@@ -15,10 +15,10 @@ tauri = { version = "2.9.3", features = [] }
 dotenvy = "0.15"
 
 # Plugins (werden in main.rs benutzt)
-tauri-plugin-os = "2.0.0"
-tauri-plugin-shell = "2.0.0"
-tauri-plugin-fs = "2.0.0"
-tauri-plugin-dialog = "2.0.0"
+tauri-plugin-os = "=2.0.0"
+tauri-plugin-shell = "=2.0.0"
+tauri-plugin-fs = "=2.0.0"
+tauri-plugin-dialog = "=2.0.0"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
