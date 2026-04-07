@@ -1,0 +1,145 @@
+name: Build & Release FrameTrain
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (z.B. 1.0.29)'
+        required: false
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Nur bei Tags: Release erstellen
+  # ─────────────────────────────────────────────
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: FrameTrain v${{ steps.get_version.outputs.version }}
+          body: |
+            ## FrameTrain v${{ steps.get_version.outputs.version }}
+
+            ### Downloads
+            - **macOS (Apple Silicon):** `.dmg`
+            - **macOS (Intel):** `.dmg`
+            - **Windows:** `.msi` oder `.exe`
+            - **Linux:** `.AppImage` oder `.deb`
+
+            ### Installation
+            1. Installer herunterladen
+            2. Installieren
+            3. Mit API-Key von [frame-train.vercel.app](https://frame-train.vercel.app/dashboard) einloggen
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────
+  # Build: läuft bei jedem Push UND bei Tags
+  # ─────────────────────────────────────────────
+  build:
+    # Bei Tag-Push: warte auf Release-Erstellung
+    needs: [create-release]
+    if: always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            rust_target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+            label: macos-arm64
+
+          - platform: macos-latest
+            rust_target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+            label: macos-x64
+
+          - platform: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            args: ''
+            label: windows-x64
+
+          - platform: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            args: ''
+            label: linux-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workdir: './src-tauri'
+          key: ${{ matrix.label }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build (kein Release)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: npm run tauri build -- ${{ matrix.args }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Build & Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'FrameTrain v__VERSION__'
+          releaseBody: ''
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
