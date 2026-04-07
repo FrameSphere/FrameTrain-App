@@ -1,0 +1,37 @@
+{
+  "_comment": "Example test configuration for FrameTrain v2 Test Engine",
+  "model_path": "/path/to/trained/model",
+  "dataset_path": "/path/to/test/dataset",
+  "output_path": "/path/to/output",
+  "batch_size": 8,
+  "max_samples": null,
+  "model_type": "auto",
+  "task_type": "auto",
+  
+  "_examples": {
+    "text_nlp": {
+      "model_path": "/models/gpt2_finetuned",
+      "dataset_path": "/data/text_test",
+      "output_path": "/output/text_results",
+      "batch_size": 16
+    },
+    "vision_classification": {
+      "model_path": "/models/resnet50_trained",
+      "dataset_path": "/data/cats_dogs_test",
+      "output_path": "/output/vision_results",
+      "batch_size": 32
+    },
+    "object_detection": {
+      "model_path": "/models/yolov8n.pt",
+      "dataset_path": "/data/detection_test",
+      "output_path": "/output/detection_results",
+      "batch_size": 8
+    },
+    "audio_speech": {
+      "model_path": "openai/whisper-base",
+      "dataset_path": "/data/audio_test",
+      "output_path": "/output/audio_results",
+      "batch_size": 4
+    }
+  }
+}
