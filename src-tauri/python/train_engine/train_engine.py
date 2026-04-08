@@ -493,6 +493,43 @@ class TextDataLoader(BaseDataLoader):
         super().__init__(config)
         self.tokenizer = None
     
+    def _resolve_data_path(self, dataset_root: Path, split: str) -> Path:
+        """
+        Resolve the actual path for a given split, with multiple fallbacks.
+        Priority: {split}/ → validation/ (for val) → unused/ → root
+        """
+        # Primary: exact split folder
+        primary = dataset_root / split
+        if primary.exists() and any(primary.rglob('*')):
+            return primary
+        
+        # For 'val': also try 'validation' and 'dev'
+        if split == 'val':
+            for alt in ('validation', 'valid', 'dev'):
+                alt_path = dataset_root / alt
+                if alt_path.exists() and any(alt_path.rglob('*')):
+                    MessageProtocol.status('loading', f"Using '{alt}/' as validation split")
+                    return alt_path
+        
+        # Fallback for train: try 'unused/' then root
+        if split == 'train':
+            unused = dataset_root / 'unused'
+            if unused.exists() and any(unused.rglob('*')):
+                MessageProtocol.status(
+                    'loading',
+                    "Train split not found — falling back to 'unused/' directory"
+                )
+                return unused
+            # Last resort: scan root (files directly in dataset folder)
+            MessageProtocol.status(
+                'loading',
+                "No train/ or unused/ found — scanning dataset root directory"
+            )
+            return dataset_root
+        
+        # For any other split: only return if it exists
+        return primary
+
     def load(self) -> Tuple[Any, Optional[Any], Optional[Any]]:
         """Load text data"""
         try:
@@ -511,13 +548,20 @@ class TextDataLoader(BaseDataLoader):
                     self.tokenizer.pad_token = self.tokenizer.eos_token
                 
                 MessageProtocol.status("loading", "Loading text datasets...")
-                
-                # Load train data
-                train_path = Path(self.config.dataset_path) / "train"
+
+                dataset_root = Path(self.config.dataset_path)
+
+                # --- Resolve train path with fallbacks ---
+                train_path = self._resolve_data_path(dataset_root, 'train')
+                MessageProtocol.status('loading', f"Loading train data from: {train_path}")
                 train_data = self._load_text_files(train_path)
                 
                 if not train_data:
-                    raise ValueError(f"No valid text data found in {train_path}")
+                    raise ValueError(
+                        f"No valid text data found.\n"
+                        f"Searched: {dataset_root}/train, {dataset_root}/unused, {dataset_root}\n"
+                        f"Make sure the dataset contains .parquet, .jsonl, .json, .csv, or .txt files."
+                    )
                 
                 MessageProtocol.status("loading", f"Loaded {len(train_data)} training samples")
                 
@@ -539,13 +583,16 @@ class TextDataLoader(BaseDataLoader):
                     pin_memory=False
                 )
                 
-                # Load validation data if exists
-                val_path = Path(self.config.dataset_path) / "val"
+                # --- Resolve val path with fallbacks ---
+                val_path = self._resolve_data_path(dataset_root, 'val')
                 if val_path.exists():
                     val_data = self._load_text_files(val_path)
                     if val_data:
+                        MessageProtocol.status('loading', f"Loaded {len(val_data)} validation samples")
                         val_dataset = HFDataset.from_list(val_data)
-                        val_dataset = val_dataset.map(self._tokenize_function, batched=True)
+                        val_dataset = val_dataset.map(self._tokenize_function, batched=True,
+                            remove_columns=[col for col in val_dataset.column_names
+                                          if col not in ['input_ids', 'attention_mask', 'labels']])
                         val_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
                         
                         self.val_loader = DataLoader(
@@ -555,6 +602,8 @@ class TextDataLoader(BaseDataLoader):
                             num_workers=0,
                             pin_memory=False
                         )
+                    else:
+                        MessageProtocol.status('loading', "No validation data found — training without validation")
                 
                 return self.train_loader, self.val_loader, None
                 
@@ -868,16 +917,35 @@ class TransformersModelHandler(BaseModelHandler):
             # Determine appropriate model class
             if architectures:
                 arch_name = architectures[0]
-                if any(x in arch_name for x in ['T5', 'Bart', 'Pegasus']):
+                if any(x in arch_name for x in ['T5', 'Bart', 'Pegasus', 'MarianMT', 'MBart']):
                     self.model = AutoModelForSeq2SeqLM.from_pretrained(self.config.model_path)
                     self.model_class = 'seq2seq'
+                elif any(x in arch_name for x in ['ForMaskedLM', 'ForTokenClassification',
+                                                    'ForSequenceClassification', 'ForQuestionAnswering']):
+                    # Encoder-only model (BERT, RoBERTa, XLM-RoBERTa, etc.)
+                    from transformers import AutoModelForMaskedLM
+                    self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_path)
+                    self.model_class = 'masked_lm'
+                elif model_type in ('bert', 'roberta', 'xlm-roberta', 'electra', 'albert',
+                                    'deberta', 'deberta-v2', 'camembert', 'distilbert',
+                                    'longformer', 'bigbird', 'rembert', 'luke'):
+                    # Known encoder-only architectures
+                    from transformers import AutoModelForMaskedLM
+                    self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_path)
+                    self.model_class = 'masked_lm'
                 else:
                     self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path)
                     self.model_class = 'causal_lm'
             else:
-                # Default to causal LM
-                self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path)
-                self.model_class = 'causal_lm'
+                if model_type in ('bert', 'roberta', 'xlm-roberta', 'electra', 'albert',
+                                  'deberta', 'deberta-v2', 'camembert', 'distilbert',
+                                  'longformer', 'bigbird', 'rembert', 'luke'):
+                    from transformers import AutoModelForMaskedLM
+                    self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_path)
+                    self.model_class = 'masked_lm'
+                else:
+                    self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path)
+                    self.model_class = 'causal_lm'
             
             # Apply LoRA if configured
             if self.config.use_lora:
@@ -908,7 +976,12 @@ class TransformersModelHandler(BaseModelHandler):
             MessageProtocol.status("loading", "Applying LoRA...")
             
             # Determine task type
-            task_type = TaskType.CAUSAL_LM if self.model_class == 'causal_lm' else TaskType.SEQ_2_SEQ_LM
+            if self.model_class == 'seq2seq':
+                task_type = TaskType.SEQ_2_SEQ_LM
+            elif self.model_class == 'masked_lm':
+                task_type = TaskType.FEATURE_EXTRACTION  # Encoder-only
+            else:
+                task_type = TaskType.CAUSAL_LM
             
             lora_config = LoraConfig(
                 r=self.config.lora_r,

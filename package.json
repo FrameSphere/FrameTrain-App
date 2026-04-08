@@ -1,6 +1,6 @@
 {
   "name": "frametrain-app-2",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "FrameTrain Desktop App 2 - Local ML Training",
   "type": "module",
   "scripts": {
@@ -16,7 +16,6 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-shell": "^2",
-
     "clsx": "^2.1.0",
     "lucide-react": "^0.263.1",
     "react": "^18.3.0",
