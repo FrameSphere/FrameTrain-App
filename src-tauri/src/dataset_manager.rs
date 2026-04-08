@@ -906,7 +906,7 @@ pub async fn download_huggingface_dataset(
     save_dataset_metadata(&app_handle, &dataset_info)?;
 
     // CRITICAL: Save to database so list_datasets_for_model can find it!
-    println!("[Dataset] Saving HF dataset to database: {}", dataset_id);
+    println!("[Dataset] Saving HF dataset to database: {}", dataset_info.id);
 
     let db = state.db.lock()
         .map_err(|e| format!("Failed to lock database: {}", e))?;
