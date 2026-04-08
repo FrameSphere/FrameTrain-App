@@ -41,8 +41,18 @@
     }
   },
   "plugins": {
-  "fs": {
-    "requireLiteralLeadingDot": true
-  }
+    "fs": {
+      "requireLiteralLeadingDot": true
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4OEM4NjY4MjRGRjQ0RDcKUldUWFJQOGthSWFNcUQ3bjU3MHNhczhOcTlwVTFyRDgxUjFGYjFLaWF0djRPOHVBUHROZ1ZrQXkK",
+      "endpoints": [
+        "https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

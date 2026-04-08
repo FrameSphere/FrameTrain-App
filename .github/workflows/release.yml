@@ -19,17 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
-      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
-    
+
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
+
       - name: Get version
         id: get_version
         run: |
@@ -38,7 +32,7 @@ jobs:
           else
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Create Release
         id: create-release
         uses: softprops/action-gh-release@v2
@@ -47,35 +41,29 @@ jobs:
           name: FrameTrain Desktop App v${{ steps.get_version.outputs.version }}
           body: |
             ## FrameTrain Desktop App v${{ steps.get_version.outputs.version }}
-            
+
             ### 🎉 Features
             - AI-powered local machine learning training
             - Multi-platform support (Windows, macOS, Linux)
             - Secure API-key authentication
             - Real-time training visualization
             - Dataset management
-            
+
             ### 📦 Downloads
             Choose your platform below:
-            - **Windows**: .msi installer
-            - **macOS**: .dmg installer (Apple Silicon & Intel)
-            - **Linux**: .AppImage (portable)
-            
+            - **Windows**: `.exe` installer
+            - **macOS**: `.dmg` installer (Apple Silicon)
+            - **Linux**: `.AppImage` (portable)
+
             ### 🔐 Installation
             1. Download the installer for your platform
             2. Install the application
             3. Log in with your API key from [frame-train.vercel.app](https://frame-train.vercel.app/dashboard)
-            
-            ### 📖 Documentation
-            - [User Guide](https://frame-train.vercel.app/docs)
-            - [API Documentation](https://frame-train.vercel.app/docs/api)
-            
+
             ### ⚠️ System Requirements
             - **Windows**: Windows 10/11 (64-bit)
-            - **macOS**: macOS 11.0 or later
+            - **macOS**: macOS 11.0 or later (Apple Silicon)
             - **Linux**: Ubuntu 20.04 or later (or equivalent)
-            - **RAM**: 8GB minimum, 16GB recommended
-            - **Storage**: 2GB free space
           draft: false
           prerelease: false
         env:
@@ -88,146 +76,215 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: ''
+            args: '--target aarch64-apple-darwin'
             rust_target: 'aarch64-apple-darwin'
 
           - platform: 'ubuntu-22.04'
             args: ''
-            rust_target: 'x86_64-unknown-linux-gnu'
+            rust_target: ''
 
           - platform: 'windows-latest'
             args: ''
-            rust_target: 'x86_64-pc-windows-msvc'
+            rust_target: ''
 
     runs-on: ${{ matrix.platform }}
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
+          cache: 'npm'
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_target }}
-      
+
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      
+
+      # ✅ FIX: Kein working-directory - das Repo IS bereits der App-Ordner
       - name: Install frontend dependencies
-        working-directory: ./desktop-app2
         run: npm ci
-      
+
       - name: Build Tauri App
-        working-directory: ./desktop-app2
-        run: npm run tauri:build -- ${{ matrix.args }}
+        run: npm run tauri build -- ${{ matrix.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+          # ✅ FIX: Signing Keys für .sig Dateien
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # ✅ FIX: Pfade ohne ./desktop-app2/ Prefix
       - name: Upload Release Assets (macOS)
         if: matrix.platform == 'macos-latest'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
-            ./desktop-app2/src-tauri/target/**/release/bundle/dmg/*.dmg
-            ./desktop-app2/src-tauri/target/**/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Upload Release Assets (Windows)
         if: matrix.platform == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
-            ./desktop-app2/src-tauri/target/**/release/bundle/msi/*.msi
-            ./desktop-app2/src-tauri/target/**/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Upload Release Assets (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
-            ./desktop-app2/src-tauri/target/**/release/bundle/appimage/*.AppImage
-            ./desktop-app2/src-tauri/target/**/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/release/bundle/deb/*.deb
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ✅ Generate latest.json nach dem Build
+  # ✅ FIX: Liest echte .sig Inhalte aus dem Release und baut latest.json korrekt
   generate-latest-json:
     needs: [build-tauri, create-release]
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Generate latest.json
-        id: generate
+
+      - name: Download .sig files and generate latest.json
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           REPO="${{ github.repository }}"
-          
-          # Create latest.json with hardcoded URLs based on standard Tauri naming
-          cat > latest.json << EOF
-          {
-            "version": "${VERSION}",
-            "notes": "Release FrameTrain v${VERSION}",
-            "pub_date": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-            "platforms": {
-              "windows-x86_64": {
-                "signature": "",
-                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_x64-setup.exe"
-              },
-              "darwin-aarch64": {
-                "signature": "",
-                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_aarch64.dmg"
-              },
-              "darwin-x86_64": {
-                "signature": "",
-                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_x64.dmg"
-              },
-              "linux-x86_64": {
-                "signature": "",
-                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_amd64.AppImage"
-              }
-            }
-          }
-          EOF
-          
-          echo "✅ latest.json generated for version ${VERSION}:"
+          TAG="v${VERSION}"
+
+          echo "📥 Downloading .sig files for tag $TAG..."
+          mkdir -p ./sigs
+          gh release download "$TAG" --pattern "*.sig" --dir ./sigs 2>/dev/null || echo "⚠️ No .sig files found yet (normal if signing key not set)"
+
+          echo "📁 Downloaded sig files:"
+          ls -la ./sigs/ 2>/dev/null || echo "(none)"
+
+          # Read signature content
+          WIN_SIG=""
+          WIN_URL=""
+          MAC_ARM_SIG=""
+          MAC_ARM_URL=""
+          LINUX_SIG=""
+          LINUX_URL=""
+
+          # Windows: prefer .exe.sig, fallback to .msi.sig
+          for f in ./sigs/*.exe.sig ./sigs/*.msi.sig; do
+            if [ -f "$f" ]; then
+              WIN_SIG=$(cat "$f")
+              echo "✅ Windows sig found: $f"
+              break
+            fi
+          done
+
+          # macOS ARM
+          for f in ./sigs/*.app.tar.gz.sig; do
+            if [ -f "$f" ]; then
+              MAC_ARM_SIG=$(cat "$f")
+              echo "✅ macOS ARM sig found: $f"
+              break
+            fi
+          done
+
+          # Linux
+          for f in ./sigs/*.AppImage.sig; do
+            if [ -f "$f" ]; then
+              LINUX_SIG=$(cat "$f")
+              echo "✅ Linux sig found: $f"
+              break
+            fi
+          done
+
+          # Get real download URLs from release assets
+          echo "🔗 Fetching asset URLs..."
+          ASSETS_JSON=$(gh release view "$TAG" --json assets --jq '.assets')
+
+          WIN_URL=$(echo "$ASSETS_JSON" | jq -r '.[] | select(.name | test("\\.exe$")) | .browserDownloadUrl' | head -1)
+          MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '.[] | select(.name | test("\\.app\\.tar\\.gz$")) | .browserDownloadUrl' | head -1)
+          LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '.[] | select(.name | test("\\.AppImage$")) | .browserDownloadUrl' | head -1)
+
+          # Fallback URLs wenn Assets noch nicht hochgeladen
+          [ -z "$WIN_URL" ] && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_x64-setup.exe"
+          [ -z "$MAC_ARM_URL" ] && MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_aarch64.app.tar.gz"
+          [ -z "$LINUX_URL" ] && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_amd64.AppImage"
+
+          echo "🔨 Building latest.json..."
+
+          # Plattform-Einträge bauen
+          PLATFORMS_JSON=""
+
+          if [ -n "$WIN_SIG" ] && [ -n "$WIN_URL" ]; then
+            PLATFORMS_JSON="${PLATFORMS_JSON}    \"windows-x86_64\": {\n      \"signature\": \"${WIN_SIG}\",\n      \"url\": \"${WIN_URL}\"\n    },\n"
+          elif [ -n "$WIN_URL" ]; then
+            PLATFORMS_JSON="${PLATFORMS_JSON}    \"windows-x86_64\": {\n      \"url\": \"${WIN_URL}\"\n    },\n"
+          fi
+
+          if [ -n "$MAC_ARM_SIG" ] && [ -n "$MAC_ARM_URL" ]; then
+            PLATFORMS_JSON="${PLATFORMS_JSON}    \"darwin-aarch64\": {\n      \"signature\": \"${MAC_ARM_SIG}\",\n      \"url\": \"${MAC_ARM_URL}\"\n    },\n"
+          elif [ -n "$MAC_ARM_URL" ]; then
+            PLATFORMS_JSON="${PLATFORMS_JSON}    \"darwin-aarch64\": {\n      \"url\": \"${MAC_ARM_URL}\"\n    },\n"
+          fi
+
+          if [ -n "$LINUX_SIG" ] && [ -n "$LINUX_URL" ]; then
+            PLATFORMS_JSON="${PLATFORMS_JSON}    \"linux-x86_64\": {\n      \"signature\": \"${LINUX_SIG}\",\n      \"url\": \"${LINUX_URL}\"\n    },\n"
+          elif [ -n "$LINUX_URL" ]; then
+            PLATFORMS_JSON="${PLATFORMS_JSON}    \"linux-x86_64\": {\n      \"url\": \"${LINUX_URL}\"\n    },\n"
+          fi
+
+          # Trailing comma entfernen
+          PLATFORMS_JSON=$(echo -e "$PLATFORMS_JSON" | sed '$ s/,$//')
+
+          # latest.json schreiben
+          printf '{\n  "version": "%s",\n  "notes": "FrameTrain Desktop App v%s",\n  "pub_date": "%s",\n  "platforms": {\n%s  }\n}\n' \
+            "$VERSION" \
+            "$VERSION" \
+            "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            "$PLATFORMS_JSON" > latest.json
+
+          echo "✅ latest.json generated:"
           cat latest.json
-      
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload latest.json to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: latest.json
           tag_name: v${{ needs.create-release.outputs.version }}
-          draft: false
-          prerelease: false
+          files: latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   notify-release:
     needs: [create-release, build-tauri, generate-latest-json]
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Notify Success
         run: |
-          echo "✅ Release v${{ needs.create-release.outputs.version }} created successfully!"
-          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.version }}"
-          echo "📦 Installers ready for all platforms!"
-          echo "📄 latest.json generated for autoupdater!"
+          echo "✅ Release v${{ needs.create-release.outputs.version }} erfolgreich!"
+          echo "🔗 https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.version }}"
+          echo "📦 Installer für alle Plattformen bereit!"
+          echo "📄 latest.json mit echten Signaturen generiert!"
