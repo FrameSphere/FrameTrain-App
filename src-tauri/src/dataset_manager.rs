@@ -283,14 +283,15 @@ fn convert_db_dataset_to_info(
 
 /// Berechnet Split-Info aus Filesystem
 fn calculate_split_info(dataset_path: &Path) -> SplitInfo {
-    let train_count = get_files_in_dir(&dataset_path.join("train"))
-        .map(|f| f.len())
+    // Use recursive counting so nested files (e.g. sharded parquet) are all counted
+    let train_count = calculate_dir_size(&dataset_path.join("train"))
+        .map(|(_, c)| c)
         .unwrap_or(0);
-    let val_count = get_files_in_dir(&dataset_path.join("val"))
-        .map(|f| f.len())
+    let val_count = calculate_dir_size(&dataset_path.join("val"))
+        .map(|(_, c)| c)
         .unwrap_or(0);
-    let test_count = get_files_in_dir(&dataset_path.join("test"))
-        .map(|f| f.len())
+    let test_count = calculate_dir_size(&dataset_path.join("test"))
+        .map(|(_, c)| c)
         .unwrap_or(0);
     
     let total = (train_count + val_count + test_count) as f32;
@@ -539,12 +540,30 @@ pub fn split_dataset(
     let dataset_dir = datasets_dir.join(&dataset_id);
     let unused_dir = dataset_dir.join("unused");
     
-    if !unused_dir.exists() {
-        return Err("Keine ungeteilten Daten gefunden".to_string());
+    // Sammle alle splittbaren Dateien: aus unused/ und direkt aus Root
+    let mut all_candidate_files: Vec<PathBuf> = Vec::new();
+    
+    if unused_dir.exists() {
+        let mut unused_files = get_files_in_dir(&unused_dir)?;
+        all_candidate_files.append(&mut unused_files);
     }
     
-    // Hole alle Dateien mit Größe
-    let files = get_files_in_dir(&unused_dir)?;
+    // Auch Root-Dateien (die nicht in train/val/test/unused liegen) einschließen
+    if let Ok(root_entries) = fs::read_dir(&dataset_dir) {
+        for entry in root_entries.flatten() {
+            let p = entry.path();
+            let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if p.is_file() && !matches!(fname, "train" | "val" | "test" | "unused") {
+                all_candidate_files.push(p);
+            }
+        }
+    }
+    
+    let files = all_candidate_files;
+    
+    if !unused_dir.exists() && files.is_empty() {
+        return Err("Keine ungeteilten Daten gefunden".to_string());
+    }
     
     if files.is_empty() {
         return Err("Keine Dateien zum Splitten gefunden".to_string());
@@ -757,7 +776,8 @@ pub async fn search_huggingface_datasets(
 /// Holt Dateiliste eines HuggingFace Datasets
 #[tauri::command]
 pub async fn get_huggingface_dataset_files(repo_id: String) -> Result<Vec<HuggingFaceDatasetFile>, String> {
-    let url = format!("https://huggingface.co/api/datasets/{}/tree/main", repo_id);
+    // recursive=true fetches all files in all subdirectories (e.g. data/train-*.parquet)
+    let url = format!("https://huggingface.co/api/datasets/{}/tree/main?recursive=true", repo_id);
     
     let client = reqwest::Client::new();
     let response = client
@@ -793,10 +813,6 @@ pub async fn download_huggingface_dataset(
     
     // Zielverzeichnis
     let datasets_dir = get_model_datasets_dir(&app_handle, &model_id)?;
-    let target_dir = datasets_dir.join(&dataset_id).join("unused");
-    
-    fs::create_dir_all(&target_dir)
-        .map_err(|e| format!("Konnte Zielverzeichnis nicht erstellen: {}", e))?;
     
     // Hole Dateiliste
     let files = get_huggingface_dataset_files(repo_id.clone()).await?;
@@ -805,23 +821,10 @@ pub async fn download_huggingface_dataset(
     let mut total_size: u64 = 0;
     let mut file_count: usize = 0;
 
-    // Erkenne ob das Dataset bereits in train/validation/test aufgeteilt ist
-    let has_presplit = files.iter().any(|f| {
-        let name = f.filename.to_lowercase();
-        name.starts_with("train/") || name.starts_with("validation/") || name.starts_with("test/")
-    });
-
-    println!("[Dataset] HF pre-split detected: {}", has_presplit);
-
-    // Bei pre-split: dataset_root direkt verwenden (kein /unused Unterordner)
-    let download_base_dir = if has_presplit {
-        let root = datasets_dir.join(&dataset_id);
-        fs::create_dir_all(&root)
-            .map_err(|e| format!("Konnte Root-Verzeichnis nicht erstellen: {}", e))?;
-        root
-    } else {
-        target_dir.clone()
-    };
+    // Dataset-Root (immer ohne /unused)
+    let dataset_root = datasets_dir.join(&dataset_id);
+    fs::create_dir_all(&dataset_root)
+        .map_err(|e| format!("Konnte Root-Verzeichnis nicht erstellen: {}", e))?;
 
     // Filtere relevante Dateien (keine reinen Verzeichnis-Einträge)
     let important_files: Vec<&HuggingFaceDatasetFile> = files.iter()
@@ -831,27 +834,43 @@ pub async fn download_huggingface_dataset(
                     return false;
                 }
             }
+            // Filtere System-/Konfigurationsdateien aus
             let name = f.filename.to_lowercase();
-            name.ends_with(".json") ||
-            name.ends_with(".jsonl") ||
-            name.ends_with(".csv") ||
-            name.ends_with(".tsv") ||
-            name.ends_with(".txt") ||
-            name.ends_with(".parquet") ||
-            name.ends_with(".arrow") ||
-            name.ends_with(".md") ||
-            name.contains("train") ||
-            name.contains("test") ||
-            name.contains("val") ||
-            name.contains("data")
+            !name.ends_with(".gitattributes")
+                && !name.ends_with(".gitignore")
+                && name != ".git"
+                && (name.ends_with(".json")
+                    || name.ends_with(".jsonl")
+                    || name.ends_with(".csv")
+                    || name.ends_with(".tsv")
+                    || name.ends_with(".txt")
+                    || name.ends_with(".parquet")
+                    || name.ends_with(".arrow")
+                    || name.ends_with(".md")
+                    || name.contains("train")
+                    || name.contains("test")
+                    || name.contains("val")
+                    || name.contains("data"))
         })
         .collect();
 
+    let mut has_any_split = false;
+
     for file in important_files {
-        // Normalisiere 'validation/' -> 'val/' für interne Konsistenz
-        let normalized_filename = file.filename
-            .replace("validation/", "val/")
-            .replace("valid/", "val/");
+        // Klassifiziere die Datei in einen Split
+        let split = classify_hf_file(&file.filename);
+        if split != "unused" {
+            has_any_split = true;
+        }
+
+        // Ziel-Verzeichnis: {dataset_root}/{split}/{basename}
+        let basename = file.filename.split('/').last()
+            .unwrap_or(&file.filename)
+            .to_string();
+
+        let target_subdir = dataset_root.join(split);
+        fs::create_dir_all(&target_subdir).ok();
+        let file_path = target_subdir.join(&basename);
 
         let encoded_filename = file.filename
             .split('/')
@@ -865,6 +884,8 @@ pub async fn download_huggingface_dataset(
             encoded_filename
         );
 
+        println!("[Dataset] Downloading {} -> {}/{}/{}", file.filename, dataset_id, split, basename);
+
         let response = client
             .get(&file_url)
             .header("User-Agent", "FrameTrain-Desktop/1.0")
@@ -876,19 +897,24 @@ pub async fn download_huggingface_dataset(
             let bytes = response.bytes().await
                 .map_err(|e| format!("Konnte Datei nicht lesen: {}", e))?;
 
-            let file_path = download_base_dir.join(&normalized_filename);
-            if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent).ok();
-            }
-
             fs::write(&file_path, &bytes)
                 .map_err(|e| format!("Konnte Datei nicht speichern: {}", e))?;
 
             total_size += bytes.len() as u64;
             file_count += 1;
+        } else {
+            println!("[Dataset] Skipped {} (HTTP {})", file.filename, response.status());
         }
     }
-    
+
+    // Berechne split_info aus dem Filesystem
+    let (final_status, final_split_info) = if has_any_split {
+        let si = calculate_split_info(&dataset_root);
+        (DatasetStatus::Split, Some(si))
+    } else {
+        (DatasetStatus::Unused, None)
+    };
+
     // Erstelle DatasetInfo
     let dataset_info = DatasetInfo {
         id: dataset_id,
@@ -899,8 +925,8 @@ pub async fn download_huggingface_dataset(
         size_bytes: total_size,
         file_count,
         created_at: Utc::now(),
-        status: if has_presplit { DatasetStatus::Split } else { DatasetStatus::Unused },
-        split_info: None,
+        status: final_status,
+        split_info: final_split_info,
     };
     
     save_dataset_metadata(&app_handle, &dataset_info)?;
@@ -931,6 +957,45 @@ pub async fn download_huggingface_dataset(
     println!("[Dataset] ✅ HF dataset saved to database: {}", dataset_info.id);
 
     Ok(dataset_info)
+}
+
+// ============ HF FILE CLASSIFICATION ============
+
+/// Klassifiziert eine HF-Datei anhand des Pfades/Namens in einen Split
+/// Gibt "train", "val", "test" oder "unused" zurück
+fn classify_hf_file(filename: &str) -> &'static str {
+    let lower = filename.to_lowercase();
+    let parts: Vec<&str> = lower.split('/').collect();
+    let n = parts.len();
+
+    // Verzeichnisbasierte Erkennung (z.B. "train/file.parquet")
+    for part in &parts[..n.saturating_sub(1)] {
+        match *part {
+            "train" | "training" => return "train",
+            "val" | "valid" | "validation" | "dev" | "develop" => return "val",
+            "test" | "testing" => return "test",
+            _ => {}
+        }
+    }
+
+    // Dateinamensbasierte Erkennung (z.B. "train-00000-of-00005.parquet")
+    let basename = parts.last().unwrap_or(&"");
+    if basename.starts_with("train") || basename.contains("-train-") || basename.contains("_train") {
+        return "train";
+    }
+    if basename.starts_with("val") || basename.starts_with("valid")
+        || basename.starts_with("dev-") || basename.starts_with("dev_")
+        || basename.contains("-val-") || basename.contains("_val")
+        || basename.contains("-valid-") || basename.contains("_valid")
+        || basename.contains("validation")
+    {
+        return "val";
+    }
+    if basename.starts_with("test") || basename.contains("-test-") || basename.contains("_test") {
+        return "test";
+    }
+
+    "unused"
 }
 
 /// Holt verfügbare Filter-Optionen für HuggingFace
@@ -1003,66 +1068,85 @@ pub struct FileInfo {
 #[tauri::command]
 pub fn get_dataset_files(
     app_handle: tauri::AppHandle,
-    dataset_id: String
+    dataset_id: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<FileInfo>, String> {
-    let metadata_path = get_datasets_metadata_path(&app_handle)?;
-    let datasets: Vec<DatasetInfo> = if metadata_path.exists() {
-        let content = fs::read_to_string(&metadata_path)
-            .map_err(|e| format!("Konnte Metadata nicht lesen: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        return Err("Keine Datasets gefunden".to_string());
+    // Primär: DB ist autoritativ (enthält immer den korrekten lokalen Pfad)
+    let dataset_dir: PathBuf = {
+        let db = state.db.lock()
+            .map_err(|e| format!("DB-Lock-Fehler: {}", e))?;
+        let all_db = db.list_datasets()
+            .map_err(|e| format!("DB-Lesefehler: {}", e))?;
+        if let Some(db_ds) = all_db.iter().find(|d| d.id == dataset_id) {
+            PathBuf::from(&db_ds.file_path)
+        } else {
+            // Fallback: JSON-Metadata (rückwärtskompatibel)
+            let metadata_path = get_datasets_metadata_path(&app_handle)?;
+            let json_datasets: Vec<DatasetInfo> = if metadata_path.exists() {
+                let content = fs::read_to_string(&metadata_path)
+                    .map_err(|e| format!("Konnte Metadata nicht lesen: {}", e))?;
+                serde_json::from_str(&content).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            if let Some(ds) = json_datasets.iter().find(|d| d.id == dataset_id) {
+                get_model_datasets_dir(&app_handle, &ds.model_id)?.join(&ds.id)
+            } else {
+                return Err(format!("Dataset '{}' nicht gefunden", dataset_id));
+            }
+        }
     };
-    
-    let dataset = datasets.iter()
-        .find(|d| d.id == dataset_id)
-        .ok_or_else(|| "Dataset nicht gefunden".to_string())?;
-    
-    let dataset_dir = get_model_datasets_dir(&app_handle, &dataset.model_id)?
-        .join(&dataset.id);
-    
+
+    if !dataset_dir.exists() {
+        return Err(format!("Dataset-Verzeichnis existiert nicht: {}", dataset_dir.display()));
+    }
+
     let mut files = Vec::new();
-    
-    // Sammle Dateien aus allen Split-Ordnern
+
+    // 1. Sammle Dateien aus Split-Ordnern (train / val / test)
     for split in &["train", "val", "test"] {
         let split_dir = dataset_dir.join(split);
         if split_dir.exists() {
             collect_files_recursive(&split_dir, split, &mut files)?;
         }
     }
-    
-    // Sammle Dateien aus Hauptverzeichnis (unsplit)
-    if dataset_dir.exists() {
-        let entries = fs::read_dir(&dataset_dir)
-            .map_err(|e| format!("Konnte Verzeichnis nicht lesen: {}", e))?;
-        
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("Fehler beim Lesen: {}", e))?;
-            let path = entry.path();
-            let file_name = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-            
-            // Überspringe Split-Ordner
-            if file_name == "train" || file_name == "val" || file_name == "test" {
-                continue;
-            }
-            
-            if path.is_file() {
-                let metadata = fs::metadata(&path)
-                    .map_err(|e| format!("Konnte Metadaten nicht lesen: {}", e))?;
-                
-                files.push(FileInfo {
-                    name: file_name.to_string(),
-                    path: path.to_string_lossy().to_string(),
-                    size: metadata.len(),
-                    is_dir: false,
-                    split: "unsplit".to_string(),
-                });
-            }
+
+    // 2. Sammle Dateien aus "unused/" (noch nicht gesplittet)
+    let unused_dir = dataset_dir.join("unused");
+    if unused_dir.exists() {
+        collect_files_recursive(&unused_dir, "unsplit", &mut files)?;
+    }
+
+    // 3. Sammle Dateien direkt im Root (weder in Split- noch in unused-Ordnern)
+    let entries = fs::read_dir(&dataset_dir)
+        .map_err(|e| format!("Konnte Verzeichnis nicht lesen: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Fehler beim Lesen: {}", e))?;
+        let path = entry.path();
+        let file_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        // Überspringe bekannte Unterordner
+        if matches!(file_name, "train" | "val" | "test" | "unused") {
+            continue;
+        }
+
+        if path.is_file() {
+            let metadata = fs::metadata(&path)
+                .map_err(|e| format!("Konnte Metadaten nicht lesen: {}", e))?;
+
+            files.push(FileInfo {
+                name: file_name.to_string(),
+                path: path.to_string_lossy().to_string(),
+                size: metadata.len(),
+                is_dir: false,
+                split: "unsplit".to_string(),
+            });
         }
     }
-    
+
     Ok(files)
 }
 
@@ -1238,7 +1322,11 @@ pub async fn add_files_to_dataset(
         let file_name = source_file.file_name()
             .ok_or_else(|| "Ungültiger Dateiname".to_string())?;
         
-        let target_path = dataset_dir.join(file_name);
+        // Neue Dateien kommen in unused/, damit split_dataset sie findet
+        let unused_dir = dataset_dir.join("unused");
+        fs::create_dir_all(&unused_dir)
+            .map_err(|e| format!("Konnte unused-Verzeichnis nicht erstellen: {}", e))?;
+        let target_path = unused_dir.join(file_name);
         
         fs::copy(&source_file, &target_path)
             .map_err(|e| format!("Konnte Datei nicht kopieren: {}", e))?;
