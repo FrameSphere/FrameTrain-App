@@ -1,145 +1,233 @@
-name: Build & Release FrameTrain
+name: Release Desktop App
 
 permissions:
   contents: write
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (z.B. 1.0.29)'
-        required: false
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
 
 jobs:
-  # ─────────────────────────────────────────────
-  # Nur bei Tags: Release erstellen
-  # ─────────────────────────────────────────────
   create-release:
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     outputs:
+      release_id: ${{ steps.create-release.outputs.id }}
+      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
-
+    
     steps:
       - uses: actions/checkout@v4
-
-      - name: Get version from tag
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Get version
         id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Release
+        id: create-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: FrameTrain v${{ steps.get_version.outputs.version }}
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: FrameTrain Desktop App v${{ steps.get_version.outputs.version }}
           body: |
-            ## FrameTrain v${{ steps.get_version.outputs.version }}
-
-            ### Downloads
-            - **macOS (Apple Silicon):** `.dmg`
-            - **macOS (Intel):** `.dmg`
-            - **Windows:** `.msi` oder `.exe`
-            - **Linux:** `.AppImage` oder `.deb`
-
-            ### Installation
-            1. Installer herunterladen
-            2. Installieren
-            3. Mit API-Key von [frame-train.vercel.app](https://frame-train.vercel.app/dashboard) einloggen
+            ## FrameTrain Desktop App v${{ steps.get_version.outputs.version }}
+            
+            ### 🎉 Features
+            - AI-powered local machine learning training
+            - Multi-platform support (Windows, macOS, Linux)
+            - Secure API-key authentication
+            - Real-time training visualization
+            - Dataset management
+            
+            ### 📦 Downloads
+            Choose your platform below:
+            - **Windows**: .msi installer
+            - **macOS**: .dmg installer (Apple Silicon & Intel)
+            - **Linux**: .AppImage (portable)
+            
+            ### 🔐 Installation
+            1. Download the installer for your platform
+            2. Install the application
+            3. Log in with your API key from [frame-train.vercel.app](https://frame-train.vercel.app/dashboard)
+            
+            ### 📖 Documentation
+            - [User Guide](https://frame-train.vercel.app/docs)
+            - [API Documentation](https://frame-train.vercel.app/docs/api)
+            
+            ### ⚠️ System Requirements
+            - **Windows**: Windows 10/11 (64-bit)
+            - **macOS**: macOS 11.0 or later
+            - **Linux**: Ubuntu 20.04 or later (or equivalent)
+            - **RAM**: 8GB minimum, 16GB recommended
+            - **Storage**: 2GB free space
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─────────────────────────────────────────────
-  # Build: läuft bei jedem Push UND bei Tags
-  # ─────────────────────────────────────────────
-  build:
-    # Bei Tag-Push: warte auf Release-Erstellung
-    needs: [create-release]
-    if: always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
+  build-tauri:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            rust_target: aarch64-apple-darwin
-            args: '--target aarch64-apple-darwin'
-            label: macos-arm64
-
-          - platform: macos-latest
-            rust_target: x86_64-apple-darwin
-            args: '--target x86_64-apple-darwin'
-            label: macos-x64
-
-          - platform: windows-latest
-            rust_target: x86_64-pc-windows-msvc
+          - platform: 'macos-latest'
             args: ''
-            label: windows-x64
+            rust_target: 'aarch64-apple-darwin'
 
-          - platform: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
+          - platform: 'ubuntu-22.04'
             args: ''
-            label: linux-x64
+            rust_target: 'x86_64-unknown-linux-gnu'
+
+          - platform: 'windows-latest'
+            args: ''
+            rust_target: 'x86_64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
-
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
+      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-
-      - name: Install Rust (stable)
+      
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_target }}
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workdir: './src-tauri'
-          key: ${{ matrix.label }}
-
-      - name: Install Linux dependencies
+      
+      - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
-
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      
       - name: Install frontend dependencies
+        working-directory: ./desktop-app2
         run: npm ci
-
-      - name: Build (kein Release)
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        run: npm run tauri build -- ${{ matrix.args }}
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Build & Upload Release Assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: tauri-apps/tauri-action@v0
+      
+      - name: Build Tauri App
+        working-directory: ./desktop-app2
+        run: npm run tauri:build -- ${{ matrix.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      
+      - name: Upload Release Assets (macOS)
+        if: matrix.platform == 'macos-latest'
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'FrameTrain v__VERSION__'
-          releaseBody: ''
-          releaseDraft: false
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            ./desktop-app2/src-tauri/target/**/release/bundle/dmg/*.dmg
+            ./desktop-app2/src-tauri/target/**/release/bundle/macos/*.app.tar.gz
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload Release Assets (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            ./desktop-app2/src-tauri/target/**/release/bundle/msi/*.msi
+            ./desktop-app2/src-tauri/target/**/release/bundle/nsis/*.exe
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload Release Assets (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            ./desktop-app2/src-tauri/target/**/release/bundle/appimage/*.AppImage
+            ./desktop-app2/src-tauri/target/**/release/bundle/deb/*.deb
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ✅ Generate latest.json nach dem Build
+  generate-latest-json:
+    needs: [build-tauri, create-release]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Generate latest.json
+        id: generate
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          REPO="${{ github.repository }}"
+          
+          # Create latest.json with hardcoded URLs based on standard Tauri naming
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "notes": "Release FrameTrain v${VERSION}",
+            "pub_date": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "",
+                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_x64-setup.exe"
+              },
+              "darwin-aarch64": {
+                "signature": "",
+                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_aarch64.dmg"
+              },
+              "darwin-x86_64": {
+                "signature": "",
+                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_x64.dmg"
+              },
+              "linux-x86_64": {
+                "signature": "",
+                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/FrameTrain.2_${VERSION}_amd64.AppImage"
+              }
+            }
+          }
+          EOF
+          
+          echo "✅ latest.json generated for version ${VERSION}:"
+          cat latest.json
+      
+      - name: Upload latest.json to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: latest.json
+          tag_name: v${{ needs.create-release.outputs.version }}
+          draft: false
           prerelease: false
-          args: ${{ matrix.args }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-release:
+    needs: [create-release, build-tauri, generate-latest-json]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Notify Success
+        run: |
+          echo "✅ Release v${{ needs.create-release.outputs.version }} created successfully!"
+          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.version }}"
+          echo "📦 Installers ready for all platforms!"
+          echo "📄 latest.json generated for autoupdater!"
