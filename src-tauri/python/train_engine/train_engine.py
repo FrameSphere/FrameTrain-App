@@ -1,22 +1,8 @@
 """
-FrameTrain v2 - Universal Training Engine (Prototype)
-======================================================
-Modular, extensible training engine supporting multiple modalities:
-- Text (NLP, LLMs)
-- Vision (Image Classification, Detection, Segmentation)
-- Audio (Speech Recognition, TTS, Audio Classification)
-- Graphs (GNN, Node/Edge Classification)
-- Tabular (TabNet, Neural Networks for structured data)
-- Time Series (Forecasting, Anomaly Detection)
-- Reinforcement Learning (PPO, DQN, SAC)
-- Multi-Modal (CLIP, Flamingo, etc.)
-
-Architecture:
-- Plugin-based system for extensibility
-- Registry pattern for model types
-- Factory pattern for data loaders
-- Strategy pattern for training modes
-- Observer pattern for progress updates
+FrameTrain v2 - Universal Training Engine
+==========================================
+Robust training engine using HuggingFace Trainer + datasets library.
+Handles all HF dataset formats and model architectures automatically.
 
 Communication: JSON messages via stdout to Rust backend
 """
@@ -28,126 +14,55 @@ import time
 import signal
 import argparse
 import traceback
-from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Callable, Tuple, Union
-from dataclasses import dataclass, field, asdict
+from typing import Dict, Any, Optional, List, Tuple
+from dataclasses import dataclass, field
 from enum import Enum
-import importlib.util
-
-# Import dependency manager for automatic plugin dependency installation
-try:
-    # Add plugins directory to path
-    plugins_dir = Path(__file__).parent / "plugins"
-    if str(plugins_dir) not in sys.path:
-        sys.path.insert(0, str(plugins_dir))
-    
-    from plugin_dependency_manager import (
-        DependencyManager,
-        PluginManifest
-    )
-    DEPENDENCY_MANAGER_AVAILABLE = True
-except ImportError:
-    DEPENDENCY_MANAGER_AVAILABLE = False
-    # MessageProtocol not yet defined at this point, so skip warning
 
 
 # ============================================================================
-# COMMUNICATION PROTOCOL
+# COMMUNICATION PROTOCOL (unchanged — Rust expects this format)
 # ============================================================================
-
-class MessageType(Enum):
-    """Types of messages sent to backend"""
-    PROGRESS = "progress"
-    STATUS = "status"
-    ERROR = "error"
-    WARNING = "warning"
-    CHECKPOINT = "checkpoint"
-    COMPLETE = "complete"
-    METRIC = "metric"
-    DEBUG = "debug"
-
 
 class MessageProtocol:
-    """Handles all communication with Rust backend via stdout"""
-    
     @staticmethod
-    def send(msg_type: MessageType, data: Dict[str, Any]):
-        """Send JSON message to backend"""
-        message = {
-            "type": msg_type.value,
-            "timestamp": datetime.now().isoformat(),
-            "data": data
-        }
-        print(json.dumps(message), flush=True)
-    
+    def _send(msg_type: str, data: Dict[str, Any]):
+        msg = {"type": msg_type, "timestamp": datetime.now().isoformat(), "data": data}
+        print(json.dumps(msg), flush=True)
+
     @staticmethod
-    def progress(epoch: int, total_epochs: int, step: int, total_steps: int,
-                 train_loss: float, val_loss: Optional[float] = None,
-                 learning_rate: float = 0.0, metrics: Dict[str, float] = None):
-        """Send progress update"""
-        MessageProtocol.send(MessageType.PROGRESS, {
-            "epoch": epoch,
-            "total_epochs": total_epochs,
-            "step": step,
-            "total_steps": total_steps,
-            "train_loss": train_loss,
-            "val_loss": val_loss,
+    def progress(epoch, total_epochs, step, total_steps, train_loss,
+                 val_loss=None, learning_rate=0.0, metrics=None):
+        progress_pct = ((epoch - 1) * total_steps + step) / max(total_epochs * total_steps, 1) * 100
+        MessageProtocol._send("progress", {
+            "epoch": epoch, "total_epochs": total_epochs,
+            "step": step, "total_steps": total_steps,
+            "train_loss": train_loss, "val_loss": val_loss,
             "learning_rate": learning_rate,
             "metrics": metrics or {},
-            "progress_percent": ((epoch - 1) * total_steps + step) / (total_epochs * total_steps) * 100
+            "progress_percent": progress_pct,
         })
-    
+
     @staticmethod
     def status(status: str, message: str = ""):
-        """Send status update"""
-        MessageProtocol.send(MessageType.STATUS, {
-            "status": status,
-            "message": message
-        })
-    
+        MessageProtocol._send("status", {"status": status, "message": message})
+
     @staticmethod
     def error(error: str, details: str = ""):
-        """Send error message"""
-        MessageProtocol.send(MessageType.ERROR, {
-            "error": error,
-            "details": details
-        })
-    
+        MessageProtocol._send("error", {"error": error, "details": details})
+
     @staticmethod
     def warning(message: str):
-        """Send warning message"""
-        MessageProtocol.send(MessageType.WARNING, {
-            "message": message
-        })
-    
-    @staticmethod
-    def checkpoint(path: str, epoch: int, metrics: Dict[str, float]):
-        """Send checkpoint saved notification"""
-        MessageProtocol.send(MessageType.CHECKPOINT, {
-            "path": path,
-            "epoch": epoch,
-            "metrics": metrics
-        })
-    
+        MessageProtocol._send("warning", {"message": message})
+
     @staticmethod
     def complete(model_path: str, metrics: Dict[str, Any]):
-        """Send training complete notification"""
-        MessageProtocol.send(MessageType.COMPLETE, {
+        MessageProtocol._send("complete", {
             "model_path": model_path,
             "output_path": model_path,
-            "final_metrics": metrics
+            "final_metrics": metrics,
         })
-    
-    @staticmethod
-    def debug(message: str, data: Any = None):
-        """Send debug message (only in debug mode)"""
-        if os.getenv("FRAMETRAIN_DEBUG"):
-            MessageProtocol.send(MessageType.DEBUG, {
-                "message": message,
-                "data": data
-            })
 
 
 # ============================================================================
@@ -156,1417 +71,662 @@ class MessageProtocol:
 
 @dataclass
 class TrainingConfig:
-    """Complete training configuration"""
-    
-    # Paths (filled by backend)
+    # Paths
     model_path: str = ""
     dataset_path: str = ""
     output_path: str = ""
     checkpoint_dir: str = ""
-    
-    # Model Type & Task
-    model_type: str = "auto"  # auto, transformers, vision, audio, graph, tabular, rl
-    task_type: str = "auto"  # auto, classification, detection, segmentation, generation, etc.
-    
-    # Training Basics
+
+    # Training basics
     epochs: int = 3
     batch_size: int = 8
     gradient_accumulation_steps: int = 1
-    max_steps: int = -1  # -1 = use epochs
-    
-    # Learning Rate
+    max_steps: int = -1
     learning_rate: float = 5e-5
     weight_decay: float = 0.01
     warmup_steps: int = 0
     warmup_ratio: float = 0.0
-    
-    # Optimizer
+
+    # Optimizer & scheduler
     optimizer: str = "adamw"
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
     adam_epsilon: float = 1e-8
-    sgd_momentum: float = 0.9
-    
-    # Scheduler
     scheduler: str = "linear"
-    scheduler_step_size: int = 1
-    scheduler_gamma: float = 0.1
-    cosine_min_lr: float = 0.0
-    
-    # Regularization
-    dropout: float = 0.1
     max_grad_norm: float = 1.0
-    label_smoothing: float = 0.0
-    
-    # Mixed Precision
+
+    # Mixed precision
     fp16: bool = False
     bf16: bool = False
-    
-    # LoRA / PEFT
+
+    # LoRA
     use_lora: bool = False
     lora_r: int = 8
     lora_alpha: int = 32
     lora_dropout: float = 0.1
     lora_target_modules: List[str] = field(default_factory=lambda: ["q_proj", "v_proj"])
-    
+
     # Quantization
     load_in_8bit: bool = False
     load_in_4bit: bool = False
-    
-    # Data Processing
+
+    # Data
     max_seq_length: int = 512
-    image_size: Tuple[int, int] = (224, 224)
-    audio_sample_rate: int = 16000
-    num_workers: int = 4
-    pin_memory: bool = True
-    
-    # Evaluation
+    num_workers: int = 0
+
+    # Eval & saving
     eval_steps: int = 500
-    eval_strategy: str = "steps"  # steps, epoch
+    eval_strategy: str = "steps"
     save_steps: int = 500
-    save_strategy: str = "steps"  # steps, epoch
+    save_strategy: str = "steps"
     save_total_limit: int = 3
-    
-    # Logging
     logging_steps: int = 10
-    
-    # Advanced
+
+    # Misc
     seed: int = 42
-    dataloader_drop_last: bool = False
-    group_by_length: bool = False
-    
-    # Multi-GPU / Distributed
-    distributed: bool = False
-    local_rank: int = -1
-    world_size: int = 1
-    
+    training_type: str = "fine_tuning"
+    task_type: str = "causal_lm"
+
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':
-        """Create config from dictionary"""
-        # Filter only known fields
-        known_fields = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered_dict = {k: v for k, v in config_dict.items() if k in known_fields}
-        return cls(**filtered_dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
-        return asdict(self)
+    def from_dict(cls, d: Dict[str, Any]) -> "TrainingConfig":
+        known = {f for f in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in d.items() if k in known})
 
 
 # ============================================================================
-# MODALITY DETECTION
+# MODEL ARCHITECTURE DETECTION
 # ============================================================================
 
-class Modality(Enum):
-    """Supported data modalities"""
-    TEXT = "text"
-    VISION = "vision"
-    AUDIO = "audio"
-    GRAPH = "graph"
-    TABULAR = "tabular"
-    TIME_SERIES = "time_series"
-    MULTIMODAL = "multimodal"
-    REINFORCEMENT = "reinforcement"
-    UNKNOWN = "unknown"
+# Encoder-only models (BERT family) → Masked LM
+ENCODER_ONLY = {
+    "bert", "roberta", "xlm-roberta", "xlm_roberta", "distilbert", "albert",
+    "electra", "deberta", "deberta-v2", "camembert", "xlnet", "longformer",
+    "bigbird", "rembert", "luke", "ernie", "roformer", "funnel",
+}
+
+# Encoder-decoder models (T5 family) → Seq2Seq LM
+ENCODER_DECODER = {
+    "t5", "mt5", "bart", "mbart", "mbart50", "pegasus", "marian",
+    "prophetnet", "led", "longt5", "flan-t5",
+}
 
 
-class ModalityDetector:
-    """Automatically detects data modality from dataset"""
-    
-    @staticmethod
-    def detect(dataset_path: str) -> Tuple[Modality, Dict[str, Any]]:
-        """
-        Detect modality from dataset structure and files
-        Returns: (modality, metadata)
-        """
-        dataset_path = Path(dataset_path)
-        
-        if not dataset_path.exists():
-            return Modality.UNKNOWN, {"error": "Dataset path does not exist"}
-        
-        # Check train directory (also look for files directly in root for HF datasets)
-        train_path = dataset_path / "train"
-        if not train_path.exists():
-            # Fallback: scan root if no train/ subdirectory
-            train_path = dataset_path
-        
-        # Get file extensions recursively (handles sharded datasets in subdirs)
-        files = []
-        skip_names = {'README.md', 'dataset_infos.json', '.gitattributes', '.gitignore',
-                      'dataset_dict.json', 'state.json', 'datasetdict.json'}
-        skip_suffixes = {'.md', '.gitattributes', '.gitignore', '.yaml', '.yml', '.lock'}
-        
-        for f in train_path.rglob('*'):
-            if f.is_file() and f.name not in skip_names and f.suffix.lower() not in skip_suffixes:
-                files.append(f)
-        
-        extensions = {f.suffix.lower() for f in files}
-        
-        metadata = {
-            "total_files": len(files),
-            "extensions": list(extensions),
-            "sample_files": [f.name for f in files[:5]]
-        }
-        
-        # Detection logic — parquet/arrow are HuggingFace text/tabular formats
-        if extensions & {'.parquet', '.arrow'}:
-            metadata["format"] = "huggingface"
-            return Modality.TEXT, metadata
-        
-        if extensions & {'.txt', '.json', '.jsonl', '.csv', '.tsv'}:
-            return Modality.TEXT, metadata
-        
-        elif extensions & {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}:
-            if (train_path / 'labels').exists() or any(f.suffix == '.xml' for f in files):
-                metadata["annotation_format"] = "detection"
-            return Modality.VISION, metadata
-        
-        elif extensions & {'.wav', '.mp3', '.flac', '.ogg', '.m4a'}:
-            return Modality.AUDIO, metadata
-        
-        elif extensions & {'.graph', '.graphml', '.gexf', '.gml', '.edgelist'}:
-            return Modality.GRAPH, metadata
-        
-        elif extensions & {'.npy', '.npz', '.h5', '.hdf5'}:
-            metadata["note"] = "Binary format — need more inspection"
-            return Modality.UNKNOWN, metadata
-        
-        else:
-            return Modality.UNKNOWN, metadata
+def detect_architecture(model_path: str) -> str:
+    """Returns 'encoder', 'encoder-decoder', or 'decoder'."""
+    try:
+        from transformers import AutoConfig
+        cfg = AutoConfig.from_pretrained(model_path)
+        mt = cfg.model_type.lower().replace("_", "-")
+        if mt in ENCODER_ONLY:
+            return "encoder"
+        if mt in ENCODER_DECODER:
+            return "encoder-decoder"
+        return "decoder"
+    except Exception as e:
+        MessageProtocol.warning(f"Could not auto-detect architecture ({e}), defaulting to decoder.")
+        return "decoder"
 
 
 # ============================================================================
-# ABSTRACT BASE CLASSES
+# ROBUST DATA LOADING
 # ============================================================================
 
-class BaseDataLoader(ABC):
-    """Abstract base class for data loaders"""
-    
-    def __init__(self, config: TrainingConfig):
-        self.config = config
-        self.train_loader = None
-        self.val_loader = None
-        self.test_loader = None
-    
-    @abstractmethod
-    def load(self) -> Tuple[Any, Optional[Any], Optional[Any]]:
-        """
-        Load dataset and create data loaders
-        Returns: (train_loader, val_loader, test_loader)
-        """
-        pass
-    
-    @abstractmethod
-    def get_sample_info(self) -> Dict[str, Any]:
-        """Get information about a sample from the dataset"""
-        pass
+SKIP_NAMES = {
+    "README.md", "readme.md", "dataset_infos.json", "dataset_dict.json",
+    "state.json", "datasetdict.json", ".gitattributes", ".gitignore",
+}
+SKIP_SUFFIXES = {".md", ".gitattributes", ".gitignore", ".yaml", ".yml", ".lock"}
+
+SPLIT_ALIASES = {
+    "train": ["train", "training"],
+    "val":   ["val", "validation", "valid", "dev"],
+    "test":  ["test", "testing", "eval"],
+}
 
 
-class BaseModelHandler(ABC):
-    """Abstract base class for model handlers"""
-    
-    def __init__(self, config: TrainingConfig):
-        self.config = config
-        self.model = None
-        self.device = None
-    
-    @abstractmethod
-    def load_model(self):
-        """Load the model"""
-        pass
-    
-    @abstractmethod
-    def forward(self, batch: Any) -> Any:
-        """Forward pass"""
-        pass
-    
-    @abstractmethod
-    def compute_loss(self, outputs: Any, batch: Any) -> Any:
-        """Compute loss"""
-        pass
-    
-    @abstractmethod
-    def save_model(self, path: str):
-        """Save the model"""
-        pass
+def data_files_in(path: Path) -> List[Path]:
+    """Return all data files in path, skipping metadata files."""
+    return [
+        f for f in path.rglob("*")
+        if f.is_file()
+        and f.name not in SKIP_NAMES
+        and f.suffix.lower() not in SKIP_SUFFIXES
+    ]
 
 
-class BaseTrainer(ABC):
-    """Abstract base class for trainers"""
-    
-    def __init__(self, config: TrainingConfig, model_handler: BaseModelHandler, 
-                 data_loader: BaseDataLoader):
-        self.config = config
-        self.model_handler = model_handler
-        self.data_loader = data_loader
-        self.optimizer = None
-        self.scheduler = None
-        self.is_stopped = False
-        self.current_epoch = 0
-        self.global_step = 0
-        self.best_metric = float('inf')
-        self.training_logs = []  # Track all training steps for analysis
-        self.start_time = None
-        
-        # Signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-    
-    def _signal_handler(self, signum, frame):
-        """Handle stop signals"""
-        MessageProtocol.status("stopping", "Training is being stopped...")
-        self.is_stopped = True
-    
-    @abstractmethod
-    def train_epoch(self, epoch: int) -> float:
-        """Train one epoch"""
-        pass
-    
-    @abstractmethod
-    def evaluate(self) -> Dict[str, float]:
-        """Evaluate on validation set"""
-        pass
-    
-    @abstractmethod
-    def train(self):
-        """Main training loop"""
-        pass
+def load_dir_as_hf_dataset(path: Path):
+    """Try loading all data files in a directory as a HuggingFace Dataset."""
+    from datasets import Dataset, concatenate_datasets
 
+    files = data_files_in(path)
+    if not files:
+        return None
 
-# ============================================================================
-# REGISTRY SYSTEM
-# ============================================================================
+    ext_groups: Dict[str, List[str]] = {}
+    for f in files:
+        ext = f.suffix.lower()
+        ext_groups.setdefault(ext, []).append(str(f))
 
-class Registry:
-    """Registry for model handlers and data loaders"""
-    
-    def __init__(self):
-        self._data_loaders = {}
-        self._model_handlers = {}
-        self._trainers = {}
-    
-    def register_data_loader(self, modality: Modality, loader_class: type):
-        """Register a data loader for a modality"""
-        self._data_loaders[modality] = loader_class
-    
-    def register_model_handler(self, model_type: str, handler_class: type):
-        """Register a model handler"""
-        self._model_handlers[model_type] = handler_class
-    
-    def register_trainer(self, trainer_type: str, trainer_class: type):
-        """Register a trainer"""
-        self._trainers[trainer_type] = trainer_class
-    
-    def get_data_loader(self, modality: Modality) -> Optional[type]:
-        """Get data loader class for modality"""
-        return self._data_loaders.get(modality)
-    
-    def get_model_handler(self, model_type: str) -> Optional[type]:
-        """Get model handler class"""
-        return self._model_handlers.get(model_type)
-    
-    def get_trainer(self, trainer_type: str) -> Optional[type]:
-        """Get trainer class"""
-        return self._trainers.get(trainer_type)
-    
-    def list_supported(self) -> Dict[str, List[str]]:
-        """List all supported types"""
-        return {
-            "data_loaders": [m.value for m in self._data_loaders.keys()],
-            "model_handlers": list(self._model_handlers.keys()),
-            "trainers": list(self._trainers.keys())
-        }
-
-
-# Global registry instance
-REGISTRY = Registry()
-
-
-# ============================================================================
-# TEXT DATA LOADER
-# ============================================================================
-
-class TextDataLoader(BaseDataLoader):
-    """Data loader for text/NLP tasks"""
-    
-    def __init__(self, config: TrainingConfig):
-        super().__init__(config)
-        self.tokenizer = None
-    
-    def _resolve_data_path(self, dataset_root: Path, split: str) -> Path:
-        """
-        Resolve the actual path for a given split, with multiple fallbacks.
-        Priority: {split}/ → validation/ (for val) → unused/ → root
-        """
-        # Primary: exact split folder
-        primary = dataset_root / split
-        if primary.exists() and any(primary.rglob('*')):
-            return primary
-        
-        # For 'val': also try 'validation' and 'dev'
-        if split == 'val':
-            for alt in ('validation', 'valid', 'dev'):
-                alt_path = dataset_root / alt
-                if alt_path.exists() and any(alt_path.rglob('*')):
-                    MessageProtocol.status('loading', f"Using '{alt}/' as validation split")
-                    return alt_path
-        
-        # Fallback for train: try 'unused/' then root
-        if split == 'train':
-            unused = dataset_root / 'unused'
-            if unused.exists() and any(unused.rglob('*')):
-                MessageProtocol.status(
-                    'loading',
-                    "Train split not found — falling back to 'unused/' directory"
-                )
-                return unused
-            # Last resort: scan root (files directly in dataset folder)
-            MessageProtocol.status(
-                'loading',
-                "No train/ or unused/ found — scanning dataset root directory"
-            )
-            return dataset_root
-        
-        # For any other split: only return if it exists
-        return primary
-
-    def load(self) -> Tuple[Any, Optional[Any], Optional[Any]]:
-        """Load text data"""
+    # Try formats in priority order
+    for ext in [".parquet", ".arrow", ".jsonl", ".json", ".csv", ".tsv", ".txt"]:
+        group = sorted(ext_groups.get(ext, []))
+        if not group:
+            continue
         try:
-            import torch
-            from torch.utils.data import DataLoader, Dataset
-            
-            # Check if transformers is available
-            try:
-                from transformers import AutoTokenizer
-                from datasets import Dataset as HFDataset
-                
-                MessageProtocol.status("loading", "Loading tokenizer...")
-                self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
-                
-                if self.tokenizer.pad_token is None:
-                    self.tokenizer.pad_token = self.tokenizer.eos_token
-                
-                MessageProtocol.status("loading", "Loading text datasets...")
+            if ext == ".parquet":
+                ds = Dataset.from_parquet(group)
+            elif ext == ".arrow":
+                parts = [Dataset.from_file(f) for f in group]
+                ds = concatenate_datasets(parts) if len(parts) > 1 else parts[0]
+            elif ext in (".jsonl", ".json"):
+                ds = Dataset.from_json(group)
+            elif ext in (".csv", ".tsv"):
+                ds = Dataset.from_csv(group)
+            elif ext == ".txt":
+                rows = []
+                for fp in group:
+                    with open(fp, encoding="utf-8", errors="replace") as fh:
+                        rows.extend({"text": ln.strip()} for ln in fh if ln.strip())
+                ds = Dataset.from_list(rows)
+            else:
+                continue
 
-                dataset_root = Path(self.config.dataset_path)
+            MessageProtocol.status(
+                "loading",
+                f"Loaded {len(ds):,} rows from {len(group)} {ext} file(s) in {path.name}/"
+            )
+            return ds
 
-                # --- Resolve train path with fallbacks ---
-                train_path = self._resolve_data_path(dataset_root, 'train')
-                MessageProtocol.status('loading', f"Loading train data from: {train_path}")
-                train_data = self._load_text_files(train_path)
-                
-                if not train_data:
-                    raise ValueError(
-                        f"No valid text data found.\n"
-                        f"Searched: {dataset_root}/train, {dataset_root}/unused, {dataset_root}\n"
-                        f"Make sure the dataset contains .parquet, .jsonl, .json, .csv, or .txt files."
-                    )
-                
-                MessageProtocol.status("loading", f"Loaded {len(train_data)} training samples")
-                
-                # Create HF dataset and tokenize
-                train_dataset = HFDataset.from_list(train_data)
-                train_dataset = train_dataset.map(
-                    self._tokenize_function,
-                    batched=True,
-                    remove_columns=[col for col in train_dataset.column_names 
-                                  if col not in ['input_ids', 'attention_mask', 'labels']]
-                )
-                train_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
-                
-                self.train_loader = DataLoader(
-                    train_dataset,
-                    batch_size=self.config.batch_size,
-                    shuffle=True,
-                    num_workers=0,  # Safer for compatibility
-                    pin_memory=False
-                )
-                
-                # --- Resolve val path with fallbacks ---
-                val_path = self._resolve_data_path(dataset_root, 'val')
-                if val_path.exists():
-                    val_data = self._load_text_files(val_path)
-                    if val_data:
-                        MessageProtocol.status('loading', f"Loaded {len(val_data)} validation samples")
-                        val_dataset = HFDataset.from_list(val_data)
-                        val_dataset = val_dataset.map(self._tokenize_function, batched=True,
-                            remove_columns=[col for col in val_dataset.column_names
-                                          if col not in ['input_ids', 'attention_mask', 'labels']])
-                        val_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
-                        
-                        self.val_loader = DataLoader(
-                            val_dataset,
-                            batch_size=self.config.batch_size,
-                            shuffle=False,
-                            num_workers=0,
-                            pin_memory=False
-                        )
-                    else:
-                        MessageProtocol.status('loading', "No validation data found — training without validation")
-                
-                return self.train_loader, self.val_loader, None
-                
-            except ImportError:
-                MessageProtocol.error("Transformers not installed", 
-                                    "Install with: pip install transformers datasets")
-                raise
-                
         except Exception as e:
-            MessageProtocol.error("Failed to load text data", str(e))
-            raise
-    
-    def _load_text_files(self, path: Path) -> List[Dict[str, str]]:
-        """Load text files from directory — supports txt, json, jsonl, csv, parquet, arrow"""
-        data = []
-        
-        # Files to always skip (metadata, not actual data)
-        skip_names = {
-            'README.md', 'readme.md', 'dataset_infos.json', 'dataset_dict.json',
-            'state.json', 'datasetdict.json', '.gitattributes', '.gitignore'
-        }
-        skip_suffixes = {'.md', '.gitattributes', '.gitignore', '.yaml', '.yml', '.lock', '.txt.gz'}
-        
-        # Scan recursively (handles sharded parquet in subdirs)
-        all_files = [f for f in path.rglob('*')
-                     if f.is_file()
-                     and f.name not in skip_names
-                     and f.suffix.lower() not in skip_suffixes]
-        
-        if not all_files:
-            MessageProtocol.warning(f"No data files found in {path}")
-            return data
-        
-        # --- Parquet / Arrow (HuggingFace native format) ---
-        parquet_files = [f for f in all_files if f.suffix.lower() == '.parquet']
-        arrow_files   = [f for f in all_files if f.suffix.lower() == '.arrow']
-        
-        if parquet_files or arrow_files:
-            try:
-                import pandas as pd
-                
-                frames = []
-                for pf in sorted(parquet_files):
-                    try:
-                        df = pd.read_parquet(pf)
-                        frames.append(df)
-                        MessageProtocol.status("loading", f"Read {len(df)} rows from {pf.name}")
-                    except Exception as e:
-                        MessageProtocol.warning(f"Could not read {pf.name}: {e}")
-                
-                for af in sorted(arrow_files):
-                    try:
-                        import pyarrow as pa
-                        with pa.memory_map(str(af), 'r') as source:
-                            table = pa.ipc.open_file(source).read_all()
-                        df = table.to_pandas()
-                        frames.append(df)
-                        MessageProtocol.status("loading", f"Read {len(df)} rows from {af.name}")
-                    except Exception as e:
-                        MessageProtocol.warning(f"Could not read {af.name}: {e}")
-                
-                if frames:
-                    import pandas as pd
-                    combined = pd.concat(frames, ignore_index=True)
-                    data = self._dataframe_to_text_list(combined)
-                    MessageProtocol.status("loading", f"Converted {len(data)} samples from parquet/arrow")
-                    return data
-                    
-            except ImportError:
-                MessageProtocol.warning("pandas not installed — trying pyarrow directly")
-                try:
-                    import pyarrow.parquet as pq
-                    for pf in sorted(parquet_files):
-                        table = pq.read_table(str(pf))
-                        for batch in table.to_batches():
-                            rows = batch.to_pydict()
-                            n = len(next(iter(rows.values())))
-                            for i in range(n):
-                                row = {k: v[i] for k, v in rows.items()}
-                                sample = self._dict_to_text_sample(row)
-                                if sample:
-                                    data.append(sample)
-                    MessageProtocol.status("loading", f"Loaded {len(data)} samples via pyarrow")
-                    return data
-                except ImportError:
-                    MessageProtocol.error(
-                        "Neither pandas nor pyarrow installed",
-                        "Install with: pip install pandas pyarrow"
-                    )
-                    raise
-        
-        # --- Plain text files ---
-        for txt_file in sorted(f for f in all_files if f.suffix.lower() == '.txt'):
-            try:
-                with open(txt_file, 'r', encoding='utf-8', errors='replace') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            data.append({"text": line})
-            except Exception as e:
-                MessageProtocol.warning(f"Could not read {txt_file.name}: {e}")
-        
-        # --- JSON ---
-        for json_file in sorted(f for f in all_files if f.suffix.lower() == '.json'
-                                and f.name not in {'dataset_infos.json', 'dataset_dict.json', 'state.json'}):
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    json_data = json.load(f)
-                if isinstance(json_data, list):
-                    for item in json_data:
-                        sample = self._dict_to_text_sample(item) if isinstance(item, dict) else {"text": str(item)}
-                        if sample:
-                            data.append(sample)
-                elif isinstance(json_data, dict):
-                    sample = self._dict_to_text_sample(json_data)
-                    if sample:
-                        data.append(sample)
-            except Exception as e:
-                MessageProtocol.warning(f"Could not read {json_file.name}: {e}")
-        
-        # --- JSONL ---
-        for jsonl_file in sorted(f for f in all_files if f.suffix.lower() == '.jsonl'):
-            try:
-                with open(jsonl_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                            sample = self._dict_to_text_sample(obj) if isinstance(obj, dict) else {"text": str(obj)}
-                            if sample:
-                                data.append(sample)
-                        except json.JSONDecodeError:
-                            pass
-            except Exception as e:
-                MessageProtocol.warning(f"Could not read {jsonl_file.name}: {e}")
-        
-        # --- CSV / TSV ---
-        for csv_file in sorted(f for f in all_files if f.suffix.lower() in {'.csv', '.tsv'}):
-            try:
-                import csv
-                delimiter = '\t' if csv_file.suffix.lower() == '.tsv' else ','
-                with open(csv_file, 'r', encoding='utf-8', errors='replace') as f:
-                    reader = csv.DictReader(f, delimiter=delimiter)
-                    for row in reader:
-                        sample = self._dict_to_text_sample(row)
-                        if sample:
-                            data.append(sample)
-            except Exception as e:
-                MessageProtocol.warning(f"Could not read {csv_file.name}: {e}")
-        
-        return data
-    
-    def _dataframe_to_text_list(self, df) -> List[Dict[str, str]]:
-        """Convert a pandas DataFrame to list of text dicts"""
-        data = []
-        for _, row in df.iterrows():
-            sample = self._dict_to_text_sample(row.to_dict())
-            if sample:
-                data.append(sample)
-        return data
-    
-    def _dict_to_text_sample(self, row: dict) -> Optional[Dict[str, str]]:
-        """Convert any dict/row to a {text: ...} or {input: ..., target: ...} sample.
-        Handles HuggingFace dataset schemas automatically."""
-        # Normalize keys to lowercase for matching
-        norm = {str(k).lower(): v for k, v in row.items() if v is not None and str(v).strip()}
-        
-        # Priority text fields (common HF dataset schemas)
-        text_fields = [
-            'text', 'content', 'document', 'abstract', 'body', 'passage',
-            'sentence', 'article', 'context', 'question', 'input', 'src',
-            'source_text', 'input_text', 'premise', 'hypothesis'
-        ]
-        target_fields = [
-            'keyphrases', 'keywords', 'tags', 'labels', 'label', 'answer',
-            'answers', 'target', 'output', 'tgt', 'target_text', 'summary',
-            'translation', 'response'
-        ]
-        
-        # Find main text field
-        text_val = None
-        for field in text_fields:
-            if field in norm:
-                val = norm[field]
-                if isinstance(val, (list, tuple)):
-                    val = ' '.join(str(x) for x in val)
-                text_val = str(val).strip()
+            MessageProtocol.warning(f"Could not load {ext} files from {path}: {e}")
+            continue
+
+    return None
+
+
+def load_dataset_from_path(dataset_path: str):
+    """
+    Load train / val / test splits from dataset_path.
+    Tries multiple strategies:
+      1. HF DatasetDict (save_to_disk format)
+      2. Named split subdirectories (train/, val/, test/)
+      3. unused/ directory (FrameTrain pre-split storage)
+      4. Root directory scan
+    Returns (train_ds, val_ds, test_ds) — val and test may be None.
+    """
+    from datasets import load_from_disk, DatasetDict
+
+    root = Path(dataset_path)
+    MessageProtocol.status("loading", f"Loading dataset from: {root}")
+
+    # Strategy 1: HF DatasetDict saved with save_to_disk()
+    try:
+        ds = load_from_disk(str(root))
+        if isinstance(ds, DatasetDict):
+            train = ds.get("train")
+            val   = ds.get("validation") or ds.get("val") or ds.get("dev")
+            test  = ds.get("test")
+            if train is not None:
+                MessageProtocol.status("loading", f"Loaded DatasetDict splits: {list(ds.keys())}")
+                return train, val, test
+    except Exception:
+        pass
+
+    # Strategy 2 & 3: Named subdirectories + unused/
+    def find_split(split_name: str):
+        aliases = SPLIT_ALIASES[split_name]
+        if split_name == "train":
+            aliases = aliases + ["unused"]  # FrameTrain fallback
+        for alias in aliases:
+            p = root / alias
+            if p.exists():
+                ds = load_dir_as_hf_dataset(p)
+                if ds is not None:
+                    if alias == "unused":
+                        MessageProtocol.status("loading", "Using 'unused/' as training data")
+                    return ds
+        return None
+
+    train_ds = find_split("train")
+    val_ds   = find_split("val")
+    test_ds  = find_split("test")
+
+    # Strategy 4: Root directory scan
+    if train_ds is None:
+        MessageProtocol.status("loading", "No split dirs found — scanning root directory...")
+        train_ds = load_dir_as_hf_dataset(root)
+
+    if train_ds is None:
+        exts = {f.suffix.lower() for f in data_files_in(root)}
+        raise ValueError(
+            f"No training data found in {root}\n"
+            f"Files found with extensions: {exts or 'none'}\n"
+            f"Supported: .parquet, .arrow, .jsonl, .json, .csv, .tsv, .txt\n"
+            f"Expected directory layout: train/, val/, test/ or files in root"
+        )
+
+    return train_ds, val_ds, test_ds
+
+
+# ============================================================================
+# TEXT COLUMN DETECTION
+# ============================================================================
+
+TEXT_PRIORITY = [
+    "text", "content", "document", "abstract", "body", "passage",
+    "sentence", "article", "context", "question", "input", "src",
+    "source_text", "input_text", "premise", "title",
+]
+TARGET_PRIORITY = [
+    "keyphrases", "extractive_keyphrases", "abstractive_keyphrases",
+    "keywords", "tags", "summary", "target", "output", "tgt",
+    "target_text", "answer", "answers", "label", "labels", "response",
+]
+
+
+def find_columns(dataset) -> Tuple[str, Optional[str]]:
+    """Find (text_col, target_col) in dataset."""
+    cols = dataset.column_names
+
+    text_col = next((c for c in TEXT_PRIORITY if c in cols), None)
+    if text_col is None:
+        # Fall back: first column with string values
+        for c in cols:
+            sample = dataset[0].get(c)
+            if isinstance(sample, str) and len(sample) > 5:
+                text_col = c
                 break
-        
-        # Find target field
-        target_val = None
-        for field in target_fields:
-            if field in norm:
-                val = norm[field]
-                if isinstance(val, (list, tuple)):
-                    val = ';'.join(str(x) for x in val)
-                target_val = str(val).strip()
-                break
-        
-        # If no known field found, use all string columns concatenated
-        if not text_val:
-            str_vals = [str(v).strip() for v in norm.values()
-                       if isinstance(v, str) and str(v).strip()]
-            if str_vals:
-                text_val = ' | '.join(str_vals)
-        
-        if not text_val:
-            return None
-        
-        if target_val:
-            return {'input': text_val, 'target': target_val}
-        return {'text': text_val}
-    
-    def _tokenize_function(self, examples):
-        """Tokenize examples — auto-detects field names for common HF schemas"""
-        # Priority order for text input fields
-        text_fields  = ['text', 'input', 'content', 'document', 'abstract', 'body',
-                        'passage', 'sentence', 'article', 'context', 'question',
-                        'source_text', 'input_text', 'src', 'premise']
-        target_fields = ['target', 'keyphrases', 'keywords', 'labels', 'label', 'answer',
-                         'answers', 'output', 'tgt', 'target_text', 'summary', 'response']
-        
-        text_field = next((f for f in text_fields if f in examples), None)
-        target_field = next((f for f in target_fields if f in examples), None)
-        
-        if not text_field:
-            # Last resort: use first string-valued column
-            for col, vals in examples.items():
-                if isinstance(vals, list) and vals and isinstance(vals[0], str):
-                    text_field = col
-                    break
-        
-        if not text_field:
-            raise ValueError(f"No usable text field found. Available columns: {list(examples.keys())}")
-        
-        texts = examples[text_field]
-        # Ensure all values are strings
-        texts = [str(t) if t is not None else '' for t in texts]
-        
-        # If we have a target field, concatenate input→target for seq2seq-style causal LM training
-        if target_field and target_field in examples:
-            targets = examples[target_field]
-            targets = [str(t) if t is not None else '' for t in targets]
-            texts = [f"{inp} → {tgt}" for inp, tgt in zip(texts, targets)]
-        
-        model_inputs = self.tokenizer(
+    if text_col is None:
+        raise ValueError(
+            f"No text column found in dataset.\n"
+            f"Available columns: {cols}\n"
+            f"Known text columns: {TEXT_PRIORITY}"
+        )
+
+    target_col = next((c for c in TARGET_PRIORITY if c in cols), None)
+    return text_col, target_col
+
+
+# ============================================================================
+# TOKENIZATION
+# ============================================================================
+
+def tokenize_dataset(dataset, tokenizer, config: TrainingConfig, arch: str,
+                     text_col: str, target_col: Optional[str]):
+    """Tokenize a HF Dataset for the given architecture."""
+
+    def tokenize_fn(examples):
+        texts = [str(t) if t is not None else "" for t in examples[text_col]]
+
+        # For non-encoder models: if target exists, append it (seq2seq-style causal)
+        if target_col and target_col in examples and arch == "decoder":
+            sep = getattr(tokenizer, "sep_token", None) or " → "
+            targets = []
+            for t in examples[target_col]:
+                if isinstance(t, list):
+                    targets.append("; ".join(str(x) for x in t))
+                elif t is not None:
+                    targets.append(str(t))
+                else:
+                    targets.append("")
+            texts = [f"{inp}{sep}{tgt}" for inp, tgt in zip(texts, targets)]
+
+        enc = tokenizer(
             texts,
             truncation=True,
-            max_length=self.config.max_seq_length,
-            padding="max_length"
+            max_length=config.max_seq_length,
+            padding="max_length",
         )
-        model_inputs["labels"] = model_inputs["input_ids"].copy()
-        return model_inputs
-    
-    def get_sample_info(self) -> Dict[str, Any]:
-        """Get sample information"""
-        return {
-            "tokenizer": str(type(self.tokenizer).__name__) if self.tokenizer else None,
-            "vocab_size": self.tokenizer.vocab_size if self.tokenizer else None,
-            "max_length": self.config.max_seq_length
-        }
 
+        # Causal LM + Masked LM: labels = input_ids (masking for MLM done by DataCollator)
+        if arch != "encoder-decoder":
+            enc["labels"] = enc["input_ids"].copy()
 
-# Register text data loader
-REGISTRY.register_data_loader(Modality.TEXT, TextDataLoader)
+        return enc
 
+    keep = {"input_ids", "attention_mask", "token_type_ids", "labels"}
+    remove = [c for c in dataset.column_names if c not in keep]
 
-# ============================================================================
-# TRANSFORMERS MODEL HANDLER
-# ============================================================================
+    tokenized = dataset.map(
+        tokenize_fn,
+        batched=True,
+        remove_columns=remove,
+        desc="Tokenizing",
+    )
 
-class TransformersModelHandler(BaseModelHandler):
-    """Handler for HuggingFace Transformers models"""
-    
-    def __init__(self, config: TrainingConfig):
-        super().__init__(config)
-        self.model_class = None
-        self.tokenizer = None
-    
-    def load_model(self):
-        """Load transformers model"""
-        try:
-            import torch
-            from transformers import (
-                AutoConfig, AutoModel, AutoModelForCausalLM,
-                AutoModelForSeq2SeqLM, AutoTokenizer
-            )
-            
-            MessageProtocol.status("loading", "Loading model...")
-            
-            # Determine device
-            if torch.cuda.is_available():
-                self.device = torch.device("cuda")
-                MessageProtocol.status("device", f"Using GPU: {torch.cuda.get_device_name(0)}")
-            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                self.device = torch.device("mps")
-                MessageProtocol.status("device", "Using Apple Silicon GPU (MPS)")
-            else:
-                self.device = torch.device("cpu")
-                MessageProtocol.status("device", "Using CPU")
-            
-            # Load config to detect model type
-            model_config = AutoConfig.from_pretrained(self.config.model_path)
-            model_type = model_config.model_type
-            architectures = getattr(model_config, 'architectures', [])
-            
-            MessageProtocol.status("loading", f"Detected model type: {model_type}")
-            
-            # Determine appropriate model class
-            if architectures:
-                arch_name = architectures[0]
-                if any(x in arch_name for x in ['T5', 'Bart', 'Pegasus', 'MarianMT', 'MBart']):
-                    self.model = AutoModelForSeq2SeqLM.from_pretrained(self.config.model_path)
-                    self.model_class = 'seq2seq'
-                elif any(x in arch_name for x in ['ForMaskedLM', 'ForTokenClassification',
-                                                    'ForSequenceClassification', 'ForQuestionAnswering']):
-                    # Encoder-only model (BERT, RoBERTa, XLM-RoBERTa, etc.)
-                    from transformers import AutoModelForMaskedLM
-                    self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_path)
-                    self.model_class = 'masked_lm'
-                elif model_type in ('bert', 'roberta', 'xlm-roberta', 'electra', 'albert',
-                                    'deberta', 'deberta-v2', 'camembert', 'distilbert',
-                                    'longformer', 'bigbird', 'rembert', 'luke'):
-                    # Known encoder-only architectures
-                    from transformers import AutoModelForMaskedLM
-                    self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_path)
-                    self.model_class = 'masked_lm'
-                else:
-                    self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path)
-                    self.model_class = 'causal_lm'
-            else:
-                if model_type in ('bert', 'roberta', 'xlm-roberta', 'electra', 'albert',
-                                  'deberta', 'deberta-v2', 'camembert', 'distilbert',
-                                  'longformer', 'bigbird', 'rembert', 'luke'):
-                    from transformers import AutoModelForMaskedLM
-                    self.model = AutoModelForMaskedLM.from_pretrained(self.config.model_path)
-                    self.model_class = 'masked_lm'
-                else:
-                    self.model = AutoModelForCausalLM.from_pretrained(self.config.model_path)
-                    self.model_class = 'causal_lm'
-            
-            # Apply LoRA if configured
-            if self.config.use_lora:
-                self._apply_lora()
-            
-            # Move to device
-            self.model = self.model.to(self.device)
-            
-            # Enable gradient checkpointing for memory efficiency on MPS
-            if self.device.type == 'mps' and hasattr(self.model, 'gradient_checkpointing_enable'):
-                try:
-                    self.model.gradient_checkpointing_enable()
-                    MessageProtocol.status("loaded", "Gradient checkpointing enabled")
-                except:
-                    pass
-            
-            MessageProtocol.status("loaded", f"Model loaded: {self.config.model_path}")
-            
-        except Exception as e:
-            MessageProtocol.error("Model loading failed", str(e))
-            raise
-    
-    def _apply_lora(self):
-        """Apply LoRA to model"""
-        try:
-            from peft import get_peft_model, LoraConfig, TaskType
-            
-            MessageProtocol.status("loading", "Applying LoRA...")
-            
-            # Determine task type
-            if self.model_class == 'seq2seq':
-                task_type = TaskType.SEQ_2_SEQ_LM
-            elif self.model_class == 'masked_lm':
-                task_type = TaskType.FEATURE_EXTRACTION  # Encoder-only
-            else:
-                task_type = TaskType.CAUSAL_LM
-            
-            lora_config = LoraConfig(
-                r=self.config.lora_r,
-                lora_alpha=self.config.lora_alpha,
-                lora_dropout=self.config.lora_dropout,
-                target_modules=self.config.lora_target_modules,
-                bias="none",
-                task_type=task_type
-            )
-            
-            self.model = get_peft_model(self.model, lora_config)
-            self.model.print_trainable_parameters()
-            
-        except ImportError:
-            MessageProtocol.error("PEFT not installed", "Install with: pip install peft")
-            raise
-    
-    def forward(self, batch: Any) -> Any:
-        """Forward pass"""
-        if not isinstance(batch, dict):
-            raise ValueError(f"Expected dict batch, got {type(batch)}")
-        
-        # Move batch to device
-        batch = {k: v.to(self.device) if hasattr(v, 'to') else v 
-                for k, v in batch.items()}
-        
-        return self.model(**batch)
-    
-    def compute_loss(self, outputs: Any, batch: Any) -> Any:
-        """Compute loss"""
-        return outputs.loss
-    
-    def save_model(self, path: str):
-        """Save model and tokenizer"""
-        output_path = Path(path)
-        output_path.mkdir(parents=True, exist_ok=True)
-        
-        # Merge LoRA weights if applicable
-        if self.config.use_lora:
-            try:
-                self.model = self.model.merge_and_unload()
-                # Make tensors contiguous
-                for param in self.model.parameters():
-                    if param.data is not None and not param.is_contiguous():
-                        param.data = param.data.contiguous()
-            except:
-                pass
-        
-        # Save model
-        self.model.save_pretrained(output_path)
-        
-        # CRITICAL: Save tokenizer as well!
-        try:
-            from transformers import AutoTokenizer
-            # Try to load and save tokenizer from original model
-            tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
-            tokenizer.save_pretrained(output_path)
-            MessageProtocol.status("saved", f"Model and tokenizer saved to {output_path}")
-        except Exception as e:
-            MessageProtocol.warning(f"Could not save tokenizer: {e}. Test engine will need to load tokenizer from original model.")
-            # Save a note file about the original model for the test engine
-            with open(output_path / "tokenizer_info.txt", 'w') as f:
-                f.write(f"Original model: {self.config.model_path}\n")
-                f.write(f"Tokenizer should be loaded from: {self.config.model_path}\n")
-            MessageProtocol.status("saved", f"Model saved to {output_path}")
-
-
-# Register transformers handler
-REGISTRY.register_model_handler("transformers", TransformersModelHandler)
+    fmt_cols = [c for c in ["input_ids", "attention_mask", "token_type_ids", "labels"]
+                if c in tokenized.column_names]
+    tokenized.set_format("torch", columns=fmt_cols)
+    return tokenized
 
 
 # ============================================================================
-# UNIVERSAL TRAINER
+# HUGGINGFACE TRAINER CALLBACK → MessageProtocol bridge
 # ============================================================================
 
-class UniversalTrainer(BaseTrainer):
-    """Universal trainer that works with any model handler and data loader"""
-    
-    def __init__(self, config: TrainingConfig, model_handler: BaseModelHandler,
-                 data_loader: BaseDataLoader):
-        super().__init__(config, model_handler, data_loader)
-    
-    def setup(self):
-        """Setup optimizer, scheduler, etc."""
-        import torch.optim as optim
-        
-        MessageProtocol.status("setup", "Setting up training...")
-        
-        # Create optimizer
-        params = [p for p in self.model_handler.model.parameters() if p.requires_grad]
-        
-        if self.config.optimizer == "adamw":
-            self.optimizer = optim.AdamW(
-                params,
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay
-            )
-        elif self.config.optimizer == "adam":
-            self.optimizer = optim.Adam(
-                params,
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay
-            )
-        elif self.config.optimizer == "sgd":
-            self.optimizer = optim.SGD(
-                params,
-                lr=self.config.learning_rate,
-                momentum=self.config.sgd_momentum,
-                weight_decay=self.config.weight_decay
-            )
-        else:
-            raise ValueError(f"Unknown optimizer: {self.config.optimizer}")
-        
-        # Create scheduler (simplified for prototype)
-        if self.config.scheduler == "cosine":
-            from torch.optim.lr_scheduler import CosineAnnealingLR
-            num_steps = len(self.data_loader.train_loader) * self.config.epochs
-            self.scheduler = CosineAnnealingLR(self.optimizer, T_max=num_steps)
-        
-        MessageProtocol.status("ready", "Training setup complete")
-    
-    def train_epoch(self, epoch: int) -> float:
-        """Train one epoch"""
-        import torch
-        
-        self.model_handler.model.train()
-        total_loss = 0.0
-        num_batches = len(self.data_loader.train_loader)
-        
-        for step, batch in enumerate(self.data_loader.train_loader):
-            if self.is_stopped:
-                break
-            
-            # Clear cache for MPS
-            if self.model_handler.device.type == 'mps':
-                torch.mps.empty_cache()
-            
-            # Forward pass
-            outputs = self.model_handler.forward(batch)
-            loss = self.model_handler.compute_loss(outputs, batch)
-            
-            # Backward pass
-            loss = loss / self.config.gradient_accumulation_steps
-            loss.backward()
-            
-            # Optimizer step
-            if (step + 1) % self.config.gradient_accumulation_steps == 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model_handler.model.parameters(),
-                    self.config.max_grad_norm
-                )
-                self.optimizer.step()
-                
-                if self.scheduler:
-                    self.scheduler.step()
-                
-                self.optimizer.zero_grad()
-                self.global_step += 1
-                
-                # Clear cache after optimizer step
-                if self.model_handler.device.type == 'mps':
-                    torch.mps.empty_cache()
-            
-            total_loss += loss.item() * self.config.gradient_accumulation_steps
-            
-            # Progress update
-            if step % self.config.logging_steps == 0:
-                current_lr = self.optimizer.param_groups[0]['lr']
-                
-                # Collect log entry for analysis
-                log_entry = {
-                    "epoch": epoch,
-                    "step": step + 1,
-                    "train_loss": total_loss / (step + 1),
-                    "val_loss": None,  # Will be filled during evaluation
-                    "learning_rate": current_lr,
-                    "timestamp": datetime.now().isoformat()
-                }
-                self.training_logs.append(log_entry)
-                
-                MessageProtocol.progress(
-                    epoch=epoch,
-                    total_epochs=self.config.epochs,
-                    step=step + 1,
-                    total_steps=num_batches,
-                    train_loss=total_loss / (step + 1),
-                    learning_rate=current_lr
-                )
-        
-        return total_loss / num_batches
-    
-    def evaluate(self) -> Dict[str, float]:
-        """Evaluate on validation set"""
-        import torch
-        
-        if self.data_loader.val_loader is None:
-            return {}
-        
-        self.model_handler.model.eval()
-        total_loss = 0.0
-        
-        with torch.no_grad():
-            for batch in self.data_loader.val_loader:
-                outputs = self.model_handler.forward(batch)
-                loss = self.model_handler.compute_loss(outputs, batch)
-                total_loss += loss.item()
-        
-        return {"val_loss": total_loss / len(self.data_loader.val_loader)}
-    
-    def train(self):
-        """Main training loop"""
-        self.start_time = time.time()
-        
-        try:
-            MessageProtocol.status("starting", "Starting training...")
-            
-            # Load model and data
-            self.model_handler.load_model()
-            self.data_loader.load()
-            self.setup()
-            
-            MessageProtocol.status("training", "Training in progress...")
-            
-            for epoch in range(1, self.config.epochs + 1):
-                if self.is_stopped:
-                    break
-                
-                self.current_epoch = epoch
-                MessageProtocol.status("epoch", f"Epoch {epoch}/{self.config.epochs}")
-                
-                # Train
-                train_loss = self.train_epoch(epoch)
-                
-                # Evaluate
-                eval_metrics = self.evaluate()
-                val_loss = eval_metrics.get("val_loss")
-                
-                # Final progress for epoch
-                MessageProtocol.progress(
-                    epoch=epoch,
-                    total_epochs=self.config.epochs,
-                    step=len(self.data_loader.train_loader),
-                    total_steps=len(self.data_loader.train_loader),
-                    train_loss=train_loss,
-                    val_loss=val_loss,
-                    learning_rate=self.optimizer.param_groups[0]['lr']
-                )
-            
-            # Training complete
-            if not self.is_stopped:
-                self.model_handler.save_model(self.config.output_path)
-                
-                training_duration = int(time.time() - self.start_time)
-                final_metrics = {
-                    "final_train_loss": train_loss,
-                    "final_val_loss": val_loss if val_loss else None,
-                    "best_val_loss": self.best_metric if self.best_metric != float('inf') else None,
-                    "training_duration_seconds": training_duration,
-                    "total_epochs": self.config.epochs,
-                    "total_steps": self.global_step
-                }
-                
-                # Save metrics to file for version system and analysis
-                metrics_file = Path(self.config.output_path) / "metrics.json"
-                metrics_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(metrics_file, 'w', encoding='utf-8') as f:
-                    json.dump(final_metrics, f, indent=2)
-                MessageProtocol.status("metrics_saved", f"Metrics saved: {metrics_file}")
-                
-                # Save training logs
-                logs_dir = Path(self.config.output_path) / "logs"
-                logs_dir.mkdir(parents=True, exist_ok=True)
-                logs_file = logs_dir / "training_logs.json"
-                with open(logs_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.training_logs, f, indent=2)
-                MessageProtocol.status("logs_saved", f"Training logs saved: {logs_file}")
-                
-                MessageProtocol.complete(self.config.output_path, final_metrics)
-            else:
-                MessageProtocol.status("stopped", "Training was stopped")
-                
-        except Exception as e:
-            MessageProtocol.error("Training failed", traceback.format_exc())
-            raise
+def make_progress_callback(total_epochs: int):
+    from transformers import TrainerCallback
 
+    class FrameTrainCallback(TrainerCallback):
+        def __init__(self):
+            self.current_epoch = 0
+            self.total_steps_per_epoch = 1
+            self.start_time = time.time()
 
-# Register universal trainer
-REGISTRY.register_trainer("universal", UniversalTrainer)
+        def on_epoch_begin(self, args, state, control, **kwargs):
+            self.current_epoch = int(state.epoch or 0) + 1
+            MessageProtocol.status("epoch", f"Epoch {self.current_epoch}/{total_epochs}")
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if logs is None:
+                return
+            epoch = int(state.epoch or 0) + 1
+            step  = state.global_step or 0
+            total = state.max_steps or 1
+
+            train_loss = logs.get("loss", logs.get("train_loss", 0.0))
+            val_loss   = logs.get("eval_loss")
+            lr         = logs.get("learning_rate", 0.0)
+
+            MessageProtocol.progress(
+                epoch=epoch,
+                total_epochs=total_epochs,
+                step=step,
+                total_steps=total,
+                train_loss=float(train_loss) if train_loss else 0.0,
+                val_loss=float(val_loss) if val_loss else None,
+                learning_rate=float(lr) if lr else 0.0,
+            )
+
+        def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+            if metrics:
+                val_loss = metrics.get("eval_loss")
+                if val_loss is not None:
+                    MessageProtocol.status("eval", f"Val loss: {val_loss:.4f}")
+
+        def on_save(self, args, state, control, **kwargs):
+            MessageProtocol.status("checkpoint", f"Checkpoint saved at step {state.global_step}")
+
+    return FrameTrainCallback()
 
 
 # ============================================================================
-# TRAINING ENGINE
+# MAIN TRAINING ENGINE
 # ============================================================================
 
 class TrainingEngine:
-    """Main training engine that orchestrates everything"""
-    
+
     def __init__(self, config: TrainingConfig):
         self.config = config
-        self.modality = None
-        self.data_loader = None
-        self.model_handler = None
-        self.trainer = None
-        self.plugin_loader = None
-    
-    def _ensure_plugin_loaded(self, modality: Modality):
-        """
-        Ensure the appropriate plugin is loaded for the detected modality.
-        This includes automatic dependency installation.
-        """
-        # Map modalities to plugin files
-        plugin_map = {
-            Modality.TEXT: None,  # Built-in, no plugin needed
-            Modality.VISION: "plugin_vision.py",
-            Modality.AUDIO: "plugin_audio.py",
-            Modality.GRAPH: "plugin_graph.py",
-            Modality.TABULAR: "plugin_tabular.py",
-            Modality.TIME_SERIES: "plugin_timeseries.py",
-            Modality.MULTIMODAL: "plugin_multimodal.py",
-            Modality.REINFORCEMENT: "plugin_rl.py",
-        }
-        
-        plugin_file = plugin_map.get(modality)
-        
-        if plugin_file is None:
-            # No plugin needed (e.g., TEXT is built-in)
-            MessageProtocol.debug(f"Modality {modality.value} uses built-in support")
-            return
-        
-        # Check if plugin is already loaded in REGISTRY
-        if REGISTRY.get_data_loader(modality) is not None:
-            MessageProtocol.debug(f"Plugin for {modality.value} already loaded")
-            return
-        
-        # Need to load the plugin
-        MessageProtocol.status(
-            "loading_plugin",
-            f"Loading plugin for {modality.value}..."
-        )
-        
-        # Create plugin loader if not exists
-        if self.plugin_loader is None:
-            plugin_dir = Path(__file__).parent
-            self.plugin_loader = PluginLoader(str(plugin_dir))
-        
-        # Determine auto-install setting
-        auto_install = os.getenv("FRAMETRAIN_AUTO_INSTALL", "false").lower() == "true"
-        
-        # Load the specific plugin
-        module = self.plugin_loader.load_plugin(plugin_file, auto_install=auto_install)
-        
-        if module is None:
-            raise RuntimeError(
-                f"Failed to load required plugin: {plugin_file}\n"
-                f"This plugin is needed for {modality.value} tasks.\n"
-                f"Try installing dependencies manually or set FRAMETRAIN_AUTO_INSTALL=true"
+        self.is_stopped = False
+        signal.signal(signal.SIGINT,  self._stop)
+        signal.signal(signal.SIGTERM, self._stop)
+
+    def _stop(self, *_):
+        MessageProtocol.status("stopping", "Training stopped by user")
+        self.is_stopped = True
+
+    def run(self):
+        start_time = time.time()
+
+        try:
+            import torch
+            from transformers import AutoTokenizer, TrainingArguments, Trainer
+            from transformers import (
+                AutoModelForMaskedLM,
+                AutoModelForCausalLM,
+                AutoModelForSeq2SeqLM,
             )
-        
-        # Verify plugin registered correctly
-        if REGISTRY.get_data_loader(modality) is None:
-            raise RuntimeError(
-                f"Plugin {plugin_file} loaded but did not register for {modality.value}\n"
-                f"This is a bug in the plugin."
-            )
-    
-    def detect_and_setup(self):
-        """Detect modality and setup appropriate components"""
-        MessageProtocol.status("detecting", "Detecting data modality...")
-        
-        # Detect modality
-        self.modality, metadata = ModalityDetector.detect(self.config.dataset_path)
-        
-        MessageProtocol.status("detected", f"Detected modality: {self.modality.value}")
-        MessageProtocol.debug("Modality metadata", metadata)
-        
-        # Check if plugin needs to be loaded for this modality
-        self._ensure_plugin_loaded(self.modality)
-        
-        # Get appropriate data loader
-        loader_class = REGISTRY.get_data_loader(self.modality)
-        if not loader_class:
-            raise ValueError(f"No data loader registered for modality: {self.modality.value}")
-        
-        self.data_loader = loader_class(self.config)
-        
-        # Get appropriate model handler
-        model_type = self.config.model_type
-        if model_type == "auto":
-            # Auto-detect based on modality
-            if self.modality == Modality.TEXT:
-                model_type = "transformers"
+
+            cfg = self.config
+
+            # ── 1. Detect device ──────────────────────────────────────────
+            if torch.cuda.is_available():
+                device = "cuda"
+                MessageProtocol.status("device", f"GPU: {torch.cuda.get_device_name(0)}")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+                MessageProtocol.status("device", "Apple Silicon GPU (MPS)")
             else:
-                raise ValueError(f"No auto model type for modality: {self.modality.value}")
-        
-        handler_class = REGISTRY.get_model_handler(model_type)
-        if not handler_class:
-            raise ValueError(f"No model handler registered for type: {model_type}")
-        
-        self.model_handler = handler_class(self.config)
-        
-        # Get trainer
-        trainer_class = REGISTRY.get_trainer("universal")
-        self.trainer = trainer_class(self.config, self.model_handler, self.data_loader)
-    
-    def train(self):
-        """Execute training"""
-        try:
-            self.detect_and_setup()
-            self.trainer.train()
-        except Exception as e:
-            MessageProtocol.error("Training engine failed", str(e))
-            raise
+                device = "cpu"
+                MessageProtocol.status("device", "CPU")
 
+            # ── 2. Detect model architecture ──────────────────────────────
+            MessageProtocol.status("loading", "Detecting model architecture...")
+            arch = detect_architecture(cfg.model_path)
+            MessageProtocol.status("loading", f"Architecture: {arch}")
 
-# ============================================================================
-# PLUGIN LOADER WITH DEPENDENCY MANAGEMENT
-# ============================================================================
+            # ── 3. Load tokenizer ─────────────────────────────────────────
+            MessageProtocol.status("loading", "Loading tokenizer...")
+            tokenizer = AutoTokenizer.from_pretrained(cfg.model_path)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+                tokenizer.pad_token_id = tokenizer.eos_token_id
 
-class PluginLoader:
-    """Load custom plugins with automatic dependency management"""
-    
-    def __init__(self, plugin_dir: str):
-        self.plugin_dir = Path(plugin_dir)
-        self.dep_manager = DependencyManager() if DEPENDENCY_MANAGER_AVAILABLE else None
-        self.loaded_plugins = {}
-    
-    def load_plugin(self, plugin_file: str, auto_install: bool = None) -> Optional[Any]:
-        """
-        Load a single plugin with dependency management
-        
-        Args:
-            plugin_file: Plugin filename (e.g., 'plugin_vision.py')
-            auto_install: Auto-install dependencies (None = use env var)
-        """
-        plugin_path = self.plugin_dir / plugin_file
-        
-        if not plugin_path.exists():
-            MessageProtocol.warning(f"Plugin not found: {plugin_path}")
-            return None
-        
-        # Check if dependency manager is available
-        if not DEPENDENCY_MANAGER_AVAILABLE:
-            MessageProtocol.warning(
-                f"Loading {plugin_file} without dependency management"
-            )
-            return self._load_plugin_without_deps(plugin_path)
-        
-        # Parse manifest
-        try:
-            manifest = PluginManifest.from_docstring(plugin_path)
-        except Exception as e:
-            MessageProtocol.warning(
-                f"Could not parse manifest from {plugin_file}: {e}\n"
-                f"Loading plugin without dependency check..."
-            )
-            return self._load_plugin_without_deps(plugin_path)
-        
-        if manifest is None:
-            MessageProtocol.debug(
-                f"No manifest found in {plugin_file}, loading without dep check"
-            )
-            return self._load_plugin_without_deps(plugin_path)
-        
-        # Check dependencies
-        MessageProtocol.status(
-            "checking_deps",
-            f"Checking dependencies for {manifest.plugin_name}..."
-        )
-        
-        missing_req, missing_opt = self.dep_manager.check_dependencies(manifest)
-        
-        if not missing_req:
+            # ── 4. Load dataset ───────────────────────────────────────────
+            MessageProtocol.status("loading", "Loading dataset...")
+            train_ds, val_ds, test_ds = load_dataset_from_path(cfg.dataset_path)
+
+            # ── 5. Find text columns ──────────────────────────────────────
+            text_col, target_col = find_columns(train_ds)
             MessageProtocol.status(
-                "deps_ok",
-                f"All dependencies for {manifest.plugin_name} are installed"
+                "loading",
+                f"Text column: '{text_col}'"
+                + (f", target column: '{target_col}'" if target_col else "")
             )
-            return self._load_plugin_without_deps(plugin_path)
-        
-        # Dependencies missing - need to install
-        MessageProtocol.status(
-            "missing_deps",
-            f"Plugin {manifest.plugin_name} requires: {', '.join(missing_req)}"
-        )
-        
-        # Determine if we should auto-install
-        if auto_install is None:
-            auto_install = os.getenv("FRAMETRAIN_AUTO_INSTALL", "false").lower() == "true"
-        
-        # Install dependencies
-        success = self.dep_manager.install_dependencies(
-            manifest,
-            auto_install=auto_install,
-            install_optional=False  # Don't install optional by default
-        )
-        
-        if not success:
+
+            # ── 6. Tokenize ───────────────────────────────────────────────
+            MessageProtocol.status("loading", f"Tokenizing {len(train_ds):,} training samples...")
+            train_tok = tokenize_dataset(train_ds, tokenizer, cfg, arch, text_col, target_col)
+
+            val_tok = None
+            if val_ds is not None and len(val_ds) > 0:
+                MessageProtocol.status("loading", f"Tokenizing {len(val_ds):,} validation samples...")
+                val_tok = tokenize_dataset(val_ds, tokenizer, cfg, arch, text_col, target_col)
+            else:
+                MessageProtocol.status("loading", "No validation data — training without evaluation")
+
+            # ── 7. Load model ─────────────────────────────────────────────
+            MessageProtocol.status("loading", f"Loading model from {cfg.model_path}...")
+
+            model_kwargs = {}
+            if cfg.load_in_4bit:
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+                model_kwargs["device_map"] = "auto"
+            elif cfg.load_in_8bit:
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+                model_kwargs["device_map"] = "auto"
+
+            if arch == "encoder":
+                model = AutoModelForMaskedLM.from_pretrained(cfg.model_path, **model_kwargs)
+            elif arch == "encoder-decoder":
+                model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_path, **model_kwargs)
+            else:
+                model = AutoModelForCausalLM.from_pretrained(cfg.model_path, **model_kwargs)
+
+            MessageProtocol.status("loading", f"Model loaded ({sum(p.numel() for p in model.parameters()):,} params)")
+
+            # ── 8. Apply LoRA ─────────────────────────────────────────────
+            if cfg.use_lora:
+                from peft import get_peft_model, LoraConfig, TaskType
+                task_map = {
+                    "encoder":         TaskType.FEATURE_EXTRACTION,
+                    "encoder-decoder": TaskType.SEQ_2_SEQ_LM,
+                    "decoder":         TaskType.CAUSAL_LM,
+                }
+                lora_cfg = LoraConfig(
+                    r=cfg.lora_r,
+                    lora_alpha=cfg.lora_alpha,
+                    lora_dropout=cfg.lora_dropout,
+                    target_modules=cfg.lora_target_modules or None,
+                    bias="none",
+                    task_type=task_map[arch],
+                )
+                model = get_peft_model(model, lora_cfg)
+                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                MessageProtocol.status("loading", f"LoRA applied — {trainable:,} trainable params")
+
+            # ── 9. Data collator ──────────────────────────────────────────
+            if arch == "encoder":
+                from transformers import DataCollatorForLanguageModeling
+                collator = DataCollatorForLanguageModeling(
+                    tokenizer=tokenizer, mlm=True, mlm_probability=0.15
+                )
+            elif arch == "encoder-decoder":
+                from transformers import DataCollatorForSeq2Seq
+                collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding=True)
+            else:
+                from transformers import DataCollatorForLanguageModeling
+                collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+            # ── 10. Training arguments ────────────────────────────────────
+            eval_strat = cfg.eval_strategy if val_tok is not None else "no"
+            save_strat = cfg.save_strategy
+
+            # fp16 not supported on MPS
+            use_fp16 = cfg.fp16 and device == "cuda"
+            use_bf16 = cfg.bf16 and device in ("cuda", "cpu")
+
+            train_args = TrainingArguments(
+                output_dir=cfg.checkpoint_dir or cfg.output_path,
+                num_train_epochs=cfg.epochs,
+                per_device_train_batch_size=cfg.batch_size,
+                per_device_eval_batch_size=cfg.batch_size,
+                gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+                max_steps=cfg.max_steps if cfg.max_steps > 0 else -1,
+                learning_rate=cfg.learning_rate,
+                weight_decay=cfg.weight_decay,
+                warmup_steps=cfg.warmup_steps,
+                warmup_ratio=cfg.warmup_ratio,
+                lr_scheduler_type=cfg.scheduler,
+                optim="adamw_torch",
+                adam_beta1=cfg.adam_beta1,
+                adam_beta2=cfg.adam_beta2,
+                adam_epsilon=cfg.adam_epsilon,
+                max_grad_norm=cfg.max_grad_norm,
+                fp16=use_fp16,
+                bf16=use_bf16,
+                evaluation_strategy=eval_strat,
+                eval_steps=cfg.eval_steps if eval_strat == "steps" else None,
+                save_strategy=save_strat,
+                save_steps=cfg.save_steps if save_strat == "steps" else None,
+                save_total_limit=cfg.save_total_limit,
+                logging_steps=cfg.logging_steps,
+                dataloader_num_workers=0,  # Safer on macOS
+                seed=cfg.seed,
+                report_to="none",  # Disable wandb/tensorboard
+                no_cuda=(device == "cpu"),
+                use_mps_device=(device == "mps"),
+                load_best_model_at_end=(val_tok is not None),
+                metric_for_best_model="eval_loss" if val_tok is not None else None,
+                greater_is_better=False,
+            )
+
+            # ── 11. Trainer ───────────────────────────────────────────────
+            callback = make_progress_callback(cfg.epochs)
+
+            trainer = Trainer(
+                model=model,
+                args=train_args,
+                train_dataset=train_tok,
+                eval_dataset=val_tok,
+                tokenizer=tokenizer,
+                data_collator=collator,
+                callbacks=[callback],
+            )
+
+            MessageProtocol.status("training", "Training started...")
+            trainer.train()
+
+            if self.is_stopped:
+                MessageProtocol.status("stopped", "Training stopped by user")
+                return
+
+            # ── 12. Save final model ──────────────────────────────────────
+            MessageProtocol.status("saving", f"Saving model to {cfg.output_path}...")
+            out = Path(cfg.output_path)
+            out.mkdir(parents=True, exist_ok=True)
+
+            # Merge LoRA weights before saving
+            if cfg.use_lora:
+                try:
+                    model = model.merge_and_unload()
+                    # Make contiguous
+                    for p in model.parameters():
+                        if p.data is not None and not p.is_contiguous():
+                            p.data = p.data.contiguous()
+                    MessageProtocol.status("saving", "LoRA weights merged")
+                except Exception as e:
+                    MessageProtocol.warning(f"Could not merge LoRA: {e}")
+
+            trainer.save_model(str(out))
+            tokenizer.save_pretrained(str(out))
+
+            # ── 13. Collect & save metrics ────────────────────────────────
+            duration = int(time.time() - start_time)
+            history  = trainer.state.log_history
+
+            final_train_loss = next(
+                (e["train_loss"] for e in reversed(history) if "train_loss" in e), 0.0
+            )
+            final_val_loss = next(
+                (e["eval_loss"] for e in reversed(history) if "eval_loss" in e), None
+            )
+
+            metrics = {
+                "final_train_loss":          final_train_loss,
+                "final_val_loss":            final_val_loss,
+                "total_epochs":              cfg.epochs,
+                "total_steps":               trainer.state.global_step,
+                "training_duration_seconds": duration,
+                "best_val_loss":             final_val_loss,
+            }
+
+            (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
+            MessageProtocol.status("saved", "Metrics saved")
+
+            MessageProtocol.complete(str(out), metrics)
+
+        except ImportError as e:
+            pkg = str(e)
             MessageProtocol.error(
-                f"Failed to install dependencies for {manifest.plugin_name}",
-                "Training cannot continue without required dependencies"
+                "Missing Python package",
+                f"{pkg}\n\nInstall with:\n  pip install transformers datasets torch peft"
             )
-            return None
-        
-        # Dependencies installed, now load the plugin
-        MessageProtocol.status("loading_plugin", f"Loading {plugin_file}...")
-        return self._load_plugin_without_deps(plugin_path)
-    
-    def _load_plugin_without_deps(self, plugin_path: Path) -> Optional[Any]:
-        """Load plugin module without dependency check"""
-        try:
-            spec = importlib.util.spec_from_file_location(plugin_path.stem, plugin_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            
-            self.loaded_plugins[plugin_path.name] = module
-            MessageProtocol.debug(f"✓ Loaded plugin: {plugin_path.name}")
-            return module
-            
+            sys.exit(1)
+
         except Exception as e:
-            MessageProtocol.error(
-                f"Failed to load plugin {plugin_path.name}",
-                str(e)
-            )
-            return None
-    
-    def load_plugins(self, auto_install: bool = None):
-        """Load all plugins from directory"""
-        if not self.plugin_dir.exists():
-            MessageProtocol.warning(f"Plugin directory not found: {self.plugin_dir}")
-            return
-        
-        plugin_files = list(self.plugin_dir.glob("plugin_*.py"))
-        MessageProtocol.status(
-            "loading_plugins",
-            f"Found {len(plugin_files)} plugins in {self.plugin_dir}"
-        )
-        
-        for plugin_file in plugin_files:
-            self.load_plugin(plugin_file.name, auto_install=auto_install)
-    
-    @staticmethod
-    def load_plugins_static(plugin_dir: str, auto_install: bool = None):
-        """Static method for backward compatibility"""
-        loader = PluginLoader(plugin_dir)
-        loader.load_plugins(auto_install=auto_install)
+            MessageProtocol.error("Training engine failed", traceback.format_exc())
+            sys.exit(1)
 
 
 # ============================================================================
-# MAIN ENTRY POINT
+# ENTRY POINT
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="FrameTrain v2 Universal Training Engine")
-    parser.add_argument("--config", type=str, required=True, help="Path to config JSON")
-    parser.add_argument("--list-supported", action="store_true", help="List supported types")
-    parser.add_argument("--plugins", type=str, help="Path to plugins directory")
-    
+    parser = argparse.ArgumentParser(description="FrameTrain Universal Training Engine")
+    parser.add_argument("--config", required=True, help="Path to config JSON")
     args = parser.parse_args()
-    
-    # Load plugins if specified
-    if args.plugins:
-        auto_install = os.getenv("FRAMETRAIN_AUTO_INSTALL", "false").lower() == "true"
-        PluginLoader.load_plugins_static(args.plugins, auto_install=auto_install)
-    
-    # List supported types
-    if args.list_supported:
-        supported = REGISTRY.list_supported()
-        print(json.dumps({"type": "supported", "data": supported}))
-        return
-    
-    # Load config
-    with open(args.config, 'r') as f:
+
+    with open(args.config, "r") as f:
         config_dict = json.load(f)
-    
+
     config = TrainingConfig.from_dict(config_dict)
-    
-    # Check PyTorch
+
     try:
         import torch
     except ImportError:
-        MessageProtocol.error("PyTorch not installed", "Install with: pip install torch")
+        MessageProtocol.error(
+            "PyTorch not installed",
+            "Install with: pip install torch transformers datasets"
+        )
         sys.exit(1)
-    
-    # Run training
+
     engine = TrainingEngine(config)
-    engine.train()
+    engine.run()
 
 
 if __name__ == "__main__":
