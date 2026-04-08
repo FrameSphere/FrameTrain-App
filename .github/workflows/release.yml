@@ -171,49 +171,52 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download .sig files and generate latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           REPO="${{ github.repository }}"
           TAG="v${VERSION}"
+          export PUB_DATE
           PUB_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          export VERSION TAG
 
-          echo "📥 Downloading .sig files for tag $TAG..."
+          echo "Downloading .sig files for tag $TAG..."
           mkdir -p ./sigs
-          gh release download "$TAG" --pattern "*.sig" --dir ./sigs 2>/dev/null || echo "⚠️ No .sig files found (signing key not configured)"
+          gh release download "$TAG" --pattern "*.sig" --dir ./sigs 2>/dev/null \
+            || echo "No .sig files found (signing key not configured)"
 
-          echo "📁 Downloaded sig files:"
+          echo "Downloaded sig files:"
           ls -la ./sigs/ 2>/dev/null || echo "(none)"
 
-          # Read signature content
-          WIN_SIG=""
-          MAC_ARM_SIG=""
-          LINUX_SIG=""
-
+          # Read signature content into env vars
+          export WIN_SIG="" MAC_ARM_SIG="" LINUX_SIG=""
           for f in ./sigs/*.exe.sig ./sigs/*.msi.sig; do
-            [ -f "$f" ] && WIN_SIG=$(cat "$f") && echo "✅ Windows sig: $f" && break
+            [ -f "$f" ] && WIN_SIG=$(cat "$f") && echo "Windows sig: $f" && break
           done
           for f in ./sigs/*.app.tar.gz.sig; do
-            [ -f "$f" ] && MAC_ARM_SIG=$(cat "$f") && echo "✅ macOS ARM sig: $f" && break
+            [ -f "$f" ] && MAC_ARM_SIG=$(cat "$f") && echo "macOS ARM sig: $f" && break
           done
           for f in ./sigs/*.AppImage.sig; do
-            [ -f "$f" ] && LINUX_SIG=$(cat "$f") && echo "✅ Linux sig: $f" && break
+            [ -f "$f" ] && LINUX_SIG=$(cat "$f") && echo "Linux sig: $f" && break
           done
 
-          # Get real download URLs — jq returns literal "null" when not found, so sanitize
-          echo "🔗 Fetching asset URLs from GitHub release..."
+          # Get download URLs via GitHub CLI
+          echo "Fetching asset URLs from GitHub release..."
           ASSETS_JSON=$(gh release view "$TAG" --json assets --jq '.assets')
-          echo "Assets JSON: $ASSETS_JSON"
+          echo "Assets: $ASSETS_JSON"
 
+          export WIN_URL MAC_ARM_URL LINUX_URL
           WIN_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.exe$"; "i"))] | first | .browserDownloadUrl // ""')
           MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.app\\.tar\\.gz$"; "i"))] | first | .browserDownloadUrl // ""')
           LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.AppImage$"; "i"))] | first | .browserDownloadUrl // ""')
 
-          # Sanitize: replace literal "null" with empty string
+          # Sanitize jq "null" strings
           [ "$WIN_URL" = "null" ]     && WIN_URL=""
           [ "$MAC_ARM_URL" = "null" ] && MAC_ARM_URL=""
           [ "$LINUX_URL" = "null" ]   && LINUX_URL=""
 
-          # Fallback constructed URLs for platforms whose build hasn't uploaded yet
+          # Fallback constructed URLs
           [ -z "$WIN_URL" ]     && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_x64-setup.exe"
           [ -z "$MAC_ARM_URL" ] && MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_aarch64.app.tar.gz"
           [ -z "$LINUX_URL" ]   && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_amd64.AppImage"
@@ -222,52 +225,8 @@ jobs:
           echo "MAC_ARM_URL: $MAC_ARM_URL"
           echo "LINUX_URL:   $LINUX_URL"
 
-          # Build latest.json using Python for correct JSON (no bash string hacks)
-          echo "🔨 Building latest.json..."
-          python3 - <<PYEOF
-import json, os
-
-version     = "${VERSION}"
-pub_date    = "${PUB_DATE}"
-notes       = f"FrameTrain Desktop App v{version}"
-
-win_url     = """${WIN_URL}"""
-mac_url     = """${MAC_ARM_URL}"""
-linux_url   = """${LINUX_URL}"""
-win_sig     = """${WIN_SIG}"""
-mac_sig     = """${MAC_ARM_SIG}"""
-linux_sig   = """${LINUX_SIG}"""
-
-def make_entry(url, sig):
-    e = {"url": url}
-    if sig.strip():
-        e["signature"] = sig.strip()
-    return e
-
-platforms = {}
-if win_url:
-    platforms["windows-x86_64"] = make_entry(win_url, win_sig)
-if mac_url:
-    platforms["darwin-aarch64"] = make_entry(mac_url, mac_sig)
-if linux_url:
-    platforms["linux-x86_64"]   = make_entry(linux_url, linux_sig)
-
-latest = {
-    "version":  version,
-    "notes":    notes,
-    "pub_date": pub_date,
-    "platforms": platforms,
-}
-
-with open("latest.json", "w") as f:
-    json.dump(latest, f, indent=2)
-    f.write("\n")
-
-print("✅ latest.json generated:")
-print(json.dumps(latest, indent=2))
-PYEOF
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Generate latest.json via standalone Python script (no heredoc = no YAML issues)
+          python3 scripts/generate_latest_json.py
 
       - name: Upload latest.json to Release
         uses: softprops/action-gh-release@v2
