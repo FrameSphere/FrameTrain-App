@@ -284,14 +284,23 @@ class ModalityDetector:
         if not dataset_path.exists():
             return Modality.UNKNOWN, {"error": "Dataset path does not exist"}
         
-        # Check train directory
+        # Check train directory (also look for files directly in root for HF datasets)
         train_path = dataset_path / "train"
         if not train_path.exists():
-            return Modality.UNKNOWN, {"error": "No train directory found"}
+            # Fallback: scan root if no train/ subdirectory
+            train_path = dataset_path
         
-        # Get file extensions
-        files = list(train_path.glob("*"))
-        extensions = {f.suffix.lower() for f in files if f.is_file()}
+        # Get file extensions recursively (handles sharded datasets in subdirs)
+        files = []
+        skip_names = {'README.md', 'dataset_infos.json', '.gitattributes', '.gitignore',
+                      'dataset_dict.json', 'state.json', 'datasetdict.json'}
+        skip_suffixes = {'.md', '.gitattributes', '.gitignore', '.yaml', '.yml', '.lock'}
+        
+        for f in train_path.rglob('*'):
+            if f.is_file() and f.name not in skip_names and f.suffix.lower() not in skip_suffixes:
+                files.append(f)
+        
+        extensions = {f.suffix.lower() for f in files}
         
         metadata = {
             "total_files": len(files),
@@ -299,21 +308,17 @@ class ModalityDetector:
             "sample_files": [f.name for f in files[:5]]
         }
         
-        # Detection logic
-        if extensions & {'.txt', '.json', '.jsonl', '.csv'}:
-            # Check if it's tabular
-            if '.csv' in extensions or '.parquet' in extensions:
-                # Could be tabular or text
-                # TODO: Better detection by inspecting CSV structure
-                metadata["note"] = "CSV detected - could be text or tabular"
-                return Modality.TEXT, metadata  # For now, treat as text
+        # Detection logic — parquet/arrow are HuggingFace text/tabular formats
+        if extensions & {'.parquet', '.arrow'}:
+            metadata["format"] = "huggingface"
+            return Modality.TEXT, metadata
+        
+        if extensions & {'.txt', '.json', '.jsonl', '.csv', '.tsv'}:
             return Modality.TEXT, metadata
         
         elif extensions & {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}:
-            # Check for annotations (YOLO, COCO, etc.)
-            if (train_path / "labels").exists() or any(f.suffix == '.xml' for f in files):
+            if (train_path / 'labels').exists() or any(f.suffix == '.xml' for f in files):
                 metadata["annotation_format"] = "detection"
-                return Modality.VISION, metadata
             return Modality.VISION, metadata
         
         elif extensions & {'.wav', '.mp3', '.flac', '.ogg', '.m4a'}:
@@ -323,8 +328,7 @@ class ModalityDetector:
             return Modality.GRAPH, metadata
         
         elif extensions & {'.npy', '.npz', '.h5', '.hdf5'}:
-            # Could be embeddings, time series, or preprocessed data
-            metadata["note"] = "Binary format - need more inspection"
+            metadata["note"] = "Binary format — need more inspection"
             return Modality.UNKNOWN, metadata
         
         else:
@@ -564,78 +568,247 @@ class TextDataLoader(BaseDataLoader):
             raise
     
     def _load_text_files(self, path: Path) -> List[Dict[str, str]]:
-        """Load text files from directory"""
+        """Load text files from directory — supports txt, json, jsonl, csv, parquet, arrow"""
         data = []
         
-        # Load .txt files
-        for txt_file in path.glob("*.txt"):
-            with open(txt_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data.append({"text": line})
+        # Files to always skip (metadata, not actual data)
+        skip_names = {
+            'README.md', 'readme.md', 'dataset_infos.json', 'dataset_dict.json',
+            'state.json', 'datasetdict.json', '.gitattributes', '.gitignore'
+        }
+        skip_suffixes = {'.md', '.gitattributes', '.gitignore', '.yaml', '.yml', '.lock', '.txt.gz'}
         
-        # Load .json files
-        for json_file in path.glob("*.json"):
-            with open(json_file, 'r', encoding='utf-8') as f:
-                try:
-                    json_data = json.load(f)
-                    if isinstance(json_data, list):
-                        data.extend(json_data)
-                    else:
-                        data.append(json_data)
-                except:
-                    pass
+        # Scan recursively (handles sharded parquet in subdirs)
+        all_files = [f for f in path.rglob('*')
+                     if f.is_file()
+                     and f.name not in skip_names
+                     and f.suffix.lower() not in skip_suffixes]
         
-        # Load .jsonl files
-        for jsonl_file in path.glob("*.jsonl"):
-            with open(jsonl_file, 'r', encoding='utf-8') as f:
-                for line in f:
+        if not all_files:
+            MessageProtocol.warning(f"No data files found in {path}")
+            return data
+        
+        # --- Parquet / Arrow (HuggingFace native format) ---
+        parquet_files = [f for f in all_files if f.suffix.lower() == '.parquet']
+        arrow_files   = [f for f in all_files if f.suffix.lower() == '.arrow']
+        
+        if parquet_files or arrow_files:
+            try:
+                import pandas as pd
+                
+                frames = []
+                for pf in sorted(parquet_files):
                     try:
-                        data.append(json.loads(line))
-                    except:
-                        pass
+                        df = pd.read_parquet(pf)
+                        frames.append(df)
+                        MessageProtocol.status("loading", f"Read {len(df)} rows from {pf.name}")
+                    except Exception as e:
+                        MessageProtocol.warning(f"Could not read {pf.name}: {e}")
+                
+                for af in sorted(arrow_files):
+                    try:
+                        import pyarrow as pa
+                        with pa.memory_map(str(af), 'r') as source:
+                            table = pa.ipc.open_file(source).read_all()
+                        df = table.to_pandas()
+                        frames.append(df)
+                        MessageProtocol.status("loading", f"Read {len(df)} rows from {af.name}")
+                    except Exception as e:
+                        MessageProtocol.warning(f"Could not read {af.name}: {e}")
+                
+                if frames:
+                    import pandas as pd
+                    combined = pd.concat(frames, ignore_index=True)
+                    data = self._dataframe_to_text_list(combined)
+                    MessageProtocol.status("loading", f"Converted {len(data)} samples from parquet/arrow")
+                    return data
+                    
+            except ImportError:
+                MessageProtocol.warning("pandas not installed — trying pyarrow directly")
+                try:
+                    import pyarrow.parquet as pq
+                    for pf in sorted(parquet_files):
+                        table = pq.read_table(str(pf))
+                        for batch in table.to_batches():
+                            rows = batch.to_pydict()
+                            n = len(next(iter(rows.values())))
+                            for i in range(n):
+                                row = {k: v[i] for k, v in rows.items()}
+                                sample = self._dict_to_text_sample(row)
+                                if sample:
+                                    data.append(sample)
+                    MessageProtocol.status("loading", f"Loaded {len(data)} samples via pyarrow")
+                    return data
+                except ImportError:
+                    MessageProtocol.error(
+                        "Neither pandas nor pyarrow installed",
+                        "Install with: pip install pandas pyarrow"
+                    )
+                    raise
         
-        # Load .csv files
-        for csv_file in path.glob("*.csv"):
-            import csv
-            with open(csv_file, 'r', encoding='utf-8') as f:
-                csv_reader = csv.reader(f)
-                for row in csv_reader:
-                    if len(row) >= 2:
-                        data.append({"input": row[0].strip(), "target": row[1].strip()})
-                    elif len(row) == 1:
-                        data.append({"text": row[0].strip()})
+        # --- Plain text files ---
+        for txt_file in sorted(f for f in all_files if f.suffix.lower() == '.txt'):
+            try:
+                with open(txt_file, 'r', encoding='utf-8', errors='replace') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            data.append({"text": line})
+            except Exception as e:
+                MessageProtocol.warning(f"Could not read {txt_file.name}: {e}")
+        
+        # --- JSON ---
+        for json_file in sorted(f for f in all_files if f.suffix.lower() == '.json'
+                                and f.name not in {'dataset_infos.json', 'dataset_dict.json', 'state.json'}):
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                if isinstance(json_data, list):
+                    for item in json_data:
+                        sample = self._dict_to_text_sample(item) if isinstance(item, dict) else {"text": str(item)}
+                        if sample:
+                            data.append(sample)
+                elif isinstance(json_data, dict):
+                    sample = self._dict_to_text_sample(json_data)
+                    if sample:
+                        data.append(sample)
+            except Exception as e:
+                MessageProtocol.warning(f"Could not read {json_file.name}: {e}")
+        
+        # --- JSONL ---
+        for jsonl_file in sorted(f for f in all_files if f.suffix.lower() == '.jsonl'):
+            try:
+                with open(jsonl_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            sample = self._dict_to_text_sample(obj) if isinstance(obj, dict) else {"text": str(obj)}
+                            if sample:
+                                data.append(sample)
+                        except json.JSONDecodeError:
+                            pass
+            except Exception as e:
+                MessageProtocol.warning(f"Could not read {jsonl_file.name}: {e}")
+        
+        # --- CSV / TSV ---
+        for csv_file in sorted(f for f in all_files if f.suffix.lower() in {'.csv', '.tsv'}):
+            try:
+                import csv
+                delimiter = '\t' if csv_file.suffix.lower() == '.tsv' else ','
+                with open(csv_file, 'r', encoding='utf-8', errors='replace') as f:
+                    reader = csv.DictReader(f, delimiter=delimiter)
+                    for row in reader:
+                        sample = self._dict_to_text_sample(row)
+                        if sample:
+                            data.append(sample)
+            except Exception as e:
+                MessageProtocol.warning(f"Could not read {csv_file.name}: {e}")
         
         return data
     
+    def _dataframe_to_text_list(self, df) -> List[Dict[str, str]]:
+        """Convert a pandas DataFrame to list of text dicts"""
+        data = []
+        for _, row in df.iterrows():
+            sample = self._dict_to_text_sample(row.to_dict())
+            if sample:
+                data.append(sample)
+        return data
+    
+    def _dict_to_text_sample(self, row: dict) -> Optional[Dict[str, str]]:
+        """Convert any dict/row to a {text: ...} or {input: ..., target: ...} sample.
+        Handles HuggingFace dataset schemas automatically."""
+        # Normalize keys to lowercase for matching
+        norm = {str(k).lower(): v for k, v in row.items() if v is not None and str(v).strip()}
+        
+        # Priority text fields (common HF dataset schemas)
+        text_fields = [
+            'text', 'content', 'document', 'abstract', 'body', 'passage',
+            'sentence', 'article', 'context', 'question', 'input', 'src',
+            'source_text', 'input_text', 'premise', 'hypothesis'
+        ]
+        target_fields = [
+            'keyphrases', 'keywords', 'tags', 'labels', 'label', 'answer',
+            'answers', 'target', 'output', 'tgt', 'target_text', 'summary',
+            'translation', 'response'
+        ]
+        
+        # Find main text field
+        text_val = None
+        for field in text_fields:
+            if field in norm:
+                val = norm[field]
+                if isinstance(val, (list, tuple)):
+                    val = ' '.join(str(x) for x in val)
+                text_val = str(val).strip()
+                break
+        
+        # Find target field
+        target_val = None
+        for field in target_fields:
+            if field in norm:
+                val = norm[field]
+                if isinstance(val, (list, tuple)):
+                    val = ';'.join(str(x) for x in val)
+                target_val = str(val).strip()
+                break
+        
+        # If no known field found, use all string columns concatenated
+        if not text_val:
+            str_vals = [str(v).strip() for v in norm.values()
+                       if isinstance(v, str) and str(v).strip()]
+            if str_vals:
+                text_val = ' | '.join(str_vals)
+        
+        if not text_val:
+            return None
+        
+        if target_val:
+            return {'input': text_val, 'target': target_val}
+        return {'text': text_val}
+    
     def _tokenize_function(self, examples):
-        """Tokenize examples"""
-        # Determine text field
-        text_field = None
-        if 'text' in examples:
-            text_field = 'text'
-        elif 'input' in examples:
-            text_field = 'input'
-        elif 'content' in examples:
-            text_field = 'content'
+        """Tokenize examples — auto-detects field names for common HF schemas"""
+        # Priority order for text input fields
+        text_fields  = ['text', 'input', 'content', 'document', 'abstract', 'body',
+                        'passage', 'sentence', 'article', 'context', 'question',
+                        'source_text', 'input_text', 'src', 'premise']
+        target_fields = ['target', 'keyphrases', 'keywords', 'labels', 'label', 'answer',
+                         'answers', 'output', 'tgt', 'target_text', 'summary', 'response']
+        
+        text_field = next((f for f in text_fields if f in examples), None)
+        target_field = next((f for f in target_fields if f in examples), None)
         
         if not text_field:
-            raise ValueError(f"No text field found in: {list(examples.keys())}")
+            # Last resort: use first string-valued column
+            for col, vals in examples.items():
+                if isinstance(vals, list) and vals and isinstance(vals[0], str):
+                    text_field = col
+                    break
+        
+        if not text_field:
+            raise ValueError(f"No usable text field found. Available columns: {list(examples.keys())}")
         
         texts = examples[text_field]
+        # Ensure all values are strings
+        texts = [str(t) if t is not None else '' for t in texts]
         
-        # Tokenize
+        # If we have a target field, concatenate input→target for seq2seq-style causal LM training
+        if target_field and target_field in examples:
+            targets = examples[target_field]
+            targets = [str(t) if t is not None else '' for t in targets]
+            texts = [f"{inp} → {tgt}" for inp, tgt in zip(texts, targets)]
+        
         model_inputs = self.tokenizer(
             texts,
             truncation=True,
             max_length=self.config.max_seq_length,
             padding="max_length"
         )
-        
-        # Create labels (for causal LM, labels = input_ids)
         model_inputs["labels"] = model_inputs["input_ids"].copy()
-        
         return model_inputs
     
     def get_sample_info(self) -> Dict[str, Any]:

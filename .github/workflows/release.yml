@@ -175,97 +175,97 @@ jobs:
           VERSION="${{ needs.create-release.outputs.version }}"
           REPO="${{ github.repository }}"
           TAG="v${VERSION}"
+          PUB_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
           echo "📥 Downloading .sig files for tag $TAG..."
           mkdir -p ./sigs
-          gh release download "$TAG" --pattern "*.sig" --dir ./sigs 2>/dev/null || echo "⚠️ No .sig files found yet (normal if signing key not set)"
+          gh release download "$TAG" --pattern "*.sig" --dir ./sigs 2>/dev/null || echo "⚠️ No .sig files found (signing key not configured)"
 
           echo "📁 Downloaded sig files:"
           ls -la ./sigs/ 2>/dev/null || echo "(none)"
 
           # Read signature content
           WIN_SIG=""
-          WIN_URL=""
           MAC_ARM_SIG=""
-          MAC_ARM_URL=""
           LINUX_SIG=""
-          LINUX_URL=""
 
-          # Windows: prefer .exe.sig, fallback to .msi.sig
           for f in ./sigs/*.exe.sig ./sigs/*.msi.sig; do
-            if [ -f "$f" ]; then
-              WIN_SIG=$(cat "$f")
-              echo "✅ Windows sig found: $f"
-              break
-            fi
+            [ -f "$f" ] && WIN_SIG=$(cat "$f") && echo "✅ Windows sig: $f" && break
           done
-
-          # macOS ARM
           for f in ./sigs/*.app.tar.gz.sig; do
-            if [ -f "$f" ]; then
-              MAC_ARM_SIG=$(cat "$f")
-              echo "✅ macOS ARM sig found: $f"
-              break
-            fi
+            [ -f "$f" ] && MAC_ARM_SIG=$(cat "$f") && echo "✅ macOS ARM sig: $f" && break
           done
-
-          # Linux
           for f in ./sigs/*.AppImage.sig; do
-            if [ -f "$f" ]; then
-              LINUX_SIG=$(cat "$f")
-              echo "✅ Linux sig found: $f"
-              break
-            fi
+            [ -f "$f" ] && LINUX_SIG=$(cat "$f") && echo "✅ Linux sig: $f" && break
           done
 
-          # Get real download URLs from release assets
-          echo "🔗 Fetching asset URLs..."
+          # Get real download URLs — jq returns literal "null" when not found, so sanitize
+          echo "🔗 Fetching asset URLs from GitHub release..."
           ASSETS_JSON=$(gh release view "$TAG" --json assets --jq '.assets')
+          echo "Assets JSON: $ASSETS_JSON"
 
-          WIN_URL=$(echo "$ASSETS_JSON" | jq -r '.[] | select(.name | test("\\.exe$")) | .browserDownloadUrl' | head -1)
-          MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '.[] | select(.name | test("\\.app\\.tar\\.gz$")) | .browserDownloadUrl' | head -1)
-          LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '.[] | select(.name | test("\\.AppImage$")) | .browserDownloadUrl' | head -1)
+          WIN_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.exe$"; "i"))] | first | .browserDownloadUrl // ""')
+          MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.app\\.tar\\.gz$"; "i"))] | first | .browserDownloadUrl // ""')
+          LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.AppImage$"; "i"))] | first | .browserDownloadUrl // ""')
 
-          # Fallback URLs wenn Assets noch nicht hochgeladen
-          [ -z "$WIN_URL" ] && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_x64-setup.exe"
+          # Sanitize: replace literal "null" with empty string
+          [ "$WIN_URL" = "null" ]     && WIN_URL=""
+          [ "$MAC_ARM_URL" = "null" ] && MAC_ARM_URL=""
+          [ "$LINUX_URL" = "null" ]   && LINUX_URL=""
+
+          # Fallback constructed URLs for platforms whose build hasn't uploaded yet
+          [ -z "$WIN_URL" ]     && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_x64-setup.exe"
           [ -z "$MAC_ARM_URL" ] && MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_aarch64.app.tar.gz"
-          [ -z "$LINUX_URL" ] && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_amd64.AppImage"
+          [ -z "$LINUX_URL" ]   && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_amd64.AppImage"
 
+          echo "WIN_URL:     $WIN_URL"
+          echo "MAC_ARM_URL: $MAC_ARM_URL"
+          echo "LINUX_URL:   $LINUX_URL"
+
+          # Build latest.json using Python for correct JSON (no bash string hacks)
           echo "🔨 Building latest.json..."
+          python3 - <<PYEOF
+import json, os
 
-          # Plattform-Einträge bauen
-          PLATFORMS_JSON=""
+version     = "${VERSION}"
+pub_date    = "${PUB_DATE}"
+notes       = f"FrameTrain Desktop App v{version}"
 
-          if [ -n "$WIN_SIG" ] && [ -n "$WIN_URL" ]; then
-            PLATFORMS_JSON="${PLATFORMS_JSON}    \"windows-x86_64\": {\n      \"signature\": \"${WIN_SIG}\",\n      \"url\": \"${WIN_URL}\"\n    },\n"
-          elif [ -n "$WIN_URL" ]; then
-            PLATFORMS_JSON="${PLATFORMS_JSON}    \"windows-x86_64\": {\n      \"url\": \"${WIN_URL}\"\n    },\n"
-          fi
+win_url     = """${WIN_URL}"""
+mac_url     = """${MAC_ARM_URL}"""
+linux_url   = """${LINUX_URL}"""
+win_sig     = """${WIN_SIG}"""
+mac_sig     = """${MAC_ARM_SIG}"""
+linux_sig   = """${LINUX_SIG}"""
 
-          if [ -n "$MAC_ARM_SIG" ] && [ -n "$MAC_ARM_URL" ]; then
-            PLATFORMS_JSON="${PLATFORMS_JSON}    \"darwin-aarch64\": {\n      \"signature\": \"${MAC_ARM_SIG}\",\n      \"url\": \"${MAC_ARM_URL}\"\n    },\n"
-          elif [ -n "$MAC_ARM_URL" ]; then
-            PLATFORMS_JSON="${PLATFORMS_JSON}    \"darwin-aarch64\": {\n      \"url\": \"${MAC_ARM_URL}\"\n    },\n"
-          fi
+def make_entry(url, sig):
+    e = {"url": url}
+    if sig.strip():
+        e["signature"] = sig.strip()
+    return e
 
-          if [ -n "$LINUX_SIG" ] && [ -n "$LINUX_URL" ]; then
-            PLATFORMS_JSON="${PLATFORMS_JSON}    \"linux-x86_64\": {\n      \"signature\": \"${LINUX_SIG}\",\n      \"url\": \"${LINUX_URL}\"\n    },\n"
-          elif [ -n "$LINUX_URL" ]; then
-            PLATFORMS_JSON="${PLATFORMS_JSON}    \"linux-x86_64\": {\n      \"url\": \"${LINUX_URL}\"\n    },\n"
-          fi
+platforms = {}
+if win_url:
+    platforms["windows-x86_64"] = make_entry(win_url, win_sig)
+if mac_url:
+    platforms["darwin-aarch64"] = make_entry(mac_url, mac_sig)
+if linux_url:
+    platforms["linux-x86_64"]   = make_entry(linux_url, linux_sig)
 
-          # Trailing comma entfernen
-          PLATFORMS_JSON=$(echo -e "$PLATFORMS_JSON" | sed '$ s/,$//')
+latest = {
+    "version":  version,
+    "notes":    notes,
+    "pub_date": pub_date,
+    "platforms": platforms,
+}
 
-          # latest.json schreiben
-          printf '{\n  "version": "%s",\n  "notes": "FrameTrain Desktop App v%s",\n  "pub_date": "%s",\n  "platforms": {\n%s  }\n}\n' \
-            "$VERSION" \
-            "$VERSION" \
-            "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-            "$PLATFORMS_JSON" > latest.json
+with open("latest.json", "w") as f:
+    json.dump(latest, f, indent=2)
+    f.write("\n")
 
-          echo "✅ latest.json generated:"
-          cat latest.json
+print("✅ latest.json generated:")
+print(json.dumps(latest, indent=2))
+PYEOF
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
