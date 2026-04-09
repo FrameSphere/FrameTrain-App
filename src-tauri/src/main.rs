@@ -193,6 +193,7 @@ fn main() {
             dataset_manager::move_dataset_files,
             dataset_manager::delete_dataset_files,
             dataset_manager::add_files_to_dataset,
+            dataset_manager::split_dataset_in_half,
             // Training Manager Commands
             training_manager::get_training_presets,
             training_manager::rate_training_config,

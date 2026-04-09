@@ -1186,6 +1186,173 @@ fn collect_files_recursive(
     Ok(())
 }
 
+// ============ DATASET SPLIT IN HALF ============
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SplitHalfResult {
+    pub dataset_a: DatasetInfo,
+    pub dataset_b: DatasetInfo,
+}
+
+/// Teilt einen Datensatz in zwei gleich große Hälften auf
+#[tauri::command]
+pub async fn split_dataset_in_half(
+    app_handle: tauri::AppHandle,
+    dataset_id: String,
+    model_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<SplitHalfResult, String> {
+    use std::process::Command;
+
+    // 1. Finde den Datensatz-Pfad
+    let db = state.db.lock().map_err(|e| format!("DB-Fehler: {}", e))?;
+    let all_db = db.list_datasets().map_err(|e| format!("DB-Lesefehler: {}", e))?;
+    let db_ds = all_db.iter().find(|d| d.id == dataset_id)
+        .ok_or_else(|| format!("Datensatz '{}' nicht gefunden", dataset_id))?;
+    let source_root = PathBuf::from(&db_ds.file_path);
+    let ds_name = db_ds.name.clone();
+    drop(db);
+
+    if !source_root.exists() {
+        return Err(format!("Datensatz-Verzeichnis existiert nicht: {}", source_root.display()));
+    }
+
+    // 2. Finde das Verzeichnis mit den eigentlichen Daten
+    let data_dir = {
+        let train = source_root.join("train");
+        let unused = source_root.join("unused");
+        if train.exists() {
+            train
+        } else if unused.exists() {
+            unused
+        } else {
+            source_root.clone()
+        }
+    };
+
+    // 3. Erstelle IDs + Zielverzeichnisse für die zwei neuen Datensätze
+    let datasets_dir = get_model_datasets_dir(&app_handle, &model_id)?;
+
+    let id_a = format!("ds_half_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
+    let id_b = format!("ds_half_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
+
+    let out_a = datasets_dir.join(&id_a).join("train");
+    let out_b = datasets_dir.join(&id_b).join("train");
+
+    fs::create_dir_all(&out_a).map_err(|e| format!("Konnte Zielordner A nicht erstellen: {}", e))?;
+    fs::create_dir_all(&out_b).map_err(|e| format!("Konnte Zielordner B nicht erstellen: {}", e))?;
+
+    // 4. Finde split_dataset.py
+    let script_path = {
+        let resource_path = app_handle.path().resource_dir()
+            .map_err(|e| format!("Resource-Dir nicht gefunden: {}", e))?;
+        let p1 = resource_path.join("python").join("split_dataset.py");
+        let p2 = PathBuf::from("src-tauri/python/split_dataset.py");
+        let p3 = PathBuf::from("/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app2/src-tauri/python/split_dataset.py");
+        if p1.exists() { p1 } else if p2.exists() { p2 } else if p3.exists() { p3 }
+        else { return Err("split_dataset.py nicht gefunden".to_string()); }
+    };
+
+    // 5. Finde Python
+    let python = {
+        let candidates = ["python3", "python"];
+        candidates.iter()
+            .find(|p| Command::new(p).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "python3".to_string())
+    };
+
+    // 6. Führe Split-Script aus
+    let output = Command::new(&python)
+        .arg(script_path.to_string_lossy().to_string())
+        .arg(data_dir.to_string_lossy().to_string())
+        .arg(out_a.to_string_lossy().to_string())
+        .arg(out_b.to_string_lossy().to_string())
+        .output()
+        .map_err(|e| format!("Konnte Split-Script nicht starten: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!("Split-Script fehlgeschlagen:\n{}\n{}", stderr, stdout));
+    }
+
+    // 7. Parse Ergebnis (letzte JSON-Zeile mit type=done)
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let mut total_a: usize = 0;
+    let mut total_b: usize = 0;
+    for line in stdout_str.lines() {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
+            if val.get("type").and_then(|t| t.as_str()) == Some("done") {
+                total_a = val.get("total_a").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                total_b = val.get("total_b").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            }
+            if val.get("type").and_then(|t| t.as_str()) == Some("error") {
+                let msg = val.get("message").and_then(|m| m.as_str()).unwrap_or("Unbekannter Fehler");
+                return Err(format!("Split-Fehler: {}", msg));
+            }
+        }
+    }
+
+    // 8. Berechne Größen
+    let root_a = datasets_dir.join(&id_a);
+    let root_b = datasets_dir.join(&id_b);
+    let (size_a, files_a) = calculate_dir_size(&root_a).unwrap_or((0, 0));
+    let (size_b, files_b) = calculate_dir_size(&root_b).unwrap_or((0, 0));
+
+    // 9. Speichere in DB
+    let db = state.db.lock().map_err(|e| format!("DB-Fehler: {}", e))?;
+    let now = Utc::now().to_rfc3339();
+
+    let name_a = format!("{} (Hälfte 1/2)", ds_name);
+    let name_b = format!("{} (Hälfte 2/2)", ds_name);
+
+    for (id, name, root, size, files) in [
+        (&id_a, &name_a, &root_a, size_a, files_a),
+        (&id_b, &name_b, &root_b, size_b, files_b),
+    ] {
+        let db_ds_new = crate::database::Dataset {
+            id: id.clone(),
+            name: name.clone(),
+            file_path: root.to_string_lossy().to_string(),
+            file_type: "directory".to_string(),
+            size_bytes: Some(size as i64),
+            rows_count: None,
+            columns_count: None,
+            validated: false,
+            created_at: now.clone(),
+        };
+        db.save_dataset(&db_ds_new)
+            .map_err(|e| format!("DB-Speicherfehler: {}", e))?;
+    }
+
+    // 10. Baue DatasetInfo für beide
+    let make_info = |id: &str, name: &str, root: &PathBuf, size: u64, file_count: usize| DatasetInfo {
+        id: id.to_string(),
+        name: name.to_string(),
+        model_id: model_id.clone(),
+        source: "local".to_string(),
+        source_path: Some(root.to_string_lossy().to_string()),
+        size_bytes: size,
+        file_count,
+        created_at: Utc::now(),
+        status: DatasetStatus::Split,
+        split_info: Some(SplitInfo {
+            train_count: if id == &id_a { total_a } else { total_b },
+            val_count: 0,
+            test_count: 0,
+            train_ratio: 1.0,
+            val_ratio: 0.0,
+            test_ratio: 0.0,
+        }),
+    };
+
+    Ok(SplitHalfResult {
+        dataset_a: make_info(&id_a, &name_a, &root_a, size_a, files_a),
+        dataset_b: make_info(&id_b, &name_b, &root_b, size_b, files_b),
+    })
+}
+
 /// Liest den Inhalt einer Datei
 #[tauri::command]
 pub fn read_dataset_file(file_path: String) -> Result<String, String> {

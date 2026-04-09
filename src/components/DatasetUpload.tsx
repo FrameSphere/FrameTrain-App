@@ -152,6 +152,12 @@ export default function DatasetUpload() {
   // File Manager State
   const [showFileManager, setShowFileManager] = useState(false);
   const [fileManagerDataset, setFileManagerDataset] = useState<DatasetInfo | null>(null);
+
+  // Split-in-Half State
+  const [showSplitHalfModal, setShowSplitHalfModal] = useState(false);
+  const [datasetToHalf, setDatasetToHalf] = useState<DatasetInfo | null>(null);
+  const [splittingHalf, setSplittingHalf] = useState(false);
+
   const [valRatio, setValRatio] = useState(0.1);
   const [testRatio, setTestRatio] = useState(0.1);
   const [splitting, setSplitting] = useState(false);
@@ -450,6 +456,30 @@ export default function DatasetUpload() {
     }
   };
 
+  // ============ Split in Half ============
+
+  const handleSplitInHalf = async () => {
+    if (!datasetToHalf || !selectedModelId) return;
+    setSplittingHalf(true);
+    try {
+      const result = await invoke<{ dataset_a: DatasetInfo; dataset_b: DatasetInfo }>(
+        'split_dataset_in_half',
+        { datasetId: datasetToHalf.id, modelId: selectedModelId }
+      );
+      success(
+        'Datensatz geteilt!',
+        `"${result.dataset_a.name}" und "${result.dataset_b.name}" wurden erstellt.`
+      );
+      setShowSplitHalfModal(false);
+      setDatasetToHalf(null);
+      await loadDatasets();
+    } catch (err: any) {
+      error('Teilen fehlgeschlagen', String(err));
+    } finally {
+      setSplittingHalf(false);
+    }
+  };
+
   // ============ Delete Dataset ============
 
   const handleDeleteDataset = async (dataset: DatasetInfo) => {
@@ -679,6 +709,14 @@ export default function DatasetUpload() {
                       Split
                     </button>
                   )}
+                  <button
+                    onClick={() => { setDatasetToHalf(dataset); setShowSplitHalfModal(true); }}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-white/5 hover:bg-orange-500/20 border border-white/10 hover:border-orange-500/30 rounded-lg text-gray-300 hover:text-orange-300 text-sm transition-all"
+                    title="Datensatz in zwei gleich große Hälften aufteilen (RAM-Probleme lösen)"
+                  >
+                    <span className="text-base leading-none">½</span>
+                    Halbieren
+                  </button>
                 </div>
               </div>
             </div>
@@ -1044,6 +1082,64 @@ export default function DatasetUpload() {
             loadDatasets();
           }}
         />
+      )}
+
+      {/* Split-in-Half Modal */}
+      {showSplitHalfModal && datasetToHalf && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <div>
+                <h2 className="text-xl font-bold text-white">Datensatz halbieren</h2>
+                <p className="text-sm text-gray-400 mt-1">{datasetToHalf.name}</p>
+              </div>
+              <button
+                onClick={() => { setShowSplitHalfModal(false); setDatasetToHalf(null); }}
+                className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                <p className="text-orange-300 text-sm font-medium mb-1">⚠️ Wofür ist das?</p>
+                <p className="text-gray-300 text-sm">
+                  Wenn das Training mit einem RAM-Fehler abbricht, kannst du den Datensatz halbieren
+                  und mit der kleineren Hälfte trainieren.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-white/5 rounded-lg text-center">
+                  <div className="text-white font-bold text-lg">{Math.ceil(datasetToHalf.file_count / 2)}</div>
+                  <div className="text-gray-400 text-xs mt-1">Dateien (Hälfte 1)</div>
+                </div>
+                <div className="p-3 bg-white/5 rounded-lg text-center">
+                  <div className="text-white font-bold text-lg">{Math.floor(datasetToHalf.file_count / 2)}</div>
+                  <div className="text-gray-400 text-xs mt-1">Dateien (Hälfte 2)</div>
+                </div>
+              </div>
+              <p className="text-gray-500 text-xs">
+                Erstellt zwei neue Datensätze "{datasetToHalf.name} (Hälfte 1/2)" und "(Hälfte 2/2)".
+                Der Original-Datensatz bleibt erhalten. Das Dateiformat (.parquet, .jsonl, etc.) wird beibehalten.
+              </p>
+              <button
+                onClick={handleSplitInHalf}
+                disabled={splittingHalf}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white font-medium transition-all disabled:opacity-50 ${
+                  splittingHalf
+                    ? 'bg-white/10'
+                    : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:opacity-90'
+                }`}
+              >
+                {splittingHalf ? (
+                  <><Loader2 className="w-5 h-5 animate-spin" />Teile auf...</>
+                ) : (
+                  <><span className="text-lg">½</span> In zwei Hälften teilen</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Split Modal */}
