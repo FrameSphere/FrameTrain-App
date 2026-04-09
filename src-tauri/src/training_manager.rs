@@ -1516,6 +1516,47 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
     
     println!("[Training] Process finished with status: {:?}", status);
     
+    // Detect silent process death (OOM kill, SIGKILL, crash without Python error message)
+    let exited_ok = status.as_ref().map(|s| s.success()).unwrap_or(false);
+    if !exited_ok {
+        // Check if we already received an "error" or "complete" event from Python.
+        // If not, the process died silently (most likely OOM / SIGKILL by the OS).
+        #[cfg(unix)]
+        let exit_code: Option<i32> = status.as_ref().ok().and_then(|s| {
+            use std::os::unix::process::ExitStatusExt;
+            s.signal()
+        });
+        #[cfg(not(unix))]
+        let exit_code: Option<i32> = None;
+        
+        let is_signal_kill = exit_code == Some(9); // SIGKILL = 9
+        let error_msg = if is_signal_kill {
+            "Training-Prozess wurde vom Betriebssystem beendet (SIGKILL).\n\
+             Ursache: Sehr wahrscheinlich zu wenig RAM (Out-of-Memory).\n\n\
+             Was tun:\n\
+             1. Batch-Size halbieren (z.B. 8 → 4 → 2)\n\
+             2. Max. Sequenzlänge halbieren (z.B. 512 → 256)\n\
+             3. LoRA aktivieren (trainiert nur 1-5% der Parameter)\n\
+             4. Andere Apps schließen um RAM freizugeben\n\
+             5. Datensatz in kleinere Hälften aufteilen".to_string()
+        } else {
+            format!(
+                "Training-Prozess unerwartet beendet (Exit-Code: {:?}).\n\
+                 Möglicherweise unzureichender RAM oder ein interner Fehler.\n\
+                 Starte FrameTrain neu und versuche es erneut.",
+                status.as_ref().map(|s| s.code())
+            )
+        };
+        
+        let _ = app_handle.emit("training-error", serde_json::json!({
+            "job_id": job_id,
+            "data": {
+                "error": "Training abgebrochen",
+                "details": error_msg
+            }
+        }));
+    }
+    
     // CRITICAL FIX: Reset training state after process finishes
     if let Ok(mut state_lock) = state.lock() {
         println!("[Training] Resetting training state...");

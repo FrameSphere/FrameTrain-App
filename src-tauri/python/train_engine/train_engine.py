@@ -112,16 +112,30 @@ def estimate_model_ram_gb(model_path: str, load_in_4bit: bool = False,
         return 2.0  # Safe default
 
 
+def estimate_tokenized_ram_gb(n_samples: int, seq_length: int, n_tensors: int = 3) -> float:
+    """Estimate RAM for a fully materialized tokenized dataset.
+    n_tensors: typically 3 (input_ids, attention_mask, labels) or 4 with token_type_ids.
+    With dynamic padding the actual usage is ~40-60% lower, but this is the safe upper bound.
+    """
+    return round(n_samples * seq_length * n_tensors * 4 / (1024 ** 3), 1)
+
+
 def build_oom_message(cfg, mem: Dict, model_ram_est: float, n_samples: int) -> str:
     """Build a human-readable OOM explanation with concrete recommendations."""
-    lines = ["💾 Kein ausreichender RAM für dieses Training.\n"]
+    tokenized_ram = estimate_tokenized_ram_gb(n_samples, cfg.max_seq_length, 3)
+    optimizer_ram = round(model_ram_est * 2.0, 1)   # AdamW: 2 momentum copies
+    total_est = round(model_ram_est + tokenized_ram + optimizer_ram, 1)
 
+    lines = ["\U0001f4be Kein ausreichender RAM für dieses Training.\n"]
     if mem.get("total_gb"):
-        lines.append(f"Dein System:  {mem['total_gb']} GB RAM gesamt")
+        lines.append(f"Dein System:       {mem['total_gb']} GB RAM gesamt")
     if mem.get("available_gb"):
-        lines.append(f"Verfügbar:    {mem['available_gb']} GB RAM")
-    lines.append(f"Modell braucht ca. {model_ram_est} GB (Schätzung)")
-    lines.append(f"Datensatz:    {n_samples:,} Samples × seq_length {cfg.max_seq_length}")
+        lines.append(f"Verfügbar:         {mem['available_gb']} GB RAM")
+    lines.append(f"Modell:           ~{model_ram_est} GB")
+    lines.append(f"Tokenisierte Daten:~{tokenized_ram} GB  "
+                 f"({n_samples:,} Samples × {cfg.max_seq_length} Tokens × 3 Tensoren × 4 Bytes)")
+    lines.append(f"Optimizer (AdamW): ~{optimizer_ram} GB  (2× Modellgröße)")
+    lines.append(f"Gesamt geschätzt:  ~{total_est} GB")
     lines.append("")
     lines.append("── Was kannst du tun? ──────────────────────────────")
     lines.append("")
@@ -434,7 +448,7 @@ def tokenize_dataset(dataset, tokenizer, config: TrainingConfig, arch: str,
                      text_col: str, target_col: Optional[str]):
     def tokenize_fn(examples):
         texts = [str(t) if t is not None else "" for t in examples[text_col]]
-        if target_col and target_col in examples and arch == "decoder":
+        if target_col and target_col in examples and arch in ("decoder", "encoder"):
             sep = getattr(tokenizer, "sep_token", None) or " → "
             targets = []
             for t in examples[target_col]:
@@ -446,11 +460,13 @@ def tokenize_dataset(dataset, tokenizer, config: TrainingConfig, arch: str,
                     targets.append("")
             texts = [f"{inp}{sep}{tgt}" for inp, tgt in zip(texts, targets)]
 
+        # Dynamic padding: truncate to max_length but do NOT pad per sample.
+        # Padding happens per-batch inside the DataCollator — saves 50-70% RAM.
         enc = tokenizer(
             texts,
             truncation=True,
             max_length=config.max_seq_length,
-            padding="max_length",
+            padding=False,
         )
         if arch != "encoder-decoder":
             enc["labels"] = enc["input_ids"].copy()
@@ -459,9 +475,7 @@ def tokenize_dataset(dataset, tokenizer, config: TrainingConfig, arch: str,
     keep = {"input_ids", "attention_mask", "token_type_ids", "labels"}
     remove = [c for c in dataset.column_names if c not in keep]
     tokenized = dataset.map(tokenize_fn, batched=True, remove_columns=remove, desc="Tokenizing")
-    fmt_cols = [c for c in ["input_ids", "attention_mask", "token_type_ids", "labels"]
-                if c in tokenized.column_names]
-    tokenized.set_format("torch", columns=fmt_cols)
+    # NOTE: do NOT call set_format("torch") — the DataCollator + Trainer handle this.
     return tokenized
 
 
@@ -564,14 +578,14 @@ class TrainingEngine:
                 device = "cpu"
                 MessageProtocol.status("device", "CPU")
 
-            # ── Pre-flight RAM check ──────────────────────────────────────
+            # ── Pre-flight RAM check (model only — dataset not loaded yet) ──
             mem = get_system_memory()
             self._model_ram_est = estimate_model_ram_gb(
                 cfg.model_path, cfg.load_in_4bit, cfg.load_in_8bit
             )
             if mem.get("available_gb") and self._model_ram_est > mem["available_gb"] * 0.8:
                 MessageProtocol.warning(
-                    f"Wenig RAM verfügbar: {mem['available_gb']} GB frei, "
+                    f"Wenig RAM: {mem['available_gb']} GB frei, "
                     f"Modell braucht ca. {self._model_ram_est} GB. "
                     f"Training könnte fehlschlagen."
                 )
@@ -592,6 +606,27 @@ class TrainingEngine:
             MessageProtocol.status("loading", "Lade Datensatz...")
             train_ds, val_ds, test_ds = load_dataset_from_path(cfg.dataset_path)
             self._n_train_samples = len(train_ds)
+
+            # ── Pre-flight: full RAM estimate after dataset size is known ──
+            if mem.get("available_gb"):
+                tok_ram   = estimate_tokenized_ram_gb(self._n_train_samples, cfg.max_seq_length, 3)
+                opt_ram   = round(self._model_ram_est * 2.0, 1)
+                total_est = round(self._model_ram_est + tok_ram + opt_ram, 1)
+                avail     = mem["available_gb"]
+                MessageProtocol.status(
+                    "loading",
+                    f"RAM-Bedarf: ~{total_est} GB "
+                    f"(Modell {self._model_ram_est} + Daten {tok_ram} + Optimizer {opt_ram}), "
+                    f"verfügbar: {avail} GB"
+                )
+                if total_est > avail * 0.90:
+                    warning_msg = build_oom_message(
+                        cfg, mem, self._model_ram_est, self._n_train_samples
+                    )
+                    MessageProtocol.warning(
+                        f"RAM-Warnung: ~{total_est} GB benötigt, nur {avail} GB verfügbar.\n"
+                        f"{warning_msg}"
+                    )
 
             # ── Columns ───────────────────────────────────────────────────
             text_col, target_col = find_columns(train_ds)
@@ -648,25 +683,41 @@ class TrainingEngine:
                     "encoder-decoder": TaskType.SEQ_2_SEQ_LM,
                     "decoder":         TaskType.CAUSAL_LM,
                 }
+                # Auto-select correct LoRA target modules based on architecture.
+                # Encoder models (BERT/RoBERTa/xlm-roberta) use 'query'/'value',
+                # decoder models (GPT/Llama) use 'q_proj'/'v_proj'.
+                default_decoder_modules = ["q_proj", "v_proj"]
+                if (not cfg.lora_target_modules or
+                        cfg.lora_target_modules == default_decoder_modules) and arch == "encoder":
+                    resolved_modules = ["query", "value"]
+                    MessageProtocol.status(
+                        "loading",
+                        f"LoRA: auto-korrigierte Module auf {resolved_modules} "
+                        f"(Encoder-Modell erkannt, nicht {default_decoder_modules})"
+                    )
+                else:
+                    resolved_modules = cfg.lora_target_modules or None
                 lora_cfg = LoraConfig(
                     r=cfg.lora_r, lora_alpha=cfg.lora_alpha,
                     lora_dropout=cfg.lora_dropout,
-                    target_modules=cfg.lora_target_modules or None,
+                    target_modules=resolved_modules,
                     bias="none", task_type=task_map[arch],
                 )
                 model = get_peft_model(model, lora_cfg)
                 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
                 MessageProtocol.status("loading", f"LoRA angewendet — {trainable:,} trainierbare Parameter")
 
-            # ── Data Collator ─────────────────────────────────────────────
+            # ── Data Collator (dynamic padding per batch = less RAM) ───────
             if arch == "encoder":
-                from transformers import DataCollatorForLanguageModeling
-                collator = DataCollatorForLanguageModeling(
-                    tokenizer=tokenizer, mlm=True, mlm_probability=0.15
-                )
+                # Use DataCollatorWithPadding so batches are padded dynamically
+                # instead of every sample being padded to max_seq_length.
+                from transformers import DataCollatorWithPadding
+                collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True)
             elif arch == "encoder-decoder":
                 from transformers import DataCollatorForSeq2Seq
-                collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding=True)
+                collator = DataCollatorForSeq2Seq(
+                    tokenizer=tokenizer, model=model, padding=True, pad_to_multiple_of=8
+                )
             else:
                 from transformers import DataCollatorForLanguageModeling
                 collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
