@@ -475,8 +475,44 @@ def tokenize_dataset(dataset, tokenizer, config: TrainingConfig, arch: str,
     keep = {"input_ids", "attention_mask", "token_type_ids", "labels"}
     remove = [c for c in dataset.column_names if c not in keep]
     tokenized = dataset.map(tokenize_fn, batched=True, remove_columns=remove, desc="Tokenizing")
-    # NOTE: do NOT call set_format("torch") — the DataCollator + Trainer handle this.
+    # NOTE: no set_format("torch") here — DataCollatorWithPaddingAndLabels handles conversion.
     return tokenized
+
+
+class DataCollatorWithPaddingAndLabels:
+    """
+    Custom collator that:
+    - Pads input_ids / attention_mask / token_type_ids via tokenizer.pad()
+    - Pads labels separately with -100 (ignored in loss) to the same max length
+    - Returns proper torch tensors for all fields
+    """
+    def __init__(self, tokenizer, padding=True):
+        self.tokenizer = tokenizer
+        self.padding   = padding
+
+    def __call__(self, features):
+        import torch
+
+        # Pull labels out before the tokenizer sees the batch
+        labels_raw = [f.pop("labels", None) for f in features]
+
+        # Pad the tokenizer fields (input_ids, attention_mask, token_type_ids)
+        batch = self.tokenizer.pad(
+            features,
+            padding=self.padding,
+            return_tensors="pt",
+        )
+
+        # Pad labels with -100 to match the padded input length
+        if labels_raw[0] is not None:
+            max_len = batch["input_ids"].shape[1]  # length after tokenizer padding
+            padded = [
+                list(lbl) + [-100] * (max_len - len(lbl))
+                for lbl in labels_raw
+            ]
+            batch["labels"] = torch.tensor(padded, dtype=torch.long)
+
+        return batch
 
 
 # ============================================================================
@@ -709,10 +745,9 @@ class TrainingEngine:
 
             # ── Data Collator (dynamic padding per batch = less RAM) ───────
             if arch == "encoder":
-                # Use DataCollatorWithPadding so batches are padded dynamically
-                # instead of every sample being padded to max_seq_length.
-                from transformers import DataCollatorWithPadding
-                collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True)
+                # Custom collator: pads input fields via tokenizer AND pads labels with -100.
+                # DataCollatorWithPadding alone does NOT handle variable-length labels.
+                collator = DataCollatorWithPaddingAndLabels(tokenizer=tokenizer, padding=True)
             elif arch == "encoder-decoder":
                 from transformers import DataCollatorForSeq2Seq
                 collator = DataCollatorForSeq2Seq(

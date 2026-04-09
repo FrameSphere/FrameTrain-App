@@ -82,12 +82,32 @@ def split_file(src: Path, out_a: Path, out_b: Path) -> tuple[int, int]:
 
     # ── JSON (array) ─────────────────────────────────────────────────────
     if ext == ".json":
-        data = json.loads(src.read_text("utf-8"))
-        if not isinstance(data, list):
-            data = [data]
+        raw = src.read_text("utf-8")
+        # Detect JSONL-in-.json (e.g. kp20k): try JSON array first, fall back to line-by-line
+        is_jsonl = False
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, list):
+                data = [data]
+        except json.JSONDecodeError:
+            is_jsonl = True
+            data = []
+            for lineno, line in enumerate(raw.splitlines(), 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Zeile {lineno} ist kein gueltiges JSON: {e}")
         mid = math.ceil(len(data) / 2)
-        out_a.write_text(json.dumps(data[:mid],  ensure_ascii=False, indent=2), "utf-8")
-        out_b.write_text(json.dumps(data[mid:],  ensure_ascii=False, indent=2), "utf-8")
+        if is_jsonl:
+            # Preserve JSONL format in output
+            out_a.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in data[:mid]),  "utf-8")
+            out_b.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in data[mid:]), "utf-8")
+        else:
+            out_a.write_text(json.dumps(data[:mid],  ensure_ascii=False, indent=2), "utf-8")
+            out_b.write_text(json.dumps(data[mid:], ensure_ascii=False, indent=2), "utf-8")
         return mid, len(data) - mid
 
     # ── CSV / TSV ─────────────────────────────────────────────────────────
