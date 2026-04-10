@@ -1,10 +1,14 @@
 """
-FrameTrain v2 - Universal Training Engine
-==========================================
-Robust training engine using HuggingFace Trainer + datasets library.
-Handles all HF dataset formats and model architectures automatically.
+FrameTrain - Training Engine
+============================
+Simple, robust training engine for all HuggingFace model types.
 
-Communication: JSON messages via stdout to Rust backend
+Architecture:
+  encoder       → Trainer + MLM/padding collator
+  encoder-decoder → Seq2SeqTrainer
+  decoder       → Trainer + causal LM collator
+
+Communication: JSON messages via stdout to Rust backend.
 """
 
 import os
@@ -22,7 +26,7 @@ from enum import Enum
 
 
 # ============================================================================
-# COMMUNICATION PROTOCOL
+# MESSAGE PROTOCOL
 # ============================================================================
 
 class MessageProtocol:
@@ -39,8 +43,7 @@ class MessageProtocol:
             "epoch": epoch, "total_epochs": total_epochs,
             "step": step, "total_steps": total_steps,
             "train_loss": train_loss, "val_loss": val_loss,
-            "learning_rate": learning_rate,
-            "metrics": metrics or {},
+            "learning_rate": learning_rate, "metrics": metrics or {},
             "progress_percent": pct,
         })
 
@@ -69,138 +72,74 @@ class MessageProtocol:
 # RAM DIAGNOSTICS
 # ============================================================================
 
-def get_system_memory() -> Dict[str, float]:
-    """Returns memory info in GB."""
+def get_system_memory() -> Dict[str, Any]:
     try:
         import psutil
         vm = psutil.virtual_memory()
         return {
-            "total_gb":     round(vm.total     / (1024 ** 3), 1),
-            "available_gb": round(vm.available / (1024 ** 3), 1),
-            "used_gb":      round(vm.used      / (1024 ** 3), 1),
+            "total_gb":     round(vm.total     / (1024**3), 1),
+            "available_gb": round(vm.available / (1024**3), 1),
+            "used_gb":      round(vm.used      / (1024**3), 1),
             "percent_used": vm.percent,
         }
     except ImportError:
-        # Fallback: read /proc/meminfo on Linux or sysctl on macOS
         try:
             import subprocess
             out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True)
-            total = int(out.strip()) / (1024 ** 3)
-            return {"total_gb": round(total, 1), "available_gb": None,
-                    "used_gb": None, "percent_used": None}
+            return {"total_gb": round(int(out.strip()) / (1024**3), 1),
+                    "available_gb": None, "used_gb": None, "percent_used": None}
         except Exception:
             return {"total_gb": None, "available_gb": None,
                     "used_gb": None, "percent_used": None}
 
 
-def estimate_model_ram_gb(model_path: str, load_in_4bit: bool = False,
-                           load_in_8bit: bool = False) -> float:
-    """Rough estimate of how much RAM loading the model needs."""
+def estimate_model_ram_gb(model_path: str, load_in_4bit=False, load_in_8bit=False) -> float:
     try:
         from transformers import AutoConfig
         cfg = AutoConfig.from_pretrained(model_path)
-        params = getattr(cfg, "num_parameters", None)
-        if params is None:
-            # Estimate from hidden_size + num_layers heuristic
-            h = getattr(cfg, "hidden_size", 768)
-            layers = getattr(cfg, "num_hidden_layers", 12)
-            vocab = getattr(cfg, "vocab_size", 32000)
-            params = vocab * h + layers * (4 * h * h + 2 * h * 4 * h)
-        bytes_per_param = 0.5 if load_in_4bit else (1.0 if load_in_8bit else 4.0)
-        return round(params * bytes_per_param / (1024 ** 3) * 1.3, 1)  # 1.3× overhead
+        h      = getattr(cfg, "hidden_size", 768)
+        layers = getattr(cfg, "num_hidden_layers", 12)
+        vocab  = getattr(cfg, "vocab_size", 32000)
+        params = vocab * h + layers * (4 * h * h + 2 * h * 4 * h)
+        bpp    = 0.5 if load_in_4bit else (1.0 if load_in_8bit else 4.0)
+        return round(params * bpp / (1024**3) * 1.3, 1)
     except Exception:
-        return 2.0  # Safe default
+        return 2.0
 
 
 def estimate_tokenized_ram_gb(n_samples: int, seq_length: int, n_tensors: int = 3) -> float:
-    """Estimate RAM for a fully materialized tokenized dataset.
-    n_tensors: typically 3 (input_ids, attention_mask, labels) or 4 with token_type_ids.
-    With dynamic padding the actual usage is ~40-60% lower, but this is the safe upper bound.
-    """
-    return round(n_samples * seq_length * n_tensors * 4 / (1024 ** 3), 1)
+    return round(n_samples * seq_length * n_tensors * 4 / (1024**3), 1)
 
 
-def build_oom_message(cfg, mem: Dict, model_ram_est: float, n_samples: int) -> str:
-    """Build a human-readable OOM explanation with concrete recommendations."""
-    tokenized_ram = estimate_tokenized_ram_gb(n_samples, cfg.max_seq_length, 3)
-    optimizer_ram = round(model_ram_est * 2.0, 1)   # AdamW: 2 momentum copies
-    total_est = round(model_ram_est + tokenized_ram + optimizer_ram, 1)
-
-    lines = ["\U0001f4be Kein ausreichender RAM für dieses Training.\n"]
-    if mem.get("total_gb"):
-        lines.append(f"Dein System:       {mem['total_gb']} GB RAM gesamt")
-    if mem.get("available_gb"):
-        lines.append(f"Verfügbar:         {mem['available_gb']} GB RAM")
-    lines.append(f"Modell:           ~{model_ram_est} GB")
-    lines.append(f"Tokenisierte Daten:~{tokenized_ram} GB  "
-                 f"({n_samples:,} Samples × {cfg.max_seq_length} Tokens × 3 Tensoren × 4 Bytes)")
-    lines.append(f"Optimizer (AdamW): ~{optimizer_ram} GB  (2× Modellgröße)")
-    lines.append(f"Gesamt geschätzt:  ~{total_est} GB")
-    lines.append("")
-    lines.append("── Was kannst du tun? ──────────────────────────────")
-    lines.append("")
-
-    recommendations = []
-
-    if cfg.batch_size > 1:
-        new_bs = max(1, cfg.batch_size // 2)
-        recommendations.append(
-            f"1. Batch-Size halbieren: {cfg.batch_size} → {new_bs}\n"
-            f"   (halbiert RAM-Verbrauch beim Training ohne Qualitätsverlust)"
-        )
-
-    if cfg.max_seq_length > 128:
-        new_seq = cfg.max_seq_length // 2
-        recommendations.append(
-            f"2. Max. Sequenzlänge halbieren: {cfg.max_seq_length} → {new_seq}\n"
-            f"   (RAM-Verbrauch sinkt quadratisch mit Attention)"
-        )
-
-    if not cfg.use_lora:
-        recommendations.append(
-            "3. LoRA aktivieren\n"
-            "   (trainiert nur ~1–5% der Parameter → drastisch weniger RAM)"
-        )
-
-    if not cfg.load_in_4bit and not cfg.load_in_8bit:
-        recommendations.append(
-            "4. 4-bit Quantisierung aktivieren (QLoRA)\n"
-            "   (Modell braucht ~4× weniger RAM beim Laden)"
-        )
-
-    if n_samples > 10000:
-        recommendations.append(
-            f"5. Datensatz halbieren\n"
-            f"   Dein Datensatz hat {n_samples:,} Samples. Teile ihn über\n"
-            f"   'Datensatz → In zwei Hälften teilen' in FrameTrain auf\n"
-            f"   und trainiere mit der kleineren Hälfte."
-        )
-
-    if mem.get("total_gb") and mem["total_gb"] < 8:
-        recommendations.append(
-            "6. Mehr RAM nutzen\n"
-            "   FrameTrain hat keinen RAM-Limit. Schließe andere Apps,\n"
-            "   um mehr RAM freizugeben, bevor du das Training startest."
-        )
-
-    lines.extend(recommendations)
+def build_oom_advice(cfg, mem, model_ram, n_samples) -> str:
+    tok_ram = estimate_tokenized_ram_gb(n_samples, cfg.max_seq_length)
+    opt_ram = round(model_ram * 2.0, 1)
+    total   = round(model_ram + tok_ram + opt_ram, 1)
+    avail   = mem.get("available_gb", "?")
+    lines = [
+        f"Geschätzter RAM-Bedarf: ~{total} GB  (Modell {model_ram} + Daten {tok_ram} + Optimizer {opt_ram})",
+        f"Verfügbar: {avail} GB",
+        "",
+        "Empfehlungen:",
+        f"  1. Batch-Size halbieren  (aktuell: {cfg.batch_size}  → {max(1, cfg.batch_size//2)})",
+        f"  2. Sequenzlänge halbieren (aktuell: {cfg.max_seq_length} → {cfg.max_seq_length//2})",
+        "  3. LoRA aktivieren (nur 1–5 % der Parameter trainieren)",
+        "  4. Andere Apps schließen",
+        "  5. Datensatz weiter aufteilen",
+    ]
     return "\n".join(lines)
 
 
-def is_oom_error(exc: Exception) -> bool:
-    """Check if an exception is an Out-of-Memory error."""
+def is_oom(exc: Exception) -> bool:
     msg = str(exc).lower()
-    oom_keywords = [
-        "out of memory", "cannot allocate memory",
-        "memoryerror", "memory error", "oom",
-        "allocation failed", "killed", "mps backend out of memory",
-        "cannot allocate", "not enough memory",
-    ]
-    return isinstance(exc, MemoryError) or any(k in msg for k in oom_keywords)
+    return isinstance(exc, MemoryError) or any(k in msg for k in [
+        "out of memory", "cannot allocate memory", "memoryerror", "oom",
+        "allocation failed", "mps backend out of memory", "not enough memory",
+    ])
 
 
 # ============================================================================
-# CONFIGURATION
+# CONFIG
 # ============================================================================
 
 @dataclass
@@ -229,51 +168,56 @@ class TrainingConfig:
     lora_r: int = 8
     lora_alpha: int = 32
     lora_dropout: float = 0.1
-    lora_target_modules: List[str] = field(default_factory=lambda: ["q_proj", "v_proj"])
+    lora_target_modules: List[str] = field(default_factory=lambda: [])
     load_in_8bit: bool = False
     load_in_4bit: bool = False
     max_seq_length: int = 512
-    num_workers: int = 0
     eval_steps: int = 500
     eval_strategy: str = "steps"
     save_steps: int = 500
     save_strategy: str = "steps"
     save_total_limit: int = 3
-    logging_steps: int = 10
+    logging_steps: int = 50
     seed: int = 42
     training_type: str = "fine_tuning"
-    task_type: str = "causal_lm"
+    task_type: str = "auto"
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TrainingConfig":
-        known = {f for f in cls.__dataclass_fields__}
+        known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in d.items() if k in known})
 
 
 # ============================================================================
-# MODEL ARCHITECTURE DETECTION
+# ARCHITECTURE DETECTION
 # ============================================================================
 
-ENCODER_ONLY = {
+ENCODER_TYPES = {
     "bert", "roberta", "xlm-roberta", "xlm_roberta", "distilbert", "albert",
     "electra", "deberta", "deberta-v2", "camembert", "xlnet", "longformer",
     "bigbird", "rembert", "luke", "ernie", "roformer", "funnel",
 }
-ENCODER_DECODER = {
+ENCODER_DECODER_TYPES = {
     "t5", "mt5", "bart", "mbart", "mbart50", "pegasus", "marian",
     "prophetnet", "led", "longt5",
 }
 
+# LoRA modules per architecture family
+LORA_MODULES = {
+    "encoder":         ["query", "value"],          # BERT/RoBERTa attention layers
+    "encoder-decoder": ["q", "v"],                  # T5 attention layers
+    "decoder":         ["q_proj", "v_proj"],         # GPT/Llama attention layers
+}
+
 
 def detect_architecture(model_path: str) -> str:
+    """Returns 'encoder', 'encoder-decoder', or 'decoder'."""
     try:
         from transformers import AutoConfig
         cfg = AutoConfig.from_pretrained(model_path)
-        mt = cfg.model_type.lower().replace("_", "-")
-        if mt in ENCODER_ONLY:
-            return "encoder"
-        if mt in ENCODER_DECODER:
-            return "encoder-decoder"
+        mt  = cfg.model_type.lower().replace("_", "-")
+        if mt in ENCODER_TYPES:         return "encoder"
+        if mt in ENCODER_DECODER_TYPES: return "encoder-decoder"
         return "decoder"
     except Exception as e:
         MessageProtocol.warning(f"Architektur nicht erkannt ({e}), nutze Decoder.")
@@ -281,7 +225,7 @@ def detect_architecture(model_path: str) -> str:
 
 
 # ============================================================================
-# ROBUST DATA LOADING
+# DATASET LOADING
 # ============================================================================
 
 SKIP_NAMES = {
@@ -291,13 +235,24 @@ SKIP_NAMES = {
 SKIP_SUFFIXES = {".md", ".gitattributes", ".gitignore", ".yaml", ".yml", ".lock"}
 
 SPLIT_ALIASES = {
-    "train": ["train", "training"],
+    "train": ["train", "training", "unused"],
     "val":   ["val", "validation", "valid", "dev"],
-    "test":  ["test", "testing", "eval"],
+    "test":  ["test", "testing"],
 }
 
+TEXT_COLS = [
+    "text", "content", "document", "abstract", "body", "passage",
+    "sentence", "article", "context", "question", "input", "src",
+    "source_text", "input_text", "premise", "hypothesis",
+]
+TARGET_COLS = [
+    "keyphrases", "extractive_keyphrases", "abstractive_keyphrases",
+    "keywords", "tags", "summary", "target", "output", "tgt",
+    "target_text", "answer", "answers", "label", "labels", "response",
+]
 
-def data_files_in(path: Path) -> List[Path]:
+
+def _data_files(path: Path) -> List[Path]:
     return [
         f for f in path.rglob("*")
         if f.is_file()
@@ -306,20 +261,21 @@ def data_files_in(path: Path) -> List[Path]:
     ]
 
 
-def load_dir_as_hf_dataset(path: Path):
+def _load_dir(path: Path):
+    """Load a directory as a HuggingFace Dataset. Tries formats in order."""
     from datasets import Dataset, concatenate_datasets
 
-    files = data_files_in(path)
+    files = _data_files(path)
     if not files:
         return None
 
-    ext_groups: Dict[str, List[str]] = {}
+    # Group by extension
+    by_ext: Dict[str, List[str]] = {}
     for f in files:
-        ext = f.suffix.lower()
-        ext_groups.setdefault(ext, []).append(str(f))
+        by_ext.setdefault(f.suffix.lower(), []).append(str(f))
 
     for ext in [".parquet", ".arrow", ".jsonl", ".json", ".csv", ".tsv", ".txt"]:
-        group = sorted(ext_groups.get(ext, []))
+        group = sorted(by_ext.get(ext, []))
         if not group:
             continue
         try:
@@ -340,23 +296,21 @@ def load_dir_as_hf_dataset(path: Path):
                 ds = Dataset.from_list(rows)
             else:
                 continue
-            MessageProtocol.status(
-                "loading",
-                f"Geladen: {len(ds):,} Zeilen aus {len(group)} {ext}-Datei(en) [{path.name}/]"
-            )
+            MessageProtocol.status("loading",
+                f"Geladen: {len(ds):,} Zeilen aus {len(group)} {ext}-Datei(en) [{path.name}/]")
             return ds
         except Exception as e:
-            MessageProtocol.warning(f"Konnte {ext}-Dateien aus {path} nicht laden: {e}")
-            continue
+            MessageProtocol.warning(f"{ext}-Dateien aus {path} nicht lesbar: {e}")
     return None
 
 
-def load_dataset_from_path(dataset_path: str):
+def load_dataset_splits(dataset_path: str):
+    """Returns (train_ds, val_ds, test_ds). train_ds is always non-None."""
     from datasets import load_from_disk, DatasetDict
     root = Path(dataset_path)
-    MessageProtocol.status("loading", f"Lade Datensatz aus: {root}")
+    MessageProtocol.status("loading", f"Lade Datensatz: {root}")
 
-    # Strategy 1: HF DatasetDict (save_to_disk)
+    # Strategy 1: HF save_to_disk format
     try:
         ds = load_from_disk(str(root))
         if isinstance(ds, DatasetDict):
@@ -364,67 +318,48 @@ def load_dataset_from_path(dataset_path: str):
             val   = ds.get("validation") or ds.get("val") or ds.get("dev")
             test  = ds.get("test")
             if train is not None:
-                MessageProtocol.status("loading", f"DatasetDict geladen: {list(ds.keys())}")
+                MessageProtocol.status("loading", f"DatasetDict-Splits: {list(ds.keys())}")
                 return train, val, test
     except Exception:
         pass
 
-    # Strategy 2: Named subdirectories + unused fallback
-    def find_split(split_name: str):
-        aliases = SPLIT_ALIASES[split_name]
-        if split_name == "train":
-            aliases = aliases + ["unused"]
-        for alias in aliases:
+    # Strategy 2: named subdirectories
+    def find_split(key):
+        for alias in SPLIT_ALIASES[key]:
             p = root / alias
             if p.exists():
-                ds = load_dir_as_hf_dataset(p)
-                if ds is not None:
+                d = _load_dir(p)
+                if d is not None:
                     if alias == "unused":
                         MessageProtocol.status("loading", "Nutze 'unused/' als Trainingsdaten")
-                    return ds
+                    return d
         return None
 
     train_ds = find_split("train")
     val_ds   = find_split("val")
     test_ds  = find_split("test")
 
-    # Strategy 3: Root directory
+    # Strategy 3: root directory
     if train_ds is None:
         MessageProtocol.status("loading", "Keine Split-Ordner — scanne Root-Verzeichnis...")
-        train_ds = load_dir_as_hf_dataset(root)
+        train_ds = _load_dir(root)
 
     if train_ds is None:
-        exts = {f.suffix.lower() for f in data_files_in(root)}
+        exts = {f.suffix.lower() for f in _data_files(root)}
         raise ValueError(
-            f"Keine Trainingsdaten gefunden in: {root}\n"
-            f"Gefundene Dateiendungen: {exts or 'keine'}\n"
-            f"Unterstützt: .parquet, .arrow, .jsonl, .json, .csv, .tsv, .txt\n"
-            f"Erwartete Ordnerstruktur: train/, val/, test/ oder Dateien im Root"
+            f"Keine Trainingsdaten in: {root}\n"
+            f"Gefundene Endungen: {exts or 'keine'}\n"
+            f"Unterstützt: .parquet .arrow .jsonl .json .csv .tsv .txt"
         )
 
     return train_ds, val_ds, test_ds
 
 
-# ============================================================================
-# TEXT COLUMN DETECTION
-# ============================================================================
-
-TEXT_PRIORITY = [
-    "text", "content", "document", "abstract", "body", "passage",
-    "sentence", "article", "context", "question", "input", "src",
-    "source_text", "input_text", "premise", "title",
-]
-TARGET_PRIORITY = [
-    "keyphrases", "extractive_keyphrases", "abstractive_keyphrases",
-    "keywords", "tags", "summary", "target", "output", "tgt",
-    "target_text", "answer", "answers", "label", "labels", "response",
-]
-
-
-def find_columns(dataset) -> Tuple[str, Optional[str]]:
+def find_text_target_cols(dataset) -> Tuple[str, Optional[str]]:
     cols = dataset.column_names
-    text_col = next((c for c in TEXT_PRIORITY if c in cols), None)
+    text_col = next((c for c in TEXT_COLS if c in cols), None)
     if text_col is None:
+        # Fall back: first column with non-empty string values
         for c in cols:
             sample = dataset[0].get(c)
             if isinstance(sample, str) and len(sample) > 5:
@@ -434,85 +369,10 @@ def find_columns(dataset) -> Tuple[str, Optional[str]]:
         raise ValueError(
             f"Keine Text-Spalte gefunden.\n"
             f"Verfügbare Spalten: {cols}\n"
-            f"Bekannte Text-Spalten: {TEXT_PRIORITY}"
+            f"Erwartete Spalten: {TEXT_COLS[:6]}..."
         )
-    target_col = next((c for c in TARGET_PRIORITY if c in cols), None)
+    target_col = next((c for c in TARGET_COLS if c in cols), None)
     return text_col, target_col
-
-
-# ============================================================================
-# TOKENIZATION
-# ============================================================================
-
-def tokenize_dataset(dataset, tokenizer, config: TrainingConfig, arch: str,
-                     text_col: str, target_col: Optional[str]):
-    def tokenize_fn(examples):
-        texts = [str(t) if t is not None else "" for t in examples[text_col]]
-        if target_col and target_col in examples and arch in ("decoder", "encoder"):
-            sep = getattr(tokenizer, "sep_token", None) or " → "
-            targets = []
-            for t in examples[target_col]:
-                if isinstance(t, list):
-                    targets.append("; ".join(str(x) for x in t))
-                elif t is not None:
-                    targets.append(str(t))
-                else:
-                    targets.append("")
-            texts = [f"{inp}{sep}{tgt}" for inp, tgt in zip(texts, targets)]
-
-        # Dynamic padding: truncate to max_length but do NOT pad per sample.
-        # Padding happens per-batch inside the DataCollator — saves 50-70% RAM.
-        enc = tokenizer(
-            texts,
-            truncation=True,
-            max_length=config.max_seq_length,
-            padding=False,
-        )
-        if arch != "encoder-decoder":
-            enc["labels"] = enc["input_ids"].copy()
-        return enc
-
-    keep = {"input_ids", "attention_mask", "token_type_ids", "labels"}
-    remove = [c for c in dataset.column_names if c not in keep]
-    tokenized = dataset.map(tokenize_fn, batched=True, remove_columns=remove, desc="Tokenizing")
-    # NOTE: no set_format("torch") here — DataCollatorWithPaddingAndLabels handles conversion.
-    return tokenized
-
-
-class DataCollatorWithPaddingAndLabels:
-    """
-    Custom collator that:
-    - Pads input_ids / attention_mask / token_type_ids via tokenizer.pad()
-    - Pads labels separately with -100 (ignored in loss) to the same max length
-    - Returns proper torch tensors for all fields
-    """
-    def __init__(self, tokenizer, padding=True):
-        self.tokenizer = tokenizer
-        self.padding   = padding
-
-    def __call__(self, features):
-        import torch
-
-        # Pull labels out before the tokenizer sees the batch
-        labels_raw = [f.pop("labels", None) for f in features]
-
-        # Pad the tokenizer fields (input_ids, attention_mask, token_type_ids)
-        batch = self.tokenizer.pad(
-            features,
-            padding=self.padding,
-            return_tensors="pt",
-        )
-
-        # Pad labels with -100 to match the padded input length
-        if labels_raw[0] is not None:
-            max_len = batch["input_ids"].shape[1]  # length after tokenizer padding
-            padded = [
-                list(lbl) + [-100] * (max_len - len(lbl))
-                for lbl in labels_raw
-            ]
-            batch["labels"] = torch.tensor(padded, dtype=torch.long)
-
-        return batch
 
 
 # ============================================================================
@@ -522,32 +382,115 @@ class DataCollatorWithPaddingAndLabels:
 def make_progress_callback(total_epochs: int):
     from transformers import TrainerCallback
 
-    class FrameTrainCallback(TrainerCallback):
+    class FTCallback(TrainerCallback):
         def on_epoch_begin(self, args, state, control, **kwargs):
             ep = int(state.epoch or 0) + 1
             MessageProtocol.status("epoch", f"Epoche {ep}/{total_epochs}")
 
         def on_log(self, args, state, control, logs=None, **kwargs):
-            if logs is None:
+            if not logs:
                 return
             epoch = int(state.epoch or 0) + 1
             step  = state.global_step or 0
             total = state.max_steps or 1
-            train_loss = logs.get("loss", logs.get("train_loss", 0.0))
-            val_loss   = logs.get("eval_loss")
-            lr         = logs.get("learning_rate", 0.0)
             MessageProtocol.progress(
                 epoch=epoch, total_epochs=total_epochs,
                 step=step, total_steps=total,
-                train_loss=float(train_loss) if train_loss else 0.0,
-                val_loss=float(val_loss) if val_loss else None,
-                learning_rate=float(lr) if lr else 0.0,
+                train_loss=float(logs.get("loss") or logs.get("train_loss") or 0.0),
+                val_loss=float(logs["eval_loss"]) if "eval_loss" in logs else None,
+                learning_rate=float(logs.get("learning_rate") or 0.0),
             )
 
         def on_save(self, args, state, control, **kwargs):
-            MessageProtocol.status("checkpoint", f"Checkpoint bei Schritt {state.global_step}")
+            MessageProtocol.status("checkpoint", f"Checkpoint Schritt {state.global_step}")
 
-    return FrameTrainCallback()
+    return FTCallback()
+
+
+# ============================================================================
+# TRAINING ARGUMENTS — version-safe builder
+# ============================================================================
+
+def _make_base_args(cfg: TrainingConfig, eval_strat: str, device: str, output_dir: str) -> dict:
+    """Build the kwargs dict for TrainingArguments (without deprecated params)."""
+    use_fp16 = cfg.fp16 and device == "cuda"
+    use_bf16 = cfg.bf16 and device in ("cuda", "cpu")
+    return dict(
+        output_dir=output_dir,
+        num_train_epochs=cfg.epochs,
+        per_device_train_batch_size=cfg.batch_size,
+        per_device_eval_batch_size=cfg.batch_size,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        max_steps=cfg.max_steps if cfg.max_steps > 0 else -1,
+        learning_rate=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+        warmup_steps=cfg.warmup_steps,
+        warmup_ratio=cfg.warmup_ratio,
+        lr_scheduler_type=cfg.scheduler,
+        optim="adamw_torch",
+        adam_beta1=cfg.adam_beta1,
+        adam_beta2=cfg.adam_beta2,
+        adam_epsilon=cfg.adam_epsilon,
+        max_grad_norm=cfg.max_grad_norm,
+        fp16=use_fp16,
+        bf16=use_bf16,
+        save_strategy=cfg.save_strategy,
+        save_steps=cfg.save_steps if cfg.save_strategy == "steps" else None,
+        save_total_limit=cfg.save_total_limit,
+        logging_steps=cfg.logging_steps,
+        dataloader_num_workers=0,
+        seed=cfg.seed,
+        report_to="none",
+        load_best_model_at_end=(eval_strat != "no"),
+        metric_for_best_model="eval_loss" if eval_strat != "no" else None,
+        greater_is_better=False,
+    )
+
+
+def build_training_args(cfg, eval_strat, device, output_dir, seq2seq=False):
+    """
+    Build TrainingArguments/Seq2SeqTrainingArguments compatible with multiple
+    transformers versions by trying different parameter names via try/except.
+    """
+    from transformers import TrainingArguments
+    if seq2seq:
+        from transformers import Seq2SeqTrainingArguments as ArgsClass
+    else:
+        ArgsClass = TrainingArguments
+
+    base = _make_base_args(cfg, eval_strat, device, output_dir)
+    if seq2seq:
+        base["predict_with_generate"] = True
+
+    # Candidates for eval strategy param name (new → old)
+    eval_candidates = [
+        {"eval_strategy": eval_strat},
+        {"evaluation_strategy": eval_strat},
+    ]
+    # Candidates for eval_steps (only when strategy != "no")
+    if eval_strat != "no":
+        base["eval_steps"] = cfg.eval_steps if eval_strat == "steps" else None
+
+    # Device params: try modern first, then legacy, then nothing
+    if device == "cpu":
+        device_candidates = [{"use_cpu": True}, {"no_cuda": True}, {}]
+    elif device == "mps":
+        # use_mps_device was removed in transformers ≥ 4.38 → MPS is auto-detected
+        device_candidates = [{"use_mps_device": True}, {}]
+    else:
+        device_candidates = [{}]
+
+    for eval_kw in eval_candidates:
+        for dev_kw in device_candidates:
+            try:
+                kwargs = {**base, **eval_kw, **dev_kw}
+                return ArgsClass(**kwargs)
+            except TypeError:
+                continue
+
+    # Last resort: no deprecated params at all
+    MessageProtocol.warning("TrainingArguments: Nutze minimale Parameter (Kompatibilitätsmodus)")
+    return ArgsClass(**base)
 
 
 # ============================================================================
@@ -557,29 +500,26 @@ def make_progress_callback(total_epochs: int):
 class TrainingEngine:
 
     def __init__(self, config: TrainingConfig):
-        self.config = config
+        self.cfg = config
         self.is_stopped = False
-        self._n_train_samples = 0
-        self._model_ram_est = 0.0
+        self._n_train = 0
+        self._model_ram = 0.0
         signal.signal(signal.SIGINT,  self._stop)
         signal.signal(signal.SIGTERM, self._stop)
 
     def _stop(self, *_):
-        MessageProtocol.status("stopping", "Training durch User gestoppt")
+        MessageProtocol.status("stopping", "Training gestoppt")
         self.is_stopped = True
 
-    def _handle_exception(self, exc: Exception):
-        """Classify exception and emit appropriate error message."""
+    # ── Error handler ──────────────────────────────────────────────────────
+
+    def _handle_exc(self, exc: Exception):
         tb = traceback.format_exc()
 
-        if is_oom_error(exc):
+        if is_oom(exc):
             mem = get_system_memory()
-            msg = build_oom_message(
-                self.config, mem,
-                self._model_ram_est,
-                self._n_train_samples
-            )
-            MessageProtocol.error("RAM-Fehler: Nicht genug Arbeitsspeicher", msg)
+            advice = build_oom_advice(self.cfg, mem, self._model_ram, self._n_train)
+            MessageProtocol.error("RAM-Fehler: Nicht genug Arbeitsspeicher", advice)
             return
 
         if isinstance(exc, ImportError) or "No module named" in str(exc):
@@ -591,30 +531,122 @@ class TrainingEngine:
 
         if isinstance(exc, TypeError) and "unexpected keyword argument" in str(exc):
             MessageProtocol.error(
-                "Inkompatible transformers-Version",
-                f"{exc}\n\nDiese Version von transformers ist inkompatibel.\n"
-                f"Aktualisiere mit:\n  pip install --upgrade transformers\n\nDetails:\n{tb}"
+                "API-Inkompatibilität",
+                f"{exc}\n\nAktualisiere transformers:\n  pip install --upgrade transformers\n\n{tb}"
             )
             return
 
-        # Generic — always show full traceback so we can debug
-        MessageProtocol.error(
-            f"Training-Fehler: {type(exc).__name__}: {exc}",
-            tb
+        # Generic — full traceback always visible
+        MessageProtocol.error(f"Training-Fehler: {type(exc).__name__}: {exc}", tb)
+
+    # ── Tokenization ───────────────────────────────────────────────────────
+
+    def _tokenize(self, dataset, tokenizer, arch: str, text_col: str, target_col: Optional[str]):
+        cfg = self.cfg
+
+        def tok_fn(examples):
+            texts = [str(t) if t is not None else "" for t in examples[text_col]]
+
+            # Concatenate target if present (input → target for supervised learning)
+            if target_col and target_col in examples:
+                sep = getattr(tokenizer, "sep_token", None) or " → "
+                targets = []
+                for t in examples[target_col]:
+                    if isinstance(t, list):
+                        targets.append("; ".join(str(x) for x in t))
+                    else:
+                        targets.append(str(t) if t is not None else "")
+                if arch != "encoder-decoder":
+                    # For encoder/decoder: concatenate as single sequence
+                    texts = [f"{inp}{sep}{tgt}" for inp, tgt in zip(texts, targets)]
+
+            enc = tokenizer(
+                texts,
+                truncation=True,
+                max_length=cfg.max_seq_length,
+                padding="max_length",   # simple, reliable, avoids custom collator issues
+            )
+
+            if arch == "encoder-decoder":
+                # For seq2seq: tokenize targets separately as labels
+                if target_col and target_col in examples:
+                    with tokenizer.as_target_tokenizer():
+                        label_enc = tokenizer(
+                            targets,
+                            truncation=True,
+                            max_length=cfg.max_seq_length,
+                            padding="max_length",
+                        )
+                    labels = [
+                        [(t if t != tokenizer.pad_token_id else -100) for t in ids]
+                        for ids in label_enc["input_ids"]
+                    ]
+                    enc["labels"] = labels
+                else:
+                    enc["labels"] = enc["input_ids"].copy()
+            else:
+                enc["labels"] = enc["input_ids"].copy()
+
+            return enc
+
+        keep   = {"input_ids", "attention_mask", "token_type_ids", "labels"}
+        remove = [c for c in dataset.column_names if c not in keep]
+        tokenized = dataset.map(tok_fn, batched=True, remove_columns=remove, desc="Tokenizing")
+        fmt_cols  = [c for c in ["input_ids", "attention_mask", "token_type_ids", "labels"]
+                     if c in tokenized.column_names]
+        tokenized.set_format("torch", columns=fmt_cols)
+        return tokenized
+
+    # ── Model loading ──────────────────────────────────────────────────────
+
+    def _load_model(self, arch: str, quant_kwargs: dict):
+        from transformers import (
+            AutoModelForMaskedLM, AutoModelForCausalLM, AutoModelForSeq2SeqLM
         )
+        path = self.cfg.model_path
+        if arch == "encoder":
+            return AutoModelForMaskedLM.from_pretrained(path, **quant_kwargs)
+        elif arch == "encoder-decoder":
+            return AutoModelForSeq2SeqLM.from_pretrained(path, **quant_kwargs)
+        else:
+            return AutoModelForCausalLM.from_pretrained(path, **quant_kwargs)
+
+    # ── LoRA ───────────────────────────────────────────────────────────────
+
+    def _apply_lora(self, model, arch: str):
+        from peft import get_peft_model, LoraConfig, TaskType
+        cfg = self.cfg
+        task_map = {
+            "encoder":         TaskType.FEATURE_EXTRACTION,
+            "encoder-decoder": TaskType.SEQ_2_SEQ_LM,
+            "decoder":         TaskType.CAUSAL_LM,
+        }
+        # Pick correct modules for this architecture
+        modules = cfg.lora_target_modules if cfg.lora_target_modules else LORA_MODULES[arch]
+        lora_cfg = LoraConfig(
+            r=cfg.lora_r, lora_alpha=cfg.lora_alpha,
+            lora_dropout=cfg.lora_dropout,
+            target_modules=modules,
+            bias="none", task_type=task_map[arch],
+        )
+        model = get_peft_model(model, lora_cfg)
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        MessageProtocol.status("loading", f"LoRA: {trainable:,} trainierbare Parameter ({modules})")
+        return model
+
+    # ── Main ───────────────────────────────────────────────────────────────
 
     def run(self):
-        start_time = time.time()
-        cfg = self.config
-
+        start = time.time()
+        cfg   = self.cfg
         try:
             import torch
             from transformers import (
-                AutoTokenizer, TrainingArguments, Trainer,
-                AutoModelForMaskedLM, AutoModelForCausalLM, AutoModelForSeq2SeqLM,
+                AutoTokenizer, Trainer, Seq2SeqTrainer,
+                DataCollatorForLanguageModeling, DataCollatorForSeq2Seq,
             )
 
-            # ── Device ───────────────────────────────────────────────────
+            # ── Device ──────────────────────────────────────────────────
             if torch.cuda.is_available():
                 device = "cuda"
                 MessageProtocol.status("device", f"GPU: {torch.cuda.get_device_name(0)}")
@@ -625,216 +657,127 @@ class TrainingEngine:
                 device = "cpu"
                 MessageProtocol.status("device", "CPU")
 
-            # ── Pre-flight RAM check (model only — dataset not loaded yet) ──
+            # ── RAM pre-check (model only) ───────────────────────────────
             mem = get_system_memory()
-            self._model_ram_est = estimate_model_ram_gb(
-                cfg.model_path, cfg.load_in_4bit, cfg.load_in_8bit
-            )
-            if mem.get("available_gb") and self._model_ram_est > mem["available_gb"] * 0.8:
+            self._model_ram = estimate_model_ram_gb(
+                cfg.model_path, cfg.load_in_4bit, cfg.load_in_8bit)
+            if mem.get("available_gb") and self._model_ram > mem["available_gb"] * 0.8:
                 MessageProtocol.warning(
-                    f"Wenig RAM: {mem['available_gb']} GB frei, "
-                    f"Modell braucht ca. {self._model_ram_est} GB. "
-                    f"Training könnte fehlschlagen."
+                    f"RAM-Warnung: Modell braucht ~{self._model_ram} GB, "
+                    f"nur {mem['available_gb']} GB frei."
                 )
 
-            # ── Architecture ──────────────────────────────────────────────
+            # ── Architecture ─────────────────────────────────────────────
             MessageProtocol.status("loading", "Erkenne Modell-Architektur...")
             arch = detect_architecture(cfg.model_path)
-            MessageProtocol.status("loading", f"Architektur: {arch}")
+            MessageProtocol.status("loading", f"Architektur: {arch}  (Modell: {Path(cfg.model_path).name})")
 
-            # ── Tokenizer ─────────────────────────────────────────────────
+            # ── Tokenizer ────────────────────────────────────────────────
             MessageProtocol.status("loading", "Lade Tokenizer...")
             tokenizer = AutoTokenizer.from_pretrained(cfg.model_path)
             if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
+                tokenizer.pad_token    = tokenizer.eos_token
                 tokenizer.pad_token_id = tokenizer.eos_token_id
 
-            # ── Dataset ───────────────────────────────────────────────────
-            MessageProtocol.status("loading", "Lade Datensatz...")
-            train_ds, val_ds, test_ds = load_dataset_from_path(cfg.dataset_path)
-            self._n_train_samples = len(train_ds)
+            # ── Dataset ──────────────────────────────────────────────────
+            train_ds, val_ds, _ = load_dataset_splits(cfg.dataset_path)
+            self._n_train = len(train_ds)
+            MessageProtocol.status("loading", f"Datensatz: {self._n_train:,} Trainingssamples")
 
-            # ── Pre-flight: full RAM estimate after dataset size is known ──
+            # ── RAM check after dataset size known ───────────────────────
             if mem.get("available_gb"):
-                tok_ram   = estimate_tokenized_ram_gb(self._n_train_samples, cfg.max_seq_length, 3)
-                opt_ram   = round(self._model_ram_est * 2.0, 1)
-                total_est = round(self._model_ram_est + tok_ram + opt_ram, 1)
+                tok_ram   = estimate_tokenized_ram_gb(self._n_train, cfg.max_seq_length)
+                opt_ram   = round(self._model_ram * 2.0, 1)
+                total_est = round(self._model_ram + tok_ram + opt_ram, 1)
                 avail     = mem["available_gb"]
                 MessageProtocol.status(
                     "loading",
-                    f"RAM-Bedarf: ~{total_est} GB "
-                    f"(Modell {self._model_ram_est} + Daten {tok_ram} + Optimizer {opt_ram}), "
+                    f"RAM-Bedarf: ~{total_est} GB  "
+                    f"(Modell {self._model_ram} + Daten {tok_ram} + Optimizer {opt_ram}), "
                     f"verfügbar: {avail} GB"
                 )
                 if total_est > avail * 0.90:
-                    warning_msg = build_oom_message(
-                        cfg, mem, self._model_ram_est, self._n_train_samples
-                    )
-                    MessageProtocol.warning(
-                        f"RAM-Warnung: ~{total_est} GB benötigt, nur {avail} GB verfügbar.\n"
-                        f"{warning_msg}"
-                    )
+                    advice = build_oom_advice(cfg, mem, self._model_ram, self._n_train)
+                    MessageProtocol.warning(f"RAM-Warnung — Training könnte fehlschlagen:\n{advice}")
 
-            # ── Columns ───────────────────────────────────────────────────
-            text_col, target_col = find_columns(train_ds)
+            # ── Text columns ─────────────────────────────────────────────
+            text_col, target_col = find_text_target_cols(train_ds)
             MessageProtocol.status(
                 "loading",
-                f"Text-Spalte: '{text_col}'"
-                + (f", Ziel-Spalte: '{target_col}'" if target_col else "")
+                f"Spalten: Text='{text_col}'"
+                + (f", Ziel='{target_col}'" if target_col else " (kein Ziel-Feld)")
             )
 
-            # ── Tokenize ──────────────────────────────────────────────────
-            MessageProtocol.status("loading", f"Tokenizing {len(train_ds):,} Trainings-Samples...")
-            train_tok = tokenize_dataset(train_ds, tokenizer, cfg, arch, text_col, target_col)
+            # ── Tokenize ─────────────────────────────────────────────────
+            MessageProtocol.status("loading", f"Tokenisiere {self._n_train:,} Trainingssamples...")
+            train_tok = self._tokenize(train_ds, tokenizer, arch, text_col, target_col)
 
             val_tok = None
-            if val_ds is not None and len(val_ds) > 0:
-                MessageProtocol.status("loading", f"Tokenizing {len(val_ds):,} Validierungs-Samples...")
-                val_tok = tokenize_dataset(val_ds, tokenizer, cfg, arch, text_col, target_col)
+            if val_ds and len(val_ds) > 0:
+                MessageProtocol.status("loading", f"Tokenisiere {len(val_ds):,} Validierungssamples...")
+                val_tok = self._tokenize(val_ds, tokenizer, arch, text_col, target_col)
             else:
                 MessageProtocol.status("loading", "Kein Validierungsdatensatz — Training ohne Eval")
 
-            # ── Model ─────────────────────────────────────────────────────
-            MessageProtocol.status("loading", f"Lade Modell aus {cfg.model_path}...")
-            model_kwargs = {}
+            # ── Model ────────────────────────────────────────────────────
+            MessageProtocol.status("loading", f"Lade Modell: {cfg.model_path}...")
+            quant_kwargs: dict = {}
             if cfg.load_in_4bit:
                 try:
                     from transformers import BitsAndBytesConfig
-                    model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
-                    model_kwargs["device_map"] = "auto"
+                    quant_kwargs = {
+                        "quantization_config": BitsAndBytesConfig(load_in_4bit=True),
+                        "device_map": "auto",
+                    }
                 except Exception as e:
-                    MessageProtocol.warning(f"4-bit nicht verfügbar: {e}. Lade ohne Quantisierung.")
+                    MessageProtocol.warning(f"4-bit nicht verfügbar: {e}")
             elif cfg.load_in_8bit:
                 try:
                     from transformers import BitsAndBytesConfig
-                    model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-                    model_kwargs["device_map"] = "auto"
+                    quant_kwargs = {
+                        "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
+                        "device_map": "auto",
+                    }
                 except Exception as e:
-                    MessageProtocol.warning(f"8-bit nicht verfügbar: {e}. Lade ohne Quantisierung.")
+                    MessageProtocol.warning(f"8-bit nicht verfügbar: {e}")
 
-            if arch == "encoder":
-                model = AutoModelForMaskedLM.from_pretrained(cfg.model_path, **model_kwargs)
-            elif arch == "encoder-decoder":
-                model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_path, **model_kwargs)
-            else:
-                model = AutoModelForCausalLM.from_pretrained(cfg.model_path, **model_kwargs)
-
+            model = self._load_model(arch, quant_kwargs)
             n_params = sum(p.numel() for p in model.parameters())
-            MessageProtocol.status("loading", f"Modell geladen ({n_params:,} Parameter)")
+            MessageProtocol.status("loading", f"Modell geladen: {n_params/1e6:.1f}M Parameter")
 
-            # ── LoRA ──────────────────────────────────────────────────────
+            # Move model to device (only when not using device_map="auto")
+            if "device_map" not in quant_kwargs:
+                model = model.to(device)
+                MessageProtocol.status("loading", f"Modell auf {device.upper()} verschoben")
+
+            # ── LoRA ─────────────────────────────────────────────────────
             if cfg.use_lora:
-                from peft import get_peft_model, LoraConfig, TaskType
-                task_map = {
-                    "encoder":         TaskType.FEATURE_EXTRACTION,
-                    "encoder-decoder": TaskType.SEQ_2_SEQ_LM,
-                    "decoder":         TaskType.CAUSAL_LM,
-                }
-                # Auto-select correct LoRA target modules based on architecture.
-                # Encoder models (BERT/RoBERTa/xlm-roberta) use 'query'/'value',
-                # decoder models (GPT/Llama) use 'q_proj'/'v_proj'.
-                default_decoder_modules = ["q_proj", "v_proj"]
-                if (not cfg.lora_target_modules or
-                        cfg.lora_target_modules == default_decoder_modules) and arch == "encoder":
-                    resolved_modules = ["query", "value"]
-                    MessageProtocol.status(
-                        "loading",
-                        f"LoRA: auto-korrigierte Module auf {resolved_modules} "
-                        f"(Encoder-Modell erkannt, nicht {default_decoder_modules})"
-                    )
-                else:
-                    resolved_modules = cfg.lora_target_modules or None
-                lora_cfg = LoraConfig(
-                    r=cfg.lora_r, lora_alpha=cfg.lora_alpha,
-                    lora_dropout=cfg.lora_dropout,
-                    target_modules=resolved_modules,
-                    bias="none", task_type=task_map[arch],
-                )
-                model = get_peft_model(model, lora_cfg)
-                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-                MessageProtocol.status("loading", f"LoRA angewendet — {trainable:,} trainierbare Parameter")
+                model = self._apply_lora(model, arch)
 
-            # ── Data Collator (dynamic padding per batch = less RAM) ───────
-            if arch == "encoder":
-                # Custom collator: pads input fields via tokenizer AND pads labels with -100.
-                # DataCollatorWithPadding alone does NOT handle variable-length labels.
-                collator = DataCollatorWithPaddingAndLabels(tokenizer=tokenizer, padding=True)
-            elif arch == "encoder-decoder":
-                from transformers import DataCollatorForSeq2Seq
+            # ── Collator ─────────────────────────────────────────────────
+            if arch == "encoder-decoder":
                 collator = DataCollatorForSeq2Seq(
-                    tokenizer=tokenizer, model=model, padding=True, pad_to_multiple_of=8
-                )
+                    tokenizer=tokenizer, model=model, padding=True)
+            elif arch == "encoder":
+                # MLM collator for encoder fine-tuning / domain adaptation
+                # Wraps our already-padded sequences; mlm_probability=0.15
+                collator = DataCollatorForLanguageModeling(
+                    tokenizer=tokenizer, mlm=True, mlm_probability=0.15)
             else:
-                from transformers import DataCollatorForLanguageModeling
-                collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+                collator = DataCollatorForLanguageModeling(
+                    tokenizer=tokenizer, mlm=False)
 
-            # ── Training Arguments ────────────────────────────────────────
-            eval_strat = cfg.eval_strategy if val_tok is not None else "no"
-            use_fp16   = cfg.fp16 and device == "cuda"
-            use_bf16   = cfg.bf16 and device in ("cuda", "cpu")
-
-            # Build TrainingArguments compatible with both old and new transformers.
-            # Several parameters were renamed/removed across versions:
-            #   evaluation_strategy → eval_strategy          (transformers ≥ 4.45)
-            #   no_cuda             → use_cpu                (transformers ≥ 4.38)
-            #   use_mps_device      → removed (auto-detect)  (transformers ≥ 4.38)
-            import inspect as _inspect
-            _ta_sig = _inspect.signature(TrainingArguments.__init__).parameters
-
-            _ta_kwargs: dict = dict(
-                output_dir=cfg.checkpoint_dir or cfg.output_path,
-                num_train_epochs=cfg.epochs,
-                per_device_train_batch_size=cfg.batch_size,
-                per_device_eval_batch_size=cfg.batch_size,
-                gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-                max_steps=cfg.max_steps if cfg.max_steps > 0 else -1,
-                learning_rate=cfg.learning_rate,
-                weight_decay=cfg.weight_decay,
-                warmup_steps=cfg.warmup_steps,
-                warmup_ratio=cfg.warmup_ratio,
-                lr_scheduler_type=cfg.scheduler,
-                optim="adamw_torch",
-                adam_beta1=cfg.adam_beta1,
-                adam_beta2=cfg.adam_beta2,
-                adam_epsilon=cfg.adam_epsilon,
-                max_grad_norm=cfg.max_grad_norm,
-                fp16=use_fp16,
-                bf16=use_bf16,
-                eval_steps=cfg.eval_steps if eval_strat == "steps" else None,
-                save_strategy=cfg.save_strategy,
-                save_steps=cfg.save_steps if cfg.save_strategy == "steps" else None,
-                save_total_limit=cfg.save_total_limit,
-                logging_steps=cfg.logging_steps,
-                dataloader_num_workers=0,
-                seed=cfg.seed,
-                report_to="none",
-                load_best_model_at_end=(val_tok is not None),
-                metric_for_best_model="eval_loss" if val_tok is not None else None,
-                greater_is_better=False,
-            )
-
-            # evaluation_strategy vs eval_strategy
-            if "eval_strategy" in _ta_sig:
-                _ta_kwargs["eval_strategy"] = eval_strat
-            else:
-                _ta_kwargs["evaluation_strategy"] = eval_strat
-
-            # no_cuda vs use_cpu (only needed if not on CUDA/MPS)
-            if device == "cpu":
-                if "use_cpu" in _ta_sig:
-                    _ta_kwargs["use_cpu"] = True
-                elif "no_cuda" in _ta_sig:
-                    _ta_kwargs["no_cuda"] = True
-
-            # use_mps_device was removed in transformers ≥ 4.38 (MPS is auto-detected)
-            if device == "mps" and "use_mps_device" in _ta_sig:
-                _ta_kwargs["use_mps_device"] = True
+            # ── Training args ─────────────────────────────────────────────
+            eval_strat = (cfg.eval_strategy if val_tok is not None else "no")
+            out_dir    = cfg.checkpoint_dir or cfg.output_path
+            is_seq2seq = (arch == "encoder-decoder")
 
             MessageProtocol.status("loading", "Erstelle TrainingArguments...")
-            train_args = TrainingArguments(**_ta_kwargs)
+            train_args = build_training_args(cfg, eval_strat, device, out_dir, seq2seq=is_seq2seq)
 
             # ── Trainer ───────────────────────────────────────────────────
-            trainer = Trainer(
+            TrainerClass = Seq2SeqTrainer if is_seq2seq else Trainer
+            trainer = TrainerClass(
                 model=model,
                 args=train_args,
                 train_dataset=train_tok,
@@ -844,6 +787,7 @@ class TrainingEngine:
                 callbacks=[make_progress_callback(cfg.epochs)],
             )
 
+            # ── Train ─────────────────────────────────────────────────────
             MessageProtocol.status("training", "Training gestartet...")
             trainer.train()
 
@@ -852,7 +796,7 @@ class TrainingEngine:
                 return
 
             # ── Save ──────────────────────────────────────────────────────
-            MessageProtocol.status("saving", f"Speichere Modell nach {cfg.output_path}...")
+            MessageProtocol.status("saving", f"Speichere nach {cfg.output_path}...")
             out = Path(cfg.output_path)
             out.mkdir(parents=True, exist_ok=True)
 
@@ -870,28 +814,25 @@ class TrainingEngine:
             tokenizer.save_pretrained(str(out))
 
             # ── Metrics ───────────────────────────────────────────────────
-            duration = int(time.time() - start_time)
+            duration = int(time.time() - start)
             history  = trainer.state.log_history
-            final_train_loss = next(
-                (e["train_loss"] for e in reversed(history) if "train_loss" in e), 0.0
-            )
-            final_val_loss = next(
-                (e["eval_loss"] for e in reversed(history) if "eval_loss" in e), None
-            )
+            final_train = next(
+                (e["train_loss"] for e in reversed(history) if "train_loss" in e), 0.0)
+            final_val = next(
+                (e["eval_loss"] for e in reversed(history) if "eval_loss" in e), None)
             metrics = {
-                "final_train_loss":          final_train_loss,
-                "final_val_loss":            final_val_loss,
+                "final_train_loss":          final_train,
+                "final_val_loss":            final_val,
                 "total_epochs":              cfg.epochs,
                 "total_steps":               trainer.state.global_step,
                 "training_duration_seconds": duration,
-                "best_val_loss":             final_val_loss,
             }
             (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
             MessageProtocol.status("saved", "Modell und Metriken gespeichert")
             MessageProtocol.complete(str(out), metrics)
 
         except Exception as exc:
-            self._handle_exception(exc)
+            self._handle_exc(exc)
             sys.exit(1)
 
 
@@ -900,7 +841,7 @@ class TrainingEngine:
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="FrameTrain Universal Training Engine")
+    parser = argparse.ArgumentParser(description="FrameTrain Training Engine")
     parser.add_argument("--config", required=True, help="Pfad zur config.json")
     args = parser.parse_args()
 
@@ -912,7 +853,7 @@ def main():
     except ImportError:
         MessageProtocol.error(
             "PyTorch nicht installiert",
-            "Installiere mit: pip install torch transformers datasets"
+            "pip install torch transformers datasets"
         )
         sys.exit(1)
 

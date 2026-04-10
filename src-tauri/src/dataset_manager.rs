@@ -1307,7 +1307,7 @@ pub async fn split_dataset_in_half(
     let name_a = format!("{} (Hälfte 1/2)", ds_name);
     let name_b = format!("{} (Hälfte 2/2)", ds_name);
 
-    for (id, name, root, size, files) in [
+    for (id, name, root, size, _files) in [
         (&id_a, &name_a, &root_a, size_a, files_a),
         (&id_b, &name_b, &root_b, size_b, files_b),
     ] {

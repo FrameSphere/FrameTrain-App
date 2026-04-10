@@ -1392,9 +1392,9 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
                     eprintln!("[Training STDERR] {}", line);
                     if let Ok(mut v) = stderr_lines_clone.lock() {
                         v.push(line);
-                        // Keep only last 50 lines to avoid unbounded growth
                         if v.len() > 50 {
-                            v.drain(0..v.len() - 50);
+                            let new_len = v.len() - 50;
+                            v.drain(0..new_len);
                         }
                     }
                 }
