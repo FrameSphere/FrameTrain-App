@@ -32,6 +32,7 @@ import {
   BarChart3,
   FileUp,
   GitBranch,
+  Moon,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -965,6 +966,9 @@ export default function TrainingPanel() {
   const [trainingStartTime, setTrainingStartTime] = useState<number | null>(null);
   const [trainingElapsed, setTrainingElapsed] = useState<number>(0);
 
+  // Sleep Prevention State
+  const [preventSleep, setPreventSleep] = useState(false);
+
   // History State
   const [trainingHistory, setTrainingHistory] = useState<TrainingJob[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -1094,6 +1098,8 @@ export default function TrainingPanel() {
           );
           setTrainingStatus('Training abgeschlossen');
           setTrainingStartTime(null);
+          // Sleep-Prevention deaktivieren
+          invoke('disable_prevent_sleep').then(() => setPreventSleep(false)).catch(() => {});
           loadTrainingHistory();
         })
       );
@@ -1106,6 +1112,8 @@ export default function TrainingPanel() {
           setTrainingStatus('');
           setTrainingStartTime(null);
           setTrainingElapsed(0);
+          // Sleep-Prevention deaktivieren
+          invoke('disable_prevent_sleep').then(() => setPreventSleep(false)).catch(() => {});
           loadTrainingHistory();
         })
       );
@@ -1425,6 +1433,20 @@ export default function TrainingPanel() {
     }
   };
 
+  const togglePreventSleep = async () => {
+    try {
+      if (preventSleep) {
+        await invoke('disable_prevent_sleep');
+        setPreventSleep(false);
+      } else {
+        await invoke('enable_prevent_sleep');
+        setPreventSleep(true);
+      }
+    } catch (err: any) {
+      error('Sleep-Prevention Fehler', String(err));
+    }
+  };
+
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
@@ -1452,6 +1474,13 @@ export default function TrainingPanel() {
 
     try {
       setLossHistory([]);
+      // Aktiviere Sleep-Prevention automatisch beim Trainingsstart
+      try {
+        await invoke('enable_prevent_sleep');
+        setPreventSleep(true);
+      } catch (e) {
+        console.warn('Sleep-Prevention konnte nicht aktiviert werden:', e);
+      }
       const job = await invoke<TrainingJob>('start_training', {
         modelId: selectedModelId,
         modelName: selectedModel.name,
@@ -1473,6 +1502,8 @@ export default function TrainingPanel() {
       setCurrentJob(null);
       setTrainingStartTime(null);
       setTrainingElapsed(0);
+      // Sleep-Prevention deaktivieren
+      try { await invoke('disable_prevent_sleep'); setPreventSleep(false); } catch (_) {}
       warning('Training gestoppt', 'Das Training wurde abgebrochen.');
     } catch (err: any) {
       error('Stoppen fehlgeschlagen', String(err));
@@ -1557,6 +1588,20 @@ export default function TrainingPanel() {
             title="Training-Verlauf"
           >
             <History className="w-5 h-5" />
+          </button>
+
+          {/* Sleep Prevention Toggle */}
+          <button
+            onClick={togglePreventSleep}
+            title={preventSleep ? 'Sleep-Prevention aktiv – klicken zum Deaktivieren' : 'Computer während Training wachhalten'}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+              preventSleep
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30'
+                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10'
+            }`}
+          >
+            <Moon className={`w-4 h-4 ${preventSleep ? 'fill-amber-400' : ''}`} />
+            <span className="hidden sm:inline">{preventSleep ? 'Kein Sleep' : 'Sleep'}</span>
           </button>
 
           {/* Refresh Button */}

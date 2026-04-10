@@ -15,6 +15,7 @@ mod init_versions;
 mod analysis_manager;
 mod test_manager;
 mod plugin_commands;
+mod power_manager;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -150,6 +151,7 @@ fn main() {
         })
         .manage(Arc::new(Mutex::new(training_manager::TrainingState::default())))
         .manage(Arc::new(Mutex::new(test_manager::TestState::default())))
+        .manage(std::sync::Mutex::new(power_manager::PowerState::default()))
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -230,6 +232,10 @@ fn main() {
             plugin_commands::check_first_launch,
             plugin_commands::install_plugins,
             plugin_commands::handle_plugin_approval,
+            // Power Manager Commands
+            power_manager::enable_prevent_sleep,
+            power_manager::disable_prevent_sleep,
+            power_manager::get_prevent_sleep_status,
         ])
         .run(context)
         .expect("Fehler beim Starten der Tauri-Anwendung");
