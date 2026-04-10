@@ -20,7 +20,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "python/*"
+      "python"
     ]
   },
   "app": {
