@@ -6,6 +6,7 @@ import DatasetUpload from './DatasetUpload';
 import AnalysisPanel from './AnalysisPanel';
 import TestPanel from './TestPanel';
 import VersionManager from './VersionManager';
+import LaboratoryPanel from './LaboratoryPanel';
 import Settings from './Settings';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -21,7 +22,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type View = 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings';
+type View = 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory';
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('models');
@@ -39,6 +40,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         return <AnalysisPanel />;
       case 'tests':
         return <TestPanel />;
+      case 'laboratory':
+        return <LaboratoryPanel />;
       case 'versions':
         return <VersionManager />;
       case 'settings':

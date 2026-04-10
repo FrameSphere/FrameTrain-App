@@ -8,7 +8,8 @@ import {
   Layers,
   Settings as SettingsIcon,
   User,
-  FlaskConical
+  FlaskConical,
+  Microscope,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -28,6 +29,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
     { id: 'training', label: 'Training', icon: Play },
     { id: 'analysis', label: 'Analyse', icon: BarChart3 },
     { id: 'tests', label: 'Tests', icon: FlaskConical },
+    { id: 'laboratory', label: 'Laboratory', icon: Microscope },
     { id: 'versions', label: 'Versionen', icon: GitBranch },
   ];
 

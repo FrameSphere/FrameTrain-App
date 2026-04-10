@@ -16,6 +16,7 @@ mod analysis_manager;
 mod test_manager;
 mod plugin_commands;
 mod power_manager;
+mod laboratory_manager;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -236,6 +237,14 @@ fn main() {
             power_manager::enable_prevent_sleep,
             power_manager::disable_prevent_sleep,
             power_manager::get_prevent_sleep_status,
+            // Laboratory Commands
+            laboratory_manager::lab_load_sample,
+            laboratory_manager::lab_run_inference,
+            laboratory_manager::lab_save_session,
+            laboratory_manager::lab_get_sessions,
+            laboratory_manager::lab_delete_session,
+            laboratory_manager::lab_export_as_dataset,
+            laboratory_manager::lab_get_stats,
         ])
         .run(context)
         .expect("Fehler beim Starten der Tauri-Anwendung");
