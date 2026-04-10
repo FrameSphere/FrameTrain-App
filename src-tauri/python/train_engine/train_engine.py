@@ -589,8 +589,19 @@ class TrainingEngine:
             )
             return
 
-        # Generic — but still include key info
-        MessageProtocol.error("Training Engine Fehler", tb)
+        if isinstance(exc, TypeError) and "unexpected keyword argument" in str(exc):
+            MessageProtocol.error(
+                "Inkompatible transformers-Version",
+                f"{exc}\n\nDiese Version von transformers ist inkompatibel.\n"
+                f"Aktualisiere mit:\n  pip install --upgrade transformers\n\nDetails:\n{tb}"
+            )
+            return
+
+        # Generic — always show full traceback so we can debug
+        MessageProtocol.error(
+            f"Training-Fehler: {type(exc).__name__}: {exc}",
+            tb
+        )
 
     def run(self):
         start_time = time.time()
@@ -762,7 +773,15 @@ class TrainingEngine:
             use_fp16   = cfg.fp16 and device == "cuda"
             use_bf16   = cfg.bf16 and device in ("cuda", "cpu")
 
-            train_args = TrainingArguments(
+            # Build TrainingArguments compatible with both old and new transformers.
+            # Several parameters were renamed/removed across versions:
+            #   evaluation_strategy → eval_strategy          (transformers ≥ 4.45)
+            #   no_cuda             → use_cpu                (transformers ≥ 4.38)
+            #   use_mps_device      → removed (auto-detect)  (transformers ≥ 4.38)
+            import inspect as _inspect
+            _ta_sig = _inspect.signature(TrainingArguments.__init__).parameters
+
+            _ta_kwargs: dict = dict(
                 output_dir=cfg.checkpoint_dir or cfg.output_path,
                 num_train_epochs=cfg.epochs,
                 per_device_train_batch_size=cfg.batch_size,
@@ -781,7 +800,6 @@ class TrainingEngine:
                 max_grad_norm=cfg.max_grad_norm,
                 fp16=use_fp16,
                 bf16=use_bf16,
-                evaluation_strategy=eval_strat,
                 eval_steps=cfg.eval_steps if eval_strat == "steps" else None,
                 save_strategy=cfg.save_strategy,
                 save_steps=cfg.save_steps if cfg.save_strategy == "steps" else None,
@@ -790,12 +808,30 @@ class TrainingEngine:
                 dataloader_num_workers=0,
                 seed=cfg.seed,
                 report_to="none",
-                no_cuda=(device == "cpu"),
-                use_mps_device=(device == "mps"),
                 load_best_model_at_end=(val_tok is not None),
                 metric_for_best_model="eval_loss" if val_tok is not None else None,
                 greater_is_better=False,
             )
+
+            # evaluation_strategy vs eval_strategy
+            if "eval_strategy" in _ta_sig:
+                _ta_kwargs["eval_strategy"] = eval_strat
+            else:
+                _ta_kwargs["evaluation_strategy"] = eval_strat
+
+            # no_cuda vs use_cpu (only needed if not on CUDA/MPS)
+            if device == "cpu":
+                if "use_cpu" in _ta_sig:
+                    _ta_kwargs["use_cpu"] = True
+                elif "no_cuda" in _ta_sig:
+                    _ta_kwargs["no_cuda"] = True
+
+            # use_mps_device was removed in transformers ≥ 4.38 (MPS is auto-detected)
+            if device == "mps" and "use_mps_device" in _ta_sig:
+                _ta_kwargs["use_mps_device"] = True
+
+            MessageProtocol.status("loading", "Erstelle TrainingArguments...")
+            train_args = TrainingArguments(**_ta_kwargs)
 
             # ── Trainer ───────────────────────────────────────────────────
             trainer = Trainer(

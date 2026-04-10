@@ -1381,13 +1381,22 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
         }
     };
     
-    // Read stderr in separate thread for debugging
+    // Read stderr in separate thread — collect it so we can include it in error messages
+    let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     if let Some(stderr) = child.stderr.take() {
         let stderr_reader = BufReader::new(stderr);
+        let stderr_lines_clone = Arc::clone(&stderr_lines);
         thread::spawn(move || {
             for line in stderr_reader.lines() {
                 if let Ok(line) = line {
                     eprintln!("[Training STDERR] {}", line);
+                    if let Ok(mut v) = stderr_lines_clone.lock() {
+                        v.push(line);
+                        // Keep only last 50 lines to avoid unbounded growth
+                        if v.len() > 50 {
+                            v.drain(0..v.len() - 50);
+                        }
+                    }
                 }
             }
         });
@@ -1519,32 +1528,43 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
     // Detect silent process death (OOM kill, SIGKILL, crash without Python error message)
     let exited_ok = status.as_ref().map(|s| s.success()).unwrap_or(false);
     if !exited_ok {
-        // Check if we already received an "error" or "complete" event from Python.
-        // If not, the process died silently (most likely OOM / SIGKILL by the OS).
         #[cfg(unix)]
-        let exit_code: Option<i32> = status.as_ref().ok().and_then(|s| {
+        let signal_num: Option<i32> = status.as_ref().ok().and_then(|s| {
             use std::os::unix::process::ExitStatusExt;
             s.signal()
         });
         #[cfg(not(unix))]
-        let exit_code: Option<i32> = None;
+        let signal_num: Option<i32> = None;
         
-        let is_signal_kill = exit_code == Some(9); // SIGKILL = 9
+        // Collect any stderr output for context
+        let stderr_context = if let Ok(v) = stderr_lines.lock() {
+            if v.is_empty() {
+                String::new()
+            } else {
+                format!("\n\nPython stderr (letzte Zeilen):\n{}", v.join("\n"))
+            }
+        } else {
+            String::new()
+        };
+        
+        let is_signal_kill = signal_num == Some(9);
         let error_msg = if is_signal_kill {
-            "Training-Prozess wurde vom Betriebssystem beendet (SIGKILL).\n\
-             Ursache: Sehr wahrscheinlich zu wenig RAM (Out-of-Memory).\n\n\
-             Was tun:\n\
-             1. Batch-Size halbieren (z.B. 8 → 4 → 2)\n\
-             2. Max. Sequenzlänge halbieren (z.B. 512 → 256)\n\
-             3. LoRA aktivieren (trainiert nur 1-5% der Parameter)\n\
-             4. Andere Apps schließen um RAM freizugeben\n\
-             5. Datensatz in kleinere Hälften aufteilen".to_string()
+            format!(
+                "Training-Prozess wurde vom Betriebssystem beendet (SIGKILL = zu wenig RAM).\n\n\
+                 Was tun:\n\
+                 1. Batch-Size halbieren (z.B. 8 → 4 → 2)\n\
+                 2. Max. Sequenzlänge halbieren (z.B. 512 → 256 → 128)\n\
+                 3. LoRA aktivieren (trainiert nur 1-5% der Parameter)\n\
+                 4. Andere Apps schließen bevor Training startet\n\
+                 5. Datensatz weiter aufteilen{}",
+                stderr_context
+            )
         } else {
             format!(
                 "Training-Prozess unerwartet beendet (Exit-Code: {:?}).\n\
-                 Möglicherweise unzureichender RAM oder ein interner Fehler.\n\
-                 Starte FrameTrain neu und versuche es erneut.",
-                status.as_ref().map(|s| s.code())
+                 Starte FrameTrain neu und versuche es erneut.{}",
+                status.as_ref().map(|s| s.code()),
+                stderr_context
             )
         };
         
