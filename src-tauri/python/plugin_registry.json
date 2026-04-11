@@ -1,0 +1,195 @@
+{
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "id": "text",
+      "name": "Text & NLP",
+      "description": "GPT, BERT, T5, LLaMA - Text generation and classification",
+      "category": "text",
+      "icon": "📝",
+      "built_in": true,
+      "train_plugin": null,
+      "test_plugin": null,
+      "required_packages": ["torch", "transformers", "datasets"],
+      "optional_packages": ["peft"],
+      "estimated_size_mb": 0,
+      "install_time_minutes": 0,
+      "github_path": null,
+      "priority": 1
+    },
+    {
+      "id": "vision",
+      "name": "Computer Vision",
+      "description": "Image Classification with ViT, ResNet, EfficientNet",
+      "category": "vision",
+      "icon": "🖼️",
+      "built_in": false,
+      "train_plugin": "plugin_vision.py",
+      "test_plugin": "plugin_vision_test.py",
+      "required_packages": ["torch", "torchvision", "timm", "pillow"],
+      "optional_packages": ["albumentations"],
+      "estimated_size_mb": 2048,
+      "install_time_minutes": 5,
+      "github_path": "plugins/plugin_vision.py",
+      "priority": 2
+    },
+    {
+      "id": "detection",
+      "name": "Object Detection",
+      "description": "YOLO, Faster-RCNN, RetinaNet - Detect objects in images",
+      "category": "vision",
+      "icon": "🎯",
+      "built_in": false,
+      "train_plugin": "plugin_detection.py",
+      "test_plugin": "plugin_detection_test.py",
+      "required_packages": ["torch", "torchvision", "ultralytics", "opencv-python"],
+      "optional_packages": ["roboflow"],
+      "estimated_size_mb": 1024,
+      "install_time_minutes": 3,
+      "github_path": "plugins/plugin_detection.py",
+      "priority": 3
+    },
+    {
+      "id": "audio",
+      "name": "Audio Processing",
+      "description": "Whisper, Wav2Vec - Speech recognition and audio classification",
+      "category": "audio",
+      "icon": "🎵",
+      "built_in": false,
+      "train_plugin": "plugin_audio.py",
+      "test_plugin": "plugin_audio_test.py",
+      "required_packages": ["torch", "torchaudio", "librosa", "soundfile"],
+      "optional_packages": ["audiomentations"],
+      "estimated_size_mb": 512,
+      "install_time_minutes": 2,
+      "github_path": "plugins/plugin_audio.py",
+      "priority": 4
+    },
+    {
+      "id": "segmentation",
+      "name": "Image Segmentation",
+      "description": "UNet, DeepLab, Mask-RCNN - Pixel-level image understanding",
+      "category": "vision",
+      "icon": "🎨",
+      "built_in": false,
+      "train_plugin": "plugin_segmentation.py",
+      "test_plugin": null,
+      "required_packages": ["torch", "torchvision", "segmentation-models-pytorch"],
+      "optional_packages": ["albumentations"],
+      "estimated_size_mb": 800,
+      "install_time_minutes": 3,
+      "github_path": "plugins/plugin_segmentation.py",
+      "priority": 5
+    },
+    {
+      "id": "timeseries",
+      "name": "Time Series",
+      "description": "Forecasting and anomaly detection in temporal data",
+      "category": "tabular",
+      "icon": "📈",
+      "built_in": false,
+      "train_plugin": "plugin_timeseries.py",
+      "test_plugin": null,
+      "required_packages": ["torch", "prophet", "statsmodels"],
+      "optional_packages": ["pmdarima"],
+      "estimated_size_mb": 256,
+      "install_time_minutes": 2,
+      "github_path": "plugins/plugin_timeseries.py",
+      "priority": 6
+    },
+    {
+      "id": "tabular",
+      "name": "Tabular Data",
+      "description": "TabNet and neural networks for structured data",
+      "category": "tabular",
+      "icon": "📊",
+      "built_in": false,
+      "train_plugin": "plugin_tabular.py",
+      "test_plugin": null,
+      "required_packages": ["torch", "pytorch-tabnet", "scikit-learn"],
+      "optional_packages": ["xgboost", "lightgbm"],
+      "estimated_size_mb": 256,
+      "install_time_minutes": 2,
+      "github_path": "plugins/plugin_tabular.py",
+      "priority": 7
+    },
+    {
+      "id": "graph",
+      "name": "Graph Neural Networks",
+      "description": "GCN, GAT - Node and edge classification on graphs",
+      "category": "graph",
+      "icon": "🕸️",
+      "built_in": false,
+      "train_plugin": "plugin_graph.py",
+      "test_plugin": null,
+      "required_packages": ["torch", "torch-geometric", "networkx"],
+      "optional_packages": ["dgl"],
+      "estimated_size_mb": 512,
+      "install_time_minutes": 3,
+      "github_path": "plugins/plugin_graph.py",
+      "priority": 8
+    },
+    {
+      "id": "multimodal",
+      "name": "Multi-Modal",
+      "description": "CLIP, Stable Diffusion - Combine text, images, and more",
+      "category": "multimodal",
+      "icon": "🌈",
+      "built_in": false,
+      "train_plugin": "plugin_multimodal.py",
+      "test_plugin": null,
+      "required_packages": ["torch", "transformers", "diffusers", "accelerate"],
+      "optional_packages": ["bitsandbytes"],
+      "estimated_size_mb": 1536,
+      "install_time_minutes": 5,
+      "github_path": "plugins/plugin_multimodal.py",
+      "priority": 9
+    },
+    {
+      "id": "rl",
+      "name": "Reinforcement Learning",
+      "description": "PPO, DQN, SAC - Train agents with RL algorithms",
+      "category": "rl",
+      "icon": "🎮",
+      "built_in": false,
+      "train_plugin": "plugin_rl.py",
+      "test_plugin": null,
+      "required_packages": ["torch", "stable-baselines3", "gymnasium"],
+      "optional_packages": ["tensorboard"],
+      "estimated_size_mb": 384,
+      "install_time_minutes": 2,
+      "github_path": "plugins/plugin_rl.py",
+      "priority": 10
+    }
+  ],
+  "categories": {
+    "text": {
+      "name": "Text & Language",
+      "description": "Natural language processing and text generation"
+    },
+    "vision": {
+      "name": "Computer Vision",
+      "description": "Image understanding and analysis"
+    },
+    "audio": {
+      "name": "Audio",
+      "description": "Speech and audio processing"
+    },
+    "tabular": {
+      "name": "Structured Data",
+      "description": "Tables, time series, and structured datasets"
+    },
+    "graph": {
+      "name": "Graph Data",
+      "description": "Network and graph-based learning"
+    },
+    "multimodal": {
+      "name": "Multi-Modal",
+      "description": "Combine multiple data types"
+    },
+    "rl": {
+      "name": "Reinforcement Learning",
+      "description": "Agent-based learning"
+    }
+  }
+}
