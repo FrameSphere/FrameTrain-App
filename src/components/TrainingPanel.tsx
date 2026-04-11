@@ -842,18 +842,11 @@ function HistoryModal({ jobs, onClose, onDelete, gradient }: HistoryModalProps) 
 
 // ============ RAM Calculator Component ============
 
-// Known model families with parameter counts in billions
-const MODEL_PRESETS = [
-  { label: 'Unbekannt / Sonstige', params: 0.35 },
-  { label: 'Mini (~125M)', params: 0.125 },
-  { label: 'Klein (~350M)', params: 0.35 },
-  { label: 'Basis (~1.3B)', params: 1.3 },
-  { label: 'Mittel (~3B)', params: 3 },
-  { label: 'Groß (~7B)', params: 7 },
-  { label: 'XL (~13B)', params: 13 },
-  { label: 'XXL (~30B)', params: 30 },
-  { label: 'Riesig (~70B)', params: 70 },
-];
+interface ModelRamInfo {
+  param_billion: number;
+  model_type: string;
+  readable_size: string;
+}
 
 const SYSTEM_RAM_OPTIONS = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128];
 
@@ -873,85 +866,111 @@ function calcRam(
 ): RamBreakdown {
   const p = paramsBillion * 1e9;
 
-  // Bytes per parameter depending on precision
+  // Bytes pro Parameter je nach Präzision
   const bpp = cfg.load_in_4bit ? 0.5 : cfg.load_in_8bit ? 1 : cfg.fp16 || cfg.bf16 ? 2 : 4;
   const modelGb = (p * bpp) / 1e9;
 
-  // Optimizer: AdamW needs 2 full-precision momentum tensors per trainable param
-  // LoRA: only ~1% of params are trainable → optimizer is tiny
-  const trainableRatio = cfg.use_lora ? (cfg.lora_r / 64) * 0.02 : 1.0;
-  const optimizerGb = (p * trainableRatio * 2 * 4) / 1e9; // always fp32 for optimizer
+  // Optimizer: AdamW braucht 2 fp32-Momentum-Tensoren pro trainierbarem Parameter
+  // LoRA: nur ~(lora_r/64)*2% der Parameter werden trainiert
+  const trainableRatio = cfg.use_lora ? Math.min((cfg.lora_r / 64) * 0.02, 0.05) : 1.0;
+  const optimizerGb = (p * trainableRatio * 2 * 4) / 1e9; // Optimizer immer fp32
 
-  // Activations: recomputed with gradient checkpointing (saves ~60%)
-  // Without: ~0.5× model size; with checkpointing: ~0.15× model size
-  const activationFactor = cfg.gradient_checkpointing ? 0.15 : 0.5;
-  const activationsGb = modelGb * activationFactor * (bpp === 0.5 ? 2 : 1); // quant models upcast
+  // Aktivierungen: mit Gradient Checkpointing ~15%, ohne ~50% der Modellgröße
+  // Quantisierte Modelle casten Aktivierungen intern auf fp16/fp32
+  const activationFactor = cfg.gradient_checkpointing ? 0.15 : 0.50;
+  const activationsGb = modelGb * activationFactor * (bpp === 0.5 ? 2 : 1);
 
-  // Batch RAM: input_ids + attention_mask + labels, each batchSize × seqLen × 4 bytes
+  // Batch-RAM: batch_size × seq_length × 3 Tensoren × 4 Bytes
+  // (input_ids + attention_mask + labels)
   const batchGb = (cfg.batch_size * cfg.max_seq_length * 3 * 4) / 1e9;
 
-  // OS + Python + miscellaneous overhead
+  // Datensatz: HuggingFace speichert als memory-mapped Arrow-Datei auf Disk.
+  // Nur aktive Seiten landen im RAM – ca. 5% bei großen Datensätzen, min 200MB.
+  const datasetCacheGb = Math.min(Math.max(datasetSizeBytes * 0.05 / 1e9, 0.2), 3.0);
+
+  // OS + Python + sonstige Overhead
   const overheadGb = 1.5;
 
-  const totalGb = modelGb + optimizerGb + activationsGb + batchGb + overheadGb;
+  const totalGb = modelGb + optimizerGb + activationsGb + batchGb + datasetCacheGb + overheadGb;
   return { modelGb, optimizerGb, activationsGb, batchGb, overheadGb, totalGb };
 }
 
 interface RamCalculatorProps {
   config: TrainingConfig;
   datasetSizeBytes: number;
+  selectedModelId: string | null;
   primaryColor: string;
-  gradient: string;
 }
 
-function RamCalculator({ config, datasetSizeBytes, primaryColor, gradient }: RamCalculatorProps) {
+function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor }: RamCalculatorProps) {
+  // Echte Daten vom Rust-Backend
+  const [systemRamGb, setSystemRamGb] = useState<number>(16);
+  const [systemRamOverride, setSystemRamOverride] = useState<number | null>(null);
+  const [modelInfo, setModelInfo] = useState<ModelRamInfo | null>(null);
+  const [loadingModel, setLoadingModel] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [systemRamGb, setSystemRamGb] = useState<number>(() => {
-    // Try navigator.deviceMemory (Chrome, capped at 8 in some browsers)
-    const detected = (navigator as any).deviceMemory;
-    if (detected && detected > 0) return Math.max(detected, 8);
-    return 16;
-  });
-  const [paramBillion, setParamBillion] = useState<number>(0.35);
 
+  // System-RAM beim Mounten einmalig abrufen
+  useEffect(() => {
+    invoke<number>('get_system_ram_gb')
+      .then(gb => setSystemRamGb(Math.round(gb)))
+      .catch(() => setSystemRamGb(16));
+  }, []);
+
+  // Modell-Info neu laden wenn sich das ausgewählte Modell ändert
+  useEffect(() => {
+    if (!selectedModelId) {
+      setModelInfo(null);
+      return;
+    }
+    setLoadingModel(true);
+    invoke<ModelRamInfo>('get_model_ram_info', { modelId: selectedModelId })
+      .then(info => setModelInfo(info))
+      .catch(() => setModelInfo(null))
+      .finally(() => setLoadingModel(false));
+  }, [selectedModelId]);
+
+  const effectiveRam = systemRamOverride ?? systemRamGb;
+  const paramBillion = modelInfo?.param_billion ?? 0.35;
   const ram = calcRam(paramBillion, config, datasetSizeBytes);
-  const usedPct = Math.min((ram.totalGb / systemRamGb) * 100, 100);
+  const usedPct = Math.min((ram.totalGb / effectiveRam) * 100, 100);
 
-  // Status thresholds
   const status: 'ok' | 'tight' | 'critical' =
     usedPct <= 70 ? 'ok' : usedPct <= 90 ? 'tight' : 'critical';
 
   const statusColor = {
-    ok:       { text: 'text-green-400',  bg: 'bg-green-500',  border: 'border-green-500/30',  label: 'Ausreichend' },
-    tight:    { text: 'text-amber-400',  bg: 'bg-amber-500',  border: 'border-amber-500/30',  label: 'Knapp' },
-    critical: { text: 'text-red-400',    bg: 'bg-red-500',    border: 'border-red-500/30',    label: 'Zu wenig' },
+    ok:       { text: 'text-green-400', border: 'border-green-500/30', badge: 'bg-green-500/20 text-green-300', label: 'Ausreichend' },
+    tight:    { text: 'text-amber-400', border: 'border-amber-500/30', badge: 'bg-amber-500/20 text-amber-300', label: 'Knapp' },
+    critical: { text: 'text-red-400',   border: 'border-red-500/30',   badge: 'bg-red-500/20 text-red-300',   label: 'Zu wenig' },
   }[status];
 
-  // Optimization tips based on current situation
+  // Alias für config
+  const cfg = config;
+
+  // Kontextbewusste Optimierungstipps
   const tips: string[] = [];
   if (status !== 'ok') {
-    if (!config.use_lora)          tips.push('LoRA aktivieren — reduziert Optimizer-RAM um bis zu 95%');
-    if (!config.load_in_4bit && !config.use_lora) tips.push('QLoRA (4-bit + LoRA) — halbiert nochmal Modell-RAM');
-    if (!config.gradient_checkpointing) tips.push('Gradient Checkpointing — spart ~60% Aktivierungs-RAM');
-    if (config.batch_size > 2)     tips.push(`Batch Size auf ${Math.max(1, Math.floor(config.batch_size / 2))} halbieren`);
-    if (config.max_seq_length > 256) tips.push(`Sequenzlänge auf ${Math.max(128, config.max_seq_length / 2)} halbieren`);
-    if (config.gradient_accumulation_steps < 4) tips.push('Gradient Accumulation auf 4–8 erhöhen, Batch auf 1–2 senken');
+    if (!cfg.use_lora)                tips.push('LoRA aktivieren — Optimizer-RAM sinkt um bis zu 95%');
+    if (!cfg.load_in_4bit && cfg.use_lora) tips.push('4-bit QLoRA — halbiert nochmals den Modell-RAM');
+    if (!cfg.gradient_checkpointing)  tips.push('Gradient Checkpointing — spart ~60% Aktivierungs-RAM (im Erweitert-Abschnitt)');
+    if (cfg.batch_size > 2)           tips.push(`Batch Size auf ${Math.max(1, cfg.batch_size >> 1)} halbieren`);
+    if (cfg.max_seq_length > 256)     tips.push(`Sequenzlänge auf ${Math.max(128, cfg.max_seq_length >> 1)} halbieren`);
+    if (cfg.gradient_accumulation_steps < 4) tips.push('Gradient Accumulation auf 4–8 erhöhen + Batch auf 1 senken');
   }
 
   const fmt = (gb: number) => gb < 1 ? `${(gb * 1024).toFixed(0)} MB` : `${gb.toFixed(1)} GB`;
 
-  // Stacked bar segments as % of systemRam
   const segments = [
-    { label: 'Modell',       gb: ram.modelGb,       color: 'bg-blue-500' },
-    { label: 'Optimizer',    gb: ram.optimizerGb,   color: 'bg-purple-500' },
-    { label: 'Aktivierungen',gb: ram.activationsGb, color: 'bg-orange-500' },
-    { label: 'Batch',        gb: ram.batchGb,       color: 'bg-cyan-500' },
-    { label: 'Overhead',     gb: ram.overheadGb,    color: 'bg-slate-500' },
+    { label: 'Modell',        gb: ram.modelGb,       color: 'bg-blue-500' },
+    { label: 'Optimizer',     gb: ram.optimizerGb,   color: 'bg-purple-500' },
+    { label: 'Aktivierungen', gb: ram.activationsGb, color: 'bg-orange-500' },
+    { label: 'Datensatz',     gb: ram.batchGb + (Math.min(Math.max(datasetSizeBytes * 0.05 / 1e9, 0.2), 3.0)), color: 'bg-cyan-500' },
+    { label: 'Overhead',      gb: ram.overheadGb,    color: 'bg-slate-500' },
   ];
 
   return (
     <div className={`bg-white/5 rounded-xl border ${statusColor.border} overflow-hidden`}>
-      {/* Header — always visible */}
+      {/* Header — immer sichtbar */}
       <button
         onClick={() => setExpanded(e => !e)}
         className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-all"
@@ -959,17 +978,16 @@ function RamCalculator({ config, datasetSizeBytes, primaryColor, gradient }: Ram
         <div className="flex items-center gap-3">
           <MemoryStick className="w-5 h-5 text-blue-400" />
           <span className="font-medium text-white text-sm">RAM-Rechner</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-            status === 'ok'       ? 'bg-green-500/20 text-green-300' :
-            status === 'tight'    ? 'bg-amber-500/20 text-amber-300' :
-                                    'bg-red-500/20 text-red-300'
-          }`}>
-            {statusColor.label}
-          </span>
+          {loadingModel
+            ? <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin" />
+            : <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor.badge}`}>
+                {statusColor.label}
+              </span>
+          }
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-sm font-bold ${statusColor.text}`}>
-            {fmt(ram.totalGb)} / {systemRamGb} GB
+            {fmt(ram.totalGb)} / {effectiveRam} GB
           </span>
           {expanded
             ? <ChevronUp className="w-4 h-4 text-gray-400" />
@@ -977,61 +995,74 @@ function RamCalculator({ config, datasetSizeBytes, primaryColor, gradient }: Ram
         </div>
       </button>
 
-      {/* RAM bar — always visible */}
+      {/* RAM-Balken — immer sichtbar */}
       <div className="px-4 pb-3">
         <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden flex">
-          {segments.map((s) => (
+          {segments.map(s => (
             <div
               key={s.label}
               className={`${s.color} h-full transition-all duration-500`}
-              style={{ width: `${Math.min((s.gb / systemRamGb) * 100, 100)}%` }}
+              style={{ width: `${Math.min((s.gb / effectiveRam) * 100, 100)}%` }}
             />
           ))}
         </div>
         <div className="flex justify-between text-xs text-gray-500 mt-1">
           <span>0 GB</span>
-          <span className={statusColor.text}>{Math.round(usedPct)}% genutzt</span>
-          <span>{systemRamGb} GB</span>
+          <span className={statusColor.text}>{Math.round(usedPct)}% belegt</span>
+          <span>{effectiveRam} GB</span>
         </div>
       </div>
 
-      {/* Expanded detail section */}
+      {/* Aufgeklappter Detailbereich */}
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-white/10 pt-4">
 
-          {/* Controls */}
+          {/* Modell-Info + RAM-Override */}
           <div className="grid grid-cols-2 gap-3">
-            {/* Model size picker */}
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Modell-Größe</label>
-              <select
-                value={paramBillion}
-                onChange={e => setParamBillion(parseFloat(e.target.value))}
-                className="w-full px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs focus:outline-none"
-              >
-                {MODEL_PRESETS.map(p => (
-                  <option key={p.label} value={p.params} className="bg-slate-800">
-                    {p.label}
-                  </option>
-                ))}
-              </select>
+            {/* Modell-Info (automatisch) */}
+            <div className="col-span-1">
+              <div className="text-xs text-gray-400 mb-1">Ausgewähltes Modell</div>
+              <div className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg">
+                {loadingModel ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin text-gray-400" />
+                    <span className="text-xs text-gray-400">Lese...</span>
+                  </div>
+                ) : modelInfo ? (
+                  <div>
+                    <span className="text-white text-xs font-medium">{modelInfo.readable_size} Params</span>
+                    <span className="text-gray-500 text-xs ml-2">({modelInfo.model_type})</span>
+                  </div>
+                ) : (
+                  <span className="text-gray-500 text-xs">Kein Modell gewählt</span>
+                )}
+              </div>
             </div>
-            {/* System RAM picker */}
+
+            {/* RAM-Override (falls Auto-Erkennung falsch) */}
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">Dein RAM</label>
+              <div className="text-xs text-gray-400 mb-1">
+                System-RAM
+                <span className="ml-1 text-gray-600">(Auto: {systemRamGb} GB)</span>
+              </div>
               <select
-                value={systemRamGb}
-                onChange={e => setSystemRamGb(parseInt(e.target.value))}
+                value={systemRamOverride ?? systemRamGb}
+                onChange={e => {
+                  const val = parseInt(e.target.value);
+                  setSystemRamOverride(val === systemRamGb ? null : val);
+                }}
                 className="w-full px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs focus:outline-none"
               >
                 {SYSTEM_RAM_OPTIONS.map(gb => (
-                  <option key={gb} value={gb} className="bg-slate-800">{gb} GB</option>
+                  <option key={gb} value={gb} className="bg-slate-800">
+                    {gb} GB{gb === systemRamGb ? ' ✓' : ''}
+                  </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Breakdown table */}
+          {/* Aufschlüsselung */}
           <div className="space-y-1.5">
             {segments.map(s => (
               <div key={s.label} className="flex items-center justify-between text-xs">
@@ -1042,48 +1073,51 @@ function RamCalculator({ config, datasetSizeBytes, primaryColor, gradient }: Ram
                 <span className="text-white font-mono">{fmt(s.gb)}</span>
               </div>
             ))}
-            <div className="border-t border-white/10 pt-1.5 flex items-center justify-between text-xs">
+            <div className="border-t border-white/10 pt-1.5 flex justify-between text-xs">
               <span className="text-gray-300 font-medium">Gesamt</span>
               <span className={`font-bold font-mono ${statusColor.text}`}>{fmt(ram.totalGb)}</span>
             </div>
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex justify-between text-xs">
               <span className="text-gray-400">Verbleibend</span>
               <span className={`font-mono ${
-                systemRamGb - ram.totalGb > 2 ? 'text-green-400' : 'text-red-400'
+                effectiveRam - ram.totalGb > 2 ? 'text-green-400' : 'text-red-400'
               }`}>
-                {fmt(Math.max(0, systemRamGb - ram.totalGb))}
+                {fmt(Math.max(0, effectiveRam - ram.totalGb))}
               </span>
             </div>
           </div>
 
-          {/* Legend for color coding */}
-          <div className="text-xs text-gray-500 space-y-0.5">
-            <div className="flex items-center gap-2">
-              <Info className="w-3 h-3 flex-shrink-0" />
-              <span>
-                {config.use_lora
-                  ? 'LoRA aktiv: Optimizer-RAM stark reduziert'
-                  : 'Kein LoRA: Optimizer = 2× Modell (AdamW Momente)'}
+          {/* Hinweise */}
+          <div className="text-xs text-gray-500 space-y-1">
+            <div className="flex items-start gap-2">
+              <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
+              <span>{cfg.use_lora
+                ? 'LoRA aktiv: Optimizer nur für trainierbare Parameter (~1–5%)'
+                : 'Kein LoRA: AdamW braucht 2× Modell-RAM für Momentum-Tensoren'}
               </span>
             </div>
-            {config.gradient_checkpointing && (
-              <div className="flex items-center gap-2">
-                <CheckCircle className="w-3 h-3 text-green-400 flex-shrink-0" />
-                <span className="text-green-400/70">Gradient Checkpointing spart ~60% Aktivierungs-RAM</span>
+            <div className="flex items-start gap-2">
+              <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
+              <span>Datensatz wird memory-mapped (Disk → kein RAM). Nur aktive Pages werden gecacht.</span>
+            </div>
+            {cfg.gradient_checkpointing && (
+              <div className="flex items-center gap-2 text-green-400/70">
+                <CheckCircle className="w-3 h-3 flex-shrink-0" />
+                <span>Gradient Checkpointing spart ~60% Aktivierungs-RAM</span>
               </div>
             )}
           </div>
 
-          {/* Optimization tips */}
+          {/* Optimierungstipps — nur bei Engpass */}
           {tips.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-amber-400 flex items-center gap-1">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                Optimierungen
+                Empfehlungen
               </div>
               {tips.map((tip, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs text-amber-300/80 bg-amber-500/5 rounded-lg px-3 py-2">
-                  <span className="text-amber-400 flex-shrink-0 mt-0.5">→</span>
+                  <span className="text-amber-400 flex-shrink-0">→</span>
                   <span>{tip}</span>
                 </div>
               ))}
@@ -1092,8 +1126,8 @@ function RamCalculator({ config, datasetSizeBytes, primaryColor, gradient }: Ram
 
           {status === 'ok' && (
             <div className="flex items-center gap-2 text-xs text-green-400/80 bg-green-500/5 rounded-lg px-3 py-2">
-              <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
-              <span>Dein System hat genug RAM für dieses Training.</span>
+              <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
+              Genug RAM für dieses Training.
             </div>
           )}
         </div>
@@ -2425,8 +2459,8 @@ export default function TrainingPanel() {
           <RamCalculator
             config={config}
             datasetSizeBytes={selectedDataset?.size_bytes ?? 0}
+            selectedModelId={selectedModelId}
             primaryColor={currentTheme.colors.primary}
-            gradient={currentTheme.colors.gradient}
           />
 
           {/* Parameter Rating */}

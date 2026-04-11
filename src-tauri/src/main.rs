@@ -206,6 +206,8 @@ fn main() {
             training_manager::get_training_history,
             training_manager::delete_training_job,
             training_manager::check_training_requirements,
+            training_manager::get_system_ram_gb,
+            training_manager::get_model_ram_info,
             // Version Manager Commands
             version_manager::list_models_with_versions,
             version_manager::list_model_versions,

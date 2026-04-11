@@ -1655,6 +1655,116 @@ pub fn delete_training_job(
     Ok(())
 }
 
+/// Gibt System-RAM in GB zurück (plattformübergreifend ohne externe Crates)
+#[tauri::command]
+pub fn get_system_ram_gb() -> f64 {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+        {
+            if let Ok(s) = String::from_utf8(out.stdout) {
+                if let Ok(bytes) = s.trim().parse::<u64>() {
+                    return bytes as f64 / (1024.0_f64).powi(3);
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+            for line in content.lines() {
+                if line.starts_with("MemTotal:") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Ok(kb) = parts[1].parse::<u64>() {
+                            return kb as f64 / (1024.0 * 1024.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(out) = std::process::Command::new("wmic")
+            .args(["OS", "get", "TotalVisibleMemorySize", "/value"])
+            .output()
+        {
+            if let Ok(s) = String::from_utf8(out.stdout) {
+                for line in s.lines() {
+                    if line.starts_with("TotalVisibleMemorySize=") {
+                        if let Ok(kb) = line
+                            .trim_start_matches("TotalVisibleMemorySize=")
+                            .trim()
+                            .parse::<u64>()
+                        {
+                            return kb as f64 / (1024.0 * 1024.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    16.0 // Fallback
+}
+
+/// Liest model_type + Parameteranzahl aus config.json des Modells
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRamInfo {
+    pub param_billion: f64,
+    pub model_type: String,
+    pub readable_size: String,
+}
+
+#[tauri::command]
+pub fn get_model_ram_info(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+) -> Result<ModelRamInfo, String> {
+    let models_dir = get_models_dir(&app_handle)?;
+    let config_path = models_dir.join(&model_id).join("config.json");
+
+    if !config_path.exists() {
+        return Ok(ModelRamInfo {
+            param_billion: 0.35,
+            model_type: "unknown".to_string(),
+            readable_size: "Unbekannt".to_string(),
+        });
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Konnte model config.json nicht lesen: {}", e))?;
+
+    let cfg: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Konnte model config.json nicht parsen: {}", e))?;
+
+    let h      = cfg.get("hidden_size").and_then(|v| v.as_f64()).unwrap_or(768.0);
+    let layers = cfg.get("num_hidden_layers").and_then(|v| v.as_f64()).unwrap_or(12.0);
+    let vocab  = cfg.get("vocab_size").and_then(|v| v.as_f64()).unwrap_or(32000.0);
+
+    // Selbe Formel wie im Python NLP-Plugin
+    let params = vocab * h + layers * (4.0 * h * h + 2.0 * h * 4.0 * h);
+    let param_billion = params / 1e9;
+
+    let model_type = cfg
+        .get("model_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let readable_size = if param_billion < 0.5 {
+        format!("{:.0}M", param_billion * 1000.0)
+    } else if param_billion < 1.5 {
+        format!("{:.1}B", param_billion)
+    } else {
+        format!("{:.0}B", param_billion)
+    };
+
+    Ok(ModelRamInfo { param_billion, model_type, readable_size })
+}
+
 /// Prüft ob Python und PyTorch installiert sind
 #[tauri::command]
 pub async fn check_training_requirements() -> Result<RequirementsCheck, String> {
