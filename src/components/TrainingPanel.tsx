@@ -116,6 +116,7 @@ interface TrainingConfig {
   seed: number;
   dataloader_drop_last: boolean;
   group_by_length: boolean;
+  gradient_checkpointing: boolean;
   training_type: string;
   task_type: string;
 }
@@ -232,6 +233,7 @@ const defaultConfig: TrainingConfig = {
   seed: 42,
   dataloader_drop_last: false,
   group_by_length: false,
+  gradient_checkpointing: false,
   training_type: 'fine_tuning',
   task_type: 'causal_lm',
 };
