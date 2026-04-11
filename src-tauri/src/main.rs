@@ -98,6 +98,12 @@ fn clear_config(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn force_quit_app(app_handle: tauri::AppHandle) {
+    println!("[App] Force quit requested by user");
+    app_handle.exit(0);
+}
+
 fn main() {
     // Note: .env is no longer required for production builds
     // API communication now happens through the backend API
@@ -163,6 +169,7 @@ fn main() {
             load_config,
             get_app_data_dir,
             clear_config,
+            force_quit_app,
             auth::validate_credentials,
             // User Manager Commands
             user_manager::login_user,
@@ -248,6 +255,14 @@ fn main() {
             laboratory_manager::lab_export_as_dataset,
             laboratory_manager::lab_get_stats,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Schließen immer abfangen — Frontend entscheidet ob Training aktiv
+                api.prevent_close();
+                // Frontend-Event senden — App.tsx zeigt Dialog
+                let _ = window.emit("app-close-requested", ());
+            }
+        })
         .run(context)
         .expect("Fehler beim Starten der Tauri-Anwendung");
 }

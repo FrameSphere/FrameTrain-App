@@ -437,12 +437,7 @@ class Plugin(TrainPlugin):
 
             # FIX: padding=False statt padding="max_length"
             # → DataCollator macht dynamisches Padding pro Batch (RAM-effizient)
-            enc = tok(
-                texts,
-                truncation=True,
-                max_length=cfg.max_seq_length,
-                padding=False,      # kein fixes Padding hier
-            )
+            enc = tok(texts, truncation=True, max_length=cfg.max_seq_length, padding=False)
 
             if arch == "encoder-decoder":
                 if targets is not None:
@@ -456,12 +451,18 @@ class Plugin(TrainPlugin):
                     enc["labels"] = lenc["input_ids"]
                 else:
                     enc["labels"] = enc["input_ids"].copy()
-            else:
-                enc["labels"] = enc["input_ids"].copy()
+            # Für encoder und decoder: KEINE labels setzen.
+            # DataCollatorForLanguageModeling erstellt sie automatisch aus input_ids
+            # und maskiert Padding-Token mit -100. Wenn wir labels vorher manuell
+            # setzen, versucht der Collator sie als variable-length-Liste zu batchen
+            # -> "excessive nesting" / Tensor-Fehler.
 
             return enc
 
-        keep   = {"input_ids", "attention_mask", "token_type_ids", "labels"}
+        # Für encoder-decoder brauchen wir labels im Dataset
+        keep   = {"input_ids", "attention_mask", "token_type_ids"}
+        if arch == "encoder-decoder":
+            keep.add("labels")
         remove = [c for c in dataset.column_names if c not in keep]
         tokenized = dataset.map(
             tok_fn,

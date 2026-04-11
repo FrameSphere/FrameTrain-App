@@ -65,8 +65,13 @@ pub fn enable_prevent_sleep(
 
     #[cfg(target_os = "macos")]
     {
-        // caffeinate -i verhindert Idle-Sleep solange der Prozess läuft
-        match Command::new("caffeinate").arg("-i").spawn() {
+        // caffeinate -dims:
+        //   -d  Display-Sleep verhindern
+        //   -i  Idle-Sleep verhindern  
+        //   -m  Disk-Sleep verhindern
+        //   -s  System-Sleep verhindern (AC-Power vorausgesetzt)
+        // Damit läuft das Training auch über Nacht ohne Unterbrechung.
+        match Command::new("caffeinate").args(["-dims"]).spawn() {
             Ok(child) => {
                 s.inhibitor_process = Some(child);
                 s.sleep_prevented = true;
