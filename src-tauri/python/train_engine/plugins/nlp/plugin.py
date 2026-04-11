@@ -57,6 +57,22 @@ LORA_MODULES = {
 STREAMING_THRESHOLD = 500_000
 
 
+def detect_architecture(model_path: str) -> str:
+    """Gibt 'encoder', 'encoder-decoder' oder 'decoder' zurück."""
+    try:
+        from transformers import AutoConfig
+        cfg = AutoConfig.from_pretrained(model_path)
+        mt = cfg.model_type.lower().replace("_", "-")
+        if mt in ENCODER_TYPES:
+            return "encoder"
+        if mt in ENCODER_DECODER_TYPES:
+            return "encoder-decoder"
+        return "decoder"
+    except Exception as e:
+        MessageProtocol.warning(f"Architektur nicht erkannt ({e}) — verwende Decoder.")
+        return "decoder"
+
+
 # ============================================================================
 # ACCELERATE KOMPATIBILITÄTS-PATCH
 # ============================================================================

@@ -908,7 +908,8 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
   const [systemRamOverride, setSystemRamOverride] = useState<number | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelRamInfo | null>(null);
   const [loadingModel, setLoadingModel] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [datasetFlash, setDatasetFlash] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // System-RAM beim Mounten einmalig abrufen
   useEffect(() => {
@@ -929,6 +930,17 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
       .catch(() => setModelInfo(null))
       .finally(() => setLoadingModel(false));
   }, [selectedModelId]);
+
+  // Kurzes Flash-Feedback wenn sich der Datensatz ändert
+  const prevDatasetRef = useRef<number>(datasetSizeBytes);
+  useEffect(() => {
+    if (prevDatasetRef.current !== datasetSizeBytes) {
+      prevDatasetRef.current = datasetSizeBytes;
+      setDatasetFlash(true);
+      const t = setTimeout(() => setDatasetFlash(false), 800);
+      return () => clearTimeout(t);
+    }
+  }, [datasetSizeBytes]);
 
   const effectiveRam = systemRamOverride ?? systemRamGb;
   const paramBillion = modelInfo?.param_billion ?? 0.35;
@@ -972,7 +984,7 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
     <div className={`bg-white/5 rounded-xl border ${statusColor.border} overflow-hidden`}>
       {/* Header — immer sichtbar */}
       <button
-        onClick={() => setExpanded(e => !e)}
+        onClick={() => setIsExpanded(e => !e)}
         className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-all"
       >
         <div className="flex items-center gap-3">
@@ -989,7 +1001,7 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
           <span className={`text-sm font-bold ${statusColor.text}`}>
             {fmt(ram.totalGb)} / {effectiveRam} GB
           </span>
-          {expanded
+          {isExpanded
             ? <ChevronUp className="w-4 h-4 text-gray-400" />
             : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </div>
@@ -997,7 +1009,9 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
 
       {/* RAM-Balken — immer sichtbar */}
       <div className="px-4 pb-3">
-        <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden flex">
+        <div className={`w-full h-3 bg-white/10 rounded-full overflow-hidden flex transition-all duration-300 ${
+          datasetFlash ? 'ring-2 ring-cyan-400/60' : ''
+        }`}>
           {segments.map(s => (
             <div
               key={s.label}
@@ -1008,13 +1022,18 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
         </div>
         <div className="flex justify-between text-xs text-gray-500 mt-1">
           <span>0 GB</span>
-          <span className={statusColor.text}>{Math.round(usedPct)}% belegt</span>
+          <div className="flex items-center gap-2">
+            {datasetFlash && (
+              <span className="text-cyan-400 text-xs animate-pulse">Datensatz aktualisiert</span>
+            )}
+            <span className={statusColor.text}>{Math.round(usedPct)}% belegt</span>
+          </div>
           <span>{effectiveRam} GB</span>
         </div>
       </div>
 
       {/* Aufgeklappter Detailbereich */}
-      {expanded && (
+      {isExpanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-white/10 pt-4">
 
           {/* Modell-Info + RAM-Override */}
