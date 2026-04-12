@@ -418,6 +418,282 @@ function ToggleField({ label, checked, onChange, tooltip, primaryColor }: Toggle
   );
 }
 
+// ============ Training Error Modal ============
+
+interface TrainingErrorModalProps {
+  errorTitle: string;
+  errorMessage: string;
+  errorDetails: string;
+  errorLogs: string[];
+  configSnapshot: string;
+  onClose: () => void;
+  gradient: string;
+  primaryColor: string;
+}
+
+function TrainingErrorModal({
+  errorTitle,
+  errorMessage,
+  errorDetails,
+  errorLogs,
+  configSnapshot,
+  onClose,
+  gradient,
+  primaryColor,
+}: TrainingErrorModalProps) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [sendError, setSendError] = useState('');
+
+  // Kategorisiere den Fehler für den User
+  const isRamError = errorMessage.toLowerCase().includes('sigkill') ||
+    errorMessage.toLowerCase().includes('arbeitsspeicher') ||
+    errorMessage.toLowerCase().includes('ram') ||
+    errorMessage.toLowerCase().includes('memory') ||
+    errorMessage.toLowerCase().includes('oom') ||
+    errorTitle.toLowerCase().includes('ram');
+
+  const isLoraError = errorDetails.toLowerCase().includes('target modules') ||
+    errorDetails.toLowerCase().includes('not found in the base model') ||
+    errorDetails.toLowerCase().includes('lora');
+
+  const isConfigError = errorDetails.toLowerCase().includes('konfigurationsfehler') ||
+    errorDetails.toLowerCase().includes('configuration') ||
+    errorTitle.toLowerCase().includes('konfiguration');
+
+  // Nutzerfreundliche Erklärung je nach Fehlertyp
+  const getExplanation = () => {
+    if (isRamError) return {
+      icon: '🧠',
+      color: 'text-orange-400',
+      bg: 'bg-orange-500/10',
+      border: 'border-orange-500/30',
+      title: 'Nicht genug Arbeitsspeicher (RAM)',
+      text: 'Dein System hatte nicht genug RAM für dieses Training. Das Betriebssystem hat den Prozess abrupt beendet.',
+      fixes: [
+        'Batch Size halbieren (z.B. 8 → 4 → 2)',
+        'LoRA aktivieren — trainiert nur 1–5% der Parameter',
+        'Sequenzlänge halbieren (z.B. 512 → 256)',
+        'Gradient Accumulation erhöhen + Batch auf 1 setzen',
+        'Andere Apps schließen bevor du trainierst',
+        '4-bit QLoRA aktivieren für maximale RAM-Ersparnis',
+      ],
+    };
+    if (isLoraError) return {
+      icon: '⚙️',
+      color: 'text-purple-400',
+      bg: 'bg-purple-500/10',
+      border: 'border-purple-500/30',
+      title: 'LoRA Konfigurationsfehler',
+      text: 'Die LoRA Target Modules (z.B. q_proj, v_proj) wurden im Modell nicht gefunden. Nicht alle Modelle unterstützen dieselben Modul-Namen.',
+      fixes: [
+        'Versuche andere Module: k_proj, o_proj, gate_proj, up_proj, down_proj',
+        'Für GPT-2 Style: c_attn, c_proj verwenden',
+        'Für BERT Style: query, value verwenden',
+        'LoRA deaktivieren und Standard-Fine-Tuning ausprobieren',
+        'Überprüfe die model_type in der config.json des Modells',
+      ],
+    };
+    if (isConfigError) return {
+      icon: '📋',
+      color: 'text-amber-400',
+      bg: 'bg-amber-500/10',
+      border: 'border-amber-500/30',
+      title: 'Konfigurationsfehler',
+      text: 'Ein ungültiger Konfigurationsparameter hat das Training verhindert.',
+      fixes: [
+        'Überprüfe alle Parameter auf gültige Werte',
+        'Nutze ein Preset als Ausgangspunkt',
+        'Stelle sicher dass Batch Size ≥ 1 ist',
+        'Learning Rate muss zwischen 1e-6 und 1e-2 liegen',
+      ],
+    };
+    return {
+      icon: '❌',
+      color: 'text-red-400',
+      bg: 'bg-red-500/10',
+      border: 'border-red-500/30',
+      title: 'Training-Fehler',
+      text: 'Das Training ist mit einem unerwarteten Fehler abgebrochen.',
+      fixes: [
+        'FrameTrain neu starten',
+        'Python-Pakete aktualisieren: pip install -U torch transformers peft',
+        'Modell und Dataset erneut prüfen',
+        'Mit einem kleineren Preset (Schnelltest) testen',
+      ],
+    };
+  };
+
+  const explanation = getExplanation();
+
+  const handleSendReport = async () => {
+    setSending(true);
+    setSendError('');
+    try {
+      const errorType = isRamError ? 'training:oom' : isLoraError ? 'training:lora_config' : isConfigError ? 'training:config' : 'training:error';
+      const response = await fetch('https://webcontrol-hq-api.karol-paschek.workers.dev/api/app-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          site_id: 'frametrain',
+          error_type: errorType,
+          title: errorTitle || 'Training-Fehler',
+          message: errorMessage,
+          details: errorDetails,
+          logs: errorLogs.join('\n'),
+          config_snapshot: configSnapshot,
+          platform: navigator.platform || 'unknown',
+          app_version: 'desktop-app2',
+        }),
+      });
+      if (response.ok) {
+        setSent(true);
+      } else {
+        setSendError('Senden fehlgeschlagen. Bitte prüfe deine Internetverbindung.');
+      }
+    } catch (e: any) {
+      setSendError('Netzwerkfehler: ' + String(e));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-red-500/20 flex items-center justify-center">
+              <AlertCircle className="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Training fehlgeschlagen</h2>
+              <p className="text-xs text-gray-400 mt-0.5">{errorTitle}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="overflow-y-auto flex-1 p-5 space-y-4">
+          {/* Categorized explanation */}
+          <div className={`rounded-xl border p-4 ${explanation.bg} ${explanation.border}`}>
+            <div className="flex items-start gap-3">
+              <span className="text-2xl flex-shrink-0">{explanation.icon}</span>
+              <div className="flex-1">
+                <div className={`font-bold text-sm mb-1 ${explanation.color}`}>{explanation.title}</div>
+                <p className="text-sm text-gray-300 leading-relaxed">{explanation.text}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Fehler-Nachricht */}
+          {errorMessage && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-500">
+                <AlertTriangle className="w-3 h-3" /> Fehlermeldung
+              </div>
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <p className="text-sm text-red-300 leading-relaxed font-mono whitespace-pre-wrap break-words">{errorMessage}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Details */}
+          {errorDetails && errorDetails !== errorMessage && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-500">
+                <Info className="w-3 h-3" /> Details
+              </div>
+              <div className="p-3 bg-white/5 border border-white/10 rounded-lg max-h-40 overflow-y-auto">
+                <pre className="text-xs text-gray-300 whitespace-pre-wrap break-words leading-relaxed">{errorDetails}</pre>
+              </div>
+            </div>
+          )}
+
+          {/* Logs */}
+          {errorLogs.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-500">
+                <BarChart3 className="w-3 h-3" /> Logs (letzte {errorLogs.length} Zeilen)
+              </div>
+              <div className="p-3 bg-black/40 border border-white/10 rounded-lg max-h-48 overflow-y-auto">
+                <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words leading-relaxed font-mono">{errorLogs.join('\n')}</pre>
+              </div>
+            </div>
+          )}
+
+          {/* Was kann ich tun */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-500">
+              <CheckCircle className="w-3 h-3" /> Was kann ich tun?
+            </div>
+            <div className="space-y-2">
+              {explanation.fixes.map((fix, i) => (
+                <div key={i} className="flex items-start gap-2.5 p-2.5 bg-white/[0.04] rounded-lg">
+                  <span className="text-blue-400 font-bold text-xs flex-shrink-0 mt-0.5">{i + 1}.</span>
+                  <span className="text-sm text-gray-300">{fix}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Send report */}
+          <div className="bg-white/[0.03] rounded-xl border border-white/10 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-white mb-1">Fehlerbericht an FrameTrain senden?</div>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Sendet Fehlermeldung, Logs und Konfiguration anonym an das FrameTrain-Team zur Analyse und Verbesserung.
+                </p>
+              </div>
+            </div>
+            {sent ? (
+              <div className="mt-3 flex items-center gap-2 text-green-400 text-sm">
+                <CheckCircle className="w-4 h-4" />
+                Bericht gesendet – danke!
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {sendError && (
+                  <p className="text-xs text-red-400">{sendError}</p>
+                )}
+                <button
+                  onClick={handleSendReport}
+                  disabled={sending}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 hover:text-white transition-all disabled:opacity-50"
+                >
+                  {sending ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Wird gesendet…</>
+                  ) : (
+                    <><Download className="w-4 h-4" /> Fehlerbericht senden</>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-5 border-t border-white/10 flex gap-3 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className={`flex-1 py-3 bg-gradient-to-r ${gradient} rounded-xl text-white font-semibold hover:opacity-90 transition-all`}
+          >
+            Schließen & Einstellungen anpassen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ Rating Modal ============
 
 interface RatingModalProps {
@@ -1286,12 +1562,23 @@ export default function TrainingPanel() {
   const [trainingStartTime, setTrainingStartTime] = useState<number | null>(null);
   const [trainingElapsed, setTrainingElapsed] = useState<number>(0);
 
+  // Stderr-Log-Puffer für das Error-Modal
+  const stderrLogsRef = useRef<string[]>([]);
+
   // Sleep Prevention State
   const [preventSleep, setPreventSleep] = useState(false);
 
   // History State
   const [trainingHistory, setTrainingHistory] = useState<TrainingJob[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+  // Training Error Modal State
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [trainingErrorTitle, setTrainingErrorTitle] = useState('');
+  const [trainingErrorMessage, setTrainingErrorMessage] = useState('');
+  const [trainingErrorDetails, setTrainingErrorDetails] = useState('');
+  const [trainingErrorLogs, setTrainingErrorLogs] = useState<string[]>([]);
+  const [trainingErrorConfigSnapshot, setTrainingErrorConfigSnapshot] = useState('');
 
   // JSON Upload State
   const [uploadingConfig, setUploadingConfig] = useState(false);
@@ -1406,6 +1693,8 @@ export default function TrainingPanel() {
           const data = event.payload.data;
           if (data?.message) {
             setTrainingStatus(data.message);
+            // Logs für Error-Modal puffern (max. 80 Zeilen)
+            stderrLogsRef.current = [...stderrLogsRef.current, data.message].slice(-80);
           }
         })
       );
@@ -1427,7 +1716,23 @@ export default function TrainingPanel() {
       unlisteners.push(
         await listen<any>('training-error', (event) => {
           const data = event.payload.data || event.payload;
-          error('Training-Fehler', data?.error || 'Unbekannter Fehler');
+          const errMsg   = data?.error   || data?.message || 'Unbekannter Fehler';
+          const errDetail = data?.details || '';
+
+          // Logs aus dem Puffer nehmen
+          const logs = stderrLogsRef.current.slice(-40);
+          stderrLogsRef.current = [];
+
+          // Error-Modal öffnen
+          setTrainingErrorTitle(errMsg.length > 80 ? errMsg.slice(0, 80) + '…' : errMsg);
+          setTrainingErrorMessage(errMsg);
+          setTrainingErrorDetails(errDetail);
+          setTrainingErrorLogs(logs);
+          setTrainingErrorConfigSnapshot(
+            JSON.stringify(config, null, 2).slice(0, 4000)
+          );
+          setShowErrorModal(true);
+
           setCurrentJob(null);
           setTrainingStatus('');
           setTrainingStartTime(null);
@@ -2788,6 +3093,19 @@ export default function TrainingPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {showErrorModal && (
+        <TrainingErrorModal
+          errorTitle={trainingErrorTitle}
+          errorMessage={trainingErrorMessage}
+          errorDetails={trainingErrorDetails}
+          errorLogs={trainingErrorLogs}
+          configSnapshot={trainingErrorConfigSnapshot}
+          onClose={() => setShowErrorModal(false)}
+          gradient={currentTheme.colors.gradient}
+          primaryColor={currentTheme.colors.primary}
+        />
       )}
 
       {showRatingModal && rating && (
