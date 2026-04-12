@@ -21,7 +21,7 @@ mod laboratory_manager;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use database::{Database, get_database_path};
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 
 // GLOBAL DB STATE
 pub struct AppState {

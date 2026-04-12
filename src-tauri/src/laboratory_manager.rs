@@ -10,7 +10,6 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::io::{BufRead, BufReader};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use tauri::Manager;
