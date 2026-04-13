@@ -570,7 +570,30 @@ class Plugin(TrainPlugin):
             "encoder-decoder": TaskType.SEQ_2_SEQ_LM,
             "decoder":         TaskType.CAUSAL_LM,
         }
-        modules = cfg.lora_target_modules if cfg.lora_target_modules else LORA_MODULES[arch]
+        # cfg.lora_target_modules kommt aus Rust-Defaults ("q_proj", "v_proj") und ist daher
+        # immer gefüllt — auch wenn der User nichts explizit gesetzt hat.
+        # Wir validieren die Module gegen die tatsächlichen Layer-Namen des Modells.
+        # Sind sie nicht vorhanden, fallen wir automatisch auf die Architektur-Defaults zurück.
+        user_modules = cfg.lora_target_modules
+        arch_defaults = LORA_MODULES[arch]
+
+        if user_modules:
+            # Alle benannten Sub-Module des Modells sammeln
+            actual_names = {name for name, _ in self.model.named_modules()}
+            # Nur Module übernehmen die auch wirklich im Modell existieren
+            valid = [m for m in user_modules if any(m in n for n in actual_names)]
+            if valid:
+                modules = valid
+                MessageProtocol.status("loading", f"LoRA Module (User): {modules}")
+            else:
+                modules = arch_defaults
+                MessageProtocol.warning(
+                    f"LoRA target_modules {user_modules} nicht im Modell gefunden "
+                    f"(Architektur: {arch}) — verwende Architektur-Defaults: {arch_defaults}"
+                )
+        else:
+            modules = arch_defaults
+            MessageProtocol.status("loading", f"LoRA Module (Auto/{arch}): {modules}")
 
         # CRITICAL: enable_input_require_grads() MUSS vor get_peft_model() aufgerufen werden.
         # Ohne dies können Gradienten nicht durch gradient-checkpointed Basis-Schichten

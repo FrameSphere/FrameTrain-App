@@ -435,6 +435,7 @@ interface AIAssistantModalProps {
   selectedDataset: DatasetInfo | undefined;
   systemRamGb: number;
   requirements: RequirementsCheck | null;
+  prefilledContext?: string | null;
   onApply: (patch: Partial<TrainingConfig>) => void;
   onClose: () => void;
   gradient: string;
@@ -488,7 +489,7 @@ const PROVIDER_META: Record<AIProvider, {
 
 function AIAssistantModal({
   config, modelInfo, selectedModel, selectedDataset,
-  systemRamGb, requirements, onApply, onClose, gradient, primaryColor,
+  systemRamGb, requirements, prefilledContext, onApply, onClose, gradient, primaryColor,
 }: AIAssistantModalProps) {
   const [provider, setProvider] = useState<AIProvider>(
     () => (localStorage.getItem('ft_ai_provider') as AIProvider) || 'ollama'
@@ -500,7 +501,7 @@ function AIAssistantModal({
     return saved || PROVIDER_META.ollama.models[0];
   });
   const [ollamaStatus, setOllamaStatus] = useState<'unchecked' | 'ok' | 'error'>('unchecked');
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(prefilledContext || '');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>('');
   const [parsedConfig, setParsedConfig] = useState<Partial<TrainingConfig> | null>(null);
@@ -981,6 +982,7 @@ interface TrainingErrorModalProps {
   errorLogs: string[];
   configSnapshot: string;
   onClose: () => void;
+  onOpenAIWithError?: (errorContext: string) => void;
   gradient: string;
   primaryColor: string;
 }
@@ -992,6 +994,7 @@ function TrainingErrorModal({
   errorLogs,
   configSnapshot,
   onClose,
+  onOpenAIWithError,
   gradient,
   primaryColor,
 }: TrainingErrorModalProps) {
@@ -1245,10 +1248,23 @@ function TrainingErrorModal({
         </div>
 
         {/* Footer */}
-        <div className="p-5 border-t border-white/10 flex gap-3 flex-shrink-0">
+        <div className="p-5 border-t border-white/10 flex gap-3 flex-col flex-shrink-0">
+          {onOpenAIWithError && errorLogs && errorLogs.length > 0 && (
+            <button
+              onClick={() => {
+                const ctx = `FEHLER: ${errorTitle}\n\nMELDUNG: ${errorMessage}\n\nDETAILS:\n${errorDetails}\n\nLOGS:\n${errorLogs.join('\n')}\n\nAktuelle Config:\n${configSnapshot}`;
+                onClose();
+                onOpenAIWithError(ctx);
+              }}
+              className={`w-full py-3 bg-gradient-to-r ${gradient} rounded-xl text-white font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-2`}
+            >
+              <Sparkles className="w-4 h-4" />
+              Mit KI-Assistent analysieren & Parameter korrigieren
+            </button>
+          )}
           <button
             onClick={onClose}
-            className={`flex-1 py-3 bg-gradient-to-r ${gradient} rounded-xl text-white font-semibold hover:opacity-90 transition-all`}
+            className={`flex-1 py-3 bg-white/5 border border-white/10 rounded-xl text-white font-semibold hover:bg-white/10 transition-all`}
           >
             Schließen & Einstellungen anpassen
           </button>
@@ -2209,6 +2225,7 @@ export default function TrainingPanel() {
 
   // KI-Assistent State
   const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [aiPrefilledContext, setAiPrefilledContext] = useState<string | null>(null);
   const [aiSystemRamGb, setAiSystemRamGb] = useState(16);
   const [mainModelInfo, setMainModelInfo] = useState<ModelRamInfo | null>(null);
 
@@ -3752,6 +3769,7 @@ export default function TrainingPanel() {
           selectedDataset={selectedDataset}
           systemRamGb={aiSystemRamGb}
           requirements={requirements}
+          prefilledContext={aiPrefilledContext}
           onApply={(patch) => {
             setConfig(prev => ({ ...prev, ...patch }));
             setSelectedPresetId(null);
@@ -3770,6 +3788,11 @@ export default function TrainingPanel() {
           errorLogs={trainingErrorLogs}
           configSnapshot={trainingErrorConfigSnapshot}
           onClose={() => setShowErrorModal(false)}
+          onOpenAIWithError={(ctx) => {
+            setShowErrorModal(false);
+            setAiPrefilledContext(ctx);
+            setShowAIAssistant(true);
+          }}
           gradient={currentTheme.colors.gradient}
           primaryColor={currentTheme.colors.primary}
         />
