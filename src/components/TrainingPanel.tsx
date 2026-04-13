@@ -36,6 +36,7 @@ import {
   MemoryStick,
   SlidersHorizontal,
   ChevronUp,
+  Brain,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -422,6 +423,75 @@ function ToggleField({ label, checked, onChange, tooltip, primaryColor }: Toggle
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+// ============ Post-Training Modal ============
+
+interface PostTrainingModalProps {
+  versionId: string;
+  modelName: string;
+  metrics: { final_train_loss?: number; total_epochs?: number; training_duration_seconds?: number } | null;
+  onClose: () => void;
+  onGoToAnalysis: () => void;
+  gradient: string;
+  primaryColor: string;
+}
+
+function PostTrainingModal({ versionId, modelName, metrics, onClose, onGoToAnalysis, gradient, primaryColor }: PostTrainingModalProps) {
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg overflow-hidden">
+        <div className="p-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-8 h-8 text-green-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-1">Training abgeschlossen!</h2>
+          <p className="text-gray-400 mb-5">{modelName}</p>
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            {metrics?.final_train_loss !== undefined && (
+              <div className="bg-white/5 rounded-lg p-3">
+                <div className="text-xs text-gray-400 mb-0.5">Final Loss</div>
+                <div className="text-white font-bold">{metrics.final_train_loss.toFixed(4)}</div>
+              </div>
+            )}
+            {metrics?.total_epochs !== undefined && (
+              <div className="bg-white/5 rounded-lg p-3">
+                <div className="text-xs text-gray-400 mb-0.5">Epochen</div>
+                <div className="text-white font-bold">{metrics.total_epochs}</div>
+              </div>
+            )}
+            {metrics?.training_duration_seconds !== undefined && (
+              <div className="bg-white/5 rounded-lg p-3">
+                <div className="text-xs text-gray-400 mb-0.5">Dauer</div>
+                <div className="text-white font-bold text-sm">{
+                  metrics.training_duration_seconds > 3600
+                    ? `${Math.floor(metrics.training_duration_seconds/3600)}h ${Math.floor((metrics.training_duration_seconds%3600)/60)}m`
+                    : metrics.training_duration_seconds > 60
+                    ? `${Math.floor(metrics.training_duration_seconds/60)}m`
+                    : `${metrics.training_duration_seconds}s`
+                }</div>
+              </div>
+            )}
+          </div>
+          <div className="space-y-3">
+            <button
+              onClick={onGoToAnalysis}
+              className={`w-full py-3 bg-gradient-to-r ${gradient} rounded-xl text-white font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-2`}
+            >
+              <Brain className="w-5 h-5" />
+              Trainingsanalyse öffnen
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl text-gray-300 hover:text-white transition-all text-sm"
+            >
+              Schließen
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2158,7 +2228,7 @@ function LossChart({ history, primaryColor }: LossChartProps) {
 
 // ============ Main Component ============
 
-export default function TrainingPanel() {
+export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAnalysis?: (versionId: string | null) => void }) {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
 
@@ -2226,6 +2296,11 @@ export default function TrainingPanel() {
   // KI-Assistent State
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [aiPrefilledContext, setAiPrefilledContext] = useState<string | null>(null);
+
+  // Post-Training Modal State
+  const [showPostTrainingModal, setShowPostTrainingModal] = useState(false);
+  const [postTrainingVersionId, setPostTrainingVersionId] = useState<string | null>(null);
+  const [postTrainingMetrics, setPostTrainingMetrics] = useState<any>(null);
   const [aiSystemRamGb, setAiSystemRamGb] = useState(16);
   const [mainModelInfo, setMainModelInfo] = useState<ModelRamInfo | null>(null);
 
@@ -2362,6 +2437,13 @@ export default function TrainingPanel() {
           setTrainingStartTime(null);
           // Sleep-Prevention deaktivieren
           invoke('disable_prevent_sleep').then(() => setPreventSleep(false)).catch(() => {});
+          // Post-Training Modal triggern
+          if (event.payload?.new_version_id) {
+            const d = event.payload.data || event.payload;
+            setPostTrainingVersionId(event.payload.new_version_id);
+            setPostTrainingMetrics(d?.final_metrics || d || null);
+            setShowPostTrainingModal(true);
+          }
           loadTrainingHistory();
         })
       );
@@ -3759,6 +3841,21 @@ export default function TrainingPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {showPostTrainingModal && (
+        <PostTrainingModal
+          versionId={postTrainingVersionId || ''}
+          modelName={selectedModel?.name || ''}
+          metrics={postTrainingMetrics}
+          onClose={() => setShowPostTrainingModal(false)}
+          onGoToAnalysis={() => {
+            setShowPostTrainingModal(false);
+            onNavigateToAnalysis?.(postTrainingVersionId);
+          }}
+          gradient={currentTheme.colors.gradient}
+          primaryColor={currentTheme.colors.primary}
+        />
       )}
 
       {showAIAssistant && (

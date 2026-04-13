@@ -26,6 +26,7 @@ type View = 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('models');
+  const [initialAnalysisVersionId, setInitialAnalysisVersionId] = useState<string | null>(null);
   const { currentTheme } = useTheme();
 
   const renderView = () => {
@@ -33,11 +34,18 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
       case 'models':
         return <ModelManager />;
       case 'training':
-        return <TrainingPanel />;
+        return (
+          <TrainingPanel
+            onNavigateToAnalysis={(versionId) => {
+              setInitialAnalysisVersionId(versionId);
+              setCurrentView('analysis');
+            }}
+          />
+        );
       case 'dataset':
         return <DatasetUpload />;
       case 'analysis':
-        return <AnalysisPanel />;
+        return <AnalysisPanel initialVersionId={initialAnalysisVersionId} />;
       case 'tests':
         return <TestPanel />;
       case 'laboratory':

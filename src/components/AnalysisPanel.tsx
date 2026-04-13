@@ -1,51 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  BarChart3,
-  TrendingDown,
-  TrendingUp,
-  Activity,
-  Zap,
-  Target,
-  Clock,
-  Layers,
-  RefreshCw,
-  Loader2,
-  ChevronDown,
-  AlertCircle,
-  Info,
-  Download,
-  GitBranch,
-  CheckCircle,
-  XCircle,
-  FileText,
-  Award,
-  Brain,
+  BarChart3, TrendingDown, TrendingUp, Activity, Zap, Target, Clock, Layers,
+  RefreshCw, Loader2, ChevronDown, AlertCircle, Info, Download, GitBranch,
+  CheckCircle, XCircle, FileText, Award, Brain, Sparkles, MessageSquare,
+  Send, Trash2, RotateCcw, ChevronUp, Bot, User,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 
 // ============ Types ============
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  source: string;
-}
-
 interface ModelWithVersionTree {
   id: string;
   name: string;
   versions: VersionTreeItem[];
 }
-
 interface VersionTreeItem {
   id: string;
   name: string;
   is_root: boolean;
   version_number: number;
 }
-
 interface TrainingMetrics {
   id: string;
   version_id: string;
@@ -57,7 +33,6 @@ interface TrainingMetrics {
   training_duration_seconds: number | null;
   created_at: string;
 }
-
 interface LogEntry {
   epoch: number;
   step: number;
@@ -66,7 +41,6 @@ interface LogEntry {
   learning_rate: number;
   timestamp: string;
 }
-
 interface VersionDetails {
   id: string;
   model_id: string;
@@ -79,358 +53,279 @@ interface VersionDetails {
   is_root: boolean;
   parent_version_id: string | null;
 }
+interface AIAnalysisReport {
+  version_id: string;
+  report_text: string;
+  provider: string;
+  model: string;
+  generated_at: string;
+}
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
-// ============ Helper Functions ============
+// ============ AI Provider Config (same keys as TrainingPanel) ============
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+type AIProvider = 'anthropic' | 'openai' | 'groq' | 'ollama';
+
+const PROVIDER_META: Record<AIProvider, {
+  label: string; needsKey: boolean; defaultModel: string;
+  endpoint: string; authHeader: (key: string) => Record<string, string>;
+  buildBody: (model: string, messages: {role:string;content:string}[], system: string) => object;
+  extractText: (data: any) => string;
+}> = {
+  anthropic: {
+    label: 'Claude (Anthropic)', needsKey: true,
+    defaultModel: 'claude-sonnet-4-5',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    authHeader: (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' }),
+    buildBody: (model, messages, system) => ({ model, max_tokens: 4096, system, messages }),
+    extractText: (d) => d.content?.[0]?.text || '',
+  },
+  openai: {
+    label: 'GPT-4o (OpenAI)', needsKey: true,
+    defaultModel: 'gpt-4o',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
+    buildBody: (model, messages, system) => ({
+      model, max_tokens: 4096,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
+    extractText: (d) => d.choices?.[0]?.message?.content || '',
+  },
+  groq: {
+    label: 'Groq', needsKey: true,
+    defaultModel: 'llama-3.3-70b-versatile',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
+    buildBody: (model, messages, system) => ({
+      model, max_tokens: 4096,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
+    extractText: (d) => d.choices?.[0]?.message?.content || '',
+  },
+  ollama: {
+    label: 'Ollama (Lokal)', needsKey: false,
+    defaultModel: 'llama3.2',
+    endpoint: 'http://localhost:11434/api/chat',
+    authHeader: () => ({}),
+    buildBody: (model, messages, system) => ({
+      model, stream: false,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
+    extractText: (d) => d.message?.content || '',
+  },
+};
+
+async function callAI(
+  provider: AIProvider, apiKey: string, model: string,
+  messages: ChatMessage[], systemPrompt: string,
+): Promise<string> {
+  const meta = PROVIDER_META[provider];
+  const resp = await fetch(meta.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...meta.authHeader(apiKey) },
+    body: JSON.stringify(meta.buildBody(model, messages, systemPrompt)),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`API-Fehler (${resp.status}): ${err}`);
+  }
+  const data = await resp.json();
+  const text = meta.extractText(data);
+  if (!text) throw new Error('Leere Antwort vom KI-Modell');
+  return text;
+}
+
+// ============ Helpers ============
+
+function formatBytes(bytes: number) {
+  if (!bytes) return '0 B';
+  const k = 1024, sizes = ['B','KB','MB','GB','TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
-
-function formatDuration(seconds: number | null): string {
-  if (!seconds) return '-';
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${secs}s`;
-  } else {
-    return `${secs}s`;
-  }
+function formatDuration(s: number | null) {
+  if (!s) return '-';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('de-DE', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+// ============ Mini Charts ============
 
-// ============ Chart Components ============
-
-interface LineChartProps {
-  data: { x: number; y: number }[];
-  label: string;
-  color: string;
-  yLabel: string;
-  xLabel: string;
-}
-
-function LineChart({ data, label, color, yLabel, xLabel }: LineChartProps) {
-  if (data.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        <div className="text-center">
-          <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-50" />
-          <p>Keine Daten verfügbar</p>
+function LossChart({ logs, primaryColor }: { logs: LogEntry[]; primaryColor: string }) {
+  if (!logs.length) return null;
+  const trainData = logs.map((l, i) => ({ x: i, y: l.train_loss }));
+  const valData = logs.filter(l => l.val_loss !== null).map((l, i) => ({ x: i, y: l.val_loss! }));
+  const all = [...trainData, ...valData];
+  const maxY = Math.max(...all.map(d => d.y));
+  const minY = Math.min(...all.map(d => d.y));
+  const rangeY = maxY - minY || 1;
+  const getX = (i: number) => (i / Math.max(all.length - 1, 1)) * 100;
+  const getY = (y: number) => 100 - (((y - minY) / rangeY) * 80 + 10);
+  const tPoints = trainData.map(d => `${getX(d.x)},${getY(d.y)}`).join(' ');
+  const vPoints = valData.map(d => `${getX(d.x)},${getY(d.y)}`).join(' ');
+  return (
+    <div className="bg-white/5 rounded-xl border border-white/10 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium text-gray-300">Loss-Verlauf</span>
+        <div className="flex items-center gap-4 text-xs text-gray-400">
+          <div className="flex items-center gap-1"><div className="w-3 h-0.5 bg-blue-400" /><span>Train</span></div>
+          {valData.length > 0 && <div className="flex items-center gap-1"><div className="w-3 h-0.5 bg-emerald-400" /><span>Val</span></div>}
         </div>
       </div>
-    );
-  }
+      <svg viewBox="0 0 100 100" className="w-full h-40" preserveAspectRatio="none">
+        {[10,32,55,77,90].map(y => <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="rgba(255,255,255,0.07)" strokeWidth="0.5" />)}
+        <polyline points={tPoints} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        {valData.length > 0 && <polyline points={vPoints} fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+      </svg>
+      <div className="flex justify-between text-xs text-gray-500 mt-1">
+        <span>Schritt 1</span><span>Schritt {logs.length}</span>
+      </div>
+    </div>
+  );
+}
 
+function LrChart({ logs }: { logs: LogEntry[] }) {
+  if (!logs.length || !logs.some(l => l.learning_rate > 0)) return null;
+  const data = logs.map((l, i) => ({ x: i, y: l.learning_rate }));
   const maxY = Math.max(...data.map(d => d.y));
   const minY = Math.min(...data.map(d => d.y));
   const rangeY = maxY - minY || 1;
-  const maxX = Math.max(...data.map(d => d.x));
-  const minX = Math.min(...data.map(d => d.x));
-  const rangeX = maxX - minX || 1;
-
-  const getX = (x: number) => ((x - minX) / rangeX) * 100;
+  const getX = (i: number) => (i / Math.max(data.length - 1, 1)) * 100;
   const getY = (y: number) => 100 - (((y - minY) / rangeY) * 80 + 10);
-
   const points = data.map(d => `${getX(d.x)},${getY(d.y)}`).join(' ');
-
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium text-gray-300">{label}</h4>
-        <div className="flex items-center gap-2 text-xs text-gray-400">
-          <div className="w-3 h-0.5" style={{ backgroundColor: color }} />
-          <span>{yLabel}</span>
-        </div>
+    <div className="bg-white/5 rounded-xl border border-white/10 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium text-gray-300">Learning Rate</span>
+        <div className="flex items-center gap-1 text-xs text-gray-400"><div className="w-3 h-0.5 bg-amber-400" /><span>LR</span></div>
       </div>
-      
-      <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-        <svg viewBox="0 0 100 100" className="w-full h-48" preserveAspectRatio="none">
-          {/* Grid lines */}
-          <line x1="0" y1="10" x2="100" y2="10" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-          <line x1="0" y1="32.5" x2="100" y2="32.5" stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
-          <line x1="0" y1="55" x2="100" y2="55" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-          <line x1="0" y1="77.5" x2="100" y2="77.5" stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
-          <line x1="0" y1="90" x2="100" y2="90" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-
-          {/* Data line */}
-          <polyline
-            points={points}
-            fill="none"
-            stroke={color}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* Data points */}
-          {data.map((d, i) => (
-            <circle
-              key={i}
-              cx={getX(d.x)}
-              cy={getY(d.y)}
-              r="1.5"
-              fill={color}
-            />
-          ))}
-        </svg>
-        
-        <div className="flex justify-between text-xs text-gray-500 mt-2">
-          <span>{xLabel}: {minX.toFixed(0)}</span>
-          <span>{xLabel}: {maxX.toFixed(0)}</span>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 text-xs">
-        <div className="text-center p-2 bg-white/5 rounded-lg">
-          <div className="text-gray-400">Min</div>
-          <div className="text-white font-medium">{minY.toFixed(4)}</div>
-        </div>
-        <div className="text-center p-2 bg-white/5 rounded-lg">
-          <div className="text-gray-400">Max</div>
-          <div className="text-white font-medium">{maxY.toFixed(4)}</div>
-        </div>
-        <div className="text-center p-2 bg-white/5 rounded-lg">
-          <div className="text-gray-400">Final</div>
-          <div className="text-white font-medium">{data[data.length - 1]?.y.toFixed(4) || '-'}</div>
-        </div>
-      </div>
+      <svg viewBox="0 0 100 100" className="w-full h-32" preserveAspectRatio="none">
+        {[10,55,90].map(y => <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="rgba(255,255,255,0.07)" strokeWidth="0.5" />)}
+        <polyline points={points} fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </div>
   );
 }
 
-interface DualLineChartProps {
-  trainData: { x: number; y: number }[];
-  valData: { x: number; y: number }[];
-  label: string;
-  trainColor: string;
-  valColor: string;
-  yLabel: string;
-  xLabel: string;
-}
+// ============ Report Renderer ============
 
-function DualLineChart({ trainData, valData, label, trainColor, valColor, yLabel, xLabel }: DualLineChartProps) {
-  if (trainData.length === 0 && valData.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        <div className="text-center">
-          <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-50" />
-          <p>Keine Daten verfügbar</p>
-        </div>
-      </div>
-    );
-  }
-
-  const allData = [...trainData, ...valData];
-  const maxY = Math.max(...allData.map(d => d.y));
-  const minY = Math.min(...allData.map(d => d.y));
-  const rangeY = maxY - minY || 1;
-  const maxX = Math.max(...allData.map(d => d.x));
-  const minX = Math.min(...allData.map(d => d.x));
-  const rangeX = maxX - minX || 1;
-
-  const getX = (x: number) => ((x - minX) / rangeX) * 100;
-  const getY = (y: number) => 100 - (((y - minY) / rangeY) * 80 + 10);
-
-  const trainPoints = trainData.map(d => `${getX(d.x)},${getY(d.y)}`).join(' ');
-  const valPoints = valData.map(d => `${getX(d.x)},${getY(d.y)}`).join(' ');
-
+function ReportText({ text }: { text: string }) {
+  // Simple markdown-like rendering: ##, **, *, bullets
+  const lines = text.split('\n');
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium text-gray-300">{label}</h4>
-        <div className="flex items-center gap-4 text-xs text-gray-400">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-0.5" style={{ backgroundColor: trainColor }} />
-            <span>Train</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-0.5" style={{ backgroundColor: valColor }} />
-            <span>Validation</span>
-          </div>
-        </div>
-      </div>
-      
-      <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-        <svg viewBox="0 0 100 100" className="w-full h-48" preserveAspectRatio="none">
-          {/* Grid lines */}
-          <line x1="0" y1="10" x2="100" y2="10" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-          <line x1="0" y1="32.5" x2="100" y2="32.5" stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
-          <line x1="0" y1="55" x2="100" y2="55" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-          <line x1="0" y1="77.5" x2="100" y2="77.5" stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
-          <line x1="0" y1="90" x2="100" y2="90" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-
-          {/* Train line */}
-          {trainPoints && (
-            <polyline
-              points={trainPoints}
-              fill="none"
-              stroke={trainColor}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-
-          {/* Val line */}
-          {valPoints && (
-            <polyline
-              points={valPoints}
-              fill="none"
-              stroke={valColor}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-
-          {/* Train points */}
-          {trainData.map((d, i) => (
-            <circle
-              key={`train-${i}`}
-              cx={getX(d.x)}
-              cy={getY(d.y)}
-              r="1.5"
-              fill={trainColor}
-            />
-          ))}
-
-          {/* Val points */}
-          {valData.map((d, i) => (
-            <circle
-              key={`val-${i}`}
-              cx={getX(d.x)}
-              cy={getY(d.y)}
-              r="1.5"
-              fill={valColor}
-            />
-          ))}
-        </svg>
-        
-        <div className="flex justify-between text-xs text-gray-500 mt-2">
-          <span>{xLabel}: {minX.toFixed(0)}</span>
-          <span>{xLabel}: {maxX.toFixed(0)}</span>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          <div className="text-xs text-gray-400 font-medium">Train Loss</div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="text-center p-2 bg-white/5 rounded-lg">
-              <div className="text-gray-400">Final</div>
-              <div className="text-white font-medium">{trainData[trainData.length - 1]?.y.toFixed(4) || '-'}</div>
+    <div className="space-y-1 text-sm leading-relaxed">
+      {lines.map((line, i) => {
+        if (line.startsWith('## ')) return <h3 key={i} className="text-base font-bold text-white mt-4 mb-1">{line.slice(3)}</h3>;
+        if (line.startsWith('# ')) return <h2 key={i} className="text-lg font-bold text-white mt-4 mb-2">{line.slice(2)}</h2>;
+        if (line.startsWith('### ')) return <h4 key={i} className="text-sm font-semibold text-purple-300 mt-3 mb-1">{line.slice(4)}</h4>;
+        if (line.startsWith('- ') || line.startsWith('* ')) {
+          return (
+            <div key={i} className="flex items-start gap-2">
+              <span className="text-purple-400 mt-1 flex-shrink-0">•</span>
+              <span className="text-gray-300" dangerouslySetInnerHTML={{ __html: line.slice(2).replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />
             </div>
-            <div className="text-center p-2 bg-white/5 rounded-lg">
-              <div className="text-gray-400">Best</div>
-              <div className="text-white font-medium">{Math.min(...trainData.map(d => d.y)).toFixed(4)}</div>
-            </div>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <div className="text-xs text-gray-400 font-medium">Val Loss</div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="text-center p-2 bg-white/5 rounded-lg">
-              <div className="text-gray-400">Final</div>
-              <div className="text-white font-medium">{valData[valData.length - 1]?.y.toFixed(4) || '-'}</div>
-            </div>
-            <div className="text-center p-2 bg-white/5 rounded-lg">
-              <div className="text-gray-400">Best</div>
-              <div className="text-white font-medium">{valData.length > 0 ? Math.min(...valData.map(d => d.y)).toFixed(4) : '-'}</div>
-            </div>
-          </div>
-        </div>
-      </div>
+          );
+        }
+        if (!line.trim()) return <div key={i} className="h-2" />;
+        return <p key={i} className="text-gray-300" dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />;
+      })}
     </div>
   );
+}
+
+// ============ Props ============
+
+interface AnalysisPanelProps {
+  initialVersionId?: string | null;
+  onNavigateToTraining?: () => void;
 }
 
 // ============ Main Component ============
 
-export default function AnalysisPanel() {
+export default function AnalysisPanel({ initialVersionId, onNavigateToTraining }: AnalysisPanelProps) {
   const { currentTheme } = useTheme();
-  const { success, error, info } = useNotification();
+  const { success, error: notifyError, info } = useNotification();
 
-  // Data State
+  // Data
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Selection State
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-
-  // Analysis Data State
   const [metrics, setMetrics] = useState<TrainingMetrics | null>(null);
   const [versionDetails, setVersionDetails] = useState<VersionDetails | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
-  // ============ Load Data ============
-  useEffect(() => {
-    loadModels();
-  }, []);
+  // AI Provider (reads same localStorage as TrainingPanel AIAssistantModal)
+  const [provider, setProvider] = useState<AIProvider>(
+    () => (localStorage.getItem('ft_ai_provider') as AIProvider) || 'ollama'
+  );
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('ft_ai_api_key') || '');
+  const [aiModel, setAiModel] = useState(() => {
+    const saved = localStorage.getItem('ft_ai_model');
+    return saved || PROVIDER_META.ollama.defaultModel;
+  });
+
+  // AI Analysis State
+  const [report, setReport] = useState<AIAnalysisReport | null>(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [showProviderSettings, setShowProviderSettings] = useState(false);
+
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // ============ Load ============
+
+  useEffect(() => { loadModels(); }, []);
 
   useEffect(() => {
-    if (selectedModelId) {
-      const model = modelsWithVersions.find(m => m.id === selectedModelId);
-
-      if (model && model.versions.length > 0) {
-        // ✨ Neue Logik: Neueste Version automatisch wählen
-        const sortedVersions = [...model.versions].sort(
-          (a, b) => b.version_number - a.version_number
-        );
-
-        const newestVersion = sortedVersions[0];
-        setSelectedVersionId(newestVersion?.id || null);
-      } else {
-        setSelectedVersionId(null);
-      }
-
-    } else {
-      setSelectedVersionId(null);
-    }
+    if (!selectedModelId) { setSelectedVersionId(null); return; }
+    const model = modelsWithVersions.find(m => m.id === selectedModelId);
+    if (!model?.versions.length) { setSelectedVersionId(null); return; }
+    const sorted = [...model.versions].sort((a, b) => b.version_number - a.version_number);
+    setSelectedVersionId(sorted[0].id);
   }, [selectedModelId, modelsWithVersions]);
 
   useEffect(() => {
-    if (selectedVersionId) {
-      loadAnalysisData();
-    } else {
-      setMetrics(null);
-      setVersionDetails(null);
-      setLogs([]);
-    }
+    if (selectedVersionId) { loadAnalysisData(); }
+    else { setMetrics(null); setVersionDetails(null); setLogs([]); setReport(null); setChatMessages([]); }
   }, [selectedVersionId]);
+
+  useEffect(() => {
+    if (initialVersionId && modelsWithVersions.length > 0) {
+      // Find which model this version belongs to
+      for (const m of modelsWithVersions) {
+        if (m.versions.some(v => v.id === initialVersionId)) {
+          setSelectedModelId(m.id);
+          setSelectedVersionId(initialVersionId);
+          break;
+        }
+      }
+    }
+  }, [initialVersionId, modelsWithVersions]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const loadModels = async () => {
     try {
       setLoading(true);
-      const modelList = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree');
-      setModelsWithVersions(modelList);
-      
-      if (modelList.length > 0) {
-        setSelectedModelId(modelList[0].id);
-      }
-    } catch (err: any) {
-      console.error('Error loading models:', err);
-      error('Fehler beim Laden', String(err));
+      const list = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree');
+      setModelsWithVersions(list);
+      if (list.length > 0) setSelectedModelId(list[0].id);
+    } catch (e: any) {
+      notifyError('Fehler beim Laden', String(e));
     } finally {
       setLoading(false);
     }
@@ -438,803 +333,490 @@ export default function AnalysisPanel() {
 
   const loadAnalysisData = async () => {
     if (!selectedVersionId) return;
-
+    setLoadingAnalysis(true);
     try {
-      setLoadingAnalysis(true);
-
-      // Load metrics
+      try { setMetrics(await invoke<TrainingMetrics>('get_training_metrics', { versionId: selectedVersionId })); }
+      catch { setMetrics(null); }
+      try { setVersionDetails(await invoke<VersionDetails>('get_version_details', { versionId: selectedVersionId })); }
+      catch { setVersionDetails(null); }
+      try { setLogs(await invoke<LogEntry[]>('get_training_logs', { versionId: selectedVersionId })); }
+      catch { setLogs([]); }
       try {
-        const metricsData = await invoke<TrainingMetrics>('get_training_metrics', {
-          versionId: selectedVersionId,
-        });
-        setMetrics(metricsData);
-      } catch (err) {
-        console.log('No metrics found for this version');
-        setMetrics(null);
-      }
-
-      // Load version details
-      try {
-        const details = await invoke<VersionDetails>('get_version_details', {
-          versionId: selectedVersionId,
-        });
-        setVersionDetails(details);
-      } catch (err) {
-        console.error('Error loading version details:', err);
-      }
-
-      // Load logs (try to read from file system)
-      try {
-        const logsData = await invoke<LogEntry[]>('get_training_logs', {
-          versionId: selectedVersionId,
-        });
-        setLogs(logsData);
-      } catch (err) {
-        console.log('No logs found for this version');
-        setLogs([]);
-      }
-
-    } catch (err: any) {
-      console.error('Error loading analysis data:', err);
-      error('Fehler beim Laden der Analyse', String(err));
+        const r = await invoke<AIAnalysisReport | null>('get_ai_analysis_report', { versionId: selectedVersionId });
+        setReport(r);
+        if (r) setChatMessages([{ role: 'assistant', content: r.report_text }]);
+        else setChatMessages([]);
+      } catch { setReport(null); setChatMessages([]); }
     } finally {
       setLoadingAnalysis(false);
     }
   };
 
-  const handleExportReport = async () => {
-    if (!metrics || !selectedVersionId) return;
+  // ============ AI Analysis ============
 
+  function buildAnalysisContext() {
+    const modelName = modelsWithVersions.find(m => m.id === selectedModelId)?.name || 'Unbekannt';
+    const vname = versionDetails?.version_name || selectedVersionId || '';
+    const logSummary = logs.length > 0
+      ? `Erster Train-Loss: ${logs[0]?.train_loss.toFixed(4)}, Letzter: ${logs[logs.length-1]?.train_loss.toFixed(4)}, Steps: ${logs.length}`
+      : 'Keine detaillierten Logs verfügbar';
+    const valInfo = metrics?.final_val_loss
+      ? `Validation Loss: ${metrics.final_val_loss.toFixed(4)}`
+      : 'Kein Validierungsdatensatz';
+    const overfitInfo = (() => {
+      if (!logs.length || !metrics?.final_val_loss) return '';
+      const gap = ((metrics.final_val_loss - metrics.final_train_loss) / metrics.final_train_loss) * 100;
+      return ` | Overfitting-Gap: ${gap.toFixed(1)}%`;
+    })();
+    return `
+Modell: ${modelName} | Version: ${vname}
+Trainingsergebnisse:
+- Final Train Loss: ${metrics?.final_train_loss.toFixed(6)}
+- ${valInfo}${overfitInfo}
+- Epochen: ${metrics?.total_epochs} | Steps: ${metrics?.total_steps}
+- Dauer: ${formatDuration(metrics?.training_duration_seconds || null)}
+- Beste Epoche: ${metrics?.best_epoch || 'N/A'}
+- Logs: ${logSummary}
+${logs.length > 0 ? `\nVerlauf (erste 5): ${logs.slice(0,5).map(l=>`E${l.epoch}/S${l.step}: loss=${l.train_loss.toFixed(4)}`).join(', ')}` : ''}
+${logs.length > 5 ? `Verlauf (letzte 5): ${logs.slice(-5).map(l=>`E${l.epoch}/S${l.step}: loss=${l.train_loss.toFixed(4)}`).join(', ')}` : ''}
+    `.trim();
+  }
+
+  const ANALYSIS_SYSTEM_PROMPT = `Du bist ein Experte für Machine Learning und Modell-Training. 
+Analysiere die Trainingsdaten präzise und strukturiert auf Deutsch.
+Deine Analyse soll folgende Abschnitte enthalten:
+## 🎯 Gesamtbewertung
+## ✅ Was lief gut
+## ⚠️ Probleme & Schwächen  
+## 💡 Verbesserungsvorschläge
+## 🔧 Empfohlene Parameter für das nächste Training
+
+Sei konkret, nenne echte Zahlenwerte aus den Daten, und gib klare Handlungsempfehlungen.`;
+
+  const runAIAnalysis = async (regenerate = false) => {
+    if (!selectedVersionId || !metrics) return;
+    const meta = PROVIDER_META[provider];
+    if (meta.needsKey && !apiKey.trim()) {
+      notifyError('API-Key fehlt', `Bitte trage deinen ${meta.label}-Key in den Einstellungen ein.`);
+      setShowProviderSettings(true);
+      return;
+    }
+    setGeneratingReport(true);
     try {
-      // Create report data
-      const report = {
+      const ctx = buildAnalysisContext();
+      const text = await callAI(
+        provider, apiKey, aiModel,
+        [{ role: 'user', content: `Analysiere folgendes Training:\n\n${ctx}` }],
+        ANALYSIS_SYSTEM_PROMPT,
+      );
+      const newReport: AIAnalysisReport = {
         version_id: selectedVersionId,
-        version_name: versionDetails?.version_name,
-        model_name: modelsWithVersions.find(m => m.id === selectedModelId)?.name,
-        metrics: metrics,
-        logs: logs,
+        report_text: text,
+        provider,
+        model: aiModel,
         generated_at: new Date().toISOString(),
       };
-
-      // Convert to JSON
-      const jsonContent = JSON.stringify(report, null, 2);
-      
-      // Create blob and download
-      const blob = new Blob([jsonContent], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `training_report_${versionDetails?.version_name || selectedVersionId}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      success('Report exportiert', 'Die Datei wurde in deinem Downloads-Ordner gespeichert.');
-    } catch (err: any) {
-      error('Export fehlgeschlagen', String(err));
+      await invoke('save_ai_analysis_report', {
+        versionId: selectedVersionId,
+        reportText: text,
+        provider,
+        model: aiModel,
+      });
+      setReport(newReport);
+      setChatMessages([{ role: 'assistant', content: text }]);
+      setShowChat(true);
+      success('Analyse gespeichert', 'KI-Analyse wurde erstellt und gespeichert.');
+    } catch (e: any) {
+      notifyError('Analyse fehlgeschlagen', String(e));
+    } finally {
+      setGeneratingReport(false);
     }
+  };
+
+  const deleteReport = async () => {
+    if (!selectedVersionId) return;
+    try {
+      await invoke('delete_ai_analysis_report', { versionId: selectedVersionId });
+      setReport(null);
+      setChatMessages([]);
+      setShowChat(false);
+      info('Analyse gelöscht', '');
+    } catch (e: any) {
+      notifyError('Fehler', String(e));
+    }
+  };
+
+  // ============ Chat ============
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading || !report) return;
+    const meta = PROVIDER_META[provider];
+    if (meta.needsKey && !apiKey.trim()) {
+      notifyError('API-Key fehlt', `${meta.label}-Key benötigt.`);
+      return;
+    }
+    const userMsg: ChatMessage = { role: 'user', content: chatInput.trim() };
+    const updatedMessages = [...chatMessages, userMsg];
+    setChatMessages(updatedMessages);
+    setChatInput('');
+    setChatLoading(true);
+    try {
+      const ctx = buildAnalysisContext();
+      const systemPrompt = `${ANALYSIS_SYSTEM_PROMPT}\n\nDu hast bereits folgende Analyse erstellt:\n${report.report_text}\n\nTrainingsdaten zur Referenz:\n${ctx}\n\nBeantworte nun Folgefragen des Users konkret und hilfreich.`;
+      const reply = await callAI(provider, apiKey, aiModel, updatedMessages, systemPrompt);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Fehler: ${String(e)}` }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!metrics || !selectedVersionId) return;
+    const blob = new Blob([JSON.stringify({ metrics, logs, report, version: versionDetails, exported_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `training_report_${versionDetails?.version_name || selectedVersionId}.json`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    success('Report exportiert', '');
   };
 
   // ============ Render ============
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
-      </div>
-    );
-  }
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 text-gray-400 animate-spin" /></div>;
 
-  if (modelsWithVersions.length === 0) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Analyse</h1>
-          <p className="text-gray-400 mt-1">Analysiere deine Modell-Performance</p>
-        </div>
-        <div className="bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/5 mb-4">
-            <Layers className="w-8 h-8 text-gray-400" />
-          </div>
-          <h3 className="text-xl font-semibold text-white mb-2">Kein Modell vorhanden</h3>
-          <p className="text-gray-400">
-            Füge zuerst ein Modell hinzu und trainiere es, um die Analyse zu nutzen.
-          </p>
-        </div>
+  if (!modelsWithVersions.length) return (
+    <div className="space-y-6">
+      <h1 className="text-3xl font-bold text-white">Analyse</h1>
+      <div className="bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
+        <Layers className="w-12 h-12 text-gray-400 mx-auto mb-4 opacity-50" />
+        <h3 className="text-xl font-semibold text-white mb-2">Kein Modell vorhanden</h3>
+        <p className="text-gray-400">Trainiere zunächst ein Modell, um die Analyse zu nutzen.</p>
       </div>
-    );
-  }
+    </div>
+  );
 
   const selectedModel = modelsWithVersions.find(m => m.id === selectedModelId);
   const selectedVersion = selectedModel?.versions.find(v => v.id === selectedVersionId);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-10">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Analyse</h1>
-          <p className="text-gray-400 mt-1">Detaillierte Trainings-Metriken und Performance-Analyse</p>
+          <h1 className="text-3xl font-bold text-white">Trainingsanalyse</h1>
+          <p className="text-gray-400 mt-1">Metriken, Graphiken & KI-gestützte Auswertung</p>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Export Button */}
+        <div className="flex items-center gap-2">
           {metrics && (
-            <button
-              onClick={handleExportReport}
-              className={`flex items-center gap-2 px-4 py-2 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white font-medium hover:opacity-90 transition-all`}
-            >
-              <Download className="w-4 h-4" />
-              Report exportieren
+            <button onClick={handleExport} className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 hover:text-white transition-all text-sm border border-white/10">
+              <Download className="w-4 h-4" />Export
             </button>
           )}
-
-          {/* Refresh Button */}
-          <button
-            onClick={loadAnalysisData}
-            disabled={!selectedVersionId || loadingAnalysis}
-            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all disabled:opacity-50"
-            title="Aktualisieren"
-          >
+          <button onClick={loadAnalysisData} disabled={!selectedVersionId || loadingAnalysis}
+            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all disabled:opacity-50">
             <RefreshCw className={`w-5 h-5 ${loadingAnalysis ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
       {/* Model & Version Selection */}
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Layers className="w-5 h-5" />
-          Modell & Version auswählen
-        </h2>
+      <div className="bg-white/5 rounded-xl border border-white/10 p-5">
         <div className="grid grid-cols-2 gap-4">
-          {/* Model Selector */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Root-Modell</label>
+            <label className="block text-xs text-gray-400 mb-1.5">Modell</label>
             <div className="relative">
-              <select
-                value={selectedModelId || ''}
-                onChange={(e) => setSelectedModelId(e.target.value)}
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 transition-all"
-                style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
-              >
-                {modelsWithVersions.map((model) => (
-                  <option key={model.id} value={model.id} className="bg-slate-800">
-                    {model.name}
-                  </option>
-                ))}
+              <select value={selectedModelId || ''} onChange={e => setSelectedModelId(e.target.value)}
+                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm appearance-none focus:outline-none">
+                {modelsWithVersions.map(m => <option key={m.id} value={m.id} className="bg-slate-800">{m.name}</option>)}
               </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
           </div>
-
-          {/* Version Selector */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2 flex items-center gap-2">
-              <GitBranch className="w-4 h-4" />
-              Modell-Version
-            </label>
+            <label className="block text-xs text-gray-400 mb-1.5 flex items-center gap-1"><GitBranch className="w-3 h-3" />Version</label>
             <div className="relative">
-              <select
-                value={selectedVersionId || ''}
-                onChange={(e) => setSelectedVersionId(e.target.value)}
-                disabled={!selectedModel || selectedModel.versions.length === 0}
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 disabled:opacity-50 transition-all"
-                style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
-              >
-                {selectedModel && selectedModel.versions.length > 0 ? (
-                  selectedModel.versions.map((version) => (
-                    <option key={version.id} value={version.id} className="bg-slate-800">
-                      {version.is_root ? '⭐ ' : ''}{version.name}
-                      {version.is_root ? ' (Original)' : ` (v${version.version_number})`}
-                    </option>
-                  ))
-                ) : (
-                  <option value="" className="bg-slate-800">Keine Versionen verfügbar</option>
-                )}
+              <select value={selectedVersionId || ''} onChange={e => setSelectedVersionId(e.target.value)}
+                disabled={!selectedModel?.versions.length}
+                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm appearance-none focus:outline-none disabled:opacity-50">
+                {selectedModel?.versions.map(v => (
+                  <option key={v.id} value={v.id} className="bg-slate-800">
+                    {v.is_root ? '⭐ ' : ''}{v.name}{v.is_root ? ' (Original)' : ` (v${v.version_number})`}
+                  </option>
+                )) || <option value="">Keine Versionen</option>}
               </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Loading State */}
       {loadingAnalysis && (
         <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 text-purple-400 animate-spin mx-auto mb-4" />
-            <p className="text-gray-400">Lade Analyse-Daten...</p>
-          </div>
+          <Loader2 className="w-10 h-10 text-purple-400 animate-spin" />
         </div>
       )}
 
-      {/* No Data State */}
       {!loadingAnalysis && selectedVersionId && !metrics && (
         <div className="bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-500/20 mb-4">
-            <AlertCircle className="w-8 h-8 text-amber-400" />
-          </div>
-          <h3 className="text-xl font-semibold text-white mb-2">Keine Trainings-Daten</h3>
-          <p className="text-gray-400 mb-4">
-            Diese Version wurde noch nicht trainiert oder die Metriken sind nicht verfügbar.
-          </p>
-          <p className="text-sm text-gray-500">
-            Starte ein Training auf der Training-Seite, um Metriken zu sammeln.
-          </p>
+          <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-white mb-1">Keine Trainingsdaten</h3>
+          <p className="text-gray-400 text-sm">Diese Version wurde noch nicht trainiert.</p>
         </div>
       )}
 
-      {/* Analysis Content */}
       {!loadingAnalysis && metrics && (
         <div className="space-y-6">
-          {/* Overview Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Training Status */}
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Status</h3>
-                <CheckCircle className="w-5 h-5 text-green-400" />
+          {/* ── Metriken-Karten ── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { label: 'Final Train Loss', value: metrics.final_train_loss.toFixed(4), sub: `Val: ${metrics.final_val_loss?.toFixed(4) || 'N/A'}`, icon: <TrendingDown className="w-5 h-5 text-blue-400" /> },
+              { label: 'Epochen', value: String(metrics.total_epochs), sub: `${metrics.total_steps.toLocaleString()} Steps`, icon: <Activity className="w-5 h-5 text-purple-400" /> },
+              { label: 'Dauer', value: formatDuration(metrics.training_duration_seconds), sub: metrics.best_epoch ? `Best: Epoch ${metrics.best_epoch}` : '', icon: <Clock className="w-5 h-5 text-yellow-400" /> },
+              { label: 'Status', value: 'Abgeschlossen', sub: formatDate(metrics.created_at), icon: <CheckCircle className="w-5 h-5 text-green-400" /> },
+            ].map((c, i) => (
+              <div key={i} className="bg-white/5 rounded-xl border border-white/10 p-4">
+                <div className="flex items-center justify-between mb-2">{c.icon}<span className="text-xs text-gray-400">{c.label}</span></div>
+                <div className="text-xl font-bold text-white">{c.value}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{c.sub}</div>
               </div>
-              <div className="text-2xl font-bold text-white mb-1">Abgeschlossen</div>
-              <div className="text-xs text-gray-500">{formatDate(metrics.created_at)}</div>
-            </div>
-
-            {/* Final Loss */}
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Final Loss</h3>
-                <TrendingDown className="w-5 h-5 text-blue-400" />
-              </div>
-              <div className="text-2xl font-bold text-white mb-1">
-                {metrics.final_train_loss.toFixed(4)}
-              </div>
-              <div className="text-xs text-gray-500">
-                Train • Val: {metrics.final_val_loss?.toFixed(4) || 'N/A'}
-              </div>
-            </div>
-
-            {/* Total Epochs */}
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Epochen</h3>
-                <Activity className="w-5 h-5 text-purple-400" />
-              </div>
-              <div className="text-2xl font-bold text-white mb-1">{metrics.total_epochs}</div>
-              <div className="text-xs text-gray-500">
-                {metrics.total_steps.toLocaleString()} Steps
-              </div>
-            </div>
-
-            {/* Duration */}
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-              <div className="text-xs text-gray-500"><h3>Dauer</h3>
-                <Clock className="w-5 h-5 text-yellow-400" />
-                </div>
-              </div>
-              <div className="text-2xl font-bold text-white mb-1">
-                {formatDuration(metrics.training_duration_seconds)}
-              </div>
-              <div className="text-xs text-gray-500">
-                {metrics.best_epoch ? `Best: Epoch ${metrics.best_epoch}` : 'Training completed'}
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* Version Info Card */}
-          {versionDetails && (
-            <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Info className="w-5 h-5" />
-                Versions-Informationen
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <div className="text-gray-400 mb-1">Version</div>
-                  <div className="text-white font-medium">{versionDetails.version_name}</div>
-                </div>
-                <div>
-                  <div className="text-gray-400 mb-1">Größe</div>
-                  <div className="text-white font-medium">{formatBytes(versionDetails.size_bytes)}</div>
-                </div>
-                <div>
-                  <div className="text-gray-400 mb-1">Dateien</div>
-                  <div className="text-white font-medium">{versionDetails.file_count}</div>
-                </div>
-                <div>
-                  <div className="text-gray-400 mb-1">Erstellt</div>
-                  <div className="text-white font-medium">{formatDate(versionDetails.created_at)}</div>
-                </div>
-              </div>
-              <div className="mt-4 p-3 bg-white/5 rounded-lg">
-                <div className="text-xs text-gray-400 mb-1">Pfad</div>
-                <div className="text-xs text-gray-300 font-mono truncate" title={versionDetails.path}>
-                  {versionDetails.path}
-                </div>
-              </div>
+          {/* ── Graphiken ── */}
+          {logs.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <LossChart logs={logs} primaryColor={currentTheme.colors.primary} />
+              <LrChart logs={logs} />
             </div>
           )}
 
-          {/* Loss Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Loss over Epochs */}
-            {logs.length > 0 && (
-              <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-                <DualLineChart
-                  trainData={logs.map(l => ({ x: l.epoch, y: l.train_loss }))}
-                  valData={logs.filter(l => l.val_loss !== null).map(l => ({ x: l.epoch, y: l.val_loss! }))}
-                  label="Loss über Epochen"
-                  trainColor="#3b82f6"
-                  valColor="#10b981"
-                  yLabel="Loss"
-                  xLabel="Epoche"
-                />
-              </div>
-            )}
-
-            {/* Loss over Steps */}
-            {logs.length > 0 && (
-              <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-                <DualLineChart
-                  trainData={logs.map(l => ({ x: l.step, y: l.train_loss }))}
-                  valData={logs.filter(l => l.val_loss !== null).map(l => ({ x: l.step, y: l.val_loss! }))}
-                  label="Loss über Steps"
-                  trainColor="#8b5cf6"
-                  valColor="#ec4899"
-                  yLabel="Loss"
-                  xLabel="Step"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Learning Rate Schedule */}
-          {logs.length > 0 && logs.some(l => l.learning_rate > 0) && (
-            <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-              <LineChart
-                data={logs.map(l => ({ x: l.step, y: l.learning_rate }))}
-                label="Learning Rate Schedule"
-                color="#f59e0b"
-                yLabel="Learning Rate"
-                xLabel="Step"
-              />
-            </div>
-          )}
-
-          {/* Performance Metrics */}
-          <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Target className="w-5 h-5" />
-              Performance Metriken
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {/* Training Loss Improvement */}
-              {logs.length > 0 && (
-                <div className="p-4 bg-white/5 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm text-gray-400">Loss Verbesserung</div>
-                    <TrendingDown className="w-4 h-4 text-green-400" />
-                  </div>
-                  <div className="text-2xl font-bold text-white">
-                    {(
-                      ((logs[0].train_loss - logs[logs.length - 1].train_loss) / logs[0].train_loss) *
-                      100
-                    ).toFixed(1)}
-                    %
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {logs[0].train_loss.toFixed(4)} → {logs[logs.length - 1].train_loss.toFixed(4)}
-                  </div>
-                </div>
-              )}
-
-              {/* Convergence Speed */}
-              {logs.length > 0 && (
-                <div className="p-4 bg-white/5 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm text-gray-400">Konvergenz</div>
-                    <Zap className="w-4 h-4 text-yellow-400" />
-                  </div>
-                  <div className="text-2xl font-bold text-white">
-                    {(() => {
-                      // Find epoch where loss dropped below 50% of initial loss
-                      const halfLoss = logs[0].train_loss / 2;
-                      const convergenceEpoch = logs.find(l => l.train_loss < halfLoss);
-                      return convergenceEpoch ? convergenceEpoch.epoch : logs.length;
-                    })()}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">Epochen bis 50% Loss</div>
-                </div>
-              )}
-
-              {/* Overfitting Indicator */}
-              {logs.filter(l => l.val_loss !== null).length > 0 && (
-                <div className="p-4 bg-white/5 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm text-gray-400">Overfitting</div>
-                    <Activity className="w-4 h-4 text-blue-400" />
-                  </div>
-                  <div className="text-2xl font-bold text-white">
-                    {(() => {
-                      const finalTrain = logs[logs.length - 1].train_loss;
-                      const finalVal = logs.filter(l => l.val_loss !== null).slice(-1)[0]?.val_loss;
-                      if (!finalVal) return 'N/A';
-                      const gap = ((finalVal - finalTrain) / finalTrain) * 100;
-                      return gap > 0 ? `+${gap.toFixed(1)}%` : `${gap.toFixed(1)}%`;
-                    })()}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">Val-Train Gap</div>
-                </div>
-              )}
-
-              {/* Steps per Second */}
-              {metrics.training_duration_seconds && metrics.total_steps && (
-                <div className="p-4 bg-white/5 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm text-gray-400">Geschwindigkeit</div>
-                    <Clock className="w-4 h-4 text-purple-400" />
-                  </div>
-                  <div className="text-2xl font-bold text-white">
-                    {(metrics.total_steps / metrics.training_duration_seconds).toFixed(2)}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">Steps/Sekunde</div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Training Summary */}
-          <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Brain className="w-5 h-5" />
-              Training Zusammenfassung
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left Column: Metrics */}
-              <div className="space-y-3">
-                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                  <span className="text-gray-400">Final Train Loss</span>
-                  <span className="text-white font-medium">{metrics.final_train_loss.toFixed(4)}</span>
+          {/* ── Performance ── */}
+          {logs.length > 0 && (
+            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
+              <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><Target className="w-4 h-4" />Performance</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <div className="text-xs text-gray-400 mb-1">Loss-Reduktion</div>
+                  <div className="text-lg font-bold text-white">{(((logs[0].train_loss - logs[logs.length-1].train_loss) / logs[0].train_loss) * 100).toFixed(1)}%</div>
                 </div>
                 {metrics.final_val_loss && (
-                  <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                    <span className="text-gray-400">Final Val Loss</span>
-                    <span className="text-white font-medium">{metrics.final_val_loss.toFixed(4)}</span>
+                  <div className="bg-white/5 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-400 mb-1">Overfitting-Gap</div>
+                    <div className="text-lg font-bold text-white">{(((metrics.final_val_loss - metrics.final_train_loss) / metrics.final_train_loss)*100).toFixed(1)}%</div>
                   </div>
                 )}
-                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                  <span className="text-gray-400">Total Epochen</span>
-                  <span className="text-white font-medium">{metrics.total_epochs}</span>
+                <div className="bg-white/5 rounded-lg p-3 text-center">
+                  <div className="text-xs text-gray-400 mb-1">Log-Einträge</div>
+                  <div className="text-lg font-bold text-white">{logs.length}</div>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                  <span className="text-gray-400">Total Steps</span>
-                  <span className="text-white font-medium">{metrics.total_steps.toLocaleString()}</span>
-                </div>
-              </div>
-
-              {/* Right Column: Status */}
-              <div className="space-y-3">
-                {metrics.best_epoch && (
-                  <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                    <span className="text-gray-400">Best Epoch</span>
-                    <span className="text-white font-medium">{metrics.best_epoch}</span>
+                {metrics.training_duration_seconds && metrics.total_steps && (
+                  <div className="bg-white/5 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-400 mb-1">Steps/Sek</div>
+                    <div className="text-lg font-bold text-white">{(metrics.total_steps / metrics.training_duration_seconds).toFixed(2)}</div>
                   </div>
                 )}
-                {metrics.training_duration_seconds && (
-                  <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                    <span className="text-gray-400">Training Dauer</span>
-                    <span className="text-white font-medium">
-                      {formatDuration(metrics.training_duration_seconds)}
-                    </span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                  <span className="text-gray-400">Training Status</span>
-                  <span className="flex items-center gap-2 text-green-400 font-medium">
-                    <CheckCircle className="w-4 h-4" />
-                    Abgeschlossen
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                  <span className="text-gray-400">Version</span>
-                  <span className="text-white font-medium">{versionDetails?.version_name || 'N/A'}</span>
-                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Recommendations */}
-          <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-xl border border-purple-500/20 p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Award className="w-5 h-5 text-purple-400" />
-              Empfehlungen
-            </h3>
-            <div className="space-y-3">
-              {/* Overfitting Check */}
-              {(() => {
-                if (logs.filter(l => l.val_loss !== null).length === 0) return null;
-                const finalTrain = logs[logs.length - 1].train_loss;
-                const finalVal = logs.filter(l => l.val_loss !== null).slice(-1)[0]?.val_loss;
-                if (!finalVal) return null;
-                const gap = ((finalVal - finalTrain) / finalTrain) * 100;
-                
-                if (gap > 20) {
-                  return (
-                    <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                      <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <div className="text-amber-400 font-medium mb-1">Overfitting erkannt</div>
-                        <div className="text-sm text-gray-300">
-                          Validation Loss ist {gap.toFixed(1)}% höher als Training Loss. 
-                          Erwäge mehr Regularisierung (Dropout, Weight Decay) oder einen kleineren Learning Rate.
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-              })()}
-
-              {/* Loss Plateau Check */}
-              {(() => {
-                if (logs.length < 10) return null;
-                const lastTen = logs.slice(-10);
-                const lossVariance = lastTen.reduce((sum, l) => sum + Math.abs(l.train_loss - metrics.final_train_loss), 0) / 10;
-                
-                if (lossVariance < 0.001) {
-                  return (
-                    <div className="flex items-start gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                      <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <div className="text-blue-400 font-medium mb-1">Loss-Plateau erreicht</div>
-                        <div className="text-sm text-gray-300">
-                          Der Loss hat sich in den letzten Epochen stabilisiert. 
-                          Das Modell hat wahrscheinlich konvergiert oder benötigt eine Learning Rate Anpassung.
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-              })()}
-
-              {/* Good Training */}
-              {(() => {
-                const finalTrain = logs[logs.length - 1]?.train_loss;
-                const initialTrain = logs[0]?.train_loss;
-                if (!finalTrain || !initialTrain) return null;
-                
-                const improvement = ((initialTrain - finalTrain) / initialTrain) * 100;
-                const valLogs = logs.filter(l => l.val_loss !== null);
-                const hasVal = valLogs.length > 0;
-                const finalVal = valLogs.slice(-1)[0]?.val_loss;
-                const gap = hasVal && finalVal ? ((finalVal - finalTrain) / finalTrain) * 100 : 0;
-                
-                if (improvement > 50 && (!hasVal || gap < 10)) {
-                  return (
-                    <div className="flex items-start gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
-                      <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <div className="text-green-400 font-medium mb-1">Gutes Training</div>
-                        <div className="text-sm text-gray-300">
-                          Das Modell zeigt eine starke Verbesserung ({improvement.toFixed(1)}% Loss-Reduktion)
-                          {hasVal && ' und keine Anzeichen von Overfitting'}. 
-                          Das Training war erfolgreich!
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-              })()}
-
-              {/* No Recommendations */}
-              {(() => {
-                // Check if any recommendation was shown
-                const finalTrain = logs[logs.length - 1]?.train_loss;
-                const initialTrain = logs[0]?.train_loss;
-                if (!finalTrain || !initialTrain) return null;
-                
-                const valLogs = logs.filter(l => l.val_loss !== null);
-                const hasVal = valLogs.length > 0;
-                const finalVal = valLogs.slice(-1)[0]?.val_loss;
-                const gap = hasVal && finalVal ? ((finalVal - finalTrain) / finalTrain) * 100 : 0;
-                const improvement = ((initialTrain - finalTrain) / initialTrain) * 100;
-                
-                // If no other recommendation was shown
-                if (improvement <= 50 && gap <= 20 && gap > -5) {
-                  return (
-                    <div className="flex items-start gap-3 p-4 bg-white/5 border border-white/10 rounded-lg">
-                      <Info className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <div className="text-gray-300 font-medium mb-1">Standard Training</div>
-                        <div className="text-sm text-gray-400">
-                          Das Training verlief normal. Teste das Modell auf der Test-Seite, um die praktische Performance zu evaluieren.
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-              })()}
-            </div>
-          </div>
-
-          {/* Training Logs Table (collapsed by default) */}
-          <details className="bg-white/5 rounded-xl border border-white/10">
-            <summary className="p-6 cursor-pointer hover:bg-white/5 transition-colors">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
-                  Training Logs ({logs.length} Einträge)
-                </h3>
-                <ChevronDown className="w-5 h-5 text-gray-400" />
+          {/* ── Versionsinfo ── */}
+          {versionDetails && (
+            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2"><Info className="w-4 h-4" />Version</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                {[
+                  ['Name', versionDetails.version_name],
+                  ['Größe', formatBytes(versionDetails.size_bytes)],
+                  ['Dateien', String(versionDetails.file_count)],
+                  ['Erstellt', formatDate(versionDetails.created_at)],
+                ].map(([k, v]) => (
+                  <div key={k}><div className="text-xs text-gray-400 mb-0.5">{k}</div><div className="text-white font-medium">{v}</div></div>
+                ))}
               </div>
-            </summary>
-            <div className="p-6 pt-0 max-h-96 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-slate-900">
-                  <tr className="text-left text-gray-400 border-b border-white/10">
-                    <th className="pb-3 pr-4">Epoch</th>
-                    <th className="pb-3 pr-4">Step</th>
-                    <th className="pb-3 pr-4">Train Loss</th>
-                    <th className="pb-3 pr-4">Val Loss</th>
-                    <th className="pb-3 pr-4">LR</th>
-                    <th className="pb-3">Zeit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((log, i) => (
-                    <tr key={i} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="py-2 pr-4 text-white">{log.epoch}</td>
-                      <td className="py-2 pr-4 text-gray-300">{log.step}</td>
-                      <td className="py-2 pr-4 text-blue-400 font-medium">{log.train_loss.toFixed(4)}</td>
-                      <td className="py-2 pr-4 text-green-400 font-medium">
-                        {log.val_loss ? log.val_loss.toFixed(4) : '-'}
-                      </td>
-                      <td className="py-2 pr-4 text-yellow-400 font-mono text-xs">
-                        {log.learning_rate.toExponential(2)}
-                      </td>
-                      <td className="py-2 text-gray-500 text-xs">
-                        {new Date(log.timestamp).toLocaleTimeString('de-DE')}
-                      </td>
+              <div className="mt-3 p-2 bg-white/5 rounded-lg text-xs text-gray-400 font-mono truncate" title={versionDetails.path}>{versionDetails.path}</div>
+            </div>
+          )}
+
+          {/* ══════════════════ KI-ANALYSE SEKTION ══════════════════ */}
+          <div className="bg-gradient-to-br from-purple-500/10 via-blue-500/5 to-transparent rounded-2xl border border-purple-500/20 p-6 space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                  <Brain className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">KI-Trainingsanalyse</h2>
+                  <p className="text-xs text-gray-400">{report ? `Erstellt von ${report.provider} · ${report.model} · ${formatDate(report.generated_at)}` : 'Noch keine Analyse vorhanden'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowProviderSettings(p => !p)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-gray-300 border border-white/10 transition-all">
+                  {PROVIDER_META[provider].label} {showProviderSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+                {report && (
+                  <>
+                    <button onClick={() => runAIAnalysis(true)} disabled={generatingReport}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-gray-300 border border-white/10 transition-all disabled:opacity-50">
+                      <RotateCcw className="w-3 h-3" />Neu
+                    </button>
+                    <button onClick={deleteReport}
+                      className="p-1.5 bg-white/5 hover:bg-red-500/20 rounded-lg text-gray-400 hover:text-red-400 border border-white/10 transition-all">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Provider Settings */}
+            {showProviderSettings && (
+              <div className="bg-black/20 rounded-xl p-4 border border-white/10 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Anbieter</label>
+                    <select value={provider} onChange={e => {
+                      const p = e.target.value as AIProvider;
+                      setProvider(p);
+                      setAiModel(PROVIDER_META[p].defaultModel);
+                      localStorage.setItem('ft_ai_provider', p);
+                    }} className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none">
+                      {(Object.entries(PROVIDER_META) as [AIProvider, any][]).map(([k, v]) => (
+                        <option key={k} value={k} className="bg-slate-800">{v.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">Modell</label>
+                    <input value={aiModel} onChange={e => { setAiModel(e.target.value); localStorage.setItem('ft_ai_model', e.target.value); }}
+                      className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none" />
+                  </div>
+                </div>
+                {PROVIDER_META[provider].needsKey && (
+                  <div>
+                    <label className="text-xs text-gray-400 mb-1 block">API-Key</label>
+                    <input type="password" value={apiKey} onChange={e => { setApiKey(e.target.value); localStorage.setItem('ft_ai_api_key', e.target.value); }}
+                      className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none font-mono" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Start Button (no report yet) */}
+            {!report && !generatingReport && (
+              <button onClick={() => runAIAnalysis(false)}
+                className={`w-full py-4 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-xl text-white font-semibold text-base hover:opacity-90 transition-all flex items-center justify-center gap-3 shadow-lg`}>
+                <Sparkles className="w-5 h-5" />
+                KI Analyse starten
+              </button>
+            )}
+
+            {/* Generating */}
+            {generatingReport && (
+              <div className="flex items-center justify-center gap-3 py-8 text-gray-300">
+                <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
+                <span>Analysiere Trainingsdaten mit {PROVIDER_META[provider].label}…</span>
+              </div>
+            )}
+
+            {/* Report */}
+            {report && !generatingReport && (
+              <div className="space-y-4">
+                <div className="bg-black/20 rounded-xl p-5 border border-white/10 max-h-96 overflow-y-auto">
+                  <ReportText text={report.report_text} />
+                </div>
+
+                {/* Chat Toggle */}
+                <button onClick={() => setShowChat(p => !p)}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all text-sm font-medium">
+                  <MessageSquare className="w-4 h-4" />
+                  {showChat ? 'Chat ausblenden' : 'Mit KI über Analyse chatten'}
+                  {showChat ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+
+                {/* Chat */}
+                {showChat && (
+                  <div className="bg-black/20 rounded-xl border border-white/10 overflow-hidden">
+                    {/* Messages */}
+                    <div className="h-72 overflow-y-auto p-4 space-y-3">
+                      {chatMessages.slice(1).map((msg, i) => (
+                        <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                          <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center ${msg.role === 'user' ? 'bg-purple-500/30' : 'bg-blue-500/20'}`}>
+                            {msg.role === 'user' ? <User className="w-3.5 h-3.5 text-purple-300" /> : <Bot className="w-3.5 h-3.5 text-blue-300" />}
+                          </div>
+                          <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${msg.role === 'user' ? 'bg-purple-500/20 text-white' : 'bg-white/5 text-gray-300'}`}>
+                            {msg.content}
+                          </div>
+                        </div>
+                      ))}
+                      {chatLoading && (
+                        <div className="flex gap-3">
+                          <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center"><Bot className="w-3.5 h-3.5 text-blue-300" /></div>
+                          <div className="bg-white/5 rounded-xl px-3 py-2"><Loader2 className="w-4 h-4 animate-spin text-gray-400" /></div>
+                        </div>
+                      )}
+                      {chatMessages.length <= 1 && !chatLoading && (
+                        <div className="text-center text-gray-500 text-sm py-8">
+                          Stelle Fragen zur Analyse, zu Parameteroptimierungen oder zum nächsten Training.
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+                    {/* Input */}
+                    <div className="border-t border-white/10 p-3 flex gap-2">
+                      <input value={chatInput} onChange={e => setChatInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                        placeholder="Frage zur Analyse stellen…"
+                        className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none" />
+                      <button onClick={sendChat} disabled={!chatInput.trim() || chatLoading}
+                        className={`p-2 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white hover:opacity-90 transition-all disabled:opacity-40`}>
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Log-Tabelle ── */}
+          {logs.length > 0 && (
+            <details className="bg-white/5 rounded-xl border border-white/10">
+              <summary className="p-5 cursor-pointer hover:bg-white/5 transition-colors list-none">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2"><FileText className="w-4 h-4" />Training Logs ({logs.length})</h3>
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                </div>
+              </summary>
+              <div className="p-5 pt-0 max-h-72 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-900">
+                    <tr className="text-left text-gray-400 border-b border-white/10">
+                      {['Epoch','Step','Train Loss','Val Loss','LR','Zeit'].map(h => <th key={h} className="pb-2 pr-3">{h}</th>)}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-
-          {/* Test Results Section */}
-          <TestResultsSection versionId={selectedVersionId} />
+                  </thead>
+                  <tbody>
+                    {logs.map((l, i) => (
+                      <tr key={i} className="border-b border-white/5 hover:bg-white/5">
+                        <td className="py-1.5 pr-3 text-white">{l.epoch}</td>
+                        <td className="py-1.5 pr-3 text-gray-300">{l.step}</td>
+                        <td className="py-1.5 pr-3 text-blue-400 font-medium">{l.train_loss.toFixed(4)}</td>
+                        <td className="py-1.5 pr-3 text-emerald-400">{l.val_loss?.toFixed(4) || '-'}</td>
+                        <td className="py-1.5 pr-3 text-amber-400 font-mono">{l.learning_rate.toExponential(2)}</td>
+                        <td className="py-1.5 text-gray-500">{new Date(l.timestamp).toLocaleTimeString('de-DE')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
         </div>
       )}
-    </div>
-  );
-}
-
-// ============ Test Results Section Component ============
-
-interface TestResultsSectionProps {
-  versionId: string;
-}
-
-function TestResultsSection({ versionId }: TestResultsSectionProps) {
-  const [testResults, setTestResults] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadTestResults();
-  }, [versionId]);
-
-  const loadTestResults = async () => {
-    try {
-      setLoading(true);
-      const results = await invoke<any[]>('get_test_results_for_version', {
-        versionId,
-      });
-      setTestResults(results);
-    } catch (err) {
-      console.error('Error loading test results:', err);
-      setTestResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Target className="w-5 h-5" />
-          Test-Ergebnisse
-        </h3>
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
-        </div>
-      </div>
-    );
-  }
-
-  if (testResults.length === 0) {
-    return (
-      <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Target className="w-5 h-5" />
-          Test-Ergebnisse
-        </h3>
-        <div className="text-center py-8">
-          <Info className="w-12 h-12 text-gray-400 mx-auto mb-3 opacity-50" />
-          <p className="text-gray-400">Noch keine Test-Ergebnisse vorhanden.</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Teste das Modell auf der Test-Seite, um Ergebnisse zu sehen.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-      <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-        <Target className="w-5 h-5" />
-        Test-Ergebnisse ({testResults.length})
-      </h3>
-
-      <div className="space-y-4">
-        {testResults.map((result, idx) => (
-          <div
-            key={idx}
-            className="p-4 bg-white/5 rounded-lg border border-white/10"
-          >
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-400">
-                  {result.accuracy.toFixed(2)}%
-                </div>
-                <div className="text-xs text-gray-400 mt-1">Accuracy</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-white">
-                  {result.total_samples}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">Samples</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-400">
-                  {result.average_loss.toFixed(4)}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">Avg Loss</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-400">
-                  {(result.average_inference_time * 1000).toFixed(0)}ms
-                </div>
-                <div className="text-xs text-gray-400 mt-1">Inferenz</div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-400" />
-                  <span className="text-gray-300">
-                    {result.correct_predictions} korrekt
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <XCircle className="w-4 h-4 text-red-400" />
-                  <span className="text-gray-300">
-                    {result.incorrect_predictions} falsch
-                  </span>
-                </div>
-              </div>
-              {result.metrics?.total_time && (
-                <span className="text-gray-400">
-                  Gesamt: {formatDuration(result.metrics.total_time)}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

@@ -229,6 +229,9 @@ fn main() {
             analysis_manager::save_training_metrics,
             analysis_manager::save_training_logs,
             analysis_manager::update_training_progress,
+            analysis_manager::save_ai_analysis_report,
+            analysis_manager::get_ai_analysis_report,
+            analysis_manager::delete_ai_analysis_report,
             // Test Manager Commands
             test_manager::start_test,
             test_manager::stop_test,

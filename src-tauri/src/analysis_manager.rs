@@ -247,6 +247,91 @@ pub async fn save_training_logs(
     Ok(())
 }
 
+// ============ AI Analysis Report ============
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AIAnalysisReport {
+    pub version_id: String,
+    pub report_text: String,
+    pub provider: String,
+    pub model: String,
+    pub generated_at: String,
+}
+
+#[tauri::command]
+pub async fn save_ai_analysis_report(
+    state: State<'_, AppState>,
+    version_id: String,
+    report_text: String,
+    provider: String,
+    model: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    let version = match db.get_version_details_by_id(&version_id)? {
+        Some(v) => v,
+        None => return Err(format!("Version {} not found", version_id)),
+    };
+
+    let report = AIAnalysisReport {
+        version_id: version_id.clone(),
+        report_text,
+        provider,
+        model,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let path = PathBuf::from(&version.path).join("ai_analysis.json");
+    let content = serde_json::to_string_pretty(&report)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("Write error: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_ai_analysis_report(
+    state: State<'_, AppState>,
+    version_id: String,
+) -> Result<Option<AIAnalysisReport>, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    let version = match db.get_version_details_by_id(&version_id)? {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let path = PathBuf::from(&version.path).join("ai_analysis.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&path).map_err(|e| format!("Read error: {}", e))?;
+    let report: AIAnalysisReport = serde_json::from_str(&content)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    Ok(Some(report))
+}
+
+#[tauri::command]
+pub async fn delete_ai_analysis_report(
+    state: State<'_, AppState>,
+    version_id: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    let version = match db.get_version_details_by_id(&version_id)? {
+        Some(v) => v,
+        None => return Err(format!("Version {} not found", version_id)),
+    };
+
+    let path = PathBuf::from(&version.path).join("ai_analysis.json");
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("Delete error: {}", e))?;
+    }
+    Ok(())
+}
+
 // Helper function to update metrics during training
 #[tauri::command]
 pub async fn update_training_progress(
