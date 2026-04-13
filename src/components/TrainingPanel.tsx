@@ -37,6 +37,7 @@ import {
   SlidersHorizontal,
   ChevronUp,
   Brain,
+  BookOpen,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -492,6 +493,106 @@ function PostTrainingModal({ versionId, modelName, metrics, onClose, onGoToAnaly
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============ KI-Assistent Modal ============
+
+interface AIAssistantModalProps {
+  config: TrainingConfig;
+  modelInfo: ModelRamInfo | null;
+  selectedModel: ModelInfo | undefined;
+  selectedDataset: DatasetInfo | undefined;
+  systemRamGb: number;
+  requirements: RequirementsCheck | null;
+  prefilledContext?: string | null;
+  onApply: (patch: Partial<TrainingConfig>) => void;
+  onClose: () => void;
+  gradient: string;
+  primaryColor: string;
+}
+
+// ============ Metrics Template Types ============
+
+interface MetricsTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  config: Partial<TrainingConfig>;
+  source: 'ai' | 'user';
+  created_at: string;
+}
+
+// ============ Template Selector Component ============
+
+function TemplateSelector({ 
+  onApply, 
+  gradient, 
+  primaryColor,
+  disabled,
+}: { 
+  onApply: (cfg: Partial<TrainingConfig>) => void; 
+  gradient: string; 
+  primaryColor: string;
+  disabled?: boolean;
+}) {
+  const [templates, setTemplates] = useState<MetricsTemplate[]>([]);
+  const [open, setOpen] = useState(false);
+  
+  useEffect(() => {
+    if (open) {
+      invoke<MetricsTemplate[]>('get_metrics_templates')
+        .then(setTemplates)
+        .catch(() => setTemplates([]));
+    }
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button 
+        onClick={() => setOpen(p => !p)} 
+        disabled={disabled}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-blue-300 text-xs font-semibold transition-all disabled:opacity-50"
+      >
+        <BookOpen className="w-3.5 h-3.5" />
+        {templates.length > 0 ? `Templates (${templates.length})` : 'Templates'}
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 w-80 bg-slate-900 border border-white/10 rounded-xl shadow-2xl z-50 p-3 space-y-2 max-h-96 overflow-y-auto">
+          <div className="text-xs text-gray-400 font-medium mb-2">📊 Gespeicherte Metriken-Templates</div>
+          {templates.length === 0 ? (
+            <div className="text-xs text-gray-500 text-center py-4 bg-white/5 rounded-lg">
+              Noch keine Templates.<br/>
+              <span className="text-gray-400">Speichern Sie Templates in der Analyse-Seite</span>
+            </div>
+          ) : (
+            templates.map(t => (
+              <div key={t.id} className="space-y-1.5">
+                <button 
+                  onClick={() => { onApply(t.config); setOpen(false); }} 
+                  className="w-full text-left p-2.5 bg-white/5 hover:bg-white/10 rounded-lg transition-all group"
+                >
+                  <div className="text-white text-xs font-medium group-hover:text-blue-300 transition-colors">
+                    {t.name}
+                  </div>
+                  {t.description && <div className="text-gray-400 text-xs mt-1">{t.description}</div>}
+                  <div className="text-gray-500 text-xs mt-1">
+                    {t.source === 'ai' ? '🤖 KI' : '👤 Benutzerdefiniert'}
+                    {t.created_at && ` · ${new Date(t.created_at).toLocaleDateString('de-DE')}`}
+                  </div>
+                </button>
+              </div>
+            ))
+          )}
+          <button 
+            onClick={() => setOpen(false)} 
+            className="w-full py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors border-t border-white/10 mt-2"
+          >
+            Schließen
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3081,13 +3182,21 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
                 <Sparkles className="w-5 h-5" />
                 Voreinstellungen
               </h2>
-              <button
-                onClick={() => setShowAIAssistant(true)}
-                disabled={isTraining}
-                className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 rounded-lg text-purple-300 text-xs font-semibold transition-all disabled:opacity-50"
-              >
-                <span>🤖</span> KI-Assistent
-              </button>
+              <div className="flex gap-2">
+                <TemplateSelector 
+                  onApply={(cfg) => { setConfig(prev => ({ ...prev, ...cfg })); setSelectedPresetId(null); }} 
+                  gradient={currentTheme.colors.gradient} 
+                  primaryColor={currentTheme.colors.primary}
+                  disabled={isTraining}
+                />
+                <button
+                  onClick={() => setShowAIAssistant(true)}
+                  disabled={isTraining}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 rounded-lg text-purple-300 text-xs font-semibold transition-all disabled:opacity-50"
+                >
+                  <span>🤖</span> KI-Assistent
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {presets.map((preset) => (

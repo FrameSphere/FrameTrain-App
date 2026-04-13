@@ -1947,3 +1947,75 @@ impl Default for TrainingConfig {
         }
     }
 }
+
+// ============ Metrics Templates ============
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub config: TrainingConfig,
+    pub created_at: String,
+    pub source: String, // "user" | "ai"
+}
+
+fn get_templates_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app_handle.path().app_data_dir()
+        .map_err(|e| format!("App data dir error: {}", e))?;
+    Ok(dir.join("metrics_templates.json"))
+}
+
+#[tauri::command]
+pub fn save_metrics_template(
+    app_handle: tauri::AppHandle,
+    name: String,
+    description: String,
+    config: TrainingConfig,
+    source: String,
+) -> Result<MetricsTemplate, String> {
+    let path = get_templates_path(&app_handle)?;
+    let mut templates: Vec<MetricsTemplate> = if path.exists() {
+        let c = fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&c).unwrap_or_default()
+    } else { vec![] };
+
+    let tmpl = MetricsTemplate {
+        id: format!("tmpl_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_string()),
+        name,
+        description,
+        config,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        source,
+    };
+    templates.push(tmpl.clone());
+    fs::write(&path, serde_json::to_string_pretty(&templates).unwrap_or_default())
+        .map_err(|e| format!("Write error: {}", e))?;
+    Ok(tmpl)
+}
+
+#[tauri::command]
+pub fn get_metrics_templates(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<MetricsTemplate>, String> {
+    let path = get_templates_path(&app_handle)?;
+    if !path.exists() { return Ok(vec![]); }
+    let c = fs::read_to_string(&path).map_err(|e| format!("Read error: {}", e))?;
+    let templates: Vec<MetricsTemplate> = serde_json::from_str(&c).unwrap_or_default();
+    Ok(templates)
+}
+
+#[tauri::command]
+pub fn delete_metrics_template(
+    app_handle: tauri::AppHandle,
+    template_id: String,
+) -> Result<(), String> {
+    let path = get_templates_path(&app_handle)?;
+    if !path.exists() { return Ok(()); }
+    let c = fs::read_to_string(&path).unwrap_or_default();
+    let mut templates: Vec<MetricsTemplate> = serde_json::from_str(&c).unwrap_or_default();
+    templates.retain(|t| t.id != template_id);
+    fs::write(&path, serde_json::to_string_pretty(&templates).unwrap_or_default())
+        .map_err(|e| format!("Write error: {}", e))?;
+    Ok(())
+}

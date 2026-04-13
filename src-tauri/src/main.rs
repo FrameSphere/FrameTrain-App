@@ -232,6 +232,11 @@ fn main() {
             analysis_manager::save_ai_analysis_report,
             analysis_manager::get_ai_analysis_report,
             analysis_manager::delete_ai_analysis_report,
+            analysis_manager::get_training_full_data,
+            // Metrics Templates
+            training_manager::save_metrics_template,
+            training_manager::get_metrics_templates,
+            training_manager::delete_metrics_template,
             // Test Manager Commands
             test_manager::start_test,
             test_manager::stop_test,

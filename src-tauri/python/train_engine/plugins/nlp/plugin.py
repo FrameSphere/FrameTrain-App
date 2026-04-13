@@ -272,21 +272,37 @@ def make_progress_callback(total_epochs: int, collector: MetricsCollector):
         def on_log(self, args, state, control, logs=None, **kwargs):
             if not logs:
                 return
-            epoch  = int(state.epoch or 0) + 1
-            step   = state.global_step or 0
-            total  = state.max_steps or 1
-            t_loss = float(logs.get("loss") or logs.get("train_loss") or 0.0)
-            v_loss = float(logs["eval_loss"]) if "eval_loss" in logs else None
-            lr     = float(logs.get("learning_rate") or 0.0)
+            epoch     = int(state.epoch or 0) + 1
+            step      = state.global_step or 0
+            total     = state.max_steps or 1
+            t_loss    = float(logs.get("loss") or logs.get("train_loss") or 0.0)
+            v_loss    = float(logs["eval_loss"]) if "eval_loss" in logs else None
+            lr        = float(logs.get("learning_rate") or 0.0)
+            grad_norm = logs.get("grad_norm")  # HF Trainer loggt das seit v4.33
+            if grad_norm is not None:
+                grad_norm = float(grad_norm)
 
             MessageProtocol.progress(
                 epoch=epoch, total_epochs=total_epochs,
                 step=step, total_steps=total,
                 train_loss=t_loss, val_loss=v_loss, learning_rate=lr,
             )
-            collector.record(epoch, step, {
-                "train_loss": t_loss, "val_loss": v_loss, "learning_rate": lr,
-            })
+            record_data: dict = {"train_loss": t_loss, "val_loss": v_loss, "learning_rate": lr}
+            if grad_norm is not None:
+                record_data["grad_norm"] = grad_norm
+            collector.record(epoch, step, record_data)
+
+        def on_epoch_end(self, args, state, control, **kwargs):
+            """Epoch-Summary aufzeichnen (inkl. val_loss falls vorhanden)."""
+            epoch = int(state.epoch or 0)
+            # Val-Loss aus letztem Log-Eintrag holen
+            history = state.log_history or []
+            val_loss = next(
+                (float(e["eval_loss"]) for e in reversed(history) if "eval_loss" in e
+                 and int(e.get("epoch") or 0) == epoch),
+                None,
+            )
+            collector.record_epoch_end(epoch, val_loss)
 
         def on_save(self, args, state, control, **kwargs):
             ep = int(state.epoch or 0) + 1
@@ -730,6 +746,59 @@ class Plugin(TrainPlugin):
 
         final = self.validate()
         self.metrics.save_with_overrides(str(out), final)
+
+        # ── Vollständige Trainingsdaten für KI-Analyse ──────────────────────
+        try:
+            import torch
+            mem = get_system_memory()
+            hardware_info = {
+                "device":           self.device,
+                "system_ram_gb":    mem.get("total_gb"),
+                "available_ram_gb": mem.get("available_gb"),
+                "cuda_available":   torch.cuda.is_available(),
+                "mps_available":    hasattr(torch.backends, "mps") and torch.backends.mps.is_available(),
+            }
+            if self.device == "cuda":
+                hardware_info["gpu_name"] = torch.cuda.get_device_name(0)
+
+            model_info = {
+                "architecture":    self.arch,
+                "n_train_samples": self._n_train,
+                "model_ram_gb":    self._model_ram,
+                "lora_active":     cfg.use_lora,
+            }
+            if cfg.use_lora and self.model is not None:
+                try:
+                    total  = sum(p.numel() for p in self.model.parameters())
+                    trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+                    model_info["total_params"]     = total
+                    model_info["trainable_params"] = trainable
+                    model_info["trainable_pct"]    = round(100 * trainable / max(total, 1), 2)
+                except Exception:
+                    pass
+
+            dataset_info = {
+                "n_train":          self._n_train,
+                "has_validation":   self.val_tok is not None,
+                "n_val":            len(self.val_tok) if self.val_tok is not None else 0,
+                "max_seq_length":   cfg.max_seq_length,
+            }
+
+            # Config als dict (alle Trainingsparameter)
+            config_dict = {k: getattr(cfg, k) for k in cfg.__dataclass_fields__
+                           if k not in ("model_path", "dataset_path", "output_path", "checkpoint_dir")}
+
+            self.metrics.save_full_data(
+                str(out),
+                config_dict=config_dict,
+                hardware_info=hardware_info,
+                model_info=model_info,
+                dataset_info=dataset_info,
+                overrides=final,
+            )
+            MessageProtocol.status("saving", "Vollständige Trainingsdaten gespeichert")
+        except Exception as e:
+            MessageProtocol.warning(f"Konnte training_full_data.json nicht schreiben: {e}")
 
         MessageProtocol.status("saved", f"Modell gespeichert: {out}")
         return str(out)

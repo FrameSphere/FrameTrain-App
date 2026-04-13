@@ -247,6 +247,26 @@ pub async fn save_training_logs(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn get_training_full_data(
+    state: State<'_, AppState>,
+    version_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let version = match db.get_version_details_by_id(&version_id)? {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    let path = PathBuf::from(&version.path).join("training_full_data.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("Read error: {}", e))?;
+    let data: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    Ok(Some(data))
+}
+
 // ============ AI Analysis Report ============
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
