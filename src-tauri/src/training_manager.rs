@@ -1733,6 +1733,8 @@ pub fn get_model_ram_info(
             param_billion: 0.35,
             model_type: "unknown".to_string(),
             readable_size: "Unbekannt".to_string(),
+            hidden_size: 768,
+            num_hidden_layers: 12,
         });
     }
 
