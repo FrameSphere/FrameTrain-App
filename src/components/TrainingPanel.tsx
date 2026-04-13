@@ -42,6 +42,14 @@ import { useNotification } from '../contexts/NotificationContext';
 
 // ============ Types ============
 
+interface ModelRamInfo {
+  param_billion: number;
+  model_type: string;
+  readable_size: string;
+  hidden_size: number;
+  num_hidden_layers: number;
+}
+
 interface ModelInfo {
   id: string;
   name: string;
@@ -491,7 +499,7 @@ WICHTIG für Apple Silicon / CPU-Training:
 - Bei wenig RAM: use_lora=true + load_in_4bit=true + gradient_checkpointing=true + batch_size=1 + gradient_accumulation_steps=8
 
 JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
-```json
+\`\`\`json
 {
   "epochs": 3,
   "batch_size": 2,
@@ -513,7 +521,8 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
   "num_workers": 0,
   "max_grad_norm": 1.0
 }
-````;
+\`\`\`
+`;
   };
 
   const handleAsk = async () => {
@@ -1445,14 +1454,6 @@ function HistoryModal({ jobs, onClose, onDelete, gradient }: HistoryModalProps) 
 
 // ============ RAM Calculator Component ============
 
-interface ModelRamInfo {
-  param_billion: number;
-  model_type: string;
-  readable_size: string;
-  hidden_size: number;
-  num_hidden_layers: number;
-}
-
 const SYSTEM_RAM_OPTIONS = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128];
 
 interface RamBreakdown {
@@ -1643,9 +1644,6 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
     { label: 'Workers',      gb: ram.workersGb,     color: 'bg-cyan-500' },
     { label: 'Overhead',     gb: ram.overheadGb,    color: 'bg-slate-500' },
   ];
-
-  // MPS-Info: Apple Silicon nutzt Unified Memory
-  const isMps = requirements?.mps_available ?? detectPlatform() === 'mps';
 
   return (
     <div className={`bg-white/5 rounded-xl border ${statusColor.border} overflow-hidden`}>
