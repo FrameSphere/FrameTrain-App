@@ -440,23 +440,108 @@ interface AIAssistantModalProps {
   primaryColor: string;
 }
 
+type AIProvider = 'anthropic' | 'openai' | 'groq' | 'ollama';
+
+const PROVIDER_META: Record<AIProvider, {
+  label: string; emoji: string; needsKey: boolean;
+  keyPlaceholder: string; keyHint: string; keyLink: string;
+  models: string[];
+}> = {
+  anthropic: {
+    label: 'Claude (Anthropic)',
+    emoji: '🤖',
+    needsKey: true,
+    keyPlaceholder: 'sk-ant-api03-...',
+    keyHint: 'Kostenlos testen: console.anthropic.com',
+    keyLink: 'https://console.anthropic.com',
+    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+  },
+  openai: {
+    label: 'GPT-4o (OpenAI)',
+    emoji: '🟢',
+    needsKey: true,
+    keyPlaceholder: 'sk-...',
+    keyHint: 'platform.openai.com/api-keys',
+    keyLink: 'https://platform.openai.com/api-keys',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
+  },
+  groq: {
+    label: 'Groq (Kostenlos)',
+    emoji: '⚡',
+    needsKey: true,
+    keyPlaceholder: 'gsk_...',
+    keyHint: '✅ Kostenloser Account — console.groq.com',
+    keyLink: 'https://console.groq.com',
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  },
+  ollama: {
+    label: 'Ollama (Lokal, kein Key)',
+    emoji: '🦙',
+    needsKey: false,
+    keyPlaceholder: '',
+    keyHint: '✅ Kein Account nötig — ollama.com installieren',
+    keyLink: 'https://ollama.com',
+    models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2', 'qwen2.5'],
+  },
+};
+
 function AIAssistantModal({
   config, modelInfo, selectedModel, selectedDataset,
   systemRamGb, onApply, onClose, gradient, primaryColor,
 }: AIAssistantModalProps) {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('ft_ai_api_key') || '');
-  const [provider, setProvider] = useState<'anthropic' | 'openai'>(
-    () => (localStorage.getItem('ft_ai_provider') as 'anthropic' | 'openai') || 'anthropic'
+  const [provider, setProvider] = useState<AIProvider>(
+    () => (localStorage.getItem('ft_ai_provider') as AIProvider) || 'ollama'
   );
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('ft_ai_api_key') || '');
+  const [ollamaModel, setOllamaModel] = useState(() => localStorage.getItem('ft_ollama_model') || 'llama3.2');
+  const [selectedModel2, setSelectedModel2] = useState(() => {
+    const saved = localStorage.getItem('ft_ai_model');
+    return saved || PROVIDER_META.ollama.models[0];
+  });
+  const [ollamaStatus, setOllamaStatus] = useState<'unchecked' | 'ok' | 'error'>('unchecked');
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>('');
   const [parsedConfig, setParsedConfig] = useState<Partial<TrainingConfig> | null>(null);
   const [error, setError] = useState('');
 
-  const saveKey = () => {
+  const meta = PROVIDER_META[provider];
+
+  const saveSettings = () => {
     localStorage.setItem('ft_ai_api_key', apiKey);
     localStorage.setItem('ft_ai_provider', provider);
+    localStorage.setItem('ft_ollama_model', ollamaModel);
+    localStorage.setItem('ft_ai_model', selectedModel2);
+  };
+
+  // Ollama-Verbindung prüfen
+  const checkOllama = async () => {
+    try {
+      const res = await fetch('http://localhost:11434/api/tags', {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Verfügbare Modelle extrahieren
+        const available = (data.models || []).map((m: any) => m.name.split(':')[0]);
+        if (available.length > 0 && !available.includes(ollamaModel)) {
+          setOllamaModel(available[0]);
+        }
+        setOllamaStatus('ok');
+      } else {
+        setOllamaStatus('error');
+      }
+    } catch {
+      setOllamaStatus('error');
+    }
+  };
+
+  // Ollama beim Wählen des Providers prüfen
+  const handleProviderChange = (p: AIProvider) => {
+    setProvider(p);
+    // Modell auf ersten der Liste setzen wenn neuer Provider
+    setSelectedModel2(PROVIDER_META[p].models[0]);
+    if (p === 'ollama') checkOllama();
   };
 
   const buildSystemPrompt = () => {
@@ -526,15 +611,56 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
   };
 
   const handleAsk = async () => {
-    if (!apiKey.trim()) { setError('Bitte API-Key eingeben.'); return; }
+    if (meta.needsKey && !apiKey.trim()) { setError('Bitte API-Key eingeben.'); return; }
     if (!prompt.trim()) { setError('Bitte beschreibe dein Trainingsziel.'); return; }
     setLoading(true); setError(''); setResult(''); setParsedConfig(null);
-    saveKey();
+    saveSettings();
 
     try {
       let responseText = '';
 
-      if (provider === 'anthropic') {
+      if (provider === 'ollama') {
+        // Ollama: Lokale REST-API, kein Key nötig
+        const model = ollamaModel.trim() || 'llama3.2';
+        const res = await fetch('http://localhost:11434/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            prompt: buildSystemPrompt() + '\n\nUser: ' + prompt + '\n\nAssistant:',
+            stream: false,
+            options: { temperature: 0.3, num_ctx: 4096 },
+          }),
+        });
+        if (!res.ok) throw new Error(`Ollama nicht erreichbar (HTTP ${res.status}). Läuft Ollama? Starte es mit: ollama serve`);
+        const data = await res.json();
+        responseText = data.response || '';
+
+      } else if (provider === 'groq') {
+        // Groq: OpenAI-kompatibel, kostenloser Tier
+        const model = selectedModel2 || 'llama-3.3-70b-versatile';
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model,
+            max_tokens: 1500,
+            temperature: 0.3,
+            messages: [
+              { role: 'system', content: buildSystemPrompt() },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e?.error?.message || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        responseText = data.choices?.[0]?.message?.content || '';
+
+      } else if (provider === 'anthropic') {
+        const model = selectedModel2 || 'claude-opus-4-5';
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
@@ -544,8 +670,8 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
             'anthropic-dangerous-direct-browser-access': 'true',
           },
           body: JSON.stringify({
-            model: 'claude-opus-4-5',
-            max_tokens: 1024,
+            model,
+            max_tokens: 1500,
             system: buildSystemPrompt(),
             messages: [{ role: 'user', content: prompt }],
           }),
@@ -556,13 +682,17 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
         }
         const data = await res.json();
         responseText = data.content?.[0]?.text || '';
+
       } else {
+        // OpenAI
+        const model = selectedModel2 || 'gpt-4o';
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
           body: JSON.stringify({
-            model: 'gpt-4o',
-            max_tokens: 1024,
+            model,
+            max_tokens: 1500,
+            temperature: 0.3,
             messages: [
               { role: 'system', content: buildSystemPrompt() },
               { role: 'user', content: prompt },
@@ -578,26 +708,17 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
       }
 
       setResult(responseText);
-
       // JSON-Block extrahieren
       const match = responseText.match(/```json\s*([\s\S]*?)```/);
       if (match) {
-        try {
-          const parsed = JSON.parse(match[1].trim());
-          setParsedConfig(parsed);
-        } catch (_) {
-          setError('JSON konnte nicht geparst werden. Du kannst die Parameter manuell übertragen.');
-        }
+        try { setParsedConfig(JSON.parse(match[1].trim())); }
+        catch (_) { setError('JSON konnte nicht geparst werden. Parameter manuell übertragen.'); }
       }
     } catch (e: any) {
       setError('Fehler: ' + String(e?.message || e));
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleApply = () => {
-    if (parsedConfig) { onApply(parsedConfig); onClose(); }
   };
 
   return (
@@ -611,7 +732,7 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
             </div>
             <div>
               <h2 className="text-lg font-bold text-white">KI-Assistent</h2>
-              <p className="text-xs text-gray-400">Parameter per KI optimieren lassen</p>
+              <p className="text-xs text-gray-400">Parameter automatisch optimieren lassen</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all">
@@ -620,33 +741,136 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
         </div>
 
         <div className="overflow-y-auto flex-1 p-5 space-y-4">
-          {/* API-Key + Provider */}
-          <div className="bg-white/[0.04] rounded-xl border border-white/10 p-4 space-y-3">
-            <div className="text-xs font-bold uppercase tracking-widest text-gray-500">KI-Anbieter & API-Key</div>
-            <div className="flex gap-2">
-              {(['anthropic', 'openai'] as const).map(p => (
+          {/* Provider-Auswahl */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-widest text-gray-500">KI-Anbieter wählen</div>
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.entries(PROVIDER_META) as [AIProvider, typeof PROVIDER_META[AIProvider]][]).map(([key, m]) => (
                 <button
-                  key={p}
-                  onClick={() => setProvider(p)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border ${
-                    provider === p
-                      ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
-                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                  key={key}
+                  onClick={() => handleProviderChange(key)}
+                  className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all ${
+                    provider === key
+                      ? 'bg-purple-500/20 border-purple-500/50 text-white'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
                   }`}
                 >
-                  {p === 'anthropic' ? '🤖 Claude (Anthropic)' : '🟢 GPT-4o (OpenAI)'}
+                  <span className="text-lg flex-shrink-0">{m.emoji}</span>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold truncate">{m.label}</div>
+                    <div className="text-xs opacity-60 mt-0.5">{m.needsKey ? 'API-Key nötig' : '✅ Kein Key'}</div>
+                  </div>
                 </button>
               ))}
             </div>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder={provider === 'anthropic' ? 'sk-ant-api03-...' : 'sk-...'}
-              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-            />
-            <p className="text-xs text-gray-500">Wird nur lokal in diesem Browser gespeichert. Niemals an FrameTrain übertragen.</p>
           </div>
+
+          {/* Key / Modell-Konfiguration */}
+          {meta.needsKey ? (
+            <div className="bg-white/[0.04] rounded-xl border border-white/10 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-widest text-gray-500">API-Key</div>
+                <a
+                  href={meta.keyLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                >
+                  Key holen ↗
+                </a>
+              </div>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder={meta.keyPlaceholder}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+              />
+              <p className="text-xs text-gray-400">{meta.keyHint}</p>
+              {/* Modell-Auswahl */}
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Modell</div>
+                <div className="flex gap-2 flex-wrap">
+                  {meta.models.map(m => (
+                    <button
+                      key={m}
+                      onClick={() => setSelectedModel2(m)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all border ${
+                        selectedModel2 === m
+                          ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                          : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">Key wird nur lokal gespeichert, nie an FrameTrain übertragen.</p>
+            </div>
+          ) : (
+            /* Ollama: kein Key, aber Modell-Name und Status */
+            <div className="bg-white/[0.04] rounded-xl border border-white/10 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-widest text-gray-500">Ollama-Konfiguration</div>
+                <button
+                  onClick={checkOllama}
+                  className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                >
+                  Verbindung prüfen
+                </button>
+              </div>
+
+              {/* Status-Anzeige */}
+              {ollamaStatus !== 'unchecked' && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
+                  ollamaStatus === 'ok'
+                    ? 'bg-green-500/10 border border-green-500/30 text-green-300'
+                    : 'bg-red-500/10 border border-red-500/30 text-red-300'
+                }`}>
+                  {ollamaStatus === 'ok'
+                    ? <><CheckCircle className="w-3.5 h-3.5" /> Ollama läuft und ist erreichbar</>
+                    : <><AlertCircle className="w-3.5 h-3.5" /> Ollama nicht erreichbar. Starte es mit: <code className="ml-1 font-mono">ollama serve</code></>}
+                </div>
+              )}
+
+              {/* Modell-Name */}
+              <div>
+                <div className="text-xs text-gray-400 mb-1.5">Modell-Name (muss lokal installiert sein)</div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={ollamaModel}
+                    onChange={e => setOllamaModel(e.target.value)}
+                    placeholder="llama3.2"
+                    className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {PROVIDER_META.ollama.models.map(m => (
+                    <button
+                      key={m}
+                      onClick={() => setOllamaModel(m)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-mono border transition-all ${
+                        ollamaModel === m
+                          ? 'bg-green-500/20 border-green-500/50 text-green-300'
+                          : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-3 bg-white/[0.03] rounded-lg border border-white/10 text-xs text-gray-400 space-y-1">
+                <div className="font-semibold text-gray-300">Ollama noch nicht installiert?</div>
+                <div>1. <a href="https://ollama.com" target="_blank" className="text-purple-400 underline">ollama.com</a> — kostenlos herunterladen</div>
+                <div>2. Im Terminal: <code className="bg-black/30 px-1 py-0.5 rounded font-mono">ollama pull llama3.2</code></div>
+                <div>3. Ollama startet automatisch im Hintergrund</div>
+              </div>
+            </div>
+          )}
 
           {/* Kontext-Info */}
           <div className="grid grid-cols-3 gap-2 text-xs">
@@ -728,11 +952,13 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
             disabled={loading}
             className={`flex-1 flex items-center justify-center gap-2 py-3 bg-gradient-to-r ${gradient} rounded-xl text-white font-semibold hover:opacity-90 transition-all disabled:opacity-50`}
           >
-            {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> KI denkt nach…</> : <>🤖 Parameter optimieren</>}
+            {loading
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> KI denkt nach…</>
+              : <>{meta.emoji} Parameter optimieren</>}
           </button>
           {parsedConfig && (
             <button
-              onClick={handleApply}
+              onClick={() => { if (parsedConfig) { onApply(parsedConfig); onClose(); } }}
               className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-500/20 hover:bg-green-500/30 border border-green-500/40 rounded-xl text-green-300 font-semibold transition-all"
             >
               <CheckCircle className="w-4 h-4" /> Parameter übernehmen
