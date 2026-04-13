@@ -301,8 +301,19 @@ class Orchestrator:
             MessageProtocol.complete(output_path, metrics)
 
         except Exception as exc:
+            # Traceback immer auch auf stderr für Rust-Logs
+            import traceback as _tb
+            print(f"[FrameTrain] UNCAUGHT EXCEPTION: {exc}", file=sys.stderr, flush=True)
+            print(_tb.format_exc(), file=sys.stderr, flush=True)
             handle_exception(exc)
-            sys.exit(1)
+            # stdout flushen bevor der Prozess endet
+            sys.stdout.flush()
+            sys.stderr.flush()
+            # Mit 0 beenden: wir haben den Fehler bereits sauber per JSON-Protokoll
+            # an Rust gemeldet. sys.exit(1) würde den Rust-Fallback-Handler triggern
+            # der eine generische "unerwartet beendet" Meldung ausgibt und die
+            # eigentliche Fehlermeldung überschreibt.
+            sys.exit(0)
 
 
 # ============================================================================
@@ -320,14 +331,16 @@ def main():
             "Config nicht gefunden",
             f"Erwartet: {config_path}"
         )
-        sys.exit(1)
+        sys.stdout.flush()
+        sys.exit(0)
 
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             config_dict = json.load(f)
     except json.JSONDecodeError as e:
         MessageProtocol.error("config.json ungültig", str(e))
-        sys.exit(1)
+        sys.stdout.flush()
+        sys.exit(0)
 
     # PyTorch-Check vor allem anderen
     try:
@@ -338,7 +351,8 @@ def main():
             "Installiere mit: pip install torch\n"
             "Oder mit CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121"
         )
-        sys.exit(1)
+        sys.stdout.flush()
+        sys.exit(0)
 
     config = TrainingConfig.from_dict(config_dict)
     Orchestrator(config).run()

@@ -1402,6 +1402,10 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
         });
     }
     
+    // Flag: haben wir bereits einen JSON-Error vom Python-Prozess empfangen?
+    // Muss VOR dem stdout-Block deklariert sein, damit es danach noch sichtbar ist.
+    let mut json_error_received = false;
+    
     // Read stdout for progress updates
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
@@ -1508,6 +1512,7 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
                             }
                         }
                         "error" => {
+                            json_error_received = true;
                             let _ = app_handle_clone.emit("training-error", serde_json::json!({
                                 "job_id": job_id_clone,
                                 "data": msg.get("data")
@@ -1527,7 +1532,7 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
     
     // Detect silent process death (OOM kill, SIGKILL, crash without Python error message)
     let exited_ok = status.as_ref().map(|s| s.success()).unwrap_or(false);
-    if !exited_ok {
+    if !exited_ok && !json_error_received {
         #[cfg(unix)]
         let signal_num: Option<i32> = status.as_ref().ok().and_then(|s| {
             use std::os::unix::process::ExitStatusExt;
