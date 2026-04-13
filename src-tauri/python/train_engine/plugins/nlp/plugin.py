@@ -488,26 +488,42 @@ class Plugin(TrainPlugin):
         MessageProtocol.status("loading", f"Lade Modell: {Path(path).name}...")
 
         quant_kwargs: dict = {}
+        # bitsandbytes (4-bit / 8-bit Quantisierung) benötigt CUDA — nicht auf MPS oder CPU verfügbar.
+        # Auf Apple Silicon (MPS) oder reiner CPU-Nutzung wird die Quantisierung übersprungen.
+        _quant_supported = (self.device == "cuda")
         if cfg.load_in_4bit:
-            try:
-                from transformers import BitsAndBytesConfig
-                quant_kwargs = {
-                    "quantization_config": BitsAndBytesConfig(load_in_4bit=True),
-                    "device_map": "auto",
-                }
-                MessageProtocol.status("loading", "4-bit Quantisierung (QLoRA-Modus)")
-            except Exception as e:
-                MessageProtocol.warning(f"4-bit Quantisierung nicht verfügbar: {e}")
+            if not _quant_supported:
+                MessageProtocol.warning(
+                    f"load_in_4bit=true wird ignoriert: bitsandbytes unterstützt nur CUDA, "
+                    f"nicht {self.device.upper()}. Modell wird in Standard-Präzision geladen. "
+                    "Empfehlung: Stattdessen use_lora=true verwenden — spart RAM ohne bitsandbytes."
+                )
+            else:
+                try:
+                    from transformers import BitsAndBytesConfig
+                    quant_kwargs = {
+                        "quantization_config": BitsAndBytesConfig(load_in_4bit=True),
+                        "device_map": "auto",
+                    }
+                    MessageProtocol.status("loading", "4-bit Quantisierung (QLoRA-Modus)")
+                except Exception as e:
+                    MessageProtocol.warning(f"4-bit Quantisierung nicht verfügbar: {e}")
         elif cfg.load_in_8bit:
-            try:
-                from transformers import BitsAndBytesConfig
-                quant_kwargs = {
-                    "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
-                    "device_map": "auto",
-                }
-                MessageProtocol.status("loading", "8-bit Quantisierung aktiviert")
-            except Exception as e:
-                MessageProtocol.warning(f"8-bit Quantisierung nicht verfügbar: {e}")
+            if not _quant_supported:
+                MessageProtocol.warning(
+                    f"load_in_8bit=true wird ignoriert: bitsandbytes unterstützt nur CUDA, "
+                    f"nicht {self.device.upper()}. Modell wird in Standard-Präzision geladen."
+                )
+            else:
+                try:
+                    from transformers import BitsAndBytesConfig
+                    quant_kwargs = {
+                        "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
+                        "device_map": "auto",
+                    }
+                    MessageProtocol.status("loading", "8-bit Quantisierung aktiviert")
+                except Exception as e:
+                    MessageProtocol.warning(f"8-bit Quantisierung nicht verfügbar: {e}")
 
         if self.arch == "encoder":
             self.model = AutoModelForMaskedLM.from_pretrained(path, **quant_kwargs)
