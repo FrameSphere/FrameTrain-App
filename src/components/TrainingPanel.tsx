@@ -418,6 +418,323 @@ function ToggleField({ label, checked, onChange, tooltip, primaryColor }: Toggle
   );
 }
 
+// ============ KI-Assistent Modal ============
+
+interface AIAssistantModalProps {
+  config: TrainingConfig;
+  modelInfo: ModelRamInfo | null;
+  selectedModel: ModelInfo | undefined;
+  selectedDataset: DatasetInfo | undefined;
+  systemRamGb: number;
+  onApply: (patch: Partial<TrainingConfig>) => void;
+  onClose: () => void;
+  gradient: string;
+  primaryColor: string;
+}
+
+function AIAssistantModal({
+  config, modelInfo, selectedModel, selectedDataset,
+  systemRamGb, onApply, onClose, gradient, primaryColor,
+}: AIAssistantModalProps) {
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('ft_ai_api_key') || '');
+  const [provider, setProvider] = useState<'anthropic' | 'openai'>(
+    () => (localStorage.getItem('ft_ai_provider') as 'anthropic' | 'openai') || 'anthropic'
+  );
+  const [prompt, setPrompt] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string>('');
+  const [parsedConfig, setParsedConfig] = useState<Partial<TrainingConfig> | null>(null);
+  const [error, setError] = useState('');
+
+  const saveKey = () => {
+    localStorage.setItem('ft_ai_api_key', apiKey);
+    localStorage.setItem('ft_ai_provider', provider);
+  };
+
+  const buildSystemPrompt = () => {
+    const modelName = selectedModel?.name || 'Unbekannt';
+    const modelType = modelInfo?.model_type || 'unknown';
+    const paramB = modelInfo?.param_billion?.toFixed(2) || '?';
+    const hiddenSize = modelInfo?.hidden_size || 768;
+    const numLayers = modelInfo?.num_hidden_layers || 12;
+    const datasetFiles = selectedDataset?.file_count || 0;
+    const datasetMb = ((selectedDataset?.size_bytes || 0) / 1e6).toFixed(0);
+
+    return `Du bist ein Experte für das Training von HuggingFace-Transformer-Modellen mit PyTorch.
+
+KONTEXT DES USERS:
+- Modell: ${modelName} (${modelType}, ${paramB}B Parameter, hidden_size=${hiddenSize}, num_layers=${numLayers})
+- Dataset: ${datasetFiles} Dateien, ${datasetMb} MB
+- System-RAM: ${systemRamGb} GB (Apple Silicon MPS oder CPU, kein dediziertes VRAM)
+- Aktuelle Konfiguration:
+${JSON.stringify({
+  epochs: config.epochs, batch_size: config.batch_size,
+  gradient_accumulation_steps: config.gradient_accumulation_steps,
+  learning_rate: config.learning_rate, optimizer: config.optimizer,
+  scheduler: config.scheduler, use_lora: config.use_lora,
+  lora_r: config.lora_r, lora_alpha: config.lora_alpha,
+  fp16: config.fp16, bf16: config.bf16, load_in_4bit: config.load_in_4bit,
+  max_seq_length: config.max_seq_length, gradient_checkpointing: config.gradient_checkpointing,
+  num_workers: config.num_workers,
+}, null, 2)}
+
+DEINE AUFGABE:
+1. Analysiere das Ziel des Users
+2. Empfehle optimale Trainingsparameter
+3. Erkläre kurz (3-5 Sätze) warum diese Parameter gewählt wurden
+4. Gib am ENDE deiner Antwort exakt einen JSON-Block mit den empfohlenen Parametern aus
+
+WICHTIG für Apple Silicon / CPU-Training:
+- Kein CUDA verfügbar, nur MPS oder CPU
+- fp16=false empfehlen (MPS-Instabilitäten bei fp16), stattdessen bf16=false auch (stabiler auf CPU)
+- num_workers=0 oder 1 empfehlen (MPS + multi-processing = Deadlocks)
+- Bei wenig RAM: use_lora=true + load_in_4bit=true + gradient_checkpointing=true + batch_size=1 + gradient_accumulation_steps=8
+
+JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
+```json
+{
+  "epochs": 3,
+  "batch_size": 2,
+  "gradient_accumulation_steps": 4,
+  "learning_rate": 0.0002,
+  "optimizer": "adamw",
+  "scheduler": "cosine",
+  "warmup_ratio": 0.05,
+  "weight_decay": 0.01,
+  "use_lora": true,
+  "lora_r": 16,
+  "lora_alpha": 32,
+  "lora_dropout": 0.05,
+  "load_in_4bit": false,
+  "fp16": false,
+  "bf16": false,
+  "max_seq_length": 512,
+  "gradient_checkpointing": true,
+  "num_workers": 0,
+  "max_grad_norm": 1.0
+}
+````;
+  };
+
+  const handleAsk = async () => {
+    if (!apiKey.trim()) { setError('Bitte API-Key eingeben.'); return; }
+    if (!prompt.trim()) { setError('Bitte beschreibe dein Trainingsziel.'); return; }
+    setLoading(true); setError(''); setResult(''); setParsedConfig(null);
+    saveKey();
+
+    try {
+      let responseText = '';
+
+      if (provider === 'anthropic') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify({
+            model: 'claude-opus-4-5',
+            max_tokens: 1024,
+            system: buildSystemPrompt(),
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e?.error?.message || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        responseText = data.content?.[0]?.text || '';
+      } else {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            max_tokens: 1024,
+            messages: [
+              { role: 'system', content: buildSystemPrompt() },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e?.error?.message || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        responseText = data.choices?.[0]?.message?.content || '';
+      }
+
+      setResult(responseText);
+
+      // JSON-Block extrahieren
+      const match = responseText.match(/```json\s*([\s\S]*?)```/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[1].trim());
+          setParsedConfig(parsed);
+        } catch (_) {
+          setError('JSON konnte nicht geparst werden. Du kannst die Parameter manuell übertragen.');
+        }
+      }
+    } catch (e: any) {
+      setError('Fehler: ' + String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApply = () => {
+    if (parsedConfig) { onApply(parsedConfig); onClose(); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple-500/20 flex items-center justify-center">
+              <span className="text-lg">🤖</span>
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">KI-Assistent</h2>
+              <p className="text-xs text-gray-400">Parameter per KI optimieren lassen</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-5 space-y-4">
+          {/* API-Key + Provider */}
+          <div className="bg-white/[0.04] rounded-xl border border-white/10 p-4 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-widest text-gray-500">KI-Anbieter & API-Key</div>
+            <div className="flex gap-2">
+              {(['anthropic', 'openai'] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setProvider(p)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border ${
+                    provider === p
+                      ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                  }`}
+                >
+                  {p === 'anthropic' ? '🤖 Claude (Anthropic)' : '🟢 GPT-4o (OpenAI)'}
+                </button>
+              ))}
+            </div>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder={provider === 'anthropic' ? 'sk-ant-api03-...' : 'sk-...'}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            />
+            <p className="text-xs text-gray-500">Wird nur lokal in diesem Browser gespeichert. Niemals an FrameTrain übertragen.</p>
+          </div>
+
+          {/* Kontext-Info */}
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            {[
+              { label: 'Modell', value: selectedModel?.name || '–' },
+              { label: 'Dataset', value: selectedDataset ? `${selectedDataset.file_count} Dateien` : '–' },
+              { label: 'System-RAM', value: `${systemRamGb} GB` },
+            ].map(item => (
+              <div key={item.label} className="bg-white/[0.04] rounded-lg p-3">
+                <div className="text-gray-500 mb-1">{item.label}</div>
+                <div className="text-white font-medium truncate" title={item.value}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Prompt */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase tracking-widest text-gray-500">Dein Trainingsziel</label>
+            <textarea
+              value={prompt}
+              onChange={e => setPrompt(e.target.value)}
+              rows={4}
+              placeholder="z.B. 'Ich möchte ein deutsches Sprachmodell für Sentiment-Analyse fine-tunen. Mein RAM ist begrenzt (16GB). Stabilität ist wichtiger als Geschwindigkeit.'"
+              className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            />
+            <div className="flex flex-wrap gap-2">
+              {[
+                'RAM ist begrenzt, max. Effizienz',
+                'Schnelles Training, Qualität sekundär',
+                'Höchste Modellqualität, Zeit egal',
+                'Erstes Fine-Tuning, sicher & stabil',
+              ].map(hint => (
+                <button
+                  key={hint}
+                  onClick={() => setPrompt(p => p ? p + ' ' + hint : hint)}
+                  className="text-xs px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-gray-400 hover:text-white transition-all"
+                >
+                  + {hint}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">{error}</div>
+          )}
+
+          {/* KI-Antwort */}
+          {result && (
+            <div className="space-y-3">
+              <div className="text-xs font-bold uppercase tracking-widest text-gray-500">KI-Empfehlung</div>
+              <div className="p-4 bg-white/[0.03] border border-white/10 rounded-xl max-h-64 overflow-y-auto">
+                <pre className="text-sm text-gray-300 whitespace-pre-wrap break-words leading-relaxed font-sans">{result}</pre>
+              </div>
+              {parsedConfig && (
+                <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                  <div className="flex items-center gap-2 text-green-400 text-sm font-semibold mb-2">
+                    <CheckCircle className="w-4 h-4" />
+                    {Object.keys(parsedConfig).length} Parameter erkannt und übertragbar
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(parsedConfig).map(([k, v]) => (
+                      <span key={k} className="text-xs px-2 py-0.5 bg-green-500/10 text-green-300 rounded font-mono">
+                        {k}: {String(v)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-5 border-t border-white/10 flex gap-3 flex-shrink-0">
+          <button
+            onClick={handleAsk}
+            disabled={loading}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 bg-gradient-to-r ${gradient} rounded-xl text-white font-semibold hover:opacity-90 transition-all disabled:opacity-50`}
+          >
+            {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> KI denkt nach…</> : <>🤖 Parameter optimieren</>}
+          </button>
+          {parsedConfig && (
+            <button
+              onClick={handleApply}
+              className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-500/20 hover:bg-green-500/30 border border-green-500/40 rounded-xl text-green-300 font-semibold transition-all"
+            >
+              <CheckCircle className="w-4 h-4" /> Parameter übernehmen
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ Training Error Modal ============
 
 interface TrainingErrorModalProps {
@@ -451,7 +768,15 @@ function TrainingErrorModal({
     errorMessage.toLowerCase().includes('ram') ||
     errorMessage.toLowerCase().includes('memory') ||
     errorMessage.toLowerCase().includes('oom') ||
-    errorTitle.toLowerCase().includes('ram');
+    errorTitle.toLowerCase().includes('ram') ||
+    // Exit-Code 1 nach Training-Start = häufig OOM oder MPS-Crash
+    (errorMessage.toLowerCase().includes('exit-code') && errorLogs.some(l =>
+      l.toLowerCase().includes('killed') ||
+      l.toLowerCase().includes('error') ||
+      l.toLowerCase().includes('oom')
+    )) ||
+    // Klassischer macOS-OOM: Prozess stirbt nach mehreren Schritten
+    errorMessage.toLowerCase().includes('unerwartet beendet');
 
   const isLoraError = errorDetails.toLowerCase().includes('target modules') ||
     errorDetails.toLowerCase().includes('not found in the base model') ||
@@ -469,14 +794,16 @@ function TrainingErrorModal({
       bg: 'bg-orange-500/10',
       border: 'border-orange-500/30',
       title: 'Nicht genug Arbeitsspeicher (RAM)',
-      text: 'Dein System hatte nicht genug RAM für dieses Training. Das Betriebssystem hat den Prozess abrupt beendet.',
+      text: 'Dein System hatte nicht genug RAM für dieses Training. Auf Apple Silicon (MPS) teilen sich CPU und GPU denselben Speicher — der Verbrauch übersteigt die theoretische Schätzung deutlich.',
       fixes: [
-        'Batch Size halbieren (z.B. 8 → 4 → 2)',
+        'Batch Size auf 1 setzen + Gradient Accumulation auf 8–16 erhöhen',
         'LoRA aktivieren — trainiert nur 1–5% der Parameter',
-        'Sequenzlänge halbieren (z.B. 512 → 256)',
-        'Gradient Accumulation erhöhen + Batch auf 1 setzen',
-        'Andere Apps schließen bevor du trainierst',
+        'Gradient Checkpointing aktivieren (im Erweitert-Abschnitt)',
+        'num_workers auf 0 setzen (MPS + Worker = RAM-Spike + Deadlocks)',
+        'Sequenzlänge halbieren (z.B. 512 → 256 → 128)',
         '4-bit QLoRA aktivieren für maximale RAM-Ersparnis',
+        'Alle anderen Apps schließen (Chrome, Slack etc.)',
+        '→ KI-Assistent nutzen: liefert optimale Parameter für deinen RAM',
       ],
     };
     if (isLoraError) return {
@@ -1122,53 +1449,104 @@ interface ModelRamInfo {
   param_billion: number;
   model_type: string;
   readable_size: string;
+  hidden_size: number;
+  num_hidden_layers: number;
 }
 
 const SYSTEM_RAM_OPTIONS = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128];
 
 interface RamBreakdown {
   modelGb: number;
+  gradientsGb: number;
   optimizerGb: number;
   activationsGb: number;
-  batchGb: number;
+  workersGb: number;
   overheadGb: number;
   totalGb: number;
+}
+
+// Plattform-Typ ermitteln (MPS = Apple Silicon, CUDA = NVIDIA, CPU)
+function detectPlatform(): 'mps' | 'cuda' | 'cpu' {
+  // Aus navigator.platform lässt sich kein sicherer Schluss ziehen;
+  // wir prüfen ob es ein Mac ist (MPS wahrscheinlich)
+  if (navigator.platform?.toLowerCase().includes('mac') ||
+      navigator.userAgent?.toLowerCase().includes('mac')) return 'mps';
+  return 'cpu'; // Fallback; CUDA würde der Rust-Backend melden
 }
 
 function calcRam(
   paramsBillion: number,
   cfg: TrainingConfig,
   datasetSizeBytes: number,
+  hiddenSize: number = 768,
+  numLayers: number = 12,
+  isMps: boolean = false,
 ): RamBreakdown {
   const p = paramsBillion * 1e9;
 
-  // Bytes pro Parameter je nach Präzision
+  // Bytes pro Parameter im Modell je nach Quantisierung
   const bpp = cfg.load_in_4bit ? 0.5 : cfg.load_in_8bit ? 1 : cfg.fp16 || cfg.bf16 ? 2 : 4;
   const modelGb = (p * bpp) / 1e9;
 
-  // Optimizer: AdamW braucht 2 fp32-Momentum-Tensoren pro trainierbarem Parameter
-  // LoRA: nur ~(lora_r/64)*2% der Parameter werden trainiert
-  const trainableRatio = cfg.use_lora ? Math.min((cfg.lora_r / 64) * 0.02, 0.05) : 1.0;
-  const optimizerGb = (p * trainableRatio * 2 * 4) / 1e9; // Optimizer immer fp32
+  // Gradienten: immer fp32 (auch bei fp16-Training hält PyTorch fp32-Kopie)
+  // Bei LoRA nur Gradienten für trainierbare Parameter
+  const trainableRatio = cfg.use_lora ? Math.min((cfg.lora_r / 64) * 0.05, 0.05) : 1.0;
+  const gradientsGb = (p * trainableRatio * 4) / 1e9;
 
-  // Aktivierungen: mit Gradient Checkpointing ~15%, ohne ~50% der Modellgröße
-  // Quantisierte Modelle casten Aktivierungen intern auf fp16/fp32
-  const activationFactor = cfg.gradient_checkpointing ? 0.15 : 0.50;
-  const activationsGb = modelGb * activationFactor * (bpp === 0.5 ? 2 : 1);
+  // Optimizer: AdamW = 2x fp32-Momentum-Tensoren pro trainierbarem Parameter
+  const optimizerGb = (p * trainableRatio * 2 * 4) / 1e9;
 
-  // Batch-RAM: batch_size × seq_length × 3 Tensoren × 4 Bytes
-  // (input_ids + attention_mask + labels)
-  const batchGb = (cfg.batch_size * cfg.max_seq_length * 3 * 4) / 1e9;
+  // Aktivierungen: physikalisch korrekte Formel für Transformer-Architekturen
+  // Pro Layer und Token werden gespeichert:
+  //   Attention: Q, K, V + scores + output = ~5 * H * B * S * 4 bytes
+  //   FFN:       up-proj + activation + down-proj = ~3 * 4H * B * S * 4 bytes (mittelt sich auf ~4H)
+  //   LayerNorm: 2 * H * B * S * 4 bytes
+  //   Residuals: 2 * H * B * S * 4 bytes
+  // Gesamt pro Layer: (5H + 16H + 4H) * B * S * 4 ≈ (H * 13 + 4*H) * B * S * 4
+  //                 = (13 + 4) * H * B * S * 4 ≈ 17 * H * B * S * 4 bytes
+  // Backward-Pass verdoppelt das näherungsweise (Temp-Tensoren für Gradienten-Berechnung)
+  const H = hiddenSize;
+  const L = numLayers;
+  const B = cfg.batch_size;
+  const S = cfg.max_seq_length;
+  const storedLayers = cfg.gradient_checkpointing ? Math.ceil(Math.sqrt(L)) : L;
+  const activationBytesPerLayer = 17 * H * B * S * 4; // forward
+  const backwardMultiplier = 1.8; // ~1.8x wegen Backward-Temp-Tensoren
+  const activationsGb = (activationBytesPerLayer * storedLayers * backwardMultiplier) / 1e9;
 
-  // Datensatz: HuggingFace speichert als memory-mapped Arrow-Datei auf Disk.
-  // Nur aktive Seiten landen im RAM – ca. 5% bei großen Datensätzen, min 200MB.
-  const datasetCacheGb = Math.min(Math.max(datasetSizeBytes * 0.05 / 1e9, 0.2), 3.0);
+  // DataLoader-Worker-Prozesse: jeder Worker lädt Dataset-Shard in eigenen RAM
+  // Auf Apple MPS: tokenizerbasierter Deadlock zwingt zu num_workers=0 oder wenig Workers
+  const workerRamMb = 450; // ~450 MB pro Python-Worker-Prozess (Basis + Dataset-Shard)
+  const workersGb = (cfg.num_workers * workerRamMb) / 1024;
 
-  // OS + Python + sonstige Overhead
-  const overheadGb = 1.5;
+  // Datensatz: HuggingFace lädt Arrow-Format memory-mapped, aber cached pages
+  const datasetCacheGb = Math.min(Math.max(datasetSizeBytes * 0.05 / 1e9, 0.2), 2.0);
 
-  const totalGb = modelGb + optimizerGb + activationsGb + batchGb + datasetCacheGb + overheadGb;
-  return { modelGb, optimizerGb, activationsGb, batchGb, overheadGb, totalGb };
+  // Framework-Overhead:
+  //   Python-Interpreter: ~300 MB
+  //   PyTorch-Core + Autograd-Graph: ~800 MB
+  //   MPS/CUDA-Kontext + Allocator-Reserve: 1.2 GB (MPS hält immer Reserve)
+  //   Tokenizer + HuggingFace-Bibliotheken: ~400 MB
+  const frameworkGb = isMps ? 3.2 : 2.5;
+
+  // MPS (Apple Unified Memory) zusätzlicher Overhead:
+  // MPS und CPU teilen denselben physischen RAM, aber PyTorch auf MPS kopiert
+  // Tensoren beim Transfer zusätzlich und hat ein weniger reifes Memory-Management.
+  // Empirisch: MPS verbraucht ca. 1.4-1.6x mehr als theoretisch.
+  const mpsFactor = isMps ? 1.35 : 1.0;
+
+  const rawTotal = modelGb + gradientsGb + optimizerGb + activationsGb + workersGb + datasetCacheGb + frameworkGb;
+  const totalGb = rawTotal * mpsFactor;
+
+  return {
+    modelGb: modelGb * mpsFactor,
+    gradientsGb: gradientsGb * mpsFactor,
+    optimizerGb: optimizerGb * mpsFactor,
+    activationsGb: activationsGb * mpsFactor,
+    workersGb: workersGb * mpsFactor,
+    overheadGb: (datasetCacheGb + frameworkGb) * mpsFactor,
+    totalGb,
+  };
 }
 
 interface RamCalculatorProps {
@@ -1176,9 +1554,10 @@ interface RamCalculatorProps {
   datasetSizeBytes: number;
   selectedModelId: string | null;
   primaryColor: string;
+  requirements: RequirementsCheck | null;
 }
 
-function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor }: RamCalculatorProps) {
+function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor, requirements }: RamCalculatorProps) {
   // Echte Daten vom Rust-Backend
   const [systemRamGb, setSystemRamGb] = useState<number>(16);
   const [systemRamOverride, setSystemRamOverride] = useState<number | null>(null);
@@ -1220,7 +1599,15 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
 
   const effectiveRam = systemRamOverride ?? systemRamGb;
   const paramBillion = modelInfo?.param_billion ?? 0.35;
-  const ram = calcRam(paramBillion, config, datasetSizeBytes);
+  const isMps = requirements?.mps_available ?? detectPlatform() === 'mps';
+  const ram = calcRam(
+    paramBillion,
+    config,
+    datasetSizeBytes,
+    modelInfo?.hidden_size ?? 768,
+    modelInfo?.num_hidden_layers ?? 12,
+    isMps,
+  );
   const usedPct = Math.min((ram.totalGb / effectiveRam) * 100, 100);
 
   const status: 'ok' | 'tight' | 'critical' =
@@ -1250,11 +1637,15 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
 
   const segments = [
     { label: 'Modell',        gb: ram.modelGb,       color: 'bg-blue-500' },
-    { label: 'Optimizer',     gb: ram.optimizerGb,   color: 'bg-purple-500' },
-    { label: 'Aktivierungen', gb: ram.activationsGb, color: 'bg-orange-500' },
-    { label: 'Datensatz',     gb: ram.batchGb + (Math.min(Math.max(datasetSizeBytes * 0.05 / 1e9, 0.2), 3.0)), color: 'bg-cyan-500' },
-    { label: 'Overhead',      gb: ram.overheadGb,    color: 'bg-slate-500' },
+    { label: 'Gradienten',   gb: ram.gradientsGb,   color: 'bg-sky-400' },
+    { label: 'Optimizer',    gb: ram.optimizerGb,   color: 'bg-purple-500' },
+    { label: 'Aktivierungen',gb: ram.activationsGb, color: 'bg-orange-500' },
+    { label: 'Workers',      gb: ram.workersGb,     color: 'bg-cyan-500' },
+    { label: 'Overhead',     gb: ram.overheadGb,    color: 'bg-slate-500' },
   ];
+
+  // MPS-Info: Apple Silicon nutzt Unified Memory
+  const isMps = requirements?.mps_available ?? detectPlatform() === 'mps';
 
   return (
     <div className={`bg-white/5 rounded-xl border ${statusColor.border} overflow-hidden`}>
@@ -1384,23 +1775,33 @@ function RamCalculator({ config, datasetSizeBytes, selectedModelId, primaryColor
 
           {/* Hinweise */}
           <div className="text-xs text-gray-500 space-y-1">
+            {isMps && (
+              <div className="flex items-start gap-2 text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2 mb-1">
+                <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                <span><strong>Apple Silicon (MPS):</strong> CPU und GPU teilen denselben RAM. PyTorch reserviert zusätzliche Puffer (+35%). Dieser Schätzwert ist realistischer als reine Theorie.</span>
+              </div>
+            )}
             <div className="flex items-start gap-2">
               <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
               <span>{cfg.use_lora
-                ? 'LoRA aktiv: Optimizer nur für trainierbare Parameter (~1–5%)'
-                : 'Kein LoRA: AdamW braucht 2× Modell-RAM für Momentum-Tensoren'}
+                ? 'LoRA aktiv: Gradienten + Optimizer nur für trainierbare Parameter (~1–5%)'
+                : 'Kein LoRA: Gradienten + AdamW-Momentum für alle Parameter'}
               </span>
             </div>
             <div className="flex items-start gap-2">
               <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
-              <span>Datensatz wird memory-mapped (Disk → kein RAM). Nur aktive Pages werden gecacht.</span>
+              <span>Aktivierungen basieren auf H={modelInfo?.hidden_size ?? 768}, L={modelInfo?.num_hidden_layers ?? 12}, B={cfg.batch_size}, S={cfg.max_seq_length}. Backward-Pass inclus.</span>
             </div>
             {cfg.gradient_checkpointing && (
               <div className="flex items-center gap-2 text-green-400/70">
                 <CheckCircle className="w-3 h-3 flex-shrink-0" />
-                <span>Gradient Checkpointing spart ~60% Aktivierungs-RAM</span>
+                <span>Gradient Checkpointing: nur {Math.ceil(Math.sqrt(modelInfo?.num_hidden_layers ?? 12))} Layers gecacht statt {modelInfo?.num_hidden_layers ?? 12}</span>
               </div>
             )}
+            <div className="flex items-start gap-2 text-yellow-400/60">
+              <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
+              <span>Schätzwert ±20% — echter Verbrauch hängt von Modellarchitektur, Batch-Padding und OS-Caching ab.</span>
+            </div>
           </div>
 
           {/* Optimierungstipps — nur bei Engpass */}
@@ -1580,6 +1981,11 @@ export default function TrainingPanel() {
   const [trainingErrorLogs, setTrainingErrorLogs] = useState<string[]>([]);
   const [trainingErrorConfigSnapshot, setTrainingErrorConfigSnapshot] = useState('');
 
+  // KI-Assistent State
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [aiSystemRamGb, setAiSystemRamGb] = useState(16);
+  const [mainModelInfo, setMainModelInfo] = useState<ModelRamInfo | null>(null);
+
   // JSON Upload State
   const [uploadingConfig, setUploadingConfig] = useState(false);
   const [showValidationModal, setShowValidationModal] = useState(false);
@@ -1593,6 +1999,10 @@ export default function TrainingPanel() {
   useEffect(() => {
     if (selectedModelId) {
       loadDatasets();
+      // Modell-Info für KI-Assistent laden
+      invoke<ModelRamInfo>('get_model_ram_info', { modelId: selectedModelId })
+        .then(info => setMainModelInfo(info))
+        .catch(() => setMainModelInfo(null));
       
       // Update version selection when model changes
       const modelWithVersions = modelsWithVersions.find(m => m.id === selectedModelId);
@@ -1801,6 +2211,9 @@ export default function TrainingPanel() {
 
       // Check requirements
       await checkRequirements();
+
+      // System-RAM auch für KI-Assistenten laden
+      invoke<number>('get_system_ram_gb').then(gb => setAiSystemRamGb(Math.round(gb))).catch(() => {});
     } catch (err: any) {
       console.error('Error loading data:', err);
       error('Fehler beim Laden', String(err));
@@ -2338,10 +2751,19 @@ export default function TrainingPanel() {
 
           {/* Presets */}
           <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Sparkles className="w-5 h-5" />
-              Voreinstellungen
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5" />
+                Voreinstellungen
+              </h2>
+              <button
+                onClick={() => setShowAIAssistant(true)}
+                disabled={isTraining}
+                className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 rounded-lg text-purple-300 text-xs font-semibold transition-all disabled:opacity-50"
+              >
+                <span>🤖</span> KI-Assistent
+              </button>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {presets.map((preset) => (
                 <button
@@ -2785,6 +3207,7 @@ export default function TrainingPanel() {
             datasetSizeBytes={selectedDataset?.size_bytes ?? 0}
             selectedModelId={selectedModelId}
             primaryColor={currentTheme.colors.primary}
+            requirements={requirements}
           />
 
           {/* Parameter Rating */}
@@ -3093,6 +3516,23 @@ export default function TrainingPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAIAssistant && (
+        <AIAssistantModal
+          config={config}
+          modelInfo={mainModelInfo}
+          selectedModel={selectedModel}
+          selectedDataset={selectedDataset}
+          systemRamGb={aiSystemRamGb}
+          onApply={(patch) => {
+            setConfig(prev => ({ ...prev, ...patch }));
+            setSelectedPresetId(null);
+          }}
+          onClose={() => setShowAIAssistant(false)}
+          gradient={currentTheme.colors.gradient}
+          primaryColor={currentTheme.colors.primary}
+        />
       )}
 
       {showErrorModal && (

@@ -1716,6 +1716,8 @@ pub struct ModelRamInfo {
     pub param_billion: f64,
     pub model_type: String,
     pub readable_size: String,
+    pub hidden_size: u32,
+    pub num_hidden_layers: u32,
 }
 
 #[tauri::command]
@@ -1762,7 +1764,7 @@ pub fn get_model_ram_info(
         format!("{:.0}B", param_billion)
     };
 
-    Ok(ModelRamInfo { param_billion, model_type, readable_size })
+    Ok(ModelRamInfo { param_billion, model_type, readable_size, hidden_size: h as u32, num_hidden_layers: layers as u32 })
 }
 
 /// Prüft ob Python und PyTorch installiert sind
