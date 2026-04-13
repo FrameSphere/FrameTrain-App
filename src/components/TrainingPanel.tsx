@@ -434,6 +434,7 @@ interface AIAssistantModalProps {
   selectedModel: ModelInfo | undefined;
   selectedDataset: DatasetInfo | undefined;
   systemRamGb: number;
+  requirements: RequirementsCheck | null;
   onApply: (patch: Partial<TrainingConfig>) => void;
   onClose: () => void;
   gradient: string;
@@ -487,7 +488,7 @@ const PROVIDER_META: Record<AIProvider, {
 
 function AIAssistantModal({
   config, modelInfo, selectedModel, selectedDataset,
-  systemRamGb, onApply, onClose, gradient, primaryColor,
+  systemRamGb, requirements, onApply, onClose, gradient, primaryColor,
 }: AIAssistantModalProps) {
   const [provider, setProvider] = useState<AIProvider>(
     () => (localStorage.getItem('ft_ai_provider') as AIProvider) || 'ollama'
@@ -559,6 +560,7 @@ KONTEXT DES USERS:
 - Modell: ${modelName} (${modelType}, ${paramB}B Parameter, hidden_size=${hiddenSize}, num_layers=${numLayers})
 - Dataset: ${datasetFiles} Dateien, ${datasetMb} MB
 - System-RAM: ${systemRamGb} GB (Apple Silicon MPS oder CPU, kein dediziertes VRAM)
+\n- Hardware/GPU: ${requirements?.cuda_available ? 'NVIDIA GPU mit CUDA — bitsandbytes verfügbar, load_in_4bit/8bit möglich' : requirements?.mps_available ? 'Apple Silicon MPS — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen. Stattdessen use_lora=true für RAM-Effizienz nutzen. fp16=false und bf16=false setzen.' : 'Nur CPU — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen.'}
 - Aktuelle Konfiguration:
 ${JSON.stringify({
   epochs: config.epochs, batch_size: config.batch_size,
@@ -3749,6 +3751,7 @@ export default function TrainingPanel() {
           selectedModel={selectedModel}
           selectedDataset={selectedDataset}
           systemRamGb={aiSystemRamGb}
+          requirements={requirements}
           onApply={(patch) => {
             setConfig(prev => ({ ...prev, ...patch }));
             setSelectedPresetId(null);

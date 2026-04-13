@@ -165,6 +165,16 @@ def _base_args(cfg: TrainingConfig, eval_strat: str, device: str, out_dir: str,
     save_steps_val = cfg.save_steps if cfg.save_strategy == "steps" else None
     eval_steps_val = cfg.eval_steps  if eval_strat      == "steps" else None
 
+    # MPS und CPU: pin_memory nicht unterstützt (kein CUDA-Pinned-Memory-Pfad),
+    # num_workers > 0 führt auf MPS zu Deadlocks beim fork-basierten Multiprocessing.
+    _pin_memory  = cfg.pin_memory  if device == "cuda" else False
+    _num_workers = cfg.num_workers if device == "cuda" else 0
+    if device != "cuda" and (cfg.pin_memory or cfg.num_workers > 0):
+        MessageProtocol.status(
+            "init",
+            f"DataLoader: pin_memory=False, num_workers=0 erzwungen (nicht kompatibel mit {device.upper()})"
+        )
+
     base = dict(
         output_dir=out_dir,
         num_train_epochs=cfg.epochs,
@@ -189,16 +199,16 @@ def _base_args(cfg: TrainingConfig, eval_strat: str, device: str, out_dir: str,
         save_total_limit=cfg.save_total_limit,
         logging_steps=cfg.logging_steps,
         eval_steps=eval_steps_val,
-        dataloader_num_workers=0,
+        dataloader_num_workers=_num_workers,
         seed=cfg.seed,
         report_to="none",
         load_best_model_at_end=(eval_strat != "no"),
         metric_for_best_model="eval_loss" if eval_strat != "no" else None,
         greater_is_better=False,
         # RAM-Optimierungen
-        group_by_length=cfg.group_by_length,       # gleich lange Seqs pro Batch → weniger Padding
-        gradient_checkpointing=use_gradient_checkpointing,  # Aktivierungen neu berechnen statt speichern
-        dataloader_pin_memory=cfg.pin_memory,
+        group_by_length=cfg.group_by_length,
+        gradient_checkpointing=use_gradient_checkpointing,
+        dataloader_pin_memory=_pin_memory,
         dataloader_drop_last=cfg.dataloader_drop_last,
     )
     return base
@@ -561,6 +571,18 @@ class Plugin(TrainPlugin):
             "decoder":         TaskType.CAUSAL_LM,
         }
         modules = cfg.lora_target_modules if cfg.lora_target_modules else LORA_MODULES[arch]
+
+        # CRITICAL: enable_input_require_grads() MUSS vor get_peft_model() aufgerufen werden.
+        # Ohne dies können Gradienten nicht durch gradient-checkpointed Basis-Schichten
+        # zurückfließen → RuntimeError: "element 0 of tensors does not require grad".
+        # Auch ohne Gradient Checkpointing schadet der Aufruf nicht und stellt sicher,
+        # dass LoRA-Adapter korrekt trainiert werden.
+        try:
+            self.model.enable_input_require_grads()
+            MessageProtocol.status("loading", "Input-Gradienten für LoRA aktiviert")
+        except Exception as e:
+            MessageProtocol.warning(f"enable_input_require_grads nicht verfügbar ({e}) — LoRA-Gradienten könnten instabil sein")
+
         lora_cfg = LoraConfig(
             r=cfg.lora_r, lora_alpha=cfg.lora_alpha, lora_dropout=cfg.lora_dropout,
             target_modules=modules, bias="none", task_type=task_map[arch],
