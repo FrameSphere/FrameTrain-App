@@ -239,6 +239,7 @@ fn main() {
             training_manager::delete_metrics_template,
             // Test Manager Commands
             test_manager::start_test,
+            test_manager::test_single_input,
             test_manager::stop_test,
             test_manager::get_current_test,
             test_manager::get_active_test_job,

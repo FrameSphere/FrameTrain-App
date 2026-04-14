@@ -1,23 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
-  Play,
-  Square,
-  Download,
-  Filter,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Zap,
-  Target,
-  TrendingUp,
-  Loader2,
-  ChevronDown,
-  AlertTriangle,
-  FileText,
-  Layers,
-  GitBranch,
+  Play, Square, Download, Filter, CheckCircle, XCircle, Clock, Zap,
+  Target, TrendingUp, Loader2, ChevronDown, AlertTriangle, FileText,
+  Layers, GitBranch, MessageSquare, Image, Mic, Table2, Eye,
+  Send, RotateCcw, ChevronRight, BarChart3, HardDrive, AlertCircle,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -29,14 +17,12 @@ interface ModelWithVersionTree {
   name: string;
   versions: VersionTreeItem[];
 }
-
 interface VersionTreeItem {
   id: string;
   name: string;
   is_root: boolean;
   version_number: number;
 }
-
 interface Dataset {
   id: string;
   name: string;
@@ -45,7 +31,6 @@ interface Dataset {
   size_bytes: number;
   type: string;
 }
-
 interface TestJob {
   id: string;
   model_id: string;
@@ -61,8 +46,9 @@ interface TestJob {
   progress: TestProgress;
   results: TestResults | null;
   error: string | null;
+  task_type: string;
+  mode: string;
 }
-
 interface TestProgress {
   current_sample: number;
   total_samples: number;
@@ -70,21 +56,22 @@ interface TestProgress {
   samples_per_second: number;
   estimated_time_remaining: number | null;
 }
-
 interface TestResults {
   total_samples: number;
-  correct_predictions: number;
-  incorrect_predictions: number;
-  accuracy: number;
-  average_loss: number;
+  correct_predictions: number | null;
+  incorrect_predictions: number | null;
+  accuracy: number | null;
+  average_loss: number | null;
   average_inference_time: number;
   predictions: PredictionResult[];
-  metrics: Record<string, number>;
+  metrics: Record<string, any>;
+  task_type: string;
+  hard_examples_file: string | null;
 }
-
 interface PredictionResult {
   sample_id: number;
   input_text: string;
+  input_path: string | null;
   expected_output: string | null;
   predicted_output: string;
   is_correct: boolean;
@@ -92,22 +79,357 @@ interface PredictionResult {
   confidence: number | null;
   inference_time: number;
   error_type: string | null;
+  top_predictions?: Array<{ label: string; confidence: number }>;
+  detections?: Array<{ label: string; confidence: number; bbox?: any }>;
+  wer?: number | null;
 }
 
-// ============ Helper Functions ============
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+// Single test result (modality-agnostic)
+interface SingleResult {
+  task_type: string;
+  input: string;
+  input_type: string;
+  result: Record<string, any>;
 }
 
-function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+type TestMode = 'dataset' | 'single';
+
+// ============ Helpers ============
+
+function formatBytes(b: number): string {
+  if (b === 0) return '0 B';
+  const k = 1024, s = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(b) / Math.log(k));
+  return `${parseFloat((b / Math.pow(k, i)).toFixed(2))} ${s[i]}`;
+}
+function formatDuration(s: number): string {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+function getModalityIcon(taskType: string) {
+  if (!taskType) return <FileText className="w-4 h-4" />;
+  const t = taskType.toLowerCase();
+  if (t.includes('vision') || t.includes('image')) return <Image className="w-4 h-4" />;
+  if (t.includes('audio') || t.includes('speech') || t.includes('asr')) return <Mic className="w-4 h-4" />;
+  if (t.includes('detection') || t.includes('yolo')) return <Eye className="w-4 h-4" />;
+  if (t.includes('tabular') || t.includes('regression') || t.includes('classification')) return <Table2 className="w-4 h-4" />;
+  return <MessageSquare className="w-4 h-4" />;
+}
+function getModalityLabel(taskType: string): string {
+  if (!taskType || taskType === 'auto') return 'Auto-Detect';
+  const t = taskType.toLowerCase();
+  if (t.includes('vision') || t.includes('image_class')) return 'Vision (Bildklassifikation)';
+  if (t.includes('detection') || t.includes('yolo')) return 'Detection (Objekterkennung)';
+  if (t.includes('audio') || t.includes('asr') || t.includes('speech')) return 'Audio / ASR';
+  if (t.includes('tabular')) return 'Tabular (Strukturiert)';
+  if (t.includes('nlp') || t.includes('causal') || t.includes('seq2seq') || t.includes('text') || t.includes('lm')) return 'NLP / Text';
+  return taskType;
+}
+function getSingleInputPlaceholder(taskType: string, inputType: string): string {
+  if (inputType === 'image_path') return '/absoluter/pfad/zum/bild.jpg';
+  if (inputType === 'audio_path') return '/absoluter/pfad/zur/audio.wav';
+  if (inputType === 'json') return '{"feature1": 1.0, "feature2": "A"}';
+  const t = taskType.toLowerCase();
+  if (t.includes('summarization')) return 'Langer Text der zusammengefasst werden soll…';
+  if (t.includes('translation')) return 'Text der übersetzt werden soll…';
+  if (t.includes('question')) return 'Frage an das Modell…';
+  return 'Eingabe für das Modell…';
+}
+
+// ============ Single Result Renderer ============
+
+function SingleResultView({ result, taskType }: { result: Record<string, any>; taskType: string }) {
+  const t = taskType.toLowerCase();
+
+  if (t.includes('audio') || result.transcript !== undefined) {
+    return (
+      <div className="space-y-3">
+        {result.mode === 'asr' || result.transcript ? (
+          <div>
+            <p className="text-xs text-gray-400 mb-1">Transkript</p>
+            <p className="text-white bg-white/5 rounded-lg p-3 text-sm leading-relaxed">
+              {result.transcript || result.output || '(leer)'}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <p className="text-xs text-gray-400 mb-1">Vorhergesagte Klasse</p>
+            <p className="text-white font-medium text-lg">{result.predicted_label}</p>
+          </div>
+        )}
+        {result.top_predictions && (
+          <div>
+            <p className="text-xs text-gray-400 mb-2">Top Vorhersagen</p>
+            <div className="space-y-1">
+              {result.top_predictions.slice(0, 5).map((p: any, i: number) => (
+                <div key={i} className="flex items-center justify-between">
+                  <span className="text-sm text-gray-300">{p.label}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(p.score || p.confidence || 0) * 100}%` }} />
+                    </div>
+                    <span className="text-xs text-gray-400 w-12 text-right">
+                      {((p.score || p.confidence || 0) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (t.includes('detection') || result.detections !== undefined) {
+    const dets: any[] = result.detections || [];
+    return (
+      <div className="space-y-3">
+        <p className="text-xs text-gray-400">{dets.length} Objekt(e) erkannt</p>
+        {dets.length === 0 ? (
+          <p className="text-gray-500 text-sm italic">Keine Objekte gefunden</p>
+        ) : (
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {dets.map((d: any, i: number) => (
+              <div key={i} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                <span className="text-white text-sm font-medium">{d.label}</span>
+                <span className="text-blue-400 text-sm">{((d.confidence || 0) * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (t.includes('vision') || result.top_predictions !== undefined) {
+    const top: any[] = result.top_predictions || [];
+    return (
+      <div className="space-y-3">
+        <div>
+          <p className="text-xs text-gray-400 mb-1">Vorhergesagte Klasse</p>
+          <p className="text-white font-semibold text-xl">{result.predicted_label || top[0]?.label}</p>
+          <p className="text-gray-400 text-sm">{((result.confidence || top[0]?.confidence || 0) * 100).toFixed(2)}% Konfidenz</p>
+        </div>
+        {top.length > 1 && (
+          <div>
+            <p className="text-xs text-gray-400 mb-2">Top-{top.length} Vorhersagen</p>
+            <div className="space-y-1">
+              {top.map((p: any, i: number) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-4">{i + 1}.</span>
+                  <div className="flex-1">
+                    <div className="flex justify-between text-xs mb-0.5">
+                      <span className="text-gray-300">{p.label}</span>
+                      <span className="text-gray-400">{((p.confidence || 0) * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                      <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${(p.confidence || 0) * 100}%` }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (t.includes('tabular') || result.prediction !== undefined) {
+    const probs: number[] = result.probabilities || [];
+    return (
+      <div className="space-y-3">
+        <div>
+          <p className="text-xs text-gray-400 mb-1">Vorhersage</p>
+          <p className="text-white font-semibold text-2xl">{result.prediction}</p>
+          {result.confidence && (
+            <p className="text-gray-400 text-sm mt-1">{(result.confidence * 100).toFixed(2)}% Konfidenz</p>
+          )}
+        </div>
+        {probs.length > 0 && (
+          <div>
+            <p className="text-xs text-gray-400 mb-2">Klassenwahrscheinlichkeiten</p>
+            <div className="space-y-1">
+              {probs.slice(0, 8).map((p: number, i: number) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-6">{i}</span>
+                  <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-green-500 rounded-full" style={{ width: `${p * 100}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-400 w-14 text-right">{(p * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // NLP / default
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs text-gray-400 mb-1">Ausgabe</p>
+        <p className="text-white bg-white/5 rounded-lg p-3 text-sm leading-relaxed whitespace-pre-wrap">
+          {result.output || result.transcript || result.predicted_label || JSON.stringify(result, null, 2)}
+        </p>
+      </div>
+      {result.confidence !== undefined && result.confidence !== null && (
+        <p className="text-gray-400 text-xs">Konfidenz: {(result.confidence * 100).toFixed(2)}%</p>
+      )}
+      {result.model_class && (
+        <p className="text-gray-500 text-xs">Modell-Klasse: {result.model_class}</p>
+      )}
+    </div>
+  );
+}
+
+// ============ Dataset Metrics View ============
+
+function MetricsGrid({ results, taskType }: { results: TestResults; taskType: string }) {
+  const t = taskType.toLowerCase();
+  const m = results.metrics || {};
+
+  const cards: Array<{ label: string; value: string; sub?: string; icon: React.ReactNode; color: string }> = [];
+
+  // Accuracy / Haupt-Metrik
+  if (results.accuracy !== null && results.accuracy !== undefined) {
+    cards.push({
+      label: 'Accuracy',
+      value: `${results.accuracy.toFixed(2)}%`,
+      sub: results.correct_predictions !== null
+        ? `${results.correct_predictions} / ${results.total_samples} korrekt`
+        : `${results.total_samples} Samples`,
+      icon: <Target className="w-5 h-5 text-green-400" />,
+      color: 'text-green-400',
+    });
+  } else if (m.average_wer !== undefined && m.average_wer !== null) {
+    cards.push({
+      label: 'WER',
+      value: `${(m.average_wer * 100).toFixed(2)}%`,
+      sub: `CER: ${m.average_cer !== null ? (m.average_cer * 100).toFixed(2) + '%' : 'N/A'}`,
+      icon: <BarChart3 className="w-5 h-5 text-orange-400" />,
+      color: 'text-orange-400',
+    });
+  } else if (m.precision !== undefined) {
+    cards.push({
+      label: 'Precision',
+      value: m.precision !== null ? `${(m.precision * 100).toFixed(2)}%` : 'N/A',
+      sub: m.recall !== null ? `Recall: ${(m.recall * 100).toFixed(2)}%` : '',
+      icon: <Target className="w-5 h-5 text-blue-400" />,
+      color: 'text-blue-400',
+    });
+  } else if (m.r2_score !== undefined) {
+    cards.push({
+      label: 'R² Score',
+      value: m.r2_score !== null ? m.r2_score.toFixed(4) : 'N/A',
+      sub: m.mae !== undefined ? `MAE: ${m.mae?.toFixed(4)}` : '',
+      icon: <TrendingUp className="w-5 h-5 text-purple-400" />,
+      color: 'text-purple-400',
+    });
+  }
+
+  // F1 (Klassifikation)
+  if (m.f1_macro !== undefined) {
+    cards.push({
+      label: 'F1 Macro',
+      value: m.f1_macro !== null ? `${(m.f1_macro * 100).toFixed(2)}%` : 'N/A',
+      sub: 'Macro-Average',
+      icon: <BarChart3 className="w-5 h-5 text-blue-400" />,
+      color: 'text-blue-400',
+    });
+  }
+
+  // Top-5 (Vision)
+  if (m.top5_accuracy !== undefined && m.top5_accuracy !== null) {
+    cards.push({
+      label: 'Top-5 Accuracy',
+      value: `${m.top5_accuracy.toFixed(2)}%`,
+      sub: 'Unter Top-5',
+      icon: <CheckCircle className="w-5 h-5 text-teal-400" />,
+      color: 'text-teal-400',
+    });
+  }
+
+  // Avg Confidence
+  if (m.average_confidence !== undefined && m.average_confidence !== null) {
+    cards.push({
+      label: 'Avg. Konfidenz',
+      value: `${(m.average_confidence * 100).toFixed(2)}%`,
+      sub: 'Durchschnitt',
+      icon: <Zap className="w-5 h-5 text-yellow-400" />,
+      color: 'text-yellow-400',
+    });
+  }
+
+  // Avg Loss
+  if (results.average_loss !== null && results.average_loss !== undefined) {
+    cards.push({
+      label: 'Avg. Loss',
+      value: results.average_loss.toFixed(4),
+      sub: 'Cross-Entropy',
+      icon: <TrendingUp className="w-5 h-5 text-blue-400" />,
+      color: 'text-blue-400',
+    });
+  }
+
+  // Inferenz-Zeit
+  cards.push({
+    label: 'Inferenz-Zeit',
+    value: `${(results.average_inference_time * 1000).toFixed(0)}ms`,
+    sub: 'Pro Sample',
+    icon: <Clock className="w-5 h-5 text-purple-400" />,
+    color: 'text-white',
+  });
+
+  // Samples/s
+  if (m.samples_per_second !== undefined) {
+    cards.push({
+      label: 'Geschwindigkeit',
+      value: `${(m.samples_per_second || 0).toFixed(1)}`,
+      sub: 'Samples/Sekunde',
+      icon: <Zap className="w-5 h-5 text-yellow-400" />,
+      color: 'text-white',
+    });
+  }
+
+  // Detections (Detection-Modus)
+  if (m.average_detections !== undefined) {
+    cards.push({
+      label: 'Avg. Detektionen',
+      value: `${(m.average_detections || 0).toFixed(1)}`,
+      sub: 'Pro Bild',
+      icon: <Eye className="w-5 h-5 text-cyan-400" />,
+      color: 'text-cyan-400',
+    });
+  }
+
+  if (cards.length === 0) {
+    cards.push({
+      label: 'Samples',
+      value: String(results.total_samples),
+      sub: 'Getestet',
+      icon: <Target className="w-5 h-5 text-gray-400" />,
+      color: 'text-white',
+    });
+  }
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      {cards.map((card, i) => (
+        <div key={i} className="bg-white/5 rounded-xl border border-white/10 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-gray-400">{card.label}</h3>
+            {card.icon}
+          </div>
+          <div className={`text-3xl font-bold mb-1 ${card.color}`}>{card.value}</div>
+          {card.sub && <div className="text-xs text-gray-500">{card.sub}</div>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ============ Main Component ============
@@ -116,59 +438,69 @@ export default function TestPanel() {
   const { currentTheme } = useTheme();
   const { success, error: notifyError, info } = useNotification();
 
-  // Selection State
+  // Data
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
 
-  // Test State
+  // Mode
+  const [testMode, setTestMode] = useState<TestMode>('dataset');
+
+  // Dataset test state
   const [currentTest, setCurrentTest] = useState<TestJob | null>(null);
   const [testResults, setTestResults] = useState<TestResults | null>(null);
   const [loading, setLoading] = useState(true);
-  const [testStartTime, setTestStartTime] = useState<number | null>(null);
 
-  // Filter State
+  // Single test state
+  const [singleInput, setSingleInput] = useState('');
+  const [singleInputType, setSingleInputType] = useState<'text' | 'image_path' | 'audio_path' | 'json'>('text');
+  const [singleRunning, setSingleRunning] = useState(false);
+  const [singleResult, setSingleResult] = useState<SingleResult | null>(null);
+  const [singleHistory, setSingleHistory] = useState<SingleResult[]>([]);
+
+  // Filters (dataset mode)
   const [showOnlyIncorrect, setShowOnlyIncorrect] = useState(false);
-  const [minLoss, setMinLoss] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
 
-    // ============ Load Data ============
+  const versionIdRef = useRef<string | null>(null);
+
+  // ============ Init ============
+
   useEffect(() => {
     loadInitialData();
-    checkForActiveTest();
     setupEventListeners();
   }, []);
 
   useEffect(() => {
     if (selectedModelId) {
       loadDatasets(selectedModelId);
-      
       const model = modelsWithVersions.find(m => m.id === selectedModelId);
-
       if (model && model.versions.length > 0) {
-
-        // ✨ Neue Logik: neueste Version anhand version_number auswählen
-        const sortedVersions = [...model.versions].sort(
-          (a, b) => b.version_number - a.version_number
-        );
-        const newestVersion = sortedVersions[0];
-
-        setSelectedVersionId(newestVersion?.id || null);
+        const sorted = [...model.versions].sort((a, b) => b.version_number - a.version_number);
+        setSelectedVersionId(sorted[0]?.id || null);
       }
     }
   }, [selectedModelId, modelsWithVersions]);
+
+  useEffect(() => {
+    versionIdRef.current = selectedVersionId;
+  }, [selectedVersionId]);
+
+  // Auto-detect best input type from task_type
+  useEffect(() => {
+    if (!selectedVersionId) return;
+    const model = modelsWithVersions.find(m => m.id === selectedModelId);
+    // We don't know task_type until test starts, keep text as default for now
+  }, [selectedVersionId]);
 
   const loadInitialData = async () => {
     try {
       setLoading(true);
       const models = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree');
       setModelsWithVersions(models);
-      
-      if (models.length > 0) {
-        setSelectedModelId(models[0].id);
-      }
+      if (models.length > 0) setSelectedModelId(models[0].id);
     } catch (err: any) {
       notifyError('Fehler beim Laden', String(err));
     } finally {
@@ -176,234 +508,121 @@ export default function TestPanel() {
     }
   };
 
-  const checkForActiveTest = async () => {
-    try {
-      // Check if there's an active test job
-      const activeTest = await invoke<TestJob | null>('get_active_test_job');
-      if (activeTest) {
-        setCurrentTest(activeTest);
-        if (activeTest.started_at) {
-          setTestStartTime(new Date(activeTest.started_at).getTime());
-        }
-        if (activeTest.results) {
-          setTestResults(activeTest.results);
-        }
-        info('Laufender Test gefunden', 'Der Test wird fortgesetzt...');
-      }
-    } catch (err: any) {
-      // No active test or error - that's fine
-      console.log('No active test found:', err);
-    }
-  };
-
   const loadDatasets = async (modelId: string) => {
     try {
       const ds = await invoke<Dataset[]>('list_test_datasets_for_model', { modelId });
       setDatasets(ds);
-      if (ds.length > 0) {
-        setSelectedDatasetId(ds[0].id);
-      }
-    } catch (err: any) {
-      console.error('Error loading datasets:', err);
+      if (ds.length > 0) setSelectedDatasetId(ds[0].id);
+      else setSelectedDatasetId(null);
+    } catch (err) {
+      console.error('Datasets laden:', err);
     }
   };
 
   const setupEventListeners = () => {
-    const unlistenProgress = listen('test-progress', (event: any) => {
-      const progressData = event.payload.data;
+    const unlisteners: Promise<() => void>[] = [];
+
+    unlisteners.push(listen('test-progress', (event: any) => {
+      const prog = event.payload.data;
       setCurrentTest(prev => {
         if (!prev) return null;
-        
-        // Calculate estimated time remaining if not provided
-        let estimatedTimeRemaining = progressData.estimated_time_remaining;
-        
-        if (!estimatedTimeRemaining && testStartTime && progressData.samples_per_second > 0) {
-          const remaining = progressData.total_samples - progressData.current_sample;
-          estimatedTimeRemaining = remaining / progressData.samples_per_second;
-        }
-        
-        return {
-          ...prev,
-          progress: {
-            ...progressData,
-            estimated_time_remaining: estimatedTimeRemaining
-          }
-        };
+        return { ...prev, status: 'running', progress: prog };
       });
-    });
+    }));
 
-    const unlistenComplete = listen('test-complete', async (event: any) => {
-      console.log('[TestPanel] ========== TEST COMPLETE EVENT ==========');
-      console.log('[TestPanel] Full event payload:', event.payload);
-      const resultsSummary = event.payload.data;
-      console.log('[TestPanel] Test complete event received', resultsSummary);
-      console.log('[TestPanel] currentTest at event time:', currentTest);
-      console.log('[TestPanel] event.payload.version_id:', event.payload.version_id);
-      
-      // CRITICAL FIX: Load full results with predictions from DB
+    unlisteners.push(listen('test-status', (event: any) => {
+      const d = event.payload.data;
+      console.log('[Test] Status:', d);
+    }));
+
+    unlisteners.push(listen('test-complete', async (event: any) => {
+      const data = event.payload.data;
+      const vid = event.payload.version_id || versionIdRef.current;
+
       let fullResults: TestResults = {
-        total_samples: resultsSummary.total_samples || 0,
-        correct_predictions: resultsSummary.correct_predictions || 0,
-        incorrect_predictions: resultsSummary.incorrect_predictions || 0,
-        accuracy: resultsSummary.accuracy || 0,
-        average_loss: resultsSummary.average_loss || 0,
-        average_inference_time: resultsSummary.average_inference_time || 0,
+        total_samples: data?.total_samples || 0,
+        correct_predictions: data?.correct_predictions ?? null,
+        incorrect_predictions: data?.incorrect_predictions ?? null,
+        accuracy: data?.accuracy ?? null,
+        average_loss: data?.average_loss ?? null,
+        average_inference_time: data?.average_inference_time || 0,
         predictions: [],
         metrics: {
-          samples_per_second: resultsSummary.samples_per_second || 0,
-          ...resultsSummary.metrics
-        }
+          samples_per_second: data?.samples_per_second || 0,
+          ...(data?.metrics || {}),
+        },
+        task_type: data?.task_type || '',
+        hard_examples_file: data?.hard_examples_file || null,
       };
-      
-      // CRITICAL FIX: Get version_id from multiple sources
-      let versionIdToUse = currentTest?.version_id;
-      
-      // Fallback: Try to get from event or state
-      if (!versionIdToUse) {
-        console.warn('[TestPanel] ⚠️ currentTest.version_id is null, checking alternatives...');
-        // Check if version_id is in the event payload
-        versionIdToUse = event.payload.version_id || event.payload.data?.version_id;
-        console.log('[TestPanel] version_id from event:', versionIdToUse);
-      }
-      
-      // Load predictions from database if we have a version_id
-      if (versionIdToUse) {
+
+      // Predictions aus DB laden
+      if (vid) {
         try {
-          console.log('[TestPanel] Loading predictions from database for version:', versionIdToUse);
-          const dbResults = await invoke<string[]>('get_test_results_for_version', {
-            versionId: versionIdToUse
-          });
-          
-          console.log('[TestPanel] DB query returned', dbResults?.length || 0, 'results');
-          
-          // Get the most recent result (first in array)
+          const dbResults = await invoke<TestResults[]>('get_test_results_for_version', { versionId: vid });
           if (dbResults && dbResults.length > 0) {
-            const latestResultJson = dbResults[0];
-            console.log('[TestPanel] Latest result JSON length:', latestResultJson?.length || 0);
-            
-            try {
-              const parsedResult = JSON.parse(latestResultJson);
-              console.log('[TestPanel] Parsed result:', {
-                hasPredictions: !!parsedResult.predictions,
-                predictionsCount: parsedResult.predictions?.length || 0,
-                keys: Object.keys(parsedResult)
-              });
-              
-              if (parsedResult.predictions && parsedResult.predictions.length > 0) {
-                console.log('[TestPanel] ✅ Successfully loaded', parsedResult.predictions.length, 'predictions from DB');
-                fullResults = {
-                  ...fullResults,
-                  predictions: parsedResult.predictions,
-                  // Also update metrics if they exist in DB
-                  accuracy: parsedResult.accuracy || fullResults.accuracy,
-                  average_loss: parsedResult.average_loss || fullResults.average_loss,
-                  average_inference_time: parsedResult.average_inference_time || fullResults.average_inference_time,
-                  total_samples: parsedResult.total_samples || fullResults.total_samples,
-                  correct_predictions: parsedResult.correct_predictions || fullResults.correct_predictions,
-                  incorrect_predictions: parsedResult.incorrect_predictions || fullResults.incorrect_predictions
-                };
-              } else {
-                console.warn('[TestPanel] ⚠️ DB result has no predictions array');
-              }
-            } catch (parseErr) {
-              console.error('[TestPanel] Failed to parse DB result JSON:', parseErr);
-            }
-          } else {
-            console.warn('[TestPanel] ⚠️ No results found in database');
+            const latest = dbResults[0];
+            fullResults = {
+              ...fullResults,
+              ...latest,
+              metrics: { ...fullResults.metrics, ...latest.metrics },
+            };
           }
-        } catch (err) {
-          console.error('[TestPanel] Failed to load predictions from DB:', err);
+        } catch (e) {
+          console.warn('[Test] Predictions aus DB nicht geladen:', e);
         }
-      } else {
-        console.error('[TestPanel] ❌ CRITICAL: No version_id available from any source!');
-        console.error('[TestPanel] currentTest:', currentTest);
-        console.error('[TestPanel] event.payload:', event.payload);
       }
-      
-      console.log('[TestPanel] Final results:', {
-        totalSamples: fullResults.total_samples,
-        predictionsCount: fullResults.predictions.length,
-        accuracy: fullResults.accuracy
-      });
-      
+
       setTestResults(fullResults);
-      setCurrentTest(prev => prev ? {
-        ...prev,
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        results: fullResults
-      } : null);
-      
-      // CRITICAL: Reset test start time to unlock UI
-      setTestStartTime(null);
-      
-      success('Test abgeschlossen', `Accuracy: ${fullResults.accuracy.toFixed(2)}%`);
-    });
+      setCurrentTest(prev => prev ? { ...prev, status: 'completed', results: fullResults } : null);
+      success('Test abgeschlossen', fullResults.accuracy !== null ? `Accuracy: ${fullResults.accuracy.toFixed(2)}%` : 'Fertig');
+    }));
 
-    const unlistenError = listen('test-error', (event: any) => {
-      setCurrentTest(prev => prev ? {
-        ...prev,
-        status: 'failed',
-        error: event.payload.error || event.payload.data?.error
-      } : null);
-      setTestStartTime(null); // CRITICAL: Reset test start time
-      notifyError('Test fehlgeschlagen', event.payload.error || 'Unbekannter Fehler');
-    });
+    unlisteners.push(listen('test-single-complete', (event: any) => {
+      const data = event.payload.data;
+      const result: SingleResult = {
+        task_type: data?.task_type || '',
+        input: data?.input || singleInput,
+        input_type: data?.input_type || singleInputType,
+        result: data?.result || {},
+      };
+      setSingleResult(result);
+      setSingleHistory(prev => [result, ...prev.slice(0, 9)]);
+      setSingleRunning(false);
+      success('Inferenz abgeschlossen', `${(result.result.inference_time * 1000).toFixed(0)}ms`);
+    }));
 
-    // CRITICAL: Listen for test-finished event to ensure UI is fully unlocked
-    const unlistenFinished = listen('test-finished', (event: any) => {
-      console.log('[TestPanel] Test finished event received:', event.payload);
-      // Ensure test is marked as completed/stopped
-      setCurrentTest(prev => {
-        if (!prev) return null;
-        // Only update if status is still running/pending
-        if (prev.status === 'running' || prev.status === 'pending') {
-          return {
-            ...prev,
-            status: event.payload.success ? 'completed' : 'failed',
-            completed_at: new Date().toISOString()
-          };
-        }
-        return prev;
-      });
-      setTestStartTime(null);
-    });
+    unlisteners.push(listen('test-error', (event: any) => {
+      const err = event.payload.error || event.payload.data?.error || 'Unbekannter Fehler';
+      setCurrentTest(prev => prev ? { ...prev, status: 'failed', error: err } : null);
+      setSingleRunning(false);
+      notifyError('Test fehlgeschlagen', err);
+    }));
 
-    // CRITICAL: Listen for done event - this is the final event that unlocks everything
-    const unlistenDone = listen('test-done', (event: any) => {
-      console.log('[TestPanel] Test DONE event received - UI fully unlocked');
-      // Final state cleanup
-      setTestStartTime(null);
+    unlisteners.push(listen('test-finished', () => {
       setCurrentTest(prev => {
         if (!prev) return null;
         if (prev.status === 'running' || prev.status === 'pending') {
-          return {
-            ...prev,
-            status: 'completed',
-            completed_at: new Date().toISOString()
-          };
+          return { ...prev, status: 'completed', completed_at: new Date().toISOString() };
         }
         return prev;
       });
-    });
+      setSingleRunning(false);
+    }));
 
-    return () => {
-      unlistenProgress.then(fn => fn());
-      unlistenComplete.then(fn => fn());
-      unlistenError.then(fn => fn());
-      unlistenFinished.then(fn => fn());
-      unlistenDone.then(fn => fn());
-    };
+    unlisteners.push(listen('test-done', () => {
+      setSingleRunning(false);
+    }));
+
+    return () => { unlisteners.forEach(u => u.then(fn => fn())); };
   };
 
   // ============ Actions ============
 
-  const startTest = async () => {
+  const startDatasetTest = async () => {
     if (!selectedModelId || !selectedVersionId || !selectedDatasetId) {
-      notifyError('Auswahl unvollständig', 'Bitte wähle Modell, Version und Dataset');
+      notifyError('Auswahl unvollständig', 'Bitte Modell, Version und Dataset wählen');
       return;
     }
-
     try {
       const model = modelsWithVersions.find(m => m.id === selectedModelId);
       const version = model?.versions.find(v => v.id === selectedVersionId);
@@ -422,8 +641,7 @@ export default function TestPanel() {
 
       setCurrentTest(job);
       setTestResults(null);
-      setTestStartTime(Date.now());
-      info('Test gestartet', 'Model wird getestet...');
+      info('Test gestartet', 'Dataset wird verarbeitet…');
     } catch (err: any) {
       notifyError('Fehler beim Starten', String(err));
     }
@@ -432,53 +650,58 @@ export default function TestPanel() {
   const stopTest = async () => {
     try {
       await invoke('stop_test');
-      // CRITICAL: Reset state immediately to unlock UI
-      setTestStartTime(null);
-      setCurrentTest(prev => prev ? {
-        ...prev,
-        status: 'stopped',
-        completed_at: new Date().toISOString()
-      } : null);
-      success('Test gestoppt', 'Der Test wurde abgebrochen');
+      setCurrentTest(prev => prev ? { ...prev, status: 'stopped', completed_at: new Date().toISOString() } : null);
+      success('Test gestoppt', '');
     } catch (err: any) {
       notifyError('Fehler beim Stoppen', String(err));
     }
   };
 
-  const exportHardExamples = async (format: string) => {
-    if (!testResults) return;
-
-    // Filter hard examples
-    const hardExamples = testResults.predictions.filter(p => 
-      !p.is_correct || (p.loss && p.loss > minLoss)
-    );
-
-    if (hardExamples.length === 0) {
-      info('Keine Beispiele', 'Keine schwierigen Beispiele gefunden');
+  const runSingleTest = async () => {
+    if (!selectedVersionId || !singleInput.trim()) {
+      notifyError('Eingabe fehlt', 'Bitte Version auswählen und Input eingeben');
       return;
     }
-
+    setSingleRunning(true);
+    setSingleResult(null);
     try {
-      const path = await invoke<string>('export_hard_examples', {
-        predictions: hardExamples,
-        format,
+      await invoke('test_single_input', {
+        versionId: selectedVersionId,
+        singleInput: singleInput.trim(),
+        singleInputType: singleInputType,
       });
-      success('Exportiert', `${hardExamples.length} Beispiele gespeichert unter:\n${path}`);
+    } catch (err: any) {
+      setSingleRunning(false);
+      notifyError('Fehler', String(err));
+    }
+  };
+
+  const exportHardExamples = async (format: string) => {
+    if (!testResults) return;
+    const hard = testResults.predictions.filter(p => !p.is_correct);
+    if (hard.length === 0) { info('Keine Hard-Examples', 'Alle Predictions waren korrekt'); return; }
+    try {
+      const path = await invoke<string>('export_hard_examples', { predictions: hard, format });
+      success('Exportiert', `${hard.length} Hard-Examples → ${path}`);
     } catch (err: any) {
       notifyError('Export fehlgeschlagen', String(err));
     }
   };
 
-  // ============ Filtered Predictions ============
+  // ============ Derived ============
+
+  const selectedModel = modelsWithVersions.find(m => m.id === selectedModelId);
+  const selectedVersion = selectedModel?.versions.find(v => v.id === selectedVersionId);
+  const isRunning = currentTest?.status === 'running' || currentTest?.status === 'pending';
 
   const filteredPredictions = testResults?.predictions.filter(p => {
     if (showOnlyIncorrect && p.is_correct) return false;
-    if (minLoss > 0 && (!p.loss || p.loss < minLoss)) return false;
-    if (searchQuery && !p.input_text.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    const q = searchQuery.toLowerCase();
+    if (q && !p.input_text.toLowerCase().includes(q) && !(p.predicted_output || '').toLowerCase().includes(q)) return false;
     return true;
   }) || [];
 
-  // ============ Render ============
+  const taskType = currentTest?.task_type || testResults?.task_type || '';
 
   if (loading) {
     return (
@@ -488,390 +711,484 @@ export default function TestPanel() {
     );
   }
 
-  const selectedModel = modelsWithVersions.find(m => m.id === selectedModelId);
-  const selectedVersion = selectedModel?.versions.find(v => v.id === selectedVersionId);
-  const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
-
-  const isRunning = currentTest?.status === 'running' || currentTest?.status === 'pending';
-
-  // DEBUG: Log state changes
-  console.log('[TestPanel] Render state:', {
-    isRunning,
-    currentTestStatus: currentTest?.status,
-    hasResults: !!testResults,
-    testStartTime
-  });
+  // ============ Render ============
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-white">Test</h1>
-        <p className="text-gray-400 mt-1">Teste deine Modelle auf Evaluations-Datensätzen</p>
+        <p className="text-gray-400 mt-1">Teste jedes KI-Modell — Text, Bild, Audio, Detection, Tabular</p>
       </div>
 
-      {/* Model & Version & Dataset Selection */}
+      {/* Mode Tabs */}
+      <div className="flex gap-2 bg-white/5 rounded-xl p-1 w-fit border border-white/10">
+        {([
+          { key: 'dataset', label: 'Dataset-Test', icon: <HardDrive className="w-4 h-4" /> },
+          { key: 'single',  label: 'Einzeltest',   icon: <Send className="w-4 h-4" /> },
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setTestMode(tab.key)}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+              testMode === tab.key
+                ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow`
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Model & Version Selection (always visible) */}
       <div className="bg-white/5 rounded-xl border border-white/10 p-6">
         <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
           <Layers className="w-5 h-5" />
-          Modell, Version & Dataset auswählen
+          Modell & Version
         </h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           {/* Model */}
           <div>
             <label className="block text-sm text-gray-400 mb-2">Root-Modell</label>
             <div className="relative">
               <select
                 value={selectedModelId || ''}
-                onChange={(e) => setSelectedModelId(e.target.value)}
-                disabled={isRunning}
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 disabled:opacity-50 transition-all"
-                style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
+                onChange={e => setSelectedModelId(e.target.value)}
+                disabled={isRunning || singleRunning}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none disabled:opacity-50"
               >
-                {modelsWithVersions.map(model => (
-                  <option key={model.id} value={model.id} className="bg-slate-800">
-                    {model.name}
-                  </option>
+                {modelsWithVersions.map(m => (
+                  <option key={m.id} value={m.id} className="bg-slate-800">{m.name}</option>
                 ))}
               </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
           </div>
 
           {/* Version */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2 flex items-center gap-2">
+            <label className="block text-sm text-gray-400 mb-2 flex items-center gap-1">
               <GitBranch className="w-4 h-4" />
               Version
             </label>
             <div className="relative">
               <select
                 value={selectedVersionId || ''}
-                onChange={(e) => setSelectedVersionId(e.target.value)}
-                disabled={!selectedModel || selectedModel.versions.length === 0 || isRunning}
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 disabled:opacity-50 transition-all"
-                style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
+                onChange={e => setSelectedVersionId(e.target.value)}
+                disabled={!selectedModel || isRunning || singleRunning}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none disabled:opacity-50"
               >
-                {selectedModel?.versions.map(version => (
-                  <option key={version.id} value={version.id} className="bg-slate-800">
-                    {version.is_root ? '⭐ ' : ''}{version.name}
+                {selectedModel?.versions.map(v => (
+                  <option key={v.id} value={v.id} className="bg-slate-800">
+                    {v.is_root ? '⭐ ' : ''}{v.name}
                   </option>
                 ))}
               </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
           </div>
-
-          {/* Dataset */}
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Test-Dataset</label>
-            <div className="relative">
-              <select
-                value={selectedDatasetId || ''}
-                onChange={(e) => setSelectedDatasetId(e.target.value)}
-                disabled={datasets.length === 0 || isRunning}
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 disabled:opacity-50 transition-all"
-                style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
-              >
-                {datasets.map(ds => (
-                  <option key={ds.id} value={ds.id} className="bg-slate-800">
-                    {ds.name} ({ds.file_count} files, {formatBytes(ds.size_bytes)})
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-            </div>
-            {datasets.length === 0 && selectedModel && (
-              <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-200">
-                  Keine Test-Datasets verfügbar. Bitte splitte ein Dataset mit einem Test-Anteil {'>'} 0%.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Start/Stop Button */}
-        <div className="mt-6 flex items-center gap-4">
-          {!isRunning ? (
-            <button
-              onClick={startTest}
-              disabled={!selectedModelId || !selectedVersionId || !selectedDatasetId}
-              className={`flex items-center gap-2 px-6 py-3 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
-            >
-              <Play className="w-5 h-5" />
-              Test starten
-            </button>
-          ) : (
-            <button
-              onClick={stopTest}
-              className="flex items-center gap-2 px-6 py-3 bg-red-500 hover:bg-red-600 rounded-lg text-white font-medium transition-all"
-            >
-              <Square className="w-5 h-5" />
-              Test stoppen
-            </button>
-          )}
-
-          {currentTest && (
-            <div className="text-sm text-gray-400">
-              Status: <span className="text-white font-medium capitalize">{currentTest.status}</span>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Progress - Enhanced with overlay effect - ONLY show when actually running */}
-     {isRunning && currentTest && ['running', 'pending'].includes(currentTest.status) && currentTest.progress && (
-        <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-xl border border-purple-500/30 p-6 shadow-lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Loader2 className="w-5 h-5 animate-spin text-purple-400" />
-              {currentTest.status === 'pending' ? 'Test wird vorbereitet...' : 'Test läuft...'}
-            </h3>
-            <span className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              {currentTest.progress?.progress_percent?.toFixed(1) || '0.0'}%
-            </span>
-          </div>
+      {/* ==================== DATASET MODE ==================== */}
+      {testMode === 'dataset' && (
+        <div className="space-y-6">
+          {/* Dataset auswählen */}
+          <div className="bg-white/5 rounded-xl border border-white/10 p-6">
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <HardDrive className="w-5 h-5" />
+              Test-Dataset
+            </h2>
+            <div className="relative">
+              <select
+                value={selectedDatasetId || ''}
+                onChange={e => setSelectedDatasetId(e.target.value)}
+                disabled={datasets.length === 0 || isRunning}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white appearance-none cursor-pointer focus:outline-none disabled:opacity-50"
+              >
+                {datasets.map(ds => (
+                  <option key={ds.id} value={ds.id} className="bg-slate-800">
+                    {ds.name} ({ds.file_count} Dateien, {formatBytes(ds.size_bytes)})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+            {datasets.length === 0 && (
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-200">
+                  Kein Test-Dataset verfügbar. Splitte einen Datensatz mit Test-Anteil &gt; 0%.
+                </p>
+              </div>
+            )}
 
-          {/* Enhanced Progress Bar */}
-          <div className="relative h-4 bg-white/10 rounded-full overflow-hidden mb-4">
-            <div
-              className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 transition-all duration-300 relative"
-              style={{ width: `${Math.min(currentTest.progress?.progress_percent || 0, 100)}%` }}
-            >
-              {/* Shimmer effect - ONLY show when not at 100% */}
-              {currentTest.progress?.progress_percent < 100 && (
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer" />
+            {/* Start/Stop */}
+            <div className="mt-5 flex items-center gap-4">
+              {!isRunning ? (
+                <button
+                  onClick={startDatasetTest}
+                  disabled={!selectedModelId || !selectedVersionId || !selectedDatasetId}
+                  className={`flex items-center gap-2 px-6 py-3 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
+                >
+                  <Play className="w-5 h-5" />
+                  Test starten
+                </button>
+              ) : (
+                <button
+                  onClick={stopTest}
+                  className="flex items-center gap-2 px-6 py-3 bg-red-500 hover:bg-red-600 rounded-lg text-white font-medium transition-all"
+                >
+                  <Square className="w-5 h-5" />
+                  Stoppen
+                </button>
+              )}
+              {currentTest && (
+                <span className="text-sm text-gray-400">
+                  Status: <span className="text-white font-medium capitalize">{currentTest.status}</span>
+                  {taskType && (
+                    <span className="ml-3 flex items-center gap-1 inline-flex">
+                      {getModalityIcon(taskType)}
+                      <span className="text-gray-300">{getModalityLabel(taskType)}</span>
+                    </span>
+                  )}
+                </span>
               )}
             </div>
-            {/* Progress text overlay */}
-            <div className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-              {currentTest.progress?.current_sample || 0} / {currentTest.progress?.total_samples || '?'} Samples
-            </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div className="bg-white/5 rounded-lg p-3">
-              <div className="text-gray-400 mb-1">Samples</div>
-              <div className="text-white font-medium text-lg">
-                {currentTest.progress?.current_sample || 0} / {currentTest.progress?.total_samples || '?'}
+          {/* Progress */}
+          {isRunning && currentTest?.progress && (
+            <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-xl border border-purple-500/30 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-purple-400" />
+                  {currentTest.status === 'pending' ? 'Wird vorbereitet…' : 'Test läuft…'}
+                </h3>
+                <span className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+                  {(currentTest.progress.progress_percent || 0).toFixed(1)}%
+                </span>
+              </div>
+
+              <div className="relative h-4 bg-white/10 rounded-full overflow-hidden mb-4">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 transition-all duration-300"
+                  style={{ width: `${Math.min(currentTest.progress.progress_percent || 0, 100)}%` }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
+                  {currentTest.progress.current_sample} / {currentTest.progress.total_samples || '?'} Samples
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                {[
+                  { label: 'Samples', value: `${currentTest.progress.current_sample} / ${currentTest.progress.total_samples || '?'}` },
+                  { label: 'Geschwindigkeit', value: `${(currentTest.progress.samples_per_second || 0).toFixed(2)} S/s` },
+                  { label: 'Verbleibend', value: currentTest.progress.estimated_time_remaining ? formatDuration(currentTest.progress.estimated_time_remaining) : 'Berechne…' },
+                ].map((s, i) => (
+                  <div key={i} className="bg-white/5 rounded-lg p-3">
+                    <div className="text-gray-400 mb-1 text-xs">{s.label}</div>
+                    <div className="text-white font-medium">{s.value}</div>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="bg-white/5 rounded-lg p-3">
-              <div className="text-gray-400 mb-1 flex items-center gap-1">
-                <Zap className="w-3 h-3" />
-                Geschwindigkeit
-              </div>
-              <div className="text-white font-medium text-lg">
-                {currentTest.progress?.samples_per_second?.toFixed(2) || '0.00'} samples/s
-              </div>
+          )}
+
+          {/* Ergebnisse */}
+          {testResults && (
+            <div className="space-y-6">
+              {/* Metriken */}
+              <MetricsGrid results={testResults} taskType={testResults.task_type} />
+
+              {/* Hard-Examples Hinweis */}
+              {testResults.hard_examples_file && (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-amber-200 font-medium text-sm">Hard-Examples gespeichert</p>
+                    <p className="text-amber-300/60 text-xs mt-0.5 break-all">{testResults.hard_examples_file}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Predictions-Tabelle */}
+              {testResults.predictions.length > 0 && (
+                <div className="bg-white/5 rounded-xl border border-white/10 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-white">Predictions</h3>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => exportHardExamples('json')}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-all"
+                      >
+                        <Download className="w-4 h-4" /> JSON
+                      </button>
+                      <button
+                        onClick={() => exportHardExamples('csv')}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-all"
+                      >
+                        <Download className="w-4 h-4" /> CSV
+                      </button>
+                      <button
+                        onClick={() => exportHardExamples('txt')}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-all"
+                      >
+                        <Download className="w-4 h-4" /> TXT
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filter */}
+                  <div className="flex items-center gap-4 mb-4 flex-wrap">
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showOnlyIncorrect}
+                        onChange={e => setShowOnlyIncorrect(e.target.checked)}
+                        className="rounded"
+                      />
+                      Nur falsche Predictions
+                    </label>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Suchen…"
+                      className="flex-1 min-w-40 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 text-sm"
+                    />
+                    <span className="text-sm text-gray-400">
+                      {filteredPredictions.length} / {testResults.predictions.length}
+                    </span>
+                  </div>
+
+                  {/* Liste */}
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                    {filteredPredictions.map(pred => (
+                      <div
+                        key={pred.sample_id}
+                        className={`p-4 rounded-lg border ${
+                          pred.is_correct
+                            ? 'bg-green-500/5 border-green-500/20'
+                            : 'bg-red-500/5 border-red-500/20'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            {pred.is_correct
+                              ? <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                              : <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                            }
+                            <span className="text-xs text-gray-500">#{pred.sample_id}</span>
+                          </div>
+                          <div className="flex gap-3 text-xs text-gray-500">
+                            {pred.loss !== null && pred.loss !== undefined && (
+                              <span>Loss: {pred.loss.toFixed(4)}</span>
+                            )}
+                            {pred.confidence !== null && pred.confidence !== undefined && (
+                              <span>Conf: {(pred.confidence * 100).toFixed(1)}%</span>
+                            )}
+                            {pred.wer !== null && pred.wer !== undefined && (
+                              <span>WER: {(pred.wer * 100).toFixed(1)}%</span>
+                            )}
+                            <span>{(pred.inference_time * 1000).toFixed(0)}ms</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 text-sm">
+                          {pred.input_text && (
+                            <div>
+                              <span className="text-gray-400">Input: </span>
+                              <span className="text-white">{pred.input_text.slice(0, 200)}</span>
+                            </div>
+                          )}
+                          {pred.input_path && (
+                            <div>
+                              <span className="text-gray-400">Datei: </span>
+                              <span className="text-gray-300 text-xs">{pred.input_path.split('/').pop()}</span>
+                            </div>
+                          )}
+                          {pred.expected_output !== null && pred.expected_output !== undefined && (
+                            <div>
+                              <span className="text-gray-400">Erwartet: </span>
+                              <span className="text-white">{String(pred.expected_output).slice(0, 200)}</span>
+                            </div>
+                          )}
+                          <div>
+                            <span className="text-gray-400">Vorhersage: </span>
+                            <span className={pred.is_correct ? 'text-green-400' : 'text-red-400'}>
+                              {pred.predicted_output?.slice(0, 200) || '—'}
+                            </span>
+                          </div>
+                          {pred.error_type && (
+                            <div className="text-red-400 text-xs">Fehler: {pred.error_type}</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="bg-white/5 rounded-lg p-3">
-              <div className="text-gray-400 mb-1 flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                Verbleibend
+          )}
+
+          {/* Empty state */}
+          {!currentTest && !testResults && (
+            <div className="bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/5 mb-4">
+                <HardDrive className="w-8 h-8 text-gray-400" />
               </div>
-              <div className="text-white font-medium text-lg">
-                {currentTest.progress?.estimated_time_remaining
-                  ? formatDuration(currentTest.progress.estimated_time_remaining)
-                  : 'Berechne...'}
-              </div>
+              <h3 className="text-xl font-semibold text-white mb-2">Kein Dataset-Test aktiv</h3>
+              <p className="text-gray-400 text-sm max-w-sm mx-auto">
+                Wähle Modell, Version und Dataset aus und starte den Test um Metriken und Hard-Examples zu erhalten.
+              </p>
             </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Results */}
-      {testResults && (
+      {/* ==================== SINGLE MODE ==================== */}
+      {testMode === 'single' && (
         <div className="space-y-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Accuracy</h3>
-                <Target className="w-5 h-5 text-green-400" />
-              </div>
-              <div className="text-3xl font-bold text-white mb-1">
-                {testResults.accuracy.toFixed(2)}%
-              </div>
-              <div className="text-xs text-gray-500">
-                {testResults.correct_predictions} / {testResults.total_samples} korrekt
-              </div>
-            </div>
-
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Avg. Loss</h3>
-                <TrendingUp className="w-5 h-5 text-blue-400" />
-              </div>
-              <div className="text-3xl font-bold text-white mb-1">
-                {testResults.average_loss.toFixed(4)}
-              </div>
-              <div className="text-xs text-gray-500">Durchschnittlicher Loss</div>
-            </div>
-
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Inferenz-Zeit</h3>
-                <Clock className="w-5 h-5 text-purple-400" />
-              </div>
-              <div className="text-3xl font-bold text-white mb-1">
-                {(testResults.average_inference_time * 1000).toFixed(0)}ms
-              </div>
-              <div className="text-xs text-gray-500">Pro Sample</div>
-            </div>
-
-            <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-gray-400">Geschwindigkeit</h3>
-                <Zap className="w-5 h-5 text-yellow-400" />
-              </div>
-              <div className="text-3xl font-bold text-white mb-1">
-                {testResults.metrics.samples_per_second?.toFixed(1) || '0'}
-              </div>
-              <div className="text-xs text-gray-500">Samples/Sekunde</div>
-            </div>
-          </div>
-
-          {/* Export & Filter Controls */}
+          {/* Input Card */}
           <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">Predictions</h3>
-              <div className="flex items-center gap-3">
-                {/* Export Buttons - Disabled during test */}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => exportHardExamples('json')}
-                    disabled={isRunning}
-                    className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download className="w-4 h-4" />
-                    JSON
-                  </button>
-                  <button
-                    onClick={() => exportHardExamples('csv')}
-                    disabled={isRunning}
-                    className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download className="w-4 h-4" />
-                    CSV
-                  </button>
-                  <button
-                    onClick={() => exportHardExamples('txt')}
-                    disabled={isRunning}
-                    className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download className="w-4 h-4" />
-                    TXT
-                  </button>
-                </div>
-              </div>
-            </div>
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Send className="w-5 h-5" />
+              Einzeltest-Eingabe
+            </h2>
 
-            {/* Filters - Disabled during test */}
-            <div className="flex items-center gap-4 mb-4">
-              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showOnlyIncorrect}
-                  onChange={(e) => setShowOnlyIncorrect(e.target.checked)}
-                  disabled={isRunning}
-                  className="rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <span className={isRunning ? 'opacity-50' : ''}>Nur falsche Predictions</span>
-              </label>
-
-              <div className="flex items-center gap-2">
-                <label className={`text-sm text-gray-400 ${isRunning ? 'opacity-50' : ''}`}>Min Loss:</label>
-                <input
-                  type="number"
-                  value={minLoss}
-                  onChange={(e) => setMinLoss(parseFloat(e.target.value) || 0)}
-                  step="0.1"
-                  min="0"
-                  disabled={isRunning}
-                  className="w-24 px-3 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-              </div>
-
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Suche in Input..."
-                disabled={isRunning}
-                className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-
-              <span className="text-sm text-gray-400">
-                {filteredPredictions.length} / {testResults.predictions.length}
-              </span>
-            </div>
-
-            {/* Predictions List */}
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {filteredPredictions.map((pred) => (
-                <div
-                  key={pred.sample_id}
-                  className={`p-4 rounded-lg border ${
-                    pred.is_correct
-                      ? 'bg-green-500/5 border-green-500/20'
-                      : 'bg-red-500/5 border-red-500/20'
+            {/* Input Typ */}
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {([
+                { key: 'text',        label: 'Text',        icon: <MessageSquare className="w-3.5 h-3.5" /> },
+                { key: 'image_path',  label: 'Bildpfad',    icon: <Image className="w-3.5 h-3.5" /> },
+                { key: 'audio_path',  label: 'Audiopfad',   icon: <Mic className="w-3.5 h-3.5" /> },
+                { key: 'json',        label: 'JSON',        icon: <Table2 className="w-3.5 h-3.5" /> },
+              ] as const).map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setSingleInputType(t.key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                    singleInputType === t.key
+                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white border-transparent`
+                      : 'text-gray-400 border-white/10 hover:text-white hover:border-white/20'
                   }`}
                 >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      {pred.is_correct ? (
-                        <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                      )}
-                      <span className="text-sm text-gray-400">Sample #{pred.sample_id}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                      {pred.loss && (
-                        <span>Loss: {pred.loss.toFixed(4)}</span>
-                      )}
-                      <span>{(pred.inference_time * 1000).toFixed(0)}ms</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 text-sm">
-                    <div>
-                      <span className="text-gray-400">Input: </span>
-                      <span className="text-white">{pred.input_text}</span>
-                    </div>
-                    {pred.expected_output && (
-                      <div>
-                        <span className="text-gray-400">Expected: </span>
-                        <span className="text-white">{pred.expected_output}</span>
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-gray-400">Predicted: </span>
-                      <span className={pred.is_correct ? 'text-green-400' : 'text-red-400'}>
-                        {pred.predicted_output}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                  {t.icon}
+                  {t.label}
+                </button>
               ))}
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Empty State */}
-      {!currentTest && !testResults && (
-        <div className="bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/5 mb-4">
-            <FileText className="w-8 h-8 text-gray-400" />
+            {/* Eingabe-Feld */}
+            <textarea
+              value={singleInput}
+              onChange={e => setSingleInput(e.target.value)}
+              placeholder={getSingleInputPlaceholder(taskType, singleInputType)}
+              disabled={singleRunning}
+              rows={singleInputType === 'text' ? 4 : 2}
+              className="w-full px-4 py-3 bg-black/20 border border-white/10 rounded-lg text-white placeholder-gray-500 text-sm resize-none focus:outline-none focus:border-white/20 disabled:opacity-50 font-mono"
+              onKeyDown={e => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !singleRunning) {
+                  runSingleTest();
+                }
+              }}
+            />
+            <p className="text-xs text-gray-600 mt-1">Cmd/Ctrl+Enter zum Ausführen</p>
+
+            {/* Run Button */}
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={runSingleTest}
+                disabled={singleRunning || !selectedVersionId || !singleInput.trim()}
+                className={`flex items-center gap-2 px-6 py-3 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
+              >
+                {singleRunning
+                  ? <><Loader2 className="w-5 h-5 animate-spin" /> Läuft…</>
+                  : <><Send className="w-5 h-5" /> Testen</>
+                }
+              </button>
+              {singleResult && (
+                <button
+                  onClick={() => { setSingleResult(null); setSingleInput(''); }}
+                  className="flex items-center gap-2 px-4 py-3 bg-white/5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-all"
+                >
+                  <RotateCcw className="w-4 h-4" /> Zurücksetzen
+                </button>
+              )}
+            </div>
           </div>
-          <h3 className="text-xl font-semibold text-white mb-2">Kein Test aktiv</h3>
-          <p className="text-gray-400">
-            Wähle ein Modell, eine Version und einen Dataset aus und starte einen Test.
-          </p>
+
+          {/* Ergebnis */}
+          {singleResult && (
+            <div className="bg-gradient-to-br from-green-500/5 to-blue-500/5 rounded-xl border border-green-500/20 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-green-400" />
+                  Ergebnis
+                  <span className="ml-2 px-2 py-0.5 rounded-full bg-white/10 text-xs text-gray-300 flex items-center gap-1">
+                    {getModalityIcon(singleResult.task_type)}
+                    {getModalityLabel(singleResult.task_type)}
+                  </span>
+                </h3>
+                <span className="text-xs text-gray-500">
+                  {singleResult.result.inference_time
+                    ? `${(singleResult.result.inference_time * 1000).toFixed(0)}ms`
+                    : ''}
+                </span>
+              </div>
+              <SingleResultView result={singleResult.result} taskType={singleResult.task_type} />
+            </div>
+          )}
+
+          {/* Historie */}
+          {singleHistory.length > 1 && (
+            <div className="bg-white/5 rounded-xl border border-white/10 p-6">
+              <h3 className="text-sm font-semibold text-gray-400 mb-3">Verlauf (letzte {singleHistory.length - 1})</h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {singleHistory.slice(1).map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setSingleResult(r); setSingleInput(r.input); }}
+                    className="w-full text-left p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-300 truncate max-w-xs">
+                        {r.input.slice(0, 60)}{r.input.length > 60 ? '…' : ''}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                      {getModalityIcon(r.task_type)}
+                      {getModalityLabel(r.task_type)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!singleRunning && !singleResult && (
+            <div className="bg-white/5 rounded-2xl border border-white/10 p-10 text-center">
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-white/5 mb-4">
+                <Send className="w-7 h-7 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Bereit zum Testen</h3>
+              <p className="text-gray-400 text-sm">
+                Gib Text, Bildpfad, Audiopfad oder JSON-Features ein und teste das Modell direkt.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                {['NLP / Text', 'Vision', 'Audio / ASR', 'Detection', 'Tabular'].map(label => (
+                  <span key={label} className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs text-gray-400">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

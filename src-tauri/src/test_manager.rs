@@ -1,4 +1,6 @@
 // Test Manager - Handles model testing and evaluation
+// FrameTrain v2 — Erweitert für alle Modalitäten (NLP, Vision, Audio, Detection, Tabular)
+// Unterstützt Dataset-Modus (ganzen Datensatz) + Single-Modus (einzelnen Input)
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -28,7 +30,14 @@ pub struct TestJob {
     pub progress: TestProgress,
     pub results: Option<TestResults>,
     pub error: Option<String>,
+    // Neue Felder
+    #[serde(default)]
+    pub task_type: String,
+    #[serde(default = "default_mode")]
+    pub mode: String,
 }
+
+fn default_mode() -> String { "dataset".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -52,19 +61,28 @@ pub struct TestProgress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResults {
     pub total_samples: usize,
-    pub correct_predictions: usize,
-    pub incorrect_predictions: usize,
-    pub accuracy: f64,
+    #[serde(default)]
+    pub correct_predictions: Option<usize>,
+    #[serde(default)]
+    pub incorrect_predictions: Option<usize>,
+    #[serde(default)]
+    pub accuracy: Option<f64>,
+    #[serde(default)]
     pub average_loss: Option<f64>,
+    #[serde(default)]
     pub average_inference_time: f64,
+    #[serde(default)]
     pub predictions: Vec<PredictionResult>,
     #[serde(default)]
-    pub metrics: std::collections::HashMap<String, f64>,
-    // Optional fields that might be present
+    pub metrics: std::collections::HashMap<String, serde_json::Value>,
     #[serde(default)]
     pub total_time: Option<f64>,
     #[serde(default)]
     pub samples_per_second: Option<f64>,
+    #[serde(default)]
+    pub task_type: String,
+    #[serde(default)]
+    pub hard_examples_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +90,8 @@ pub struct PredictionResult {
     pub sample_id: usize,
     #[serde(default)]
     pub input_text: String,
+    #[serde(default)]
+    pub input_path: Option<String>,
     pub expected_output: Option<String>,
     pub predicted_output: String,
     pub is_correct: bool,
@@ -81,8 +101,16 @@ pub struct PredictionResult {
     pub inference_time: f64,
     #[serde(default)]
     pub error_type: Option<String>,
+    // Modalitäts-spezifische Felder
+    #[serde(default)]
+    pub top_predictions: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub detections: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub wer: Option<f64>,
 }
 
+/// Config-Struct das an Python übergeben wird
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestConfig {
     pub model_path: String,
@@ -90,6 +118,20 @@ pub struct TestConfig {
     pub output_path: String,
     pub batch_size: usize,
     pub max_samples: Option<usize>,
+    pub task_type: String,
+    pub mode: String,
+    pub single_input: String,
+    pub single_input_type: String,
+}
+
+/// Ergebnis eines Single-Modus Tests (modalitätsagnostisch)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleTestResult {
+    pub task_type: String,
+    pub input: String,
+    pub input_type: String,
+    pub result: serde_json::Value,
+    pub inference_time_ms: f64,
 }
 
 // ============ Global Test State ============
@@ -97,6 +139,7 @@ pub struct TestConfig {
 pub struct TestState {
     pub current_job: Option<TestJob>,
     pub jobs_history: Vec<TestJob>,
+    pub stop_signal: bool,
 }
 
 impl Default for TestState {
@@ -104,6 +147,7 @@ impl Default for TestState {
         Self {
             current_job: None,
             jobs_history: Vec::new(),
+            stop_signal: false,
         }
     }
 }
@@ -111,249 +155,148 @@ impl Default for TestState {
 // ============ Helper Functions ============
 
 fn get_python_path() -> String {
-    println!("[Test Python] 🔍 ROBUST SEARCH: Finding best Python installation...");
-    
-    #[derive(Debug)]
-    struct PythonCandidate {
-        path: String,
-        version: (u32, u32, u32),
-    }
-    
-    let mut candidates: Vec<PythonCandidate> = Vec::new();
-    
-    // STRATEGY 1: Search common installation directories on macOS/Linux
+    println!("[Test Python] 🔍 Suche Python-Installation…");
+
+    struct Candidate { path: String, version: (u32, u32, u32) }
+    let mut candidates: Vec<Candidate> = Vec::new();
+
     if !cfg!(target_os = "windows") {
-        let search_paths = vec![
-            // Homebrew (Intel)
-            "/usr/local/bin",
-            // Homebrew (Apple Silicon)
-            "/opt/homebrew/bin",
-            // Python.org installations
+        let dirs = vec![
+            "/opt/homebrew/bin", "/usr/local/bin",
             "/Library/Frameworks/Python.framework/Versions/3.13/bin",
             "/Library/Frameworks/Python.framework/Versions/3.12/bin",
             "/Library/Frameworks/Python.framework/Versions/3.11/bin",
             "/Library/Frameworks/Python.framework/Versions/3.10/bin",
-            "/Library/Frameworks/Python.framework/Versions/3.9/bin",
-            // System Python
             "/usr/bin",
         ];
-        
-        for base_path in search_paths {
-            // Check for python3.X and python3
-            for name in &["python3.13", "python3.12", "python3.11", "python3.10", "python3.9", "python3"] {
-                let full_path = format!("{}/{}", base_path, name);
-                
-                if let Ok(output) = Command::new(&full_path).arg("--version").output() {
-                    if output.status.success() {
-                        let version_str = String::from_utf8_lossy(&output.stdout);
-                        if let Some(version) = parse_python_version(&version_str) {
-                            println!("[Test Python] ✅ Found: {} -> v{}.{}.{}", full_path, version.0, version.1, version.2);
-                            candidates.push(PythonCandidate {
-                                path: full_path,
-                                version,
-                            });
+        for base in dirs {
+            for name in &["python3.13","python3.12","python3.11","python3.10","python3.9","python3"] {
+                let full = format!("{}/{}", base, name);
+                if let Ok(out) = Command::new(&full).arg("--version").output() {
+                    if out.status.success() {
+                        let vs = String::from_utf8_lossy(&out.stdout);
+                        if let Some(v) = parse_python_version(&vs) {
+                            println!("[Test Python] ✅ {full} → v{}.{}.{}", v.0, v.1, v.2);
+                            candidates.push(Candidate { path: full, version: v });
                         }
                     }
                 }
             }
         }
     }
-    
-    // STRATEGY 2: Use 'which' command to find python in PATH
+
     for cmd in &["python3", "python"] {
-        if let Ok(output) = Command::new("which").arg(cmd).output() {
-            if output.status.success() {
-                let which_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !which_path.is_empty() {
-                    if let Ok(version_output) = Command::new(&which_path).arg("--version").output() {
-                        if version_output.status.success() {
-                            let version_str = String::from_utf8_lossy(&version_output.stdout);
-                            if let Some(version) = parse_python_version(&version_str) {
-                                println!("[Test Python] ✅ Found via 'which': {} -> v{}.{}.{}", which_path, version.0, version.1, version.2);
-                                candidates.push(PythonCandidate {
-                                    path: which_path,
-                                    version,
-                                });
-                            }
-                        }
+        if let Ok(out) = Command::new("which").arg(cmd).output() {
+            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !p.is_empty() {
+                if let Ok(vo) = Command::new(&p).arg("--version").output() {
+                    let vs = String::from_utf8_lossy(&vo.stdout);
+                    if let Some(v) = parse_python_version(&vs) {
+                        candidates.push(Candidate { path: p, version: v });
                     }
                 }
             }
         }
     }
-    
-    // STRATEGY 3: Try command names directly (fallback for Windows or restricted environments)
-    let cmd_names = if cfg!(target_os = "windows") {
-        vec!["python", "python3", "py"]
-    } else {
-        vec!["python3", "python"]
-    };
-    
-    for cmd in cmd_names {
-        if let Ok(output) = Command::new(cmd).arg("--version").output() {
-            if output.status.success() {
-                let version_str = String::from_utf8_lossy(&output.stdout);
-                if let Some(version) = parse_python_version(&version_str) {
-                    println!("[Test Python] ✅ Found via command: {} -> v{}.{}.{}", cmd, version.0, version.1, version.2);
-                    candidates.push(PythonCandidate {
-                        path: cmd.to_string(),
-                        version,
-                    });
-                }
-            }
-        }
-    }
-    
-    // Remove duplicates (same version, different paths)
+
     candidates.sort_by(|a, b| b.version.cmp(&a.version));
     candidates.dedup_by(|a, b| a.version == b.version);
-    
-    // Select the best (highest version)
+
     if let Some(best) = candidates.first() {
-        println!("[Test Python] 🎯 SELECTED: {} (v{}.{}.{})", best.path, best.version.0, best.version.1, best.version.2);
-        println!("[Test Python] 📊 All candidates found: {:?}", candidates);
+        println!("[Test Python] 🎯 Gewählt: {} (v{}.{}.{})", best.path, best.version.0, best.version.1, best.version.2);
         return best.path.clone();
     }
-    
-    // Fallback
-    println!("[Test Python] ⚠️  WARNING: No Python found! Using fallback.");
-    if cfg!(target_os = "windows") {
-        "python".to_string()
-    } else {
-        "python3".to_string()
-    }
+
+    if cfg!(target_os = "windows") { "python".to_string() } else { "python3".to_string() }
 }
 
-fn parse_python_version(version_str: &str) -> Option<(u32, u32, u32)> {
-    // Parse version from strings like "Python 3.11.1"
-    let parts: Vec<&str> = version_str.split_whitespace().collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    
-    let version_part = parts[1];
-    let nums: Vec<&str> = version_part.split('.').collect();
-    
-    if nums.len() < 2 {
-        return None;
-    }
-    
+fn parse_python_version(s: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 2 { return None; }
+    let nums: Vec<&str> = parts[1].split('.').collect();
+    if nums.len() < 2 { return None; }
     let major = nums[0].parse::<u32>().ok()?;
     let minor = nums[1].parse::<u32>().ok()?;
-    let patch = nums.get(2).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
-    
+    let patch = nums.get(2).and_then(|p| p.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().ok()).unwrap_or(0);
     Some((major, minor, patch))
 }
 
 fn get_test_engine_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // NEW: Updated path for test_engine folder structure
-    let resource_path = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Could not get resource dir: {}", e))?;
-    
-    println!("[Test Engine] Resource path: {:?}", resource_path);
-    
-    // Try new structure: python/test_engine/test_engine.py
-    let engine_path = resource_path.join("python").join("test_engine").join("test_engine.py");
-    println!("[Test Engine] Trying path 1: {:?}", engine_path);
-    
-    if engine_path.exists() {
-        println!("[Test Engine] ✅ Found at path 1");
-        return Ok(engine_path);
+    let try_paths: Vec<PathBuf> = vec![
+        // Resourcen-Verzeichnis (Produktion)
+        app_handle.path().resource_dir()
+            .map(|p| p.join("python").join("test_engine").join("test_engine.py"))
+            .unwrap_or_default(),
+        // Entwicklung – relativ
+        PathBuf::from("src-tauri/python/test_engine/test_engine.py"),
+        // Entwicklung – absolut
+        PathBuf::from("/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app2/src-tauri/python/test_engine/test_engine.py"),
+    ];
+
+    for p in try_paths {
+        if p.exists() {
+            println!("[Test Engine] ✅ Gefunden: {:?}", p);
+            return Ok(p);
+        }
     }
-    
-    // Fallback: old structure python/test_engine.py
-    let engine_path_old = resource_path.join("python").join("test_engine.py");
-    println!("[Test Engine] Trying path 2: {:?}", engine_path_old);
-    if engine_path_old.exists() {
-        println!("[Test Engine] ✅ Found at path 2");
-        return Ok(engine_path_old);
-    }
-    
-    // Fallback: Development - relative to src-tauri
-    let local_path = PathBuf::from("src-tauri/python/test_engine/test_engine.py");
-    println!("[Test Engine] Trying path 3: {:?}", local_path);
-    if local_path.exists() {
-        println!("[Test Engine] ✅ Found at path 3");
-        return Ok(local_path);
-    }
-    
-    // Last fallback: old development path
-    let local_path_old = PathBuf::from("src-tauri/python/test_engine.py");
-    println!("[Test Engine] Trying path 4: {:?}", local_path_old);
-    if local_path_old.exists() {
-        println!("[Test Engine] ✅ Found at path 4");
-        return Ok(local_path_old);
-    }
-    
-    // ABSOLUTE PATH FALLBACK for development
-    let absolute_dev_path = PathBuf::from("/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app2/src-tauri/python/test_engine/test_engine.py");
-    println!("[Test Engine] Trying path 5 (absolute): {:?}", absolute_dev_path);
-    if absolute_dev_path.exists() {
-        println!("[Test Engine] ✅ Found at path 5 (absolute dev path)");
-        return Ok(absolute_dev_path);
-    }
-    
-    Err("Test engine not found in any location".to_string())
+    Err("Test-Engine nicht gefunden".to_string())
 }
 
 fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not get app data dir: {}", e))?;
-    Ok(data_dir.join("models"))
+    let data = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir Fehler: {}", e))?;
+    Ok(data.join("models"))
 }
 
 fn get_test_output_dir(app_handle: &tauri::AppHandle, test_id: &str) -> Result<PathBuf, String> {
-    let data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not get app data dir: {}", e))?;
-    
-    let output_dir = data_dir.join("test_outputs").join(test_id);
-    fs::create_dir_all(&output_dir)
-        .map_err(|e| format!("Could not create output dir: {}", e))?;
-    
-    Ok(output_dir)
+    let data = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir Fehler: {}", e))?;
+    let dir = data.join("test_outputs").join(test_id);
+    fs::create_dir_all(&dir).map_err(|e| format!("Output-Ordner Fehler: {}", e))?;
+    Ok(dir)
 }
 
-fn save_test_jobs(app_handle: &tauri::AppHandle, jobs: &[TestJob]) -> Result<(), String> {
-    let data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not get app data dir: {}", e))?;
-    
-    let jobs_path = data_dir.join("test_jobs.json");
-    let content = serde_json::to_string_pretty(jobs)
-        .map_err(|e| format!("Could not serialize jobs: {}", e))?;
-    
-    fs::write(&jobs_path, content)
-        .map_err(|e| format!("Could not save jobs: {}", e))?;
-    
-    Ok(())
+fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) -> Result<String, String> {
+    let db_path = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir Fehler: {}", e))?
+        .join("frametrain.db");
+
+    let conn = rusqlite::Connection::open(&db_path)
+        .map_err(|e| format!("Datenbank-Fehler: {}", e))?;
+
+    conn.query_row(
+        "SELECT path FROM model_versions_new WHERE id = ?1",
+        [version_id],
+        |row| row.get(0),
+    ).map_err(|e| format!("Version nicht gefunden: {}", e))
 }
 
-fn load_test_jobs(app_handle: &tauri::AppHandle) -> Result<Vec<TestJob>, String> {
-    let data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not get app data dir: {}", e))?;
-    
-    let jobs_path = data_dir.join("test_jobs.json");
-    
-    if !jobs_path.exists() {
-        return Ok(Vec::new());
+fn get_task_type_for_version(app_handle: &tauri::AppHandle, version_id: &str) -> String {
+    let db_path = match app_handle.path().app_data_dir() {
+        Ok(p) => p.join("frametrain.db"),
+        Err(_) => return "auto".to_string(),
+    };
+
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return "auto".to_string(),
+    };
+
+    // Versuche task_type aus der Trainings-Config zu lesen
+    let result: Result<String, _> = conn.query_row(
+        "SELECT training_config FROM model_versions_new WHERE id = ?1",
+        [version_id],
+        |row| row.get::<_, String>(0),
+    );
+
+    if let Ok(config_json) = result {
+        if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&config_json) {
+            if let Some(tt) = cfg.get("task_type").and_then(|v| v.as_str()) {
+                return tt.to_string();
+            }
+        }
     }
-    
-    let content = fs::read_to_string(&jobs_path)
-        .map_err(|e| format!("Could not read jobs: {}", e))?;
-    
-    let jobs: Vec<TestJob> = serde_json::from_str(&content)
-        .map_err(|e| format!("Could not parse jobs: {}", e))?;
-    
-    Ok(jobs)
+    "auto".to_string()
 }
 
 fn save_test_results_to_db(
@@ -363,28 +306,28 @@ fn save_test_results_to_db(
 ) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
     let db = state.db.lock()
-        .map_err(|e| format!("Database lock error: {}", e))?;
-    
-    // Serialize results to JSON
+        .map_err(|e| format!("DB-Lock Fehler: {}", e))?;
+
     let results_json = serde_json::to_string(results)
-        .map_err(|e| format!("Failed to serialize results: {}", e))?;
-    
+        .map_err(|e| format!("Serialisierungs-Fehler: {}", e))?;
+
     db.save_test_result(
         version_id,
         results.total_samples as i32,
-        results.correct_predictions as i32,
-        results.accuracy,
+        results.correct_predictions.unwrap_or(0) as i32,
+        results.accuracy.unwrap_or(0.0),
         results.average_loss.unwrap_or(0.0),
         results.average_inference_time,
         &results_json,
-    ).map_err(|e| format!("Failed to save test results: {}", e))?;
-    
-    println!("[Test] ✅ Test results saved to database for version: {}", version_id);
+    ).map_err(|e| format!("DB-Speicher-Fehler: {}", e))?;
+
+    println!("[Test] ✅ Ergebnisse in DB gespeichert für Version: {}", version_id);
     Ok(())
 }
 
 // ============ Tauri Commands ============
 
+/// Startet einen Dataset-Test (ganzen Datensatz durchlaufen)
 #[tauri::command]
 pub async fn start_test(
     app_handle: tauri::AppHandle,
@@ -398,55 +341,41 @@ pub async fn start_test(
     max_samples: Option<usize>,
     state: tauri::State<'_, Arc<Mutex<TestState>>>,
 ) -> Result<TestJob, String> {
-    let mut state_lock = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    
+    let mut state_lock = state.lock().map_err(|e| format!("Lock Fehler: {}", e))?;
     if state_lock.current_job.is_some() {
         return Err("Ein Test läuft bereits".to_string());
     }
-    
-    // Generate test ID
-    let test_id = format!("test_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
-    
-    // Get paths
+    state_lock.stop_signal = false;
+
+    let test_id = format!(
+        "test_{}",
+        &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
+    );
+
+    let model_path = get_version_path(&app_handle, &version_id)?;
+    let task_type = get_task_type_for_version(&app_handle, &version_id);
     let models_dir = get_models_dir(&app_handle)?;
-    
-    // Get version path from database
-    let db_path = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not get app data dir: {}", e))?
-        .join("frametrain.db");
-    
-    let conn = rusqlite::Connection::open(&db_path)
-        .map_err(|e| format!("Database error: {}", e))?;
-    
-    let version_path: String = conn.query_row(
-        "SELECT path FROM model_versions_new WHERE id = ?1",
-        [&version_id],
-        |row| row.get(0),
-    ).map_err(|e| format!("Version nicht gefunden: {}", e))?;
-    
-    let model_path = PathBuf::from(version_path);
     let dataset_path = models_dir.join(&model_id).join("datasets").join(&dataset_id);
     let output_dir = get_test_output_dir(&app_handle, &test_id)?;
-    
-    // Create config
+
     let config = TestConfig {
-        model_path: model_path.to_string_lossy().to_string(),
+        model_path,
         dataset_path: dataset_path.to_string_lossy().to_string(),
         output_path: output_dir.to_string_lossy().to_string(),
         batch_size: batch_size.unwrap_or(8),
         max_samples,
+        task_type: task_type.clone(),
+        mode: "dataset".to_string(),
+        single_input: String::new(),
+        single_input_type: "text".to_string(),
     };
-    
-    // Write config to file
+
     let config_path = output_dir.join("test_config.json");
     let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Could not serialize config: {}", e))?;
+        .map_err(|e| format!("Config-Serialisierung: {}", e))?;
     fs::write(&config_path, &config_json)
-        .map_err(|e| format!("Could not write config: {}", e))?;
-    
-    // Create job
+        .map_err(|e| format!("Config schreiben: {}", e))?;
+
     let job = TestJob {
         id: test_id.clone(),
         model_id,
@@ -462,24 +391,81 @@ pub async fn start_test(
         progress: TestProgress::default(),
         results: None,
         error: None,
+        task_type: task_type.clone(),
+        mode: "dataset".to_string(),
     };
-    
+
     state_lock.current_job = Some(job.clone());
-    
-    // Start test process in background
-    let app_handle_clone = app_handle.clone();
+    drop(state_lock);
+
+    let app_clone = app_handle.clone();
     let config_path_str = config_path.to_string_lossy().to_string();
     let version_id_clone = version_id.clone();
     let state_clone = Arc::clone(&state);
-    
-    drop(state_lock);
-    
+
     thread::spawn(move || {
-        run_test_process(app_handle_clone, test_id, config_path_str, version_id_clone, state_clone);
+        run_test_process(
+            app_clone, test_id, config_path_str,
+            version_id_clone, state_clone, false,
+        );
     });
-    
+
     Ok(job)
 }
+
+/// Testet einen einzelnen Input (Text, Bildpfad, Audiopfad, JSON)
+#[tauri::command]
+pub async fn test_single_input(
+    app_handle: tauri::AppHandle,
+    version_id: String,
+    single_input: String,
+    single_input_type: String,  // "text" | "image_path" | "audio_path" | "json"
+    state: tauri::State<'_, Arc<Mutex<TestState>>>,
+) -> Result<String, String> {
+    // Single-Tests blockieren keinen Dataset-Test – sie laufen parallel
+    let test_id = format!(
+        "single_{}",
+        &uuid::Uuid::new_v4().to_string().replace("-", "")[..8]
+    );
+
+    let model_path = get_version_path(&app_handle, &version_id)?;
+    let task_type = get_task_type_for_version(&app_handle, &version_id);
+    let output_dir = get_test_output_dir(&app_handle, &test_id)?;
+
+    let config = TestConfig {
+        model_path,
+        dataset_path: String::new(),
+        output_path: output_dir.to_string_lossy().to_string(),
+        batch_size: 1,
+        max_samples: Some(1),
+        task_type: task_type.clone(),
+        mode: "single".to_string(),
+        single_input: single_input.clone(),
+        single_input_type: single_input_type.clone(),
+    };
+
+    let config_path = output_dir.join("test_config.json");
+    fs::write(&config_path, serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Config-Fehler: {}", e))?)
+        .map_err(|e| format!("Config schreiben: {}", e))?;
+
+    let app_clone = app_handle.clone();
+    let config_path_str = config_path.to_string_lossy().to_string();
+    let test_id_clone = test_id.clone();
+    let state_clone = Arc::clone(&state);
+
+    // Single-Test in eigenem Thread, Ergebnis via Event
+    thread::spawn(move || {
+        run_test_process(
+            app_clone, test_id_clone, config_path_str,
+            version_id, state_clone, true,
+        );
+    });
+
+    Ok(test_id)
+}
+
+// ============ Process Runner ============
 
 fn run_test_process(
     app_handle: tauri::AppHandle,
@@ -487,34 +473,24 @@ fn run_test_process(
     config_path: String,
     version_id: String,
     state: Arc<Mutex<TestState>>,
+    is_single: bool,
 ) {
     let python = get_python_path();
-    
-    println!("[Test] Using Python: {}", python);
-    println!("[Test] Test ID: {}", test_id);
-    println!("[Test] Config: {}", config_path);
-    
+
     let engine_path = match get_test_engine_path(&app_handle) {
-        Ok(p) => {
-            println!("[Test] Engine path: {:?}", p);
-            p
-        },
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("[Test] Error finding engine: {}", e);
+            eprintln!("[Test] Engine nicht gefunden: {}", e);
             let _ = app_handle.emit("test-error", serde_json::json!({
                 "test_id": test_id,
-                "error": e
+                "error": e,
             }));
             return;
         }
     };
-    
-    let _ = app_handle.emit("test-started", serde_json::json!({
-        "test_id": test_id
-    }));
-    
-    println!("[Test] Starting Python process...");
-    
+
+    println!("[Test] Python: {} | Engine: {:?}", python, engine_path);
+
     let mut child = match Command::new(&python)
         .arg(engine_path.to_string_lossy().to_string())
         .arg("--config")
@@ -523,181 +499,166 @@ fn run_test_process(
         .stderr(Stdio::piped())
         .spawn()
     {
-        Ok(c) => {
-            println!("[Test] Python process started successfully");
-            c
-        },
+        Ok(c) => c,
         Err(e) => {
-            eprintln!("[Test] Failed to start Python: {}", e);
             let _ = app_handle.emit("test-error", serde_json::json!({
                 "test_id": test_id,
-                "error": format!("Failed to start Python: {}", e)
+                "error": format!("Python konnte nicht gestartet werden: {}", e),
             }));
             return;
         }
     };
-    
-    // Read stderr in separate thread
+
+    // stderr → Logs
     if let Some(stderr) = child.stderr.take() {
-        let stderr_reader = BufReader::new(stderr);
         thread::spawn(move || {
-            for line in stderr_reader.lines() {
-                if let Ok(line) = line {
-                    eprintln!("[Test STDERR] {}", line);
-                }
+            for line in BufReader::new(stderr).lines().flatten() {
+                eprintln!("[Test STDERR] {}", line);
             }
         });
     }
-    
-    // Read stdout for progress updates
+
+    // stdout → Events
     if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        let app_handle_clone = app_handle.clone();
-        let test_id_clone = test_id.clone();
-        
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                println!("[Test OUTPUT] {}", line);
-                
-                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
-                    let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    
-                    match msg_type {
-                        "progress" => {
-                            let _ = app_handle_clone.emit("test-progress", serde_json::json!({
-                                "test_id": test_id_clone,
-                                "data": msg.get("data")
-                            }));
-                        }
-                        "status" => {
-                            let _ = app_handle_clone.emit("test-status", serde_json::json!({
-                                "test_id": test_id_clone,
-                                "data": msg.get("data")
-                            }));
-                        }
-                        "complete" => {
-                            // CRITICAL FIX: Read full results from file before saving to DB
-                            if let Some(data) = msg.get("data") {
-                                // Check if results_file is provided
-                                if let Some(results_file) = data.get("results_file").and_then(|f| f.as_str()) {
-                                    println!("[Test] Reading full results from file: {}", results_file);
-                                    
-                                    // Read full results from file
-                                    match fs::read_to_string(results_file) {
-                                        Ok(file_content) => {
-                                            match serde_json::from_str::<TestResults>(&file_content) {
-                                                Ok(full_results) => {
-                                                    // Save FULL results (with predictions) to DB
-                                                    if let Err(e) = save_test_results_to_db(&app_handle_clone, &version_id, &full_results) {
-                                                        eprintln!("[Test] Failed to save results to DB: {}", e);
-                                                    } else {
-                                                        println!("[Test] ✅ Saved {} predictions to database", full_results.predictions.len());
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("[Test] Failed to parse results file: {}", e);
+        let ah = app_handle.clone();
+        let tid = test_id.clone();
+        let vid = version_id.clone();
+
+        for line in BufReader::new(stdout).lines().flatten() {
+            // Stop-Signal prüfen
+            if let Ok(s) = state.lock() {
+                if s.stop_signal && !is_single {
+                    let _ = child.kill();
+                    break;
+                }
+            }
+
+            println!("[Test OUTPUT] {}", line);
+
+            let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+            match msg_type {
+                "progress" => {
+                    let _ = ah.emit("test-progress", serde_json::json!({
+                        "test_id": tid,
+                        "data": msg.get("data"),
+                    }));
+                }
+                "status" => {
+                    let _ = ah.emit("test-status", serde_json::json!({
+                        "test_id": tid,
+                        "data": msg.get("data"),
+                    }));
+                }
+                "complete" => {
+                    let data = msg.get("data");
+                    let mode = data
+                        .and_then(|d| d.get("mode"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("dataset");
+
+                    if mode == "single" || is_single {
+                        // Single-Modus: Ergebnis direkt ans Frontend
+                        let _ = ah.emit("test-single-complete", serde_json::json!({
+                            "test_id": tid,
+                            "data": data,
+                        }));
+                    } else {
+                        // Dataset-Modus: Ergebnisse aus Datei lesen + in DB speichern
+                        if let Some(d) = data {
+                            if let Some(results_file) = d.get("results_file").and_then(|f| f.as_str()) {
+                                println!("[Test] Lese Ergebnisse aus: {}", results_file);
+                                match fs::read_to_string(results_file) {
+                                    Ok(content) => {
+                                        match serde_json::from_str::<TestResults>(&content) {
+                                            Ok(full_results) => {
+                                                if let Err(e) = save_test_results_to_db(&ah, &vid, &full_results) {
+                                                    eprintln!("[Test] DB-Fehler: {}", e);
+                                                } else {
+                                                    println!("[Test] ✅ {} Predictions gespeichert", full_results.predictions.len());
                                                 }
                                             }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("[Test] Failed to read results file: {}", e);
+                                            Err(e) => eprintln!("[Test] Parse-Fehler: {}", e),
                                         }
                                     }
-                                } else {
-                                    // Fallback: Try to parse data directly (old format)
-                                    if let Ok(results) = serde_json::from_value::<TestResults>(data.clone()) {
-                                        if let Err(e) = save_test_results_to_db(&app_handle_clone, &version_id, &results) {
-                                            eprintln!("[Test] Failed to save results to DB: {}", e);
-                                        }
-                                    }
+                                    Err(e) => eprintln!("[Test] Datei-Fehler: {}", e),
                                 }
                             }
-                            
-                            // CRITICAL FIX: Include version_id in event payload
-                            let event_data = serde_json::json!({
-                                "test_id": test_id_clone,
-                                "version_id": version_id.clone(),  // ADD version_id!
-                                "data": msg.get("data")
-                            });
-                            
-                            let _ = app_handle_clone.emit("test-complete", event_data);
                         }
-                        "error" => {
-                            let _ = app_handle_clone.emit("test-error", serde_json::json!({
-                                "test_id": test_id_clone,
-                                "data": msg.get("data")
-                            }));
-                        }
-                        _ => {}
+
+                        let _ = ah.emit("test-complete", serde_json::json!({
+                            "test_id": tid,
+                            "version_id": vid,
+                            "data": data,
+                        }));
                     }
                 }
+                "error" => {
+                    let _ = ah.emit("test-error", serde_json::json!({
+                        "test_id": tid,
+                        "data": msg.get("data"),
+                        "error": msg.get("data")
+                            .and_then(|d| d.get("error"))
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("Unbekannter Fehler"),
+                    }));
+                }
+                "warning" => {
+                    let _ = ah.emit("test-status", serde_json::json!({
+                        "test_id": tid,
+                        "data": {"status": "warning", "message": msg.get("data")},
+                    }));
+                }
+                _ => {}
             }
         }
     }
-    
+
     let status = child.wait();
-    println!("[Test] Process finished with status: {:?}", status);
-    
-    // Reset state
-    if let Ok(mut state_lock) = state.lock() {
-        state_lock.current_job = None;
+    println!("[Test] Prozess beendet: {:?}", status);
+
+    if !is_single {
+        if let Ok(mut s) = state.lock() {
+            s.current_job = None;
+            s.stop_signal = false;
+        }
     }
-    
+
     let _ = app_handle.emit("test-finished", serde_json::json!({
         "test_id": test_id,
-        "success": status.map(|s| s.success()).unwrap_or(false)
+        "is_single": is_single,
+        "success": status.map(|s| s.success()).unwrap_or(false),
     }));
-    
-    // CRITICAL: Send final done event to unlock UI
-    println!("[Test] Sending test-done event");
-    let _ = app_handle.emit("test-done", serde_json::json!({
-        "test_id": test_id
-    }));
+    let _ = app_handle.emit("test-done", serde_json::json!({ "test_id": test_id }));
 }
+
+// ============ Weitere Commands ============
 
 #[tauri::command]
 pub fn stop_test(
     state: tauri::State<'_, Arc<Mutex<TestState>>>,
 ) -> Result<(), String> {
-    let mut state_lock = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    
-    if let Some(ref mut job) = state_lock.current_job {
+    let mut s = state.lock().map_err(|e| format!("Lock Fehler: {}", e))?;
+    s.stop_signal = true;
+    if let Some(ref mut job) = s.current_job {
         job.status = TestStatus::Stopped;
         job.completed_at = Some(chrono::Utc::now().to_rfc3339());
     }
-    
     Ok(())
-}
-
-#[tauri::command]
-pub fn get_current_test(
-    state: tauri::State<'_, Arc<Mutex<TestState>>>,
-) -> Result<Option<TestJob>, String> {
-    let state_lock = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    Ok(state_lock.current_job.clone())
 }
 
 #[tauri::command]
 pub fn get_active_test_job(
     state: tauri::State<'_, Arc<Mutex<TestState>>>,
 ) -> Result<Option<TestJob>, String> {
-    let state_lock = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    
-    // Return current job only if it's running or pending
-    if let Some(ref job) = state_lock.current_job {
+    let s = state.lock().map_err(|e| format!("Lock Fehler: {}", e))?;
+    if let Some(ref job) = s.current_job {
         if job.status == TestStatus::Running || job.status == TestStatus::Pending {
             return Ok(Some(job.clone()));
         }
     }
-    
     Ok(None)
-}
-
-#[tauri::command]
-pub fn get_test_history(
-    app_handle: tauri::AppHandle,
-) -> Result<Vec<TestJob>, String> {
-    load_test_jobs(&app_handle)
 }
 
 #[tauri::command]
@@ -707,19 +668,18 @@ pub fn get_test_results_for_version(
 ) -> Result<Vec<TestResults>, String> {
     let state = app_handle.state::<AppState>();
     let db = state.db.lock()
-        .map_err(|e| format!("Database lock error: {}", e))?;
-    
+        .map_err(|e| format!("DB-Lock Fehler: {}", e))?;
+
     let results_json = db.get_test_results_for_version(&version_id)
-        .map_err(|e| format!("Query error: {}", e))?;
-    
-    let mut test_results = Vec::new();
+        .map_err(|e| format!("DB-Fehler: {}", e))?;
+
+    let mut out = Vec::new();
     for json_str in results_json {
-        if let Ok(test_result) = serde_json::from_str::<TestResults>(&json_str) {
-            test_results.push(test_result);
+        if let Ok(r) = serde_json::from_str::<TestResults>(&json_str) {
+            out.push(r);
         }
     }
-    
-    Ok(test_results)
+    Ok(out)
 }
 
 #[tauri::command]
@@ -728,69 +688,62 @@ pub fn export_hard_examples(
     predictions: Vec<PredictionResult>,
     format: String,
 ) -> Result<String, String> {
-    let data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not get app data dir: {}", e))?;
-    
+    let data_dir = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?;
     let export_dir = data_dir.join("exports");
     fs::create_dir_all(&export_dir)
-        .map_err(|e| format!("Could not create export dir: {}", e))?;
-    
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let filename = format!("hard_examples_{}.{}", timestamp, format);
-    let export_path = export_dir.join(&filename);
-    
+        .map_err(|e| format!("Export-Ordner: {}", e))?;
+
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("hard_examples_{}.{}", ts, format);
+    let path = export_dir.join(&filename);
+
     match format.as_str() {
         "json" => {
-            let json = serde_json::to_string_pretty(&predictions)
-                .map_err(|e| format!("Serialization error: {}", e))?;
-            fs::write(&export_path, json)
-                .map_err(|e| format!("Write error: {}", e))?;
+            let j = serde_json::to_string_pretty(&predictions)
+                .map_err(|e| format!("Serialisierung: {}", e))?;
+            fs::write(&path, j).map_err(|e| format!("Schreiben: {}", e))?;
         }
         "jsonl" => {
             let mut lines = Vec::new();
-            for pred in predictions {
-                let line = serde_json::to_string(&pred)
-                    .map_err(|e| format!("Serialization error: {}", e))?;
-                lines.push(line);
+            for p in &predictions {
+                lines.push(serde_json::to_string(p).map_err(|e| format!("Serialisierung: {}", e))?);
             }
-            fs::write(&export_path, lines.join("\n"))
-                .map_err(|e| format!("Write error: {}", e))?;
+            fs::write(&path, lines.join("\n")).map_err(|e| format!("Schreiben: {}", e))?;
         }
         "csv" => {
-            let mut csv = String::from("input,expected,predicted,is_correct,loss,confidence\n");
-            for pred in predictions {
-                let input = pred.input_text.replace("\"", "\"\"");
-                let expected = pred.expected_output.unwrap_or_default().replace("\"", "\"\"");
-                let predicted = pred.predicted_output.replace("\"", "\"\"");
-                let loss = pred.loss.map(|l| l.to_string()).unwrap_or_default();
-                let conf = pred.confidence.map(|c| c.to_string()).unwrap_or_default();
+            let mut csv = String::from("input,expected,predicted,is_correct,confidence,inference_time_ms\n");
+            for p in &predictions {
+                let input = p.input_text.replace('"', "\"\"");
+                let exp = p.expected_output.clone().unwrap_or_default().replace('"', "\"\"");
+                let pred = p.predicted_output.replace('"', "\"\"");
+                let conf = p.confidence.map(|c| format!("{:.4}", c)).unwrap_or_default();
                 csv.push_str(&format!(
-                    "\"{}\",\"{}\",\"{}\",{},{},{}\n",
-                    input, expected, predicted, pred.is_correct, loss, conf
+                    "\"{}\",\"{}\",\"{}\",{},{},{:.1}\n",
+                    input, exp, pred, p.is_correct, conf, p.inference_time * 1000.0
                 ));
             }
-            fs::write(&export_path, csv)
-                .map_err(|e| format!("Write error: {}", e))?;
+            fs::write(&path, csv).map_err(|e| format!("Schreiben: {}", e))?;
         }
         "txt" => {
             let mut text = String::new();
-            for (i, pred) in predictions.iter().enumerate() {
-                text.push_str(&format!("Example {}\n", i + 1));
-                text.push_str(&format!("Input: {}\n", pred.input_text));
-                if let Some(expected) = &pred.expected_output {
-                    text.push_str(&format!("Expected: {}\n", expected));
+            for (i, p) in predictions.iter().enumerate() {
+                text.push_str(&format!("── Example {} ──\n", i + 1));
+                text.push_str(&format!("Input:     {}\n", p.input_text));
+                if let Some(exp) = &p.expected_output {
+                    text.push_str(&format!("Expected:  {}\n", exp));
                 }
-                text.push_str(&format!("Predicted: {}\n", pred.predicted_output));
-                text.push_str(&format!("Correct: {}\n", pred.is_correct));
-                text.push_str("\n---\n\n");
+                text.push_str(&format!("Predicted: {}\n", p.predicted_output));
+                text.push_str(&format!("Correct:   {}\n", p.is_correct));
+                if let Some(conf) = p.confidence {
+                    text.push_str(&format!("Confidence:{:.2}%\n", conf * 100.0));
+                }
+                text.push_str(&format!("Time:      {:.0}ms\n\n", p.inference_time * 1000.0));
             }
-            fs::write(&export_path, text)
-                .map_err(|e| format!("Write error: {}", e))?;
+            fs::write(&path, text).map_err(|e| format!("Schreiben: {}", e))?;
         }
-        _ => return Err(format!("Unsupported format: {}", format)),
+        _ => return Err(format!("Unbekanntes Format: {}", format)),
     }
-    
-    Ok(export_path.to_string_lossy().to_string())
+
+    Ok(path.to_string_lossy().to_string())
 }
