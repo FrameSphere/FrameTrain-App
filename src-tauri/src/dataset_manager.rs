@@ -1459,47 +1459,76 @@ pub fn delete_dataset_files(
 pub async fn add_files_to_dataset(
     app_handle: tauri::AppHandle,
     dataset_id: String,
-    file_paths: Vec<String>
+    file_paths: Vec<String>,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<usize, String> {
-    let metadata_path = get_datasets_metadata_path(&app_handle)?;
-    let datasets: Vec<DatasetInfo> = if metadata_path.exists() {
-        let content = fs::read_to_string(&metadata_path)
-            .map_err(|e| format!("Konnte Metadata nicht lesen: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        return Err("Keine Datasets gefunden".to_string());
+    // 1. Primär: Pfad aus der Datenbank lesen (wie get_dataset_files)
+    let dataset_dir: PathBuf = {
+        let db = state.db.lock()
+            .map_err(|e| format!("DB-Lock-Fehler: {}", e))?;
+        let all_db = db.list_datasets()
+            .map_err(|e| format!("DB-Lesefehler: {}", e))?;
+
+        if let Some(db_ds) = all_db.iter().find(|d| d.id == dataset_id) {
+            PathBuf::from(&db_ds.file_path)
+        } else {
+            // 2. Fallback: alte JSON-Metadata (Rückwärtskompatibilität)
+            let metadata_path = get_datasets_metadata_path(&app_handle)?;
+            let json_datasets: Vec<DatasetInfo> = if metadata_path.exists() {
+                let content = fs::read_to_string(&metadata_path)
+                    .map_err(|e| format!("Konnte Metadata nicht lesen: {}", e))?;
+                serde_json::from_str(&content).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            if let Some(ds) = json_datasets.iter().find(|d| d.id == dataset_id) {
+                get_model_datasets_dir(&app_handle, &ds.model_id)?.join(&ds.id)
+            } else {
+                return Err(format!(
+                    "Dataset '{}' nicht gefunden (weder in DB noch in Metadata-Datei)",
+                    dataset_id
+                ));
+            }
+        }
     };
-    
-    let dataset = datasets.iter()
-        .find(|d| d.id == dataset_id)
-        .ok_or_else(|| "Dataset nicht gefunden".to_string())?;
-    
-    let dataset_dir = get_model_datasets_dir(&app_handle, &dataset.model_id)?
-        .join(&dataset.id);
-    
+
+    if !dataset_dir.exists() {
+        return Err(format!(
+            "Dataset-Verzeichnis existiert nicht: {}",
+            dataset_dir.display()
+        ));
+    }
+
     let mut copied_count = 0;
-    
+
     for file_path_str in file_paths {
         let source_file = Path::new(&file_path_str);
-        
+
         if !source_file.exists() {
+            println!("[Dataset] Datei übersprungen (nicht gefunden): {}", file_path_str);
             continue;
         }
-        
+
         let file_name = source_file.file_name()
-            .ok_or_else(|| "Ungültiger Dateiname".to_string())?;
-        
-        // Neue Dateien kommen in unused/, damit split_dataset sie findet
+            .ok_or_else(|| format!("Ungültiger Dateiname: {}", file_path_str))?;
+
+        // Neue Dateien kommen in unused/ (split_dataset erkennt sie dort)
         let unused_dir = dataset_dir.join("unused");
         fs::create_dir_all(&unused_dir)
             .map_err(|e| format!("Konnte unused-Verzeichnis nicht erstellen: {}", e))?;
+
         let target_path = unused_dir.join(file_name);
-        
-        fs::copy(&source_file, &target_path)
-            .map_err(|e| format!("Konnte Datei nicht kopieren: {}", e))?;
-        
+
+        fs::copy(source_file, &target_path)
+            .map_err(|e| format!(
+                "Konnte '{}' nicht kopieren: {}",
+                source_file.display(), e
+            ))?;
+
+        println!("[Dataset] ✅ Datei hinzugefügt: {:?}", file_name);
         copied_count += 1;
     }
-    
+
     Ok(copied_count)
 }
