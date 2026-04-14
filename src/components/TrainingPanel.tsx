@@ -454,7 +454,7 @@ function PostTrainingModal({ versionId, modelName, metrics, onClose, onGoToAnaly
             {metrics?.final_train_loss !== undefined && (
               <div className="bg-white/5 rounded-lg p-3">
                 <div className="text-xs text-gray-400 mb-0.5">Final Loss</div>
-                <div className="text-white font-bold">{metrics.final_train_loss.toFixed(4)}</div>
+                <div className="text-white font-bold">{metrics.final_train_loss.toFixed(8)}</div>
               </div>
             )}
             {metrics?.total_epochs !== undefined && (
@@ -678,6 +678,71 @@ function AIAssistantModal({
   const [parsedConfig, setParsedConfig] = useState<Partial<TrainingConfig> | null>(null);
   const [error, setError] = useState('');
 
+  // Neu: Templates + vorherige Analyse
+  const [templates, setTemplates] = useState<MetricsTemplate[]>([]);
+  const [includeTemplates, setIncludeTemplates] = useState(false);
+  const [includeLastAnalysis, setIncludeLastAnalysis] = useState(false);
+  const [lastAnalysisText, setLastAnalysisText] = useState<string | null>(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
+  useEffect(() => {
+    invoke<MetricsTemplate[]>('get_metrics_templates')
+      .then(setTemplates)
+      .catch(() => setTemplates([]));
+  }, []);
+
+  const handleToggleLastAnalysis = async (val: boolean) => {
+    setIncludeLastAnalysis(val);
+    if (val && !lastAnalysisText) {
+      setLoadingAnalysis(true);
+      try {
+        // Neueste Version aus den Templates/Analyse-DB laden
+        // Wir holen einfach alle Versionen und nehmen die neueste mit Analyse
+        const allVersions = await invoke<any[]>('list_models_with_version_tree').catch(() => []);
+        let found = false;
+        for (const m of allVersions) {
+          for (const v of (m.versions || [])) {
+            const report = await invoke<any>('get_ai_analysis_report', { versionId: v.id }).catch(() => null);
+            if (report?.report_text) {
+              setLastAnalysisText(`=== Letzter Trainingsbericht (${m.name} / ${v.name}) ===\n${report.report_text}`);
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+        if (!found) {
+          setLastAnalysisText(null);
+          setIncludeLastAnalysis(false);
+          setError('Kein gespeicherter Trainingsbericht gefunden. Erstelle zuerst eine KI-Analyse in der Analyse-Seite.');
+        }
+      } finally {
+        setLoadingAnalysis(false);
+      }
+    }
+  };
+
+  const handleSaveAsTemplate = async () => {
+    if (!parsedConfig) return;
+    setSavingTemplate(true);
+    try {
+      const tmpl = await invoke<MetricsTemplate>('save_metrics_template', {
+        name: `KI-Assistent · ${new Date().toLocaleDateString('de-DE')}`,
+        description: `Prompt: ${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}`,
+        config: parsedConfig,
+        source: 'ai',
+      });
+      setTemplates(prev => [...prev, tmpl]);
+      setError('');
+      // Kurze visuelle Bestätigung
+      setSavingTemplate(false);
+    } catch (e: any) {
+      setError('Template konnte nicht gespeichert werden: ' + String(e));
+      setSavingTemplate(false);
+    }
+  };
+
   const meta = PROVIDER_META[provider];
 
   const saveSettings = () => {
@@ -726,13 +791,33 @@ function AIAssistantModal({
     const datasetFiles = selectedDataset?.file_count || 0;
     const datasetMb = ((selectedDataset?.size_bytes || 0) / 1e6).toFixed(0);
 
+    let templatesSection = '';
+    if (includeTemplates && templates.length > 0) {
+      templatesSection = `
+
+GESPEICHERTE PARAMETER-TEMPLATES (frühere Trainings / KI-Empfehlungen):
+${templates.map(t => `- ${t.name} (${t.source === 'ai' ? 'KI-Empfehlung' : 'Benutzerdefiniert'}):\n${JSON.stringify(t.config, null, 2)}`).join('\n\n')}
+Nutze diese Templates als Referenz und Ausgangspunkt für deine Empfehlung.`;
+    }
+
+    let analysisSection = '';
+    if (includeLastAnalysis && lastAnalysisText) {
+      analysisSection = `
+
+LETZTER TRAININGSBERICHT (KI-Analyse des letzten Trainings):
+${lastAnalysisText.slice(0, 3000)}
+
+Berücksichtige diese Analyse bei deiner Empfehlung: Was lief gut? Was soll verbessert werden?`;
+    }
+
     return `Du bist ein Experte für das Training von HuggingFace-Transformer-Modellen mit PyTorch.
 
 KONTEXT DES USERS:
 - Modell: ${modelName} (${modelType}, ${paramB}B Parameter, hidden_size=${hiddenSize}, num_layers=${numLayers})
 - Dataset: ${datasetFiles} Dateien, ${datasetMb} MB
 - System-RAM: ${systemRamGb} GB (Apple Silicon MPS oder CPU, kein dediziertes VRAM)
-\n- Hardware/GPU: ${requirements?.cuda_available ? 'NVIDIA GPU mit CUDA — bitsandbytes verfügbar, load_in_4bit/8bit möglich' : requirements?.mps_available ? 'Apple Silicon MPS — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen. Stattdessen use_lora=true für RAM-Effizienz nutzen. fp16=false und bf16=false setzen.' : 'Nur CPU — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen.'}
+
+- Hardware/GPU: ${requirements?.cuda_available ? 'NVIDIA GPU mit CUDA — bitsandbytes verfügbar, load_in_4bit/8bit möglich' : requirements?.mps_available ? 'Apple Silicon MPS — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen. Stattdessen use_lora=true für RAM-Effizienz nutzen. fp16=false und bf16=false setzen.' : 'Nur CPU — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen.'}
 - Aktuelle Konfiguration:
 ${JSON.stringify({
   epochs: config.epochs, batch_size: config.batch_size,
@@ -743,7 +828,7 @@ ${JSON.stringify({
   fp16: config.fp16, bf16: config.bf16, load_in_4bit: config.load_in_4bit,
   max_seq_length: config.max_seq_length, gradient_checkpointing: config.gradient_checkpointing,
   num_workers: config.num_workers,
-}, null, 2)}
+}, null, 2)}${templatesSection}${analysisSection}
 
 DEINE AUFGABE:
 1. Analysiere das Ziel des Users
@@ -779,6 +864,7 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
   "gradient_checkpointing": true,
   "num_workers": 0,
   "max_grad_norm": 1.0
+}
 }
 \`\`\`
 `;
@@ -1088,6 +1174,29 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
             </div>
           </div>
 
+          {/* Optionen: Templates + letzte Analyse */}
+          <div className="space-y-2">
+            <div className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Zusätzliche Infos für die KI</div>
+            <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${includeTemplates ? 'bg-blue-500/10 border-blue-500/30' : 'bg-white/5 border-white/10 hover:bg-white/[0.08]'}`}>
+              <input type="checkbox" checked={includeTemplates} onChange={e => setIncludeTemplates(e.target.checked)} className="mt-0.5 accent-purple-500" />
+              <div>
+                <div className="text-sm text-white font-medium">📊 Templates mitgeben ({templates.length} gespeichert)</div>
+                <div className="text-xs text-gray-400 mt-0.5">Zeigt der KI deine gespeicherten Analyse-Templates als Referenz.</div>
+              </div>
+            </label>
+            <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${includeLastAnalysis ? 'bg-purple-500/10 border-purple-500/30' : 'bg-white/5 border-white/10 hover:bg-white/[0.08]'}`}>
+              <input type="checkbox" checked={includeLastAnalysis} onChange={e => handleToggleLastAnalysis(e.target.checked)} className="mt-0.5 accent-purple-500" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white font-medium">🧠 Letzten Trainingsbericht einbeziehen</span>
+                  {loadingAnalysis && <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" />}
+                  {includeLastAnalysis && lastAnalysisText && !loadingAnalysis && <span className="text-xs text-green-400">✓ Geladen</span>}
+                </div>
+                <div className="text-xs text-gray-400 mt-0.5">Die KI sieht den letzten Analyse-Bericht und reagiert gezielt auf Probleme des letzten Trainings.</div>
+              </div>
+            </label>
+          </div>
+
           {/* Error */}
           {error && (
             <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">{error}</div>
@@ -1114,6 +1223,16 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
                     ))}
                   </div>
                 </div>
+              )}
+              {parsedConfig && (
+                <button
+                  onClick={handleSaveAsTemplate}
+                  disabled={savingTemplate}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg text-blue-300 text-sm font-medium transition-all disabled:opacity-50"
+                >
+                  {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+                  Als Template speichern (für nächstes Training)
+                </button>
               )}
             </div>
           )}
@@ -1831,13 +1950,13 @@ function HistoryModal({ jobs, onClose, onDelete, gradient }: HistoryModalProps) 
                       <div className="text-center">
                         <div className="text-gray-400">Train Loss</div>
                         <div className="text-white font-medium">
-                          {job.progress.train_loss.toFixed(4)}
+                          {job.progress.train_loss.toFixed(8)}
                         </div>
                       </div>
                      <div className="text-center">
                         <div className="text-gray-400">Val Loss</div>
                         <div className="text-white font-medium">
-                          {job.progress.val_loss?.toFixed(4) || '-'}
+                          {job.progress.val_loss?.toFixed(8) || '-'}
                         </div>
                       </div>
                       <div className="text-center">
@@ -2375,6 +2494,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
   const [lossHistory, setLossHistory] = useState<{ epoch: number; train_loss: number; val_loss: number | null }[]>([]);
   const [trainingStartTime, setTrainingStartTime] = useState<number | null>(null);
   const [trainingElapsed, setTrainingElapsed] = useState<number>(0);
+  const [lastCheckpointStep, setLastCheckpointStep] = useState<number>(0);
 
   // Stderr-Log-Puffer für das Error-Modal
   const stderrLogsRef = useRef<string[]>([]);
@@ -2487,6 +2607,14 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
           setTrainingStatus('Training gestartet...');
           setTrainingStartTime(Date.now());
           setTrainingElapsed(0);
+          setLastCheckpointStep(0);
+        })
+      );
+
+      unlisteners.push(
+        await listen<any>('training-checkpoint', (event) => {
+          const step = event.payload?.step || event.payload?.data?.step || 0;
+          if (step > 0) setLastCheckpointStep(step);
         })
       );
 
@@ -3764,14 +3892,14 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-400">Train Loss</span>
                       <span className="text-white font-medium font-mono">
-                        {currentJob.progress.train_loss.toFixed(4)}
+                        {currentJob.progress.train_loss.toFixed(8)}
                       </span>
                     </div>
                     {currentJob.progress.val_loss !== null && (
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-400">Val Loss</span>
                         <span className="text-white font-medium font-mono">
-                          {currentJob.progress.val_loss.toFixed(4)}
+                          {currentJob.progress.val_loss.toFixed(8)}
                         </span>
                       </div>
                     )}
@@ -3789,13 +3917,28 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
                     </div>
                   )}
 
-                  {/* Stop Button */}
+                  {/* Stop Buttons */}
+                  {lastCheckpointStep > 0 && (
+                    <div className="mt-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                      <div className="flex items-center gap-2 text-xs text-green-400 mb-2">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Checkpoint gespeichert bei Step {lastCheckpointStep}
+                      </div>
+                      <button
+                        onClick={handleStopTraining}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded-lg text-green-300 text-sm font-medium transition-all"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Ab Checkpoint beenden (Step {lastCheckpointStep} gespeichert)
+                      </button>
+                    </div>
+                  )}
                   <button
                     onClick={handleStopTraining}
-                    className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-red-400 font-medium transition-all"
+                    className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-red-400 font-medium transition-all"
                   >
                     <Square className="w-4 h-4" />
-                    Training stoppen
+                    Training abbrechen
                   </button>
                 </>
               )}

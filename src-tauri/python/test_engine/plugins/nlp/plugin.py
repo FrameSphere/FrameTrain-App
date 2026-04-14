@@ -61,42 +61,64 @@ class Plugin(TestPlugin):
         model_path = self.config.model_path
         self.proto.status("loading", f"Lade Modell: {Path(model_path).name} …")
 
+        # Architektur aus config.json ermitteln.
+        # Wenn die Version kein eigenes config.json hat (Adapter-only), schauen wir
+        # im Basis-Modell-Ordner nach (parent.parent = models/{hf_id}/)
+        def _find_base_path(vpath: str) -> str:
+            p = Path(vpath)
+            # Direkt: config.json im Versions-Verzeichnis?
+            if (p / "config.json").exists():
+                return vpath
+            # Adapter-only: versions/ver_xxx → models/hf_id/
+            candidate = p.parent.parent
+            if (candidate / "config.json").exists():
+                self.proto.status("loading", f"config.json nicht in Version gefunden — nutze Basis-Modell: {candidate.name}")
+                return str(candidate)
+            # Noch eine Ebene höher (falls unerwartete Struktur)
+            candidate2 = p.parent
+            if (candidate2 / "config.json").exists():
+                return str(candidate2)
+            # Fallback: originalen Pfad behalten (HF lädt mit local_files_only)
+            return vpath
+
+        base_config_path = _find_base_path(model_path)
+
         # Architektur aus config.json ermitteln
-        hf_config = AutoConfig.from_pretrained(model_path)
+        hf_config = AutoConfig.from_pretrained(base_config_path, local_files_only=True)
         archs = getattr(hf_config, "architectures", []) or []
 
         if archs:
             arch = archs[0]
             if "SequenceClassification" in arch:
                 self.model_class = "classification"
-                self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
+                self.model = AutoModelForSequenceClassification.from_pretrained(model_path, local_files_only=True)
                 # Label-Mapping speichern falls vorhanden
                 self.id2label = getattr(hf_config, "id2label", None)
             elif any(x in arch for x in ["T5", "MT5", "Bart", "Pegasus", "Marian", "Mbart"]):
                 self.model_class = "seq2seq"
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
+                self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path, local_files_only=True)
             else:
                 self.model_class = "causal_lm"
-                self.model = AutoModelForCausalLM.from_pretrained(model_path)
+                self.model = AutoModelForCausalLM.from_pretrained(model_path, local_files_only=True)
         else:
             # task_type als Fallback
             task = self.config.task_type.lower()
             if task in ("seq_classification", "sequence_classification", "text_classification"):
                 self.model_class = "classification"
-                self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
+                self.model = AutoModelForSequenceClassification.from_pretrained(model_path, local_files_only=True)
             elif task in ("seq2seq", "seq2seq_lm", "summarization", "translation"):
                 self.model_class = "seq2seq"
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
+                self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path, local_files_only=True)
             else:
                 self.model_class = "causal_lm"
-                self.model = AutoModelForCausalLM.from_pretrained(model_path)
+                self.model = AutoModelForCausalLM.from_pretrained(model_path, local_files_only=True)
 
         self.model.to(self.device)
         self.model.eval()
 
         # Tokenizer laden
         tokenizer_path = self._find_tokenizer_path(model_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
