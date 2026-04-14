@@ -52,9 +52,11 @@ class MessageProtocol:
         learning_rate: float = 0.0,
         metrics: Optional[Dict[str, float]] = None,
     ) -> None:
+        # Fortschritt basierend auf globalem Step / Gesamtzahl Steps
+        # step = absoluter Schritt über alle Epochen hinweg
+        # total_steps = Gesamtzahl aller Steps (epochs * steps_per_epoch)
         pct = (
-            ((epoch - 1) * total_steps + step)
-            / max(total_epochs * total_steps, 1)
+            step / max(total_steps, 1)
             * 100
         )
         MessageProtocol._send(
