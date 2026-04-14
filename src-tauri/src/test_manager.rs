@@ -662,6 +662,22 @@ pub fn get_active_test_job(
 }
 
 #[tauri::command]
+pub fn get_current_test(
+    state: tauri::State<'_, Arc<Mutex<TestState>>>,
+) -> Result<Option<TestJob>, String> {
+    let s = state.lock().map_err(|e| format!("Lock Fehler: {}", e))?;
+    Ok(s.current_job.clone())
+}
+
+#[tauri::command]
+pub fn get_test_history(
+    state: tauri::State<'_, Arc<Mutex<TestState>>>,
+) -> Result<Vec<TestJob>, String> {
+    let s = state.lock().map_err(|e| format!("Lock Fehler: {}", e))?;
+    Ok(s.jobs_history.clone())
+}
+
+#[tauri::command]
 pub fn get_test_results_for_version(
     app_handle: tauri::AppHandle,
     version_id: String,
