@@ -1397,43 +1397,66 @@ pub fn move_dataset_files(
     app_handle: tauri::AppHandle,
     dataset_id: String,
     file_paths: Vec<String>,
-    target_split: String
+    target_split: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let metadata_path = get_datasets_metadata_path(&app_handle)?;
-    let datasets: Vec<DatasetInfo> = if metadata_path.exists() {
-        let content = fs::read_to_string(&metadata_path)
-            .map_err(|e| format!("Konnte Metadata nicht lesen: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        return Err("Keine Datasets gefunden".to_string());
+    // Primär: DB (wie get_dataset_files und add_files_to_dataset)
+    let dataset_dir: PathBuf = {
+        let db = state.db.lock()
+            .map_err(|e| format!("DB-Lock-Fehler: {}", e))?;
+        let all_db = db.list_datasets()
+            .map_err(|e| format!("DB-Lesefehler: {}", e))?;
+
+        if let Some(db_ds) = all_db.iter().find(|d| d.id == dataset_id) {
+            PathBuf::from(&db_ds.file_path)
+        } else {
+            // Fallback: alte JSON-Metadata (Rückwärtskompatibilität)
+            let metadata_path = get_datasets_metadata_path(&app_handle)?;
+            let json_datasets: Vec<DatasetInfo> = if metadata_path.exists() {
+                let content = fs::read_to_string(&metadata_path)
+                    .map_err(|e| format!("Konnte Metadata nicht lesen: {}", e))?;
+                serde_json::from_str(&content).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            if let Some(ds) = json_datasets.iter().find(|d| d.id == dataset_id) {
+                get_model_datasets_dir(&app_handle, &ds.model_id)?.join(&ds.id)
+            } else {
+                return Err(format!(
+                    "Dataset '{}' nicht gefunden (weder in DB noch in Metadata-Datei)",
+                    dataset_id
+                ));
+            }
+        }
     };
-    
-    let dataset = datasets.iter()
-        .find(|d| d.id == dataset_id)
-        .ok_or_else(|| "Dataset nicht gefunden".to_string())?;
-    
-    let dataset_dir = get_model_datasets_dir(&app_handle, &dataset.model_id)?
-        .join(&dataset.id);
-    
+
+    if !dataset_dir.exists() {
+        return Err(format!(
+            "Dataset-Verzeichnis existiert nicht: {}",
+            dataset_dir.display()
+        ));
+    }
+
+    // Zielordner anlegen (z.B. val/, train/, test/)
     let target_dir = dataset_dir.join(&target_split);
     fs::create_dir_all(&target_dir)
         .map_err(|e| format!("Konnte Zielverzeichnis nicht erstellen: {}", e))?;
-    
+
     for file_path_str in file_paths {
         let source_path = Path::new(&file_path_str);
         if !source_path.exists() {
             continue;
         }
-        
+
         let file_name = source_path.file_name()
             .ok_or_else(|| "Ungültiger Dateipfad".to_string())?;
-        
+
         let target_path = target_dir.join(file_name);
-        
+
         fs::rename(source_path, &target_path)
             .map_err(|e| format!("Konnte Datei nicht verschieben: {}", e))?;
     }
-    
+
     Ok(())
 }
 
