@@ -68,6 +68,11 @@ async function callAI(provider: AIProvider, apiKey: string, model: string, messa
 
 // ============ Helpers ============
 function formatBytes(b: number) { if (!b) return '0 B'; const k = 1024, s = ['B','KB','MB','GB']; const i = Math.floor(Math.log(b)/Math.log(k)); return parseFloat((b/Math.pow(k,i)).toFixed(2))+' '+s[i]; }
+function extractAIRecommendedParams(reportText: string): Record<string, any> | null {
+  const match = reportText.match(/```json\s*([\s\S]*?)```/);
+  if (!match) return null;
+  try { return JSON.parse(match[1].trim()); } catch { return null; }
+}
 function formatDuration(s: number | null) { if (!s) return '-'; const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60); return h>0?`${h}h ${m}m`:m>0?`${m}m ${sec}s`:`${sec}s`; }
 function formatDate(d: string) { return new Date(d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
 
@@ -210,6 +215,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   const [templateName, setTemplateName] = useState('');
   const [templateDesc, setTemplateDesc] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
+  const [aiRecommendedParams, setAiRecommendedParams] = useState<Record<string, any> | null>(null);
+  const [savingAITemplate, setSavingAITemplate] = useState(false);
 
   useEffect(() => { loadModels(); loadTemplates(); }, []);
   useEffect(() => {
@@ -251,8 +258,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       try {
         const r = await invoke<AIAnalysisReport | null>('get_ai_analysis_report', { versionId: selectedVersionId });
         setReport(r);
-        if (r) setChatMessages([{ role: 'assistant', content: r.report_text }]);
-        else setChatMessages([]);
+        if (r) {
+          setChatMessages([{ role: 'assistant', content: r.report_text }]);
+          setAiRecommendedParams(extractAIRecommendedParams(r.report_text));
+        } else {
+          setChatMessages([]);
+          setAiRecommendedParams(null);
+        }
       } catch { setReport(null); }
     } finally { setLoadingAnalysis(false); }
   };
@@ -376,6 +388,7 @@ Was erwartest du vom nächsten Training wenn die Vorschläge umgesetzt werden?`;
       await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider, model: aiModel });
       const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider, model: aiModel, generated_at: new Date().toISOString() };
       setReport(newReport);
+      setAiRecommendedParams(extractAIRecommendedParams(text));
       setChatMessages([{ role: 'assistant', content: text }]);
       setShowChat(true);
       success('Analyse gespeichert', 'KI-Analyse erfolgreich erstellt.');
@@ -409,6 +422,22 @@ Was erwartest du vom nächsten Training wenn die Vorschläge umgesetzt werden?`;
       setShowSaveTemplate(false); setTemplateName(''); setTemplateDesc('');
       success('Template gespeichert', templateName);
     } catch (e: any) { notifyError('Fehler', String(e)); }
+  };
+
+  const saveAIRecommendationAsTemplate = async () => {
+    if (!aiRecommendedParams) return;
+    setSavingAITemplate(true);
+    try {
+      const name = `KI-Empfehlung · ${versionDetails?.version_name || selectedVersionId?.slice(0, 8) || 'Analyse'}`;
+      const desc = `Empfohlene Parameter für nächstes Training · Analyse vom ${report ? formatDate(report.generated_at) : 'heute'}`;
+      const tmpl = await invoke<MetricsTemplate>('save_metrics_template', {
+        name, description: desc,
+        config: aiRecommendedParams, source: 'ai',
+      });
+      setTemplates(prev => [...prev, tmpl]);
+      success('Template gespeichert', `"${name}" ist jetzt im Training abrufbar.`);
+    } catch (e: any) { notifyError('Fehler', String(e)); }
+    finally { setSavingAITemplate(false); }
   };
 
   const deleteTemplate = async (id: string) => {
@@ -652,11 +681,44 @@ Was erwartest du vom nächsten Training wenn die Vorschläge umgesetzt werden?`;
               <div className="space-y-4">
                 <div className="bg-black/20 rounded-xl p-5 border border-white/10 max-h-[32rem] overflow-y-auto"><ReportText text={report.report_text}/></div>
 
-                {/* Template aus KI-Empfehlung speichern */}
-                {fullData?.config && (
-                  <button onClick={() => { setTemplateName('KI-Empfehlung'); setTemplateDesc(`Basierend auf Analyse vom ${formatDate(report.generated_at)}`); setShowSaveTemplate(true); setShowTemplates(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                {/* KI-Empfehlung für nächstes Training */}
+                {aiRecommendedParams ? (
+                  <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-xl">
+                    <div className="flex items-start gap-3 mb-3">
+                      <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-sm font-semibold text-white">Empfohlene Parameter für nächstes Training</div>
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          KI hat {Object.keys(aiRecommendedParams).length} Parameter empfohlen · Als Template speichern und im Training anwenden
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {Object.entries(aiRecommendedParams).slice(0, 6).map(([k, v]) => (
+                        <span key={k} className="px-2 py-0.5 bg-purple-500/20 rounded text-xs text-purple-300 font-mono">
+                          {k}: {String(v)}
+                        </span>
+                      ))}
+                      {Object.keys(aiRecommendedParams).length > 6 && (
+                        <span className="px-2 py-0.5 bg-white/10 rounded text-xs text-gray-400">
+                          +{Object.keys(aiRecommendedParams).length - 6} weitere
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={saveAIRecommendationAsTemplate}
+                      disabled={savingAITemplate}
+                      className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-40`}
+                    >
+                      {savingAITemplate
+                        ? <><Loader2 className="w-4 h-4 animate-spin" />Speichere...</>
+                        : <><Save className="w-4 h-4" />Als Training-Template speichern</>}
+                    </button>
+                  </div>
+                ) : fullData?.config && (
+                  <button onClick={() => { setTemplateName('Aktuelle Parameter'); setTemplateDesc(''); setShowSaveTemplate(true); setShowTemplates(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                     className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 hover:text-white transition-all">
-                    <Save className="w-4 h-4"/>Parameter als Template speichern
+                    <Save className="w-4 h-4" />Aktuelle Parameter als Template speichern
                   </button>
                 )}
 

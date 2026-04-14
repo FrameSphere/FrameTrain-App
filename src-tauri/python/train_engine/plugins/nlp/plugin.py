@@ -53,6 +53,37 @@ LORA_MODULES = {
     "decoder":         ["q_proj", "v_proj"],
 }
 
+# Alle bekannten Attention-Layer-Naming-Patterns, geordnet nach Häufigkeit.
+# Wird in _auto_detect_lora_modules() der Reihe nach gegen das Modell geprüft.
+_LORA_PATTERNS_BY_PRIORITY = [
+    # LLaMA 1/2/3, Mistral, Phi-3, Gemma, CodeLlama, Qwen2, Yi
+    ["q_proj", "v_proj"],
+    # BERT, RoBERTa, DeBERTa, ALBERT, ELECTRA, CamemBERT
+    ["query", "value"],
+    # T5, mT5, BART, mBART, Pegasus, FLAN-T5
+    ["q", "v"],
+    # GPT-2, DistilGPT-2 (kombiniertes QKV-Proj)
+    ["c_attn"],
+    # BLOOM, Falcon (7B)
+    ["query_key_value"],
+    # Phi-2
+    ["Wqkv"],
+    # OPT, LLaMA mit allen Proj-Layers
+    ["q_proj", "k_proj", "v_proj"],
+    # einige MPT / RWKV Varianten
+    ["qkv_proj"],
+    # StarCoder, SantaCoder (GPT-BigCode)
+    ["c_attn", "c_proj"],
+    # GPT-NeoX, Pythia
+    ["query_key_value", "dense"],
+    # Falcon 40B
+    ["query_key_value", "dense_h_to_4h"],
+    # Mamba (State-Space)
+    ["x_proj", "embeddings"],
+    # Notfall-Fallback: alle vorhandenen Linear-Layer
+    None,
+]
+
 # Ab dieser Sample-Anzahl schalten wir auf Streaming-Tokenisierung um
 STREAMING_THRESHOLD = 500_000
 
@@ -71,6 +102,60 @@ def detect_architecture(model_path: str) -> str:
     except Exception as e:
         MessageProtocol.warning(f"Architektur nicht erkannt ({e}) — verwende Decoder.")
         return "decoder"
+
+
+def _auto_detect_lora_modules(model, arch: str) -> list:
+    """
+    Erkennt automatisch die richtigen LoRA-Ziel-Module für ein beliebiges Modell.
+
+    Strategie (Priorität absteigend):
+    1. Architektur-Defaults (LORA_MODULES) prüfen
+    2. Alle bekannten Naming-Patterns (_LORA_PATTERNS_BY_PRIORITY) systematisch probieren
+    3. Notfall-Fallback: alle nn.Linear-Layer automatisch scannen und
+       nach Attention-Keywords filtern (proj, query, attn, qkv, ...)
+
+    Wird aufgerufen wenn user_modules oder arch_defaults im Modell nicht gefunden wurden.
+    """
+    actual_names = {name for name, _ in model.named_modules()}
+
+    # Schritt 1: Architektur-Defaults
+    arch_defaults = LORA_MODULES.get(arch, ["q_proj", "v_proj"])
+    valid = [m for m in arch_defaults if any(m in n for n in actual_names)]
+    if valid:
+        return valid
+
+    # Schritt 2: Alle bekannten Patterns durchprobieren
+    for pattern in _LORA_PATTERNS_BY_PRIORITY:
+        if pattern is None:
+            break  # Notfall-Fallback folgt unten
+        valid = [m for m in pattern if any(m in n for n in actual_names)]
+        if valid:
+            return valid
+
+    # Schritt 3: Notfall-Fallback — alle nn.Linear scannen
+    try:
+        import torch.nn as nn
+        seen: set = set()
+        found: list = []
+        for name, module in model.named_modules():
+            if isinstance(module, nn.Linear):
+                leaf = name.split(".")[-1]
+                if leaf not in seen:
+                    seen.add(leaf)
+                    found.append(leaf)
+        # Attention-relevante Layer bevorzugen
+        attn_kw = {"query", "key", "value", "proj", "attn", "qkv", "qk", "fc", "linear"}
+        attn_layers = [f for f in found if any(kw in f.lower() for kw in attn_kw)]
+        if attn_layers:
+            # Auf höchstens 4 Layer beschränken (Standard-LoRA-Umfang)
+            return attn_layers[:4]
+        if found:
+            return found[:4]
+    except Exception:
+        pass
+
+    # Absoluter letzter Ausweg (neuere PEFT-Versionen unterstützen "all-linear")
+    return ["all-linear"]
 
 
 # ============================================================================
@@ -586,29 +671,28 @@ class Plugin(TrainPlugin):
             "encoder-decoder": TaskType.SEQ_2_SEQ_LM,
             "decoder":         TaskType.CAUSAL_LM,
         }
+
         # cfg.lora_target_modules kommt aus Rust-Defaults ("q_proj", "v_proj") und ist daher
         # immer gefüllt — auch wenn der User nichts explizit gesetzt hat.
         # Wir validieren die Module gegen die tatsächlichen Layer-Namen des Modells.
-        # Sind sie nicht vorhanden, fallen wir automatisch auf die Architektur-Defaults zurück.
         user_modules = cfg.lora_target_modules
-        arch_defaults = LORA_MODULES[arch]
+        actual_names = {name for name, _ in self.model.named_modules()}
 
         if user_modules:
-            # Alle benannten Sub-Module des Modells sammeln
-            actual_names = {name for name, _ in self.model.named_modules()}
-            # Nur Module übernehmen die auch wirklich im Modell existieren
             valid = [m for m in user_modules if any(m in n for n in actual_names)]
             if valid:
                 modules = valid
                 MessageProtocol.status("loading", f"LoRA Module (User): {modules}")
             else:
-                modules = arch_defaults
+                # user_modules existieren nicht im Modell — Auto-Erkennung
                 MessageProtocol.warning(
                     f"LoRA target_modules {user_modules} nicht im Modell gefunden "
-                    f"(Architektur: {arch}) — verwende Architektur-Defaults: {arch_defaults}"
+                    f"(Architektur: {arch}) — suche automatisch nach passenden Layern ..."
                 )
+                modules = _auto_detect_lora_modules(self.model, arch)
+                MessageProtocol.status("loading", f"LoRA Module (Auto-erkannt für {arch}): {modules}")
         else:
-            modules = arch_defaults
+            modules = _auto_detect_lora_modules(self.model, arch)
             MessageProtocol.status("loading", f"LoRA Module (Auto/{arch}): {modules}")
 
         # CRITICAL: enable_input_require_grads() MUSS vor get_peft_model() aufgerufen werden.
