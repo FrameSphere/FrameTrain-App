@@ -238,6 +238,7 @@ pub struct RatingInfo {
 pub struct TrainingState {
     pub current_job: Option<TrainingJob>,
     pub process: Option<Child>,
+    pub process_pid: Option<u32>,   // PID des Python-Prozesses für sicheres Killing
     pub jobs_history: Vec<TrainingJob>,
 }
 
@@ -246,6 +247,7 @@ impl Default for TrainingState {
         Self {
             current_job: None,
             process: None,
+            process_pid: None,
             jobs_history: Vec::new(),
         }
     }
@@ -1383,6 +1385,13 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
     
     // Read stderr in separate thread — collect it so we can include it in error messages
     let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // PID sofort in den State schreiben — stop_training kann damit den Prozess direkt killen
+    let child_pid = child.id();
+    if let Ok(mut s) = state.lock() {
+        s.process_pid = Some(child_pid);
+        println!("[Training] 💾 PID {} in State gespeichert", child_pid);
+    }
     if let Some(stderr) = child.stderr.take() {
         let stderr_reader = BufReader::new(stderr);
         let stderr_lines_clone = Arc::clone(&stderr_lines);
@@ -1587,6 +1596,7 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
         println!("[Training] Resetting training state...");
         state_lock.current_job = None;
         state_lock.process = None;
+        state_lock.process_pid = None;  // PID freigeben
         println!("[Training] ✅ Training state reset");
     } else {
         eprintln!("[Training] ❌ Failed to lock state for reset");
@@ -1598,24 +1608,64 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
     }));
 }
 
-/// Stoppt das laufende Training
+/// Stoppt das laufende Training — killt den Python-Prozess zuverlässig
 #[tauri::command]
 pub fn stop_training(
     state: tauri::State<'_, Arc<Mutex<TrainingState>>>,
 ) -> Result<(), String> {
     let mut state_lock = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    
+
+    // Methode 1: Child-Handle (falls vorhanden)
     if let Some(ref mut process) = state_lock.process {
-        process.kill().map_err(|e| format!("Could not kill process: {}", e))?;
+        let _ = process.kill();
+        println!("[Training] ✅ Child.kill() aufgerufen");
     }
-    
+
+    // Methode 2: PID-basiertes Kill als Absicherung
+    if let Some(pid) = state_lock.process_pid {
+        println!("[Training] 🔪 Killing Python-Prozess PID: {}", pid);
+
+        #[cfg(unix)]
+        {
+            // SIGTERM zuerst (Python kann cleanup machen)
+            let _ = Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .output();
+
+            // Kurz warten, dann SIGKILL falls noch läuft
+            thread::sleep(std::time::Duration::from_millis(500));
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .output();
+
+            // Auch Kind-Prozesse killen (Python spawnt manchmal Subprozesse)
+            let _ = Command::new("pkill")
+                .args(["-KILL", "-P", &pid.to_string()])
+                .output();
+
+            println!("[Training] ✅ SIGKILL an PID {} gesendet", pid);
+        }
+
+        #[cfg(windows)]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string(), "/T"])
+                .output();
+            println!("[Training] ✅ taskkill /F an PID {} gesendet", pid);
+        }
+    } else {
+        println!("[Training] ⚠️ Kein PID gespeichert – Prozess kann nicht direkt getötet werden");
+    }
+
+    // State aufräumen
     if let Some(ref mut job) = state_lock.current_job {
         job.status = TrainingStatus::Stopped;
         job.completed_at = Some(Utc::now());
     }
-    
     state_lock.process = None;
-    
+    state_lock.process_pid = None;
+    state_lock.current_job = None;  // Job freigeben → neues Training möglich
+
     Ok(())
 }
 
