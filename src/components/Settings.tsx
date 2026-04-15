@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
@@ -140,6 +140,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Load stored tickets when support tab opens
+  useEffect(() => {
+    if (activeTab === 'support' && supportOpen) {
+      setStoredTickets(getAll());
+    }
+  }, [activeTab, supportOpen, getAll]);
 
   const loadAppVersion = async () => {
     try {
@@ -586,8 +593,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 : 'text-white'
             }`}>
               {updateStatus === 'checking' && 'Auf Updates prüfen...'}
-              {updateStatus === 'up-to-date' && '✨ Du bist auf dem neuesten Stand!'}
-              {updateStatus === 'update-available' && '⚠️ Neues Update verfügbar'}
+              {updateStatus === 'up-to-date' && 'Du bist auf dem neuesten Stand!'}
+              {updateStatus === 'update-available' && 'Neues Update verfügbar'}
               {updateStatus === 'error' && 'Update-Prüfung fehlgeschlagen'}
             </h3>
           </div>
@@ -667,7 +674,10 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* Installation Instructions */}
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">📋 Update-Installation</h3>
+        <div className="flex items-center gap-2 mb-4">
+          <FileText className="w-5 h-5 text-gray-400" />
+          <h3 className="text-lg font-semibold text-white">Update-Installation</h3>
+        </div>
         <div className="space-y-3 text-gray-400 text-sm">
           <p>
             <span className="font-semibold text-white">1.</span> Lade die neue Version herunter
@@ -692,9 +702,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       {/* Auto-Update Info */}
       <div className="bg-blue-500/10 rounded-xl p-6 border border-blue-500/20">
         <div className="flex items-start gap-3">
-          <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+          <Lightbulb className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-white font-semibold mb-1">💡 Automatische Update-Benachrichtigung</h3>
+            <h3 className="text-white font-semibold mb-1">Automatische Update-Benachrichtigung</h3>
             <p className="text-blue-300 text-sm">
               FrameTrain prüft automatisch beim Start auf neue Versionen. 
               Wenn ein Update verfügbar ist, wird dir ein Modal angezeigt. 
@@ -776,8 +786,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* Support Info */}
       <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-6">
+        <div className="flex items-center justify-center gap-2 mb-2">
+          <BookOpen className="w-4 h-4 text-blue-400" />
+          <p className="text-sm text-gray-400 text-center">
+            Die Dokumentation wird regelmäßig aktualisiert.
+          </p>
+        </div>
         <p className="text-sm text-gray-400 text-center">
-          📚 Die Dokumentation wird regelmäßig aktualisiert.<br />
           Haben Sie Fragen? Schau in den Docs vorbei!
         </p>
       </div>
@@ -826,8 +841,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             {/* Sub-nav */}
             <div className="flex border-b border-white/10">
               {[
-                { id: 'list' as const, label: '📬 Meine Tickets' },
-                { id: 'new' as const, label: '✏️ Neues Ticket' },
+                { id: 'list' as const, label: 'Meine Tickets', icon: Inbox },
+                { id: 'new' as const, label: 'Neues Ticket', icon: Edit },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -835,12 +850,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     setSupportView(tab.id);
                     setActiveTicket(null);
                   }}
-                  className={`px-6 py-3 text-sm font-semibold transition-colors ${
+                  className={`px-6 py-3 text-sm font-semibold transition-colors flex items-center gap-2 ${
                     supportView === tab.id || (supportView === 'thread' && tab.id === 'list')
                       ? 'text-purple-400 border-b-2 border-purple-400'
                       : 'text-gray-400 hover:text-white'
                   }`}
                 >
+                  <tab.icon className="w-4 h-4" />
                   {tab.label}
                 </button>
               ))}
@@ -894,7 +910,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 <div>
                   {storedTickets.length === 0 ? (
                     <div className="text-center py-12">
-                      <div className="text-5xl mb-4">📭</div>
+                      <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <MailX className="w-8 h-8 text-gray-500" />
+                      </div>
                       <p className="text-gray-400 mb-2">Du hast noch keine Support-Tickets.</p>
                       <p className="text-gray-500 text-sm mb-6">Hast du ein Problem oder eine Frage? Wir helfen gerne.</p>
                       <button
@@ -981,8 +999,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                               }`}
                             >
                               <p style={{ whiteSpace: 'pre-wrap' }}>{m.message}</p>
-                              <p className={`text-xs mt-1.5 ${m.sender === 'user' ? 'text-purple-200' : 'text-gray-500'}`}>
-                                {m.sender === 'user' ? 'Du' : '🔧 Support'} · {new Date(m.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              <p className={`text-xs mt-1.5 flex items-center gap-1 ${m.sender === 'user' ? 'text-purple-200' : 'text-gray-500'}`}>
+                                {m.sender === 'user' ? 'Du' : <>
+                                  <Wrench className="w-3 h-3" />
+                                  Support
+                                </>} · {new Date(m.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             </div>
                           </div>
