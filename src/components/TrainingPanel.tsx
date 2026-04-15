@@ -2597,6 +2597,68 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
     };
   }, [trainingStartTime, isTraining]);
 
+  // Restore training state when component remounts (e.g., after tab switch)
+  useEffect(() => {
+    const restoreTrainingState = async () => {
+      try {
+        const current = await invoke<TrainingJob | null>('get_current_training');
+        if (current) {
+          setCurrentJob(current);
+          
+          // Restore status message
+          const savedStatus = localStorage.getItem('ft_training_status');
+          if (savedStatus) {
+            setTrainingStatus(savedStatus);
+          }
+
+          // Restore loss history
+          const savedLossHistory = localStorage.getItem('ft_loss_history');
+          if (savedLossHistory) {
+            try {
+              const history = JSON.parse(savedLossHistory);
+              setLossHistory(history);
+            } catch (e) {
+              console.warn('Could not restore loss history:', e);
+            }
+          }
+
+          if (current.status === 'running' && current.started_at) {
+            // Wenn Training läuft, stellen wir auch die Startzeit wieder her
+            const startTime = new Date(current.started_at).getTime();
+            setTrainingStartTime(startTime);
+            setTrainingElapsed(Date.now() - startTime);
+          }
+        }
+      } catch (err) {
+        console.error('Error restoring training state:', err);
+      }
+    };
+
+    restoreTrainingState();
+  }, []); // Nur beim Mount
+
+  // Persist loss history to localStorage
+  useEffect(() => {
+    if (lossHistory.length > 0 && isTraining) {
+      localStorage.setItem('ft_loss_history', JSON.stringify(lossHistory));
+    }
+  }, [lossHistory, isTraining]);
+
+  // Persist training status to localStorage
+  useEffect(() => {
+    if (trainingStatus && isTraining) {
+      localStorage.setItem('ft_training_status', trainingStatus);
+    }
+  }, [trainingStatus, isTraining]);
+
+  // Clear localStorage when training finishes
+  useEffect(() => {
+    if (!isTraining) {
+      localStorage.removeItem('ft_loss_history');
+      localStorage.removeItem('ft_training_status');
+    }
+  }, [isTraining]);
+
   // Listen to training events
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
