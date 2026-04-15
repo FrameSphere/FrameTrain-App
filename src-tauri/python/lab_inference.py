@@ -249,7 +249,21 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
 
     except ImportError as e:
         elapsed_ms = int((time.time() - start) * 1000)
-        output = build_error_output(sample_path, f"Fehlende Bibliothek: {e}. Bitte installiere: pip install transformers torch pillow", elapsed_ms)
+        error_msg = f"⚠️ Fehlende Bibliothek: {str(e)}\n\n"
+        error_msg += "Bitte installiere die erforderlichen Pakete in diese Python-Version:\n\n"
+        error_msg += f"Aktuelle Python: {sys.executable}\n"
+        error_msg += f"Python Version: {sys.version.split()[0]}\n\n"
+        error_msg += "Installation:\n"
+        error_msg += f"{sys.executable.replace('/bin/python3', '').replace('/bin/python', '')} -m pip install torch transformers pillow\n\n"
+        error_msg += "Alternative (für andere Versionen):\n"
+        error_msg += "pip3 install torch transformers pillow\n"
+        error_msg += "pip install torch transformers pillow\n\n"
+        error_msg += "Frametrain sucht Python in diesen Orten:\n"
+        error_msg += "  🍎 macOS: /Library/Frameworks/Python.framework/Versions/3.11-3.13/bin/\n"
+        error_msg += "  🍎 macOS Homebrew: /opt/homebrew/bin/, /usr/local/bin/\n"
+        error_msg += "  🐧 Linux: Homebrew oder System Python\n"
+        error_msg += "  🪟 Windows: python.exe von python.org oder Homebrew"
+        output = build_error_output(sample_path, error_msg, elapsed_ms)
 
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)

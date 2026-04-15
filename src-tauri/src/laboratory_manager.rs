@@ -155,13 +155,56 @@ fn detect_sample_type(path: &str) -> String {
 }
 
 fn get_python_path() -> String {
-    for cmd in &["python3", "python"] {
+    // First, try to find Python with torch+transformers (best for laboratory)
+    for cmd in &["python3.11", "python3.12", "python3.13", "python3", "python"] {
+        if let Ok(output) = Command::new(cmd)
+            .arg("-c")
+            .arg("import torch, transformers; print('ok')")
+            .output()
+        {
+            if output.status.success() && String::from_utf8_lossy(&output.stdout).contains("ok") {
+                return cmd.to_string();
+            }
+        }
+    }
+    
+    // Fallback 1: Try Python installation directories on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let search_paths = vec![
+            "/Library/Frameworks/Python.framework/Versions/3.13/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.11/bin",
+            "/Library/Frameworks/Python.framework/Versions/3.10/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+        ];
+        
+        for base_path in search_paths {
+            for name in &["python3.13", "python3.12", "python3.11", "python3.10", "python3"] {
+                let full_path = format!("{}/{}", base_path, name);
+                if let Ok(output) = Command::new(&full_path)
+                    .arg("-c")
+                    .arg("import torch, transformers; print('ok')")
+                    .output()
+                {
+                    if output.status.success() && String::from_utf8_lossy(&output.stdout).contains("ok") {
+                        return full_path;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback 2: Just find any Python version
+    for cmd in &["python3.11", "python3.12", "python3.13", "python3", "python"] {
         if let Ok(output) = Command::new(cmd).arg("--version").output() {
             if output.status.success() {
                 return cmd.to_string();
             }
         }
     }
+    
     "python3".to_string()
 }
 
