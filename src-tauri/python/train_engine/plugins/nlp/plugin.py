@@ -350,6 +350,11 @@ def make_progress_callback(total_epochs: int, collector: MetricsCollector):
 
     class FTCallback(TrainerCallback):
 
+        def __init__(self):
+            # Letzten bekannten Step merken — wird für reine Eval-Events benötigt,
+            # damit der Val-Loss dem richtigen Step zugeordnet wird.
+            self._last_step: int | None = None
+
         def on_epoch_begin(self, args, state, control, **kwargs):
             ep = int(state.epoch or 0) + 1
             MessageProtocol.status("epoch", f"Epoche {ep}/{total_epochs}")
@@ -357,15 +362,39 @@ def make_progress_callback(total_epochs: int, collector: MetricsCollector):
         def on_log(self, args, state, control, logs=None, **kwargs):
             if not logs:
                 return
+
+            has_train_loss = "loss" in logs or "train_loss" in logs
+            has_eval_loss  = "eval_loss" in logs
+
+            # Reines Eval-Event (kein train_loss) → nur Val-Loss tracken,
+            # KEINEN Progress-Eintrag mit train_loss=0 senden (würde Spike erzeugen).
+            if not has_train_loss and has_eval_loss:
+                v_loss = float(logs["eval_loss"])
+                # Bestes Val-Loss intern aktualisieren ohne neuen Step zu erzeugen
+                epoch = int(state.epoch or 0) + 1
+                if self._last_step is not None:
+                    collector.record(epoch, self._last_step, {"val_loss": v_loss})
+                # Bestes Val-Loss für MetricsCollector
+                if collector.best_val_loss is None or v_loss < collector.best_val_loss:
+                    collector.best_val_loss = v_loss
+                    collector.best_epoch    = epoch
+                return
+
+            if not has_train_loss:
+                # Weder train noch eval loss — ignorieren (z.B. reine Status-Logs)
+                return
+
             epoch     = int(state.epoch or 0) + 1
             step      = state.global_step or 0
             total     = state.max_steps or 1
             t_loss    = float(logs.get("loss") or logs.get("train_loss") or 0.0)
-            v_loss    = float(logs["eval_loss"]) if "eval_loss" in logs else None
+            v_loss    = float(logs["eval_loss"]) if has_eval_loss else None
             lr        = float(logs.get("learning_rate") or 0.0)
-            grad_norm = logs.get("grad_norm")  # HF Trainer loggt das seit v4.33
+            grad_norm = logs.get("grad_norm")
             if grad_norm is not None:
                 grad_norm = float(grad_norm)
+
+            self._last_step = step
 
             MessageProtocol.progress(
                 epoch=epoch, total_epochs=total_epochs,
