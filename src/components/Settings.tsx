@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
+import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 
@@ -38,7 +39,7 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'docs' | 'support' | 'about';
+type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about';
 
 // Status helpers for Support tickets
 const STATUS_LABEL: Record<string, string> = {
@@ -53,6 +54,49 @@ const STATUS_COLOR: Record<string, string> = {
   in_progress: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20',
   resolved: 'text-green-400 bg-green-500/10 border-green-500/20',
   closed: 'text-gray-400 bg-gray-500/10 border-gray-500/20',
+};
+
+const PROVIDER_META: Record<AIProvider, {
+  label: string; emoji: string; needsKey: boolean;
+  keyPlaceholder: string; keyHint: string; keyLink: string;
+  models: string[];
+}> = {
+  anthropic: {
+    label: 'Claude (Anthropic)',
+    emoji: '🤖',
+    needsKey: true,
+    keyPlaceholder: 'sk-ant-api03-...',
+    keyHint: 'Kostenlos testen: console.anthropic.com',
+    keyLink: 'https://console.anthropic.com',
+    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+  },
+  openai: {
+    label: 'GPT-4o (OpenAI)',
+    emoji: '🟢',
+    needsKey: true,
+    keyPlaceholder: 'sk-...',
+    keyHint: 'platform.openai.com/api-keys',
+    keyLink: 'https://platform.openai.com/api-keys',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
+  },
+  groq: {
+    label: 'Groq (Kostenlos)',
+    emoji: '⚡',
+    needsKey: true,
+    keyPlaceholder: 'gsk_...',
+    keyHint: '✅ Kostenloser Account — console.groq.com',
+    keyLink: 'https://console.groq.com',
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  },
+  ollama: {
+    label: 'Ollama (Lokal, kein Key)',
+    emoji: '🦙',
+    needsKey: false,
+    keyPlaceholder: '',
+    keyHint: '✅ Kein Account nötig — ollama.com installieren',
+    keyLink: 'https://ollama.com',
+    models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2', 'qwen2.5'],
+  },
 };
 
 const MANAGER_API = 'https://webcontrol-hq-api.karol-paschek.workers.dev';
@@ -82,6 +126,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const { currentTheme, setTheme, themes: allThemes } = useTheme();
+  const { settings: aiSettings, updateSettings: updateAISettings } = useAISettings();
   const [appVersion, setAppVersion] = useState<string>('Loading...');
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<'checking' | 'up-to-date' | 'update-available' | 'error'>('checking');
@@ -101,6 +146,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [submitting, setSubmitting] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
   const [supportBadge, setSupportBadge] = useState(0);
+  const [showApiKeyField, setShowApiKeyField] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { getAll, add } = useStoredTickets(userData.userId);
@@ -324,6 +370,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     { id: 'account' as SettingsTab, label: 'Konto', icon: User },
     { id: 'appearance' as SettingsTab, label: 'Darstellung', icon: Palette },
     { id: 'notifications' as SettingsTab, label: 'Benachrichtigungen', icon: Bell },
+    { id: 'ai-assistant' as SettingsTab, label: 'KI-Assistent', icon: Brain },
     { id: 'updates' as SettingsTab, label: 'Updates', icon: Download },
     { id: 'docs' as SettingsTab, label: 'Dokumentation', icon: BookOpen },
     { id: 'support' as SettingsTab, label: 'Support', icon: MessageCircle },
@@ -446,6 +493,186 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       </div>
     </div>
   );
+
+  const renderAIAssistantTab = () => {
+    const meta = PROVIDER_META[aiSettings.provider];
+    return (
+      <div className="space-y-6">
+        {/* Enable/Disable Toggle */}
+        <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-white">KI-Assistent aktivieren</h3>
+              <p className="text-sm text-gray-400 mt-1">Globale Einstellung für den KI-Coach in der App</p>
+            </div>
+            <button
+              onClick={() => updateAISettings({ enabled: !aiSettings.enabled })}
+              className={`w-11 h-6 rounded-full transition-all ${
+                aiSettings.enabled ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-white/10'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded-full bg-white shadow-lg transform transition-transform ${
+                  aiSettings.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+          {aiSettings.enabled && (
+            <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              KI-Assistent ist aktiv und verfügbar
+            </div>
+          )}
+          {!aiSettings.enabled && (
+            <div className="p-3 bg-gray-500/10 border border-gray-500/20 rounded-lg text-sm text-gray-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              KI-Assistent ist deaktiviert
+            </div>
+          )}
+        </div>
+
+        {aiSettings.enabled && (
+          <>
+            {/* Provider Selection */}
+            <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+              <h3 className="text-lg font-semibold text-white mb-4">KI-ANBIETER WÄHLEN</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {(Object.entries(PROVIDER_META) as [AIProvider, typeof PROVIDER_META[AIProvider]][]).map(([key, m]) => (
+                  <button
+                    key={key}
+                    onClick={() => updateAISettings({ provider: key, selectedModel: m.models[0] })}
+                    className={`flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${
+                      aiSettings.provider === key
+                        ? 'bg-purple-500/20 border-purple-500/50 text-white'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <span className="text-3xl flex-shrink-0">{m.emoji}</span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">{m.label}</div>
+                      <div className="text-xs opacity-60 mt-0.5">{m.needsKey ? 'API-Key nötig' : '✅ Kein Key'}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Provider-specific Configuration */}
+            {meta.needsKey ? (
+              <div className="bg-white/5 rounded-xl p-6 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-white">API-Key</h3>
+                  <a
+                    href={meta.keyLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+                  >
+                    Key holen ↗
+                  </a>
+                </div>
+                
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">{meta.keyHint}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type={showApiKeyField ? 'text' : 'password'}
+                      value={aiSettings.apiKey}
+                      onChange={(e) => updateAISettings({ apiKey: e.target.value })}
+                      placeholder={meta.keyPlaceholder}
+                      className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    />
+                    <button
+                      onClick={() => setShowApiKeyField(!showApiKeyField)}
+                      className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white transition-all text-sm"
+                    >
+                      {showApiKeyField ? 'Verbergen' : 'Anzeigen'}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500">Key wird nur lokal gespeichert, nie an FrameTrain übertragen.</p>
+
+                {/* Model Selection */}
+                <div>
+                  <label className="block text-sm font-semibold text-white mb-2">Modell</label>
+                  <div className="flex flex-wrap gap-2">
+                    {meta.models.map(m => (
+                      <button
+                        key={m}
+                        onClick={() => updateAISettings({ selectedModel: m })}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all border ${
+                          aiSettings.selectedModel === m
+                            ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Ollama Configuration */
+              <div className="bg-white/5 rounded-xl p-6 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-white">Ollama-Konfiguration</h3>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Modell-Name (muss lokal installiert sein)</label>
+                  <input
+                    type="text"
+                    value={aiSettings.ollamaModel}
+                    onChange={(e) => updateAISettings({ ollamaModel: e.target.value, selectedModel: e.target.value })}
+                    placeholder="llama3.2"
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-white mb-2">Beliebte Modelle</label>
+                  <div className="flex flex-wrap gap-2">
+                    {PROVIDER_META.ollama.models.map(m => (
+                      <button
+                        key={m}
+                        onClick={() => updateAISettings({ ollamaModel: m, selectedModel: m })}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-all ${
+                          aiSettings.ollamaModel === m
+                            ? 'bg-green-500/20 border-green-500/50 text-green-300'
+                            : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white/[0.03] rounded-lg border border-white/10 text-xs text-gray-400 space-y-2">
+                  <div className="font-semibold text-gray-300">🦙 Ollama noch nicht installiert?</div>
+                  <div>1. <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">ollama.com</a> — kostenlos herunterladen</div>
+                  <div>2. Im Terminal: <code className="bg-black/30 px-1 py-0.5 rounded font-mono text-xs">ollama pull llama3.2</code></div>
+                  <div>3. Ollama läuft dann im Hintergrund</div>
+                </div>
+              </div>
+            )}
+
+            {/* Info Box */}
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-300 flex items-start gap-3">
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold mb-1">Diese Einstellungen gelten global</div>
+                <p className="text-xs text-blue-200">Der KI-Anbieter und das Modell werden für alle KI-Funktionen verwendet: Quick Chat, Training-Analysen und Labor-Assistenz.</p>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   const handleThemeChange = async (themeId: ThemeId) => {
     setTheme(themeId);
@@ -1174,6 +1401,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'account' && renderAccountTab()}
           {activeTab === 'appearance' && renderAppearanceTab()}
           {activeTab === 'notifications' && renderNotificationsTab()}
+          {activeTab === 'ai-assistant' && renderAIAssistantTab()}
           {activeTab === 'updates' && renderUpdatesTab()}
           {activeTab === 'docs' && renderDocsTab()}
           {activeTab === 'support' && renderSupportTab()}

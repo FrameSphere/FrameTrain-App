@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 
 // ============ Types ============
 
@@ -613,8 +614,6 @@ interface AIAssistantModalProps {
   primaryColor: string;
 }
 
-type AIProvider = 'anthropic' | 'openai' | 'groq' | 'ollama';
-
 const PROVIDER_META: Record<AIProvider, {
   label: string; emoji: string; needsKey: boolean;
   keyPlaceholder: string; keyHint: string; keyLink: string;
@@ -662,16 +661,8 @@ function AIAssistantModal({
   config, modelInfo, selectedModel, selectedDataset,
   systemRamGb, requirements, prefilledContext, onApply, onClose, gradient, primaryColor,
 }: AIAssistantModalProps) {
-  const [provider, setProvider] = useState<AIProvider>(
-    () => (localStorage.getItem('ft_ai_provider') as AIProvider) || 'ollama'
-  );
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('ft_ai_api_key') || '');
-  const [ollamaModel, setOllamaModel] = useState(() => localStorage.getItem('ft_ollama_model') || 'llama3.2');
-  const [selectedModel2, setSelectedModel2] = useState(() => {
-    const saved = localStorage.getItem('ft_ai_model');
-    return saved || PROVIDER_META.ollama.models[0];
-  });
-  const [ollamaStatus, setOllamaStatus] = useState<'unchecked' | 'ok' | 'error'>('unchecked');
+  const { settings: aiSettings } = useAISettings();
+  
   const [prompt, setPrompt] = useState(prefilledContext || '');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>('');
@@ -743,44 +734,7 @@ function AIAssistantModal({
     }
   };
 
-  const meta = PROVIDER_META[provider];
-
-  const saveSettings = () => {
-    localStorage.setItem('ft_ai_api_key', apiKey);
-    localStorage.setItem('ft_ai_provider', provider);
-    localStorage.setItem('ft_ollama_model', ollamaModel);
-    localStorage.setItem('ft_ai_model', selectedModel2);
-  };
-
-  // Ollama-Verbindung prüfen
-  const checkOllama = async () => {
-    try {
-      const res = await fetch('http://localhost:11434/api/tags', {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Verfügbare Modelle extrahieren
-        const available = (data.models || []).map((m: any) => m.name.split(':')[0]);
-        if (available.length > 0 && !available.includes(ollamaModel)) {
-          setOllamaModel(available[0]);
-        }
-        setOllamaStatus('ok');
-      } else {
-        setOllamaStatus('error');
-      }
-    } catch {
-      setOllamaStatus('error');
-    }
-  };
-
-  // Ollama beim Wählen des Providers prüfen
-  const handleProviderChange = (p: AIProvider) => {
-    setProvider(p);
-    // Modell auf ersten der Liste setzen wenn neuer Provider
-    setSelectedModel2(PROVIDER_META[p].models[0]);
-    if (p === 'ollama') checkOllama();
-  };
+  const meta = PROVIDER_META[aiSettings.provider];
 
   const buildSystemPrompt = () => {
     const modelName = selectedModel?.name || 'Unbekannt';
@@ -871,17 +825,20 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
   };
 
   const handleAsk = async () => {
-    if (meta.needsKey && !apiKey.trim()) { setError('Bitte API-Key eingeben.'); return; }
+    if (!aiSettings.enabled) { setError('KI-Assistent ist deaktiviert. Bitte aktiviere ihn in den Einstellungen.'); return; }
     if (!prompt.trim()) { setError('Bitte beschreibe dein Trainingsziel.'); return; }
+    
+    const meta = PROVIDER_META[aiSettings.provider];
+    if (meta.needsKey && !aiSettings.apiKey) { setError('Bitte API-Key in den Einstellungen eintragen.'); return; }
+    
     setLoading(true); setError(''); setResult(''); setParsedConfig(null);
-    saveSettings();
 
     try {
       let responseText = '';
 
-      if (provider === 'ollama') {
+      if (aiSettings.provider === 'ollama') {
         // Ollama: Lokale REST-API, kein Key nötig
-        const model = ollamaModel.trim() || 'llama3.2';
+        const model = aiSettings.ollamaModel.trim() || 'llama3.2';
         const res = await fetch('http://localhost:11434/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -896,12 +853,12 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
         const data = await res.json();
         responseText = data.response || '';
 
-      } else if (provider === 'groq') {
+      } else if (aiSettings.provider === 'groq') {
         // Groq: OpenAI-kompatibel, kostenloser Tier
-        const model = selectedModel2 || 'llama-3.3-70b-versatile';
+        const model = aiSettings.selectedModel || 'llama-3.3-70b-versatile';
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiSettings.apiKey}` },
           body: JSON.stringify({
             model,
             max_tokens: 1500,
@@ -919,13 +876,13 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
         const data = await res.json();
         responseText = data.choices?.[0]?.message?.content || '';
 
-      } else if (provider === 'anthropic') {
-        const model = selectedModel2 || 'claude-opus-4-5';
+      } else if (aiSettings.provider === 'anthropic') {
+        const model = aiSettings.selectedModel || 'claude-opus-4-5';
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': apiKey,
+            'x-api-key': aiSettings.apiKey,
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true',
           },
@@ -945,10 +902,10 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
 
       } else {
         // OpenAI
-        const model = selectedModel2 || 'gpt-4o';
+        const model = aiSettings.selectedModel || 'gpt-4o';
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiSettings.apiKey}` },
           body: JSON.stringify({
             model,
             max_tokens: 1500,
@@ -1001,136 +958,14 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
         </div>
 
         <div className="overflow-y-auto flex-1 p-5 space-y-4">
-          {/* Provider-Auswahl */}
-          <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-widest text-gray-500">KI-Anbieter wählen</div>
-            <div className="grid grid-cols-2 gap-2">
-              {(Object.entries(PROVIDER_META) as [AIProvider, typeof PROVIDER_META[AIProvider]][]).map(([key, m]) => (
-                <button
-                  key={key}
-                  onClick={() => handleProviderChange(key)}
-                  className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all ${
-                    provider === key
-                      ? 'bg-purple-500/20 border-purple-500/50 text-white'
-                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <span className="text-lg flex-shrink-0">{m.emoji}</span>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">{m.label}</div>
-                    <div className="text-xs opacity-60 mt-0.5">{m.needsKey ? 'API-Key nötig' : '✅ Kein Key'}</div>
-                  </div>
-                </button>
-              ))}
+          {/* Info: Einstellungen sind zentral */}
+          <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm text-blue-300 flex items-start gap-2">
+            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-0.5">KI-Anbieter: {PROVIDER_META[aiSettings.provider].label}</p>
+              <p className="text-xs text-blue-200">Diese Einstellung wird zentral in den Einstellungen &gt; KI-Assistent verwaltet.</p>
             </div>
           </div>
-
-          {/* Key / Modell-Konfiguration */}
-          {meta.needsKey ? (
-            <div className="bg-white/[0.04] rounded-xl border border-white/10 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold uppercase tracking-widest text-gray-500">API-Key</div>
-                <a
-                  href={meta.keyLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
-                >
-                  Key holen ↗
-                </a>
-              </div>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                placeholder={meta.keyPlaceholder}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-              />
-              <p className="text-xs text-gray-400">{meta.keyHint}</p>
-              {/* Modell-Auswahl */}
-              <div>
-                <div className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Modell</div>
-                <div className="flex gap-2 flex-wrap">
-                  {meta.models.map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setSelectedModel2(m)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all border ${
-                        selectedModel2 === m
-                          ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">Key wird nur lokal gespeichert, nie an FrameTrain übertragen.</p>
-            </div>
-          ) : (
-            /* Ollama: kein Key, aber Modell-Name und Status */
-            <div className="bg-white/[0.04] rounded-xl border border-white/10 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold uppercase tracking-widest text-gray-500">Ollama-Konfiguration</div>
-                <button
-                  onClick={checkOllama}
-                  className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
-                >
-                  Verbindung prüfen
-                </button>
-              </div>
-
-              {/* Status-Anzeige */}
-              {ollamaStatus !== 'unchecked' && (
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
-                  ollamaStatus === 'ok'
-                    ? 'bg-green-500/10 border border-green-500/30 text-green-300'
-                    : 'bg-red-500/10 border border-red-500/30 text-red-300'
-                }`}>
-                  {ollamaStatus === 'ok'
-                    ? <><CheckCircle className="w-3.5 h-3.5" /> Ollama läuft und ist erreichbar</>
-                    : <><AlertCircle className="w-3.5 h-3.5" /> Ollama nicht erreichbar. Starte es mit: <code className="ml-1 font-mono">ollama serve</code></>}
-                </div>
-              )}
-
-              {/* Modell-Name */}
-              <div>
-                <div className="text-xs text-gray-400 mb-1.5">Modell-Name (muss lokal installiert sein)</div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={ollamaModel}
-                    onChange={e => setOllamaModel(e.target.value)}
-                    placeholder="llama3.2"
-                    className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                  />
-                </div>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {PROVIDER_META.ollama.models.map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setOllamaModel(m)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-mono border transition-all ${
-                        ollamaModel === m
-                          ? 'bg-green-500/20 border-green-500/50 text-green-300'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-3 bg-white/[0.03] rounded-lg border border-white/10 text-xs text-gray-400 space-y-1">
-                <div className="font-semibold text-gray-300">Ollama noch nicht installiert?</div>
-                <div>1. <a href="https://ollama.com" target="_blank" className="text-purple-400 underline">ollama.com</a> — kostenlos herunterladen</div>
-                <div>2. Im Terminal: <code className="bg-black/30 px-1 py-0.5 rounded font-mono">ollama pull llama3.2</code></div>
-                <div>3. Ollama startet automatisch im Hintergrund</div>
-              </div>
-            </div>
-          )}
 
           {/* Kontext-Info */}
           <div className="grid grid-cols-3 gap-2 text-xs">

@@ -9,6 +9,7 @@ import FirstLaunchSetup from './components/FirstLaunchSetup';
 import { UpdateChecker } from './components/UpdateChecker';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { AISettingsProvider } from './contexts/AISettingsContext';
 import './App.css';
 
 interface ApiKeyValidation {
@@ -271,7 +272,9 @@ function App() {
     return (
       <ThemeProvider>
         <NotificationProvider>
-          <FirstLaunchSetup onComplete={handleFirstLaunchComplete} />
+          <AISettingsProvider>
+            <FirstLaunchSetup onComplete={handleFirstLaunchComplete} />
+          </AISettingsProvider>
         </NotificationProvider>
       </ThemeProvider>
     );
@@ -280,29 +283,31 @@ function App() {
   return (
     <ThemeProvider>
       <NotificationProvider>
-        <div className="app">
-        {isAuthenticated && userData ? (
-          <>
-            <Dashboard 
-              userData={userData}
-              onLogout={handleLogout} 
-            />
-            <GlobalTrainingProgress />
-            <UpdateChecker />
-          </>
-        ) : (
-          <Login onLogin={handleLogin} />
-        )}
-      </div>
+        <AISettingsProvider>
+          <div className="app">
+          {isAuthenticated && userData ? (
+            <>
+              <Dashboard 
+                userData={userData}
+                onLogout={handleLogout} 
+              />
+              <GlobalTrainingProgress />
+              <UpdateChecker />
+            </>
+          ) : (
+            <Login onLogin={handleLogin} />
+          )}
+        </div>
 
-        {/* App-Close-Dialog — über allem */}
-        {showCloseDialog && (
-          <CloseConfirmDialog
-            isTraining={isTrainingActive}
-            onConfirm={handleConfirmClose}
-            onCancel={handleCancelClose}
-          />
-        )}
+          {/* App-Close-Dialog — über allem */}
+          {showCloseDialog && (
+            <CloseConfirmDialog
+              isTraining={isTrainingActive}
+              onConfirm={handleConfirmClose}
+              onCancel={handleCancelClose}
+            />
+          )}
+        </AISettingsProvider>
       </NotificationProvider>
     </ThemeProvider>
   );

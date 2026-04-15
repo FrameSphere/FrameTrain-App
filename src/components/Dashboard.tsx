@@ -8,6 +8,7 @@ import TestPanel from './TestPanel';
 import VersionManager from './VersionManager';
 import LaboratoryPanel from './LaboratoryPanel';
 import Settings from './Settings';
+import FloatingAICoach from './FloatingAICoach';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface UserData {
@@ -73,6 +74,9 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
           {renderView()}
         </div>
       </main>
+
+      {/* Floating AI Coach */}
+      <FloatingAICoach />
     </div>
   );
 }
