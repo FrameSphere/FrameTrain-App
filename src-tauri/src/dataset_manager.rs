@@ -469,6 +469,8 @@ pub async fn import_local_dataset(
         columns_count: None,
         validated: false,
         created_at: Utc::now().to_rfc3339(),
+        training_count: 0,
+        last_used_at: None,
     };
     
     db.save_dataset(&db_dataset)
@@ -958,6 +960,8 @@ pub async fn download_huggingface_dataset(
         columns_count: None,
         validated: false,
         created_at: Utc::now().to_rfc3339(),
+        training_count: 0,
+        last_used_at: None,
     };
 
     db.save_dataset(&db_dataset)
@@ -1330,6 +1334,8 @@ pub async fn split_dataset_in_half(
             columns_count: None,
             validated: false,
             created_at: now.clone(),
+            training_count: 0,
+            last_used_at: None,
         };
         db.save_dataset(&db_ds_new)
             .map_err(|e| format!("DB-Speicherfehler: {}", e))?;

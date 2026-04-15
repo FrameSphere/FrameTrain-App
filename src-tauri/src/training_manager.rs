@@ -848,6 +848,9 @@ model_id.clone()
     fs::write(&config_path, &config_json)
         .map_err(|e| format!("Could not write config: {}", e))?;
     
+    // Clone dataset_id before it's moved into the job
+    let dataset_id_clone = dataset_id.clone();
+    
     // Create job
     let job = TrainingJob {
         id: job_id.clone(),
@@ -883,7 +886,6 @@ model_id.clone()
     let model_name_clone = job.model_name.clone();
     let version_id_clone = version_id.clone();
     let user_id_clone = user_id.clone();
-    let dataset_id_clone = dataset_id.clone();
     
     let state_clone = Arc::clone(&state);
     drop(state_lock);  // Release lock before spawning thread
@@ -1492,17 +1494,13 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
                                             }
                                             
                                             // FIXED: Mark dataset as used only on successful completion
-                                            {
-                                                let app_state = app_handle_clone.state::<crate::AppState>();
-                                                match app_state.db.lock() {
-                                                    Ok(db) => {
-                                                        match db.mark_dataset_used(&dataset_id) {
-                                                            Ok(_)  => println!("[Training] ✅ Dataset '{}' als benutzt markiert (Training erfolgreich)", dataset_id),
-                                                            Err(e) => eprintln!("[Training] ⚠️ mark_dataset_used fehlgeschlagen: {}", e),
-                                                        }
-                                                    }
-                                                    Err(e) => eprintln!("[Training] ⚠️ DB-Lock für mark_dataset_used fehlgeschlagen: {}", e),
+                                            if let Ok(db_guard) = app_handle_clone.state::<crate::AppState>().db.lock() {
+                                                match db_guard.mark_dataset_used(&dataset_id) {
+                                                    Ok(_)  => println!("[Training] ✅ Dataset '{}' als benutzt markiert (Training erfolgreich)", dataset_id),
+                                                    Err(e) => eprintln!("[Training] ⚠️ mark_dataset_used fehlgeschlagen: {}", e),
                                                 }
+                                            } else {
+                                                eprintln!("[Training] ⚠️ DB-Lock für mark_dataset_used fehlgeschlagen");
                                             }
                                             
                                             let _ = app_handle_clone.emit("training-complete", serde_json::json!({
