@@ -237,6 +237,26 @@ function HighlightedText({ text, spans }: { text: string; spans: TextSpan[] }) {
   );
 }
 
+// ============ Error Message Helper ============
+
+function getDetailedErrorMessage(errorMsg: string): string {
+  // Check for common library import errors
+  if (errorMsg.includes("No module named 'torch'")) {
+    return `⚠️ Fehlende Bibliothek: torch\n\nBitte installiere die erforderlichen Pakete:\n\n# Versuche je nach Python-Version:\npip install torch transformers pillow\n  ODER\npip3 install torch transformers pillow\n\nNutzer-Hinweise:\n• Stelle sicher, dass du die richtige Python-Umgebung verwendest\n• Prüfe: python --version oder python3 --version\n• Bei virtuellen Umgebungen: Aktiviere die Umgebung zuerst\n• Nutze pip3 wenn du mehrere Python-Versionen hast\n• Bei macOS Silicon: Möglicherweise conda statt pip besser`;
+  }
+  if (errorMsg.includes("No module named 'transformers'")) {
+    return `⚠️ Fehlende Bibliothek: transformers\n\nBitte installiere:\npip install transformers torch\n  ODER\npip3 install transformers torch\n\nSiehe Dokumentation für weitere Hilfe.`;
+  }
+  if (errorMsg.includes("No module named 'PIL'") || errorMsg.includes("No module named 'pillow'")) {
+    return `⚠️ Fehlende Bibliothek: Pillow (PIL)\n\nBitte installiere:\npip install pillow\n  ODER\npip3 install pillow`;
+  }
+  if (errorMsg.includes("CUDA") || errorMsg.includes("gpu")) {
+    return `⚠️ GPU/CUDA Problem:\n${errorMsg}\n\nVersuche mit CPU-Fallback oder prüfe deine GPU-Treiber.`;
+  }
+  // Return original if no match
+  return errorMsg;
+}
+
 // ============ Hauptkomponente ============
 
 export default function LaboratoryPanel() {
@@ -397,7 +417,8 @@ export default function LaboratoryPanel() {
       });
       setInferenceResult(result);
       if (result.error) {
-        warning('Inferenz-Warnung', result.error);
+        const detailedMsg = getDetailedErrorMessage(result.error);
+        warning('Inferenz-Warnung', detailedMsg);
       }
     } catch (err: any) {
       error('Inferenz fehlgeschlagen', String(err));
@@ -853,7 +874,7 @@ export default function LaboratoryPanel() {
               {inferenceResult.error && (
                 <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 text-sm flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>{inferenceResult.error}</span>
+                  <span className="whitespace-pre-wrap">{getDetailedErrorMessage(inferenceResult.error)}</span>
                 </div>
               )}
 

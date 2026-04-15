@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { getVersion } from '@tauri-apps/api/app';
 
@@ -15,7 +15,7 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'about';
+type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'docs' | 'about';
 
 export default function Settings({ userData, onLogout }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('account');
@@ -43,6 +43,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     { id: 'appearance' as SettingsTab, label: 'Darstellung', icon: Palette },
     { id: 'notifications' as SettingsTab, label: 'Benachrichtigungen', icon: Bell },
     { id: 'updates' as SettingsTab, label: 'Updates', icon: Download },
+    { id: 'docs' as SettingsTab, label: 'Dokumentation', icon: BookOpen },
     { id: 'about' as SettingsTab, label: 'Über', icon: Info },
   ];
 
@@ -363,6 +364,84 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     </div>
   );
 
+  const renderDocsTab = () => (
+    <div className="space-y-6">
+      {/* Docs Header Card */}
+      <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/20 rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-3">
+          <BookOpen className="w-6 h-6 text-blue-400" />
+          <h3 className="text-lg font-semibold text-white">FrameTrain Dokumentation</h3>
+        </div>
+        <p className="text-sm text-gray-300">
+          Lerne alles über FrameTrain – von den Grundlagen bis zu erweiterten Funktionen.
+        </p>
+      </div>
+
+      {/* Main Docs Link */}
+      <a
+        href="https://frame-train.vercel.app/docs"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-500/30 rounded-xl p-6 transition-all hover:shadow-lg"
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <h4 className="text-base font-semibold text-white mb-2">Komplette Dokumentation</h4>
+            <p className="text-sm text-gray-400">
+              Vollständige Anleitung mit allen Features, Tutorials und Best Practices
+            </p>
+          </div>
+          <ExternalLink className="w-5 h-5 text-blue-400 flex-shrink-0 mt-1" />
+        </div>
+      </a>
+
+      {/* AI Training Guide */}
+      <a
+        href="https://frame-train.vercel.app/docs/ai-training-guide"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/30 rounded-xl p-6 transition-all hover:shadow-lg"
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <h4 className="text-base font-semibold text-white mb-2">KI-Training Guide</h4>
+            <p className="text-sm text-gray-400">
+              Schritt-für-Schritt Anleitung zum Training deines eigenen KI-Modells
+            </p>
+          </div>
+          <ExternalLink className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-1" />
+        </div>
+      </a>
+
+      {/* Quick Tips Card */}
+      <div className="bg-white/5 rounded-xl border border-white/10 p-6">
+        <h4 className="text-base font-semibold text-white mb-4">Schnelle Tipps</h4>
+        <ul className="space-y-3">
+          <li className="flex items-start gap-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 flex-shrink-0" />
+            <span className="text-sm text-gray-300">Starte mit dem Training Guide um ein neues Modell zu trainieren</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+            <span className="text-sm text-gray-300">Nutze die Dokumentation zum Troubleshooting von Fehlern</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-2 flex-shrink-0" />
+            <span className="text-sm text-gray-300">In den Docs findest du Video-Tutorials und Code-Beispiele</span>
+          </li>
+        </ul>
+      </div>
+
+      {/* Support Info */}
+      <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-6">
+        <p className="text-sm text-gray-400 text-center">
+          📚 Die Dokumentation wird regelmäßig aktualisiert.<br />
+          Haben Sie Fragen? Schau in den Docs vorbei!
+        </p>
+      </div>
+    </div>
+  );
+
   const renderAboutTab = () => (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10 text-center">
@@ -490,6 +569,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'appearance' && renderAppearanceTab()}
           {activeTab === 'notifications' && renderNotificationsTab()}
           {activeTab === 'updates' && renderUpdatesTab()}
+          {activeTab === 'docs' && renderDocsTab()}
           {activeTab === 'about' && renderAboutTab()}
         </div>
       </div>
