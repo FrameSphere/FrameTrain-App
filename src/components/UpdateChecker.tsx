@@ -2,16 +2,12 @@ import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 
 interface UpdateInfo {
-  available: boolean;
   latestVersion: string;
   currentVersion: string;
-  releaseUrl: string;
-  releaseName: string;
 }
 
 export function UpdateChecker() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [checking, setChecking] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
 
   useEffect(() => {
@@ -20,56 +16,48 @@ export function UpdateChecker() {
 
   async function checkForUpdates() {
     try {
-      setChecking(true);
-      
-      // Get current version from Tauri
       const currentVersion = await getVersion();
-      
-      // Fetch latest release from GitHub
+      console.log('[UpdateChecker] Current version:', currentVersion);
+
+      // latest.json aus dem richtigen Repo laden
       const response = await fetch(
-        'https://api.github.com/repos/KarolP-tech/FrameTrain/releases/latest',
+        'https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json',
         {
-          headers: {
-            'Accept': 'application/vnd.github.v3+json'
-          }
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
         }
       );
-      
+
       if (!response.ok) {
-        console.error('Failed to check for updates:', response.status);
+        console.warn('[UpdateChecker] latest.json nicht erreichbar:', response.status);
         return;
       }
-      
-      const release = await response.json();
-      const latestVersion = release.tag_name.replace('v', ''); // Remove 'v' prefix
-      
-      // Simple version comparison
-      const isUpdateAvailable = compareVersions(latestVersion, currentVersion) > 0;
-      
-      if (isUpdateAvailable) {
-        setUpdateInfo({
-          available: true,
-          latestVersion,
-          currentVersion,
-          releaseUrl: release.html_url,
-          releaseName: release.name || `v${latestVersion}`
-        });
+
+      const data = await response.json();
+      const latestVersion = (data.version as string)?.replace(/^v/, '') ?? '';
+
+      console.log('[UpdateChecker] Latest version from GitHub:', latestVersion);
+
+      if (!latestVersion) {
+        console.warn('[UpdateChecker] Kein version-Feld in latest.json gefunden');
+        return;
+      }
+
+      if (compareVersions(latestVersion, currentVersion) > 0) {
+        console.log('[UpdateChecker] Update verfügbar:', latestVersion, '>', currentVersion);
+        setUpdateInfo({ latestVersion, currentVersion });
         setShowDialog(true);
       } else {
-        console.log('App is up to date:', currentVersion);
+        console.log('[UpdateChecker] App ist aktuell:', currentVersion);
       }
     } catch (error) {
-      console.error('Error checking for updates:', error);
-    } finally {
-      setChecking(false);
+      console.error('[UpdateChecker] Fehler beim Update-Check:', error);
     }
   }
 
-  // Simple semantic version comparison (e.g., "1.0.28" > "1.0.27")
   function compareVersions(v1: string, v2: string): number {
     const parts1 = v1.split('.').map(Number);
     const parts2 = v2.split('.').map(Number);
-    
     for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
       const p1 = parts1[i] || 0;
       const p2 = parts2[i] || 0;
@@ -79,75 +67,83 @@ export function UpdateChecker() {
     return 0;
   }
 
-  function openDownloadPage() {
-    if (updateInfo?.releaseUrl) {
-      // Open in default browser using window.open
-      window.open(updateInfo.releaseUrl, '_blank');
-    }
+  function openDashboard() {
+    window.open('https://frametrain.vercel.app/dashboard', '_blank');
   }
 
   if (!showDialog || !updateInfo) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-        <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">
-          Update Available! 🎉
-        </h2>
-        
-        <div className="mb-6">
-          <p className="text-gray-700 dark:text-gray-300 mb-2">
-            A new version of FrameTrain is available!
-          </p>
-          
-          <div className="bg-gray-100 dark:bg-gray-700 rounded p-4 my-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Current Version:</span>
-              <span className="font-mono font-semibold text-gray-900 dark:text-white">
-                v{updateInfo.currentVersion}
-              </span>
+    <div
+      className="fixed inset-0 flex items-center justify-center z-[9999]"
+      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+    >
+      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        {/* Warnstreifen */}
+        <div className="h-1 bg-gradient-to-r from-orange-500 to-red-500" />
+
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-start gap-4 mb-5">
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 border border-orange-500/40 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-5 h-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Latest Version:</span>
-              <span className="font-mono font-semibold text-green-600 dark:text-green-400">
-                v{updateInfo.latestVersion}
-              </span>
+            <div>
+              <h2 className="text-white font-semibold text-lg leading-tight">
+                Neues Update verfügbar 🚀
+              </h2>
+              <p className="text-gray-400 text-sm mt-1">
+                Version <span className="font-mono text-orange-400">v{updateInfo.latestVersion}</span> ist verfügbar
+              </p>
             </div>
           </div>
-          
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-            Click "View Release" to download the latest installer from GitHub.
-          </p>
-          
-          <div className="text-xs text-gray-500 dark:text-gray-500 bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
-            💡 Download the installer for your platform:
-            <br />• macOS: .dmg file
-            <br />• Windows: .exe or .msi file
-            <br />• Linux: .AppImage or .deb file
+
+          {/* Versions-Info */}
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-4 flex justify-between text-sm">
+            <div className="text-center">
+              <p className="text-gray-500 text-xs mb-1">Installiert</p>
+              <p className="font-mono text-gray-300">v{updateInfo.currentVersion}</p>
+            </div>
+            <div className="flex items-center text-gray-600">→</div>
+            <div className="text-center">
+              <p className="text-gray-500 text-xs mb-1">Neu</p>
+              <p className="font-mono text-green-400 font-semibold">v{updateInfo.latestVersion}</p>
+            </div>
+          </div>
+
+          {/* Nachricht */}
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-5">
+            <p className="text-red-300 text-sm leading-relaxed">
+              ⚠️ <strong>Bitte lade dir die neue Version herunter</strong> und deinstalliere
+              umgehend die alte Version. Diese könnte Sicherheitslücken aufweisen und wird
+              nicht mehr unterstützt.
+            </p>
+            <p className="text-gray-400 text-xs mt-2">
+              Download unter:{' '}
+              <span className="text-blue-400 underline cursor-pointer" onClick={openDashboard}>
+                frametrain.vercel.app/dashboard
+              </span>
+            </p>
+          </div>
+
+          {/* Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={openDashboard}
+              className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-sm font-semibold transition-all"
+            >
+              Zum Dashboard
+            </button>
+            <button
+              onClick={() => setShowDialog(false)}
+              className="flex-1 py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-gray-300 text-sm font-medium transition-all"
+            >
+              Schließen
+            </button>
           </div>
         </div>
-        
-        <div className="flex gap-3">
-          <button
-            onClick={openDownloadPage}
-            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition"
-          >
-            View Release
-          </button>
-          
-          <button
-            onClick={() => setShowDialog(false)}
-            className="flex-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold py-2 px-4 rounded transition"
-          >
-            Later
-          </button>
-        </div>
-        
-        {checking && (
-          <div className="mt-3 text-center text-sm text-gray-500">
-            Checking for updates...
-          </div>
-        )}
       </div>
     </div>
   );
