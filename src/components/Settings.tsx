@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { getVersion } from '@tauri-apps/api/app';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 
 interface UserData {
   apiKey: string;
@@ -23,6 +24,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const { currentTheme, setTheme, themes: allThemes } = useTheme();
   const [appVersion, setAppVersion] = useState<string>('Loading...');
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<'checking' | 'up-to-date' | 'update-available' | 'error'>('checking');
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
 
   useEffect(() => {
     loadAppVersion();
@@ -32,10 +36,91 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     try {
       const version = await getVersion();
       setAppVersion(version);
+      checkForUpdates(version);
     } catch (error) {
       console.error('Failed to load app version:', error);
       setAppVersion('Unknown');
     }
+  };
+
+  const checkForUpdates = async (currentVersion: string) => {
+    setCheckingUpdates(true);
+    setUpdateStatus('checking');
+    
+    try {
+      let version: string = '';
+
+      // Methode 1: GitHub API
+      try {
+        const response = await fetch(
+          'https://api.github.com/repos/FrameSphere/FrameTrain-App/releases/latest',
+          { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          version = (data.tag_name as string)?.replace(/^v/, '') ?? '';
+        }
+      } catch (err) {
+        console.warn('GitHub API failed:', err);
+      }
+
+      // Methode 2: Fallback zu latest.json
+      if (!version) {
+        try {
+          const response = await fetch(
+            'https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json',
+            { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            version = (data.version as string)?.replace(/^v/, '') ?? '';
+          }
+        } catch (err) {
+          console.warn('latest.json failed:', err);
+        }
+      }
+
+      if (!version) {
+        setUpdateStatus('error');
+        setLatestVersion(null);
+      } else {
+        setLatestVersion(version);
+        if (compareVersions(version, currentVersion) > 0) {
+          setUpdateStatus('update-available');
+        } else {
+          setUpdateStatus('up-to-date');
+        }
+      }
+    } catch (error) {
+      console.error('Error checking updates:', error);
+      setUpdateStatus('error');
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
+  const compareVersions = (v1: string, v2: string): number => {
+    const parts1 = v1.split('.').map(Number);
+    const parts2 = v2.split('.').map(Number);
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+      const p1 = parts1[i] || 0;
+      const p2 = parts2[i] || 0;
+      if (p1 > p2) return 1;
+      if (p1 < p2) return -1;
+    }
+    return 0;
+  };
+
+  const handleCheckUpdates = () => {
+    checkForUpdates(appVersion);
+  };
+
+  const handleOpenGitHub = () => {
+    openUrl('https://github.com/FrameSphere/FrameTrain-App/releases/latest').catch(() => {
+      window.open('https://github.com/FrameSphere/FrameTrain-App/releases/latest', '_blank');
+    });
   };
 
   const tabs = [
@@ -280,70 +365,135 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
   const renderUpdatesTab = () => (
     <div className="space-y-6">
-      {/* Current Version Card */}
-      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Aktuelle Version</h3>
-          <Download className="w-5 h-5 text-purple-400" />
+      {/* Update Status Card */}
+      <div className={`rounded-xl p-6 border ${
+        updateStatus === 'update-available'
+          ? 'bg-red-500/10 border-red-500/30'
+          : updateStatus === 'up-to-date'
+          ? 'bg-green-500/10 border-green-500/30'
+          : 'bg-white/5 border-white/10'
+      }`}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            {updateStatus === 'checking' && (
+              <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+            )}
+            {updateStatus === 'update-available' && (
+              <AlertCircle className="w-6 h-6 text-red-400" />
+            )}
+            {updateStatus === 'up-to-date' && (
+              <CheckCircle className="w-6 h-6 text-green-400" />
+            )}
+            {updateStatus === 'error' && (
+              <AlertCircle className="w-6 h-6 text-gray-400" />
+            )}
+            <h3 className={`text-lg font-semibold ${
+              updateStatus === 'update-available'
+                ? 'text-red-300'
+                : updateStatus === 'up-to-date'
+                ? 'text-green-300'
+                : 'text-white'
+            }`}>
+              {updateStatus === 'checking' && 'Auf Updates prüfen...'}
+              {updateStatus === 'up-to-date' && '✨ Du bist auf dem neuesten Stand!'}
+              {updateStatus === 'update-available' && '⚠️ Neues Update verfügbar'}
+              {updateStatus === 'error' && 'Update-Prüfung fehlgeschlagen'}
+            </h3>
+          </div>
+          <button
+            onClick={handleCheckUpdates}
+            disabled={checkingUpdates}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white rounded-lg text-sm font-semibold transition-all"
+          >
+            {checkingUpdates ? 'Wird geprüft...' : 'Neu prüfen'}
+          </button>
         </div>
-        
-        <div className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-lg">
-          <div>
-            <div className="text-white font-semibold text-lg">FrameTrain Desktop {appVersion}</div>
-            <div className="text-sm text-gray-400 mt-1">
-              Prüfe auf GitHub nach neuen Versionen
-            </div>
+
+        {/* Version Comparison */}
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="bg-black/20 rounded-lg p-4">
+            <p className="text-gray-400 text-xs mb-1">Installiert</p>
+            <p className="text-white font-mono font-semibold text-lg">v{appVersion}</p>
+          </div>
+          <div className="flex items-center justify-center">
+            <Zap className="w-5 h-5 text-gray-400" />
+          </div>
+          <div className={`${
+            updateStatus === 'update-available'
+              ? 'bg-red-500/20 border-red-500/30'
+              : 'bg-black/20'
+          } rounded-lg p-4 border`}>
+            <p className="text-gray-400 text-xs mb-1">Verfügbar</p>
+            <p className={`font-mono font-semibold text-lg ${
+              latestVersion ? 'text-white' : 'text-gray-500'
+            }`}>
+              v{latestVersion || '—'}
+            </p>
           </div>
         </div>
+
+        {/* Status Message */}
+        {updateStatus === 'update-available' && (
+          <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-4 mb-4">
+            <p className="text-red-300 text-sm">
+              Eine neuere Version ist verfügbar! Klick auf "Zu GitHub Releases" um die neue Version herunterzuladen.
+            </p>
+          </div>
+        )}
+
+        {updateStatus === 'error' && (
+          <div className="bg-gray-500/20 border border-gray-500/30 rounded-lg p-4 mb-4">
+            <p className="text-gray-300 text-sm">
+              Konnte nicht auf Updates prüfen. Prüfe deine Internetverbindung oder klick "Neu prüfen".
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Check for Updates on GitHub */}
+      {/* GitHub Releases Link */}
       <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl p-6">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center flex-shrink-0">
             <Download className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="text-xl font-bold text-white mb-2">Nach Updates suchen</h3>
+            <h3 className="text-xl font-bold text-white mb-2">Neue Version herunterladen</h3>
             <p className="text-gray-300 mb-4">
-              Neue Versionen von FrameTrain werden auf GitHub veröffentlicht. 
-              Klicke unten, um die neueste Version zu prüfen und herunterzuladen.
+              Besuche die GitHub Releases-Seite, um die neueste Version von FrameTrain herunterzuladen.
             </p>
             
-            <a
-              href="https://github.com/FrameSphere/FrameTrain-App/releases/latest"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={handleOpenGitHub}
               className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all"
             >
               <Download className="w-5 h-5" />
               <span>Zu GitHub Releases</span>
               <ExternalLink className="w-4 h-4" />
-            </a>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Installation Instructions */}
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Installation</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">📋 Update-Installation</h3>
         <div className="space-y-3 text-gray-400 text-sm">
           <p>
-            <span className="font-semibold text-white">1.</span> Öffne die GitHub Releases-Seite
+            <span className="font-semibold text-white">1.</span> Lade die neue Version herunter
           </p>
           <p>
-            <span className="font-semibold text-white">2.</span> Lade die passende Version herunter:
+            <span className="font-semibold text-white">2.</span> Deinstalliere die alte FrameTrain App komplett:
           </p>
           <ul className="ml-6 space-y-1 list-disc">
-            <li><span className="text-white">.dmg</span> für macOS</li>
-            <li><span className="text-white">.exe</span> oder <span className="text-white">.msi</span> für Windows</li>
-            <li><span className="text-white">.AppImage</span> oder <span className="text-white">.deb</span> für Linux</li>
+            <li>macOS: <span className="text-white">Applications</span> → FrameTrain → <span className="text-white">Move to Trash</span></li>
+            <li>Windows: <span className="text-white">Control Panel</span> → <span className="text-white">Uninstall</span></li>
+            <li>Linux: <span className="text-white">sudo apt remove frametrain</span> oder entsprechend für deine Distribution</li>
           </ul>
           <p>
             <span className="font-semibold text-white">3.</span> Installiere die neue Version
           </p>
           <p>
-            <span className="font-semibold text-white">4.</span> Starte FrameTrain neu
+            <span className="font-semibold text-white">4.</span> Starte FrameTrain neu (alle Einstellungen und Daten bleiben erhalten)
           </p>
         </div>
       </div>
@@ -353,10 +503,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="flex items-start gap-3">
           <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-white font-semibold mb-1">Automatische Update-Prüfung</h3>
+            <h3 className="text-white font-semibold mb-1">💡 Automatische Update-Benachrichtigung</h3>
             <p className="text-blue-300 text-sm">
-              FrameTrain prüft automatisch beim Start auf neue Versionen und 
-              benachrichtigt dich, wenn ein Update verfügbar ist.
+              FrameTrain prüft automatisch beim Start auf neue Versionen. 
+              Wenn ein Update verfügbar ist, wird dir ein Modal angezeigt. 
+              Du kannst auch hier jederzeit manuell prüfen.
             </p>
           </div>
         </div>

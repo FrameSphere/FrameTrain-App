@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 
 interface UpdateInfo {
   latestVersion: string;
@@ -93,7 +94,11 @@ export function UpdateChecker() {
   }
 
   function openDashboard() {
-    window.open('https://frametrain.vercel.app/dashboard', '_blank');
+    openUrl('https://frametrain.vercel.app/dashboard').catch((err) => {
+      console.error('Failed to open URL:', err);
+      // Fallback: Versuche window.open als Backup
+      window.open('https://frametrain.vercel.app/dashboard', '_blank');
+    });
   }
 
   if (!showDialog || !updateInfo) return null;
@@ -145,11 +150,35 @@ export function UpdateChecker() {
               umgehend die alte Version. Diese könnte Sicherheitslücken aufweisen und wird
               nicht mehr unterstützt.
             </p>
-            <p className="text-gray-400 text-xs mt-2">
-              Download unter:{' '}
-              <span className="text-blue-400 underline cursor-pointer" onClick={openDashboard}>
-                frametrain.vercel.app/dashboard
-              </span>
+          </div>
+
+          {/* Update-Anleitung */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-5">
+            <p className="text-blue-300 font-semibold text-sm mb-3">📋 Update-Anleitung:</p>
+            <ol className="text-gray-300 text-xs space-y-1.5 ml-4 list-decimal">
+              <li>Klick auf <strong>"Zum Dashboard"</strong> um die neue Version herunterzuladen</li>
+              <li>Deinstalliere die alte FrameTrain App komplett:
+                <div className="mt-1 p-2 bg-black/30 rounded text-gray-400 font-mono text-[10px]">
+                  Gehe zu <strong>Applications</strong> → FrameTrain → <strong>Move to Trash</strong>
+                </div>
+              </li>
+              <li>Installiere die neue Version:
+                <div className="mt-1 p-2 bg-black/30 rounded text-gray-400 font-mono text-[10px]">
+                  Die heruntergeladene <strong>.dmg</strong> öffnen und FrameTrain in <strong>Applications</strong> ziehen
+                </div>
+              </li>
+              <li>Starte die neue FrameTrain App</li>
+            </ol>
+          </div>
+
+          {/* Download Link */}
+          <div className="bg-white/5 rounded-xl p-4 mb-5 text-center">
+            <p className="text-gray-400 text-xs mb-2">Download verfügbar unter:</p>
+            <p
+              className="text-blue-400 underline cursor-pointer hover:text-blue-300 transition-colors text-sm font-semibold"
+              onClick={openDashboard}
+            >
+              frametrain.vercel.app/dashboard
             </p>
           </div>
 
