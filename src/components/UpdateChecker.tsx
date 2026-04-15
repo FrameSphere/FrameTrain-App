@@ -19,27 +19,52 @@ export function UpdateChecker() {
       const currentVersion = await getVersion();
       console.log('[UpdateChecker] Current version:', currentVersion);
 
-      // latest.json aus dem richtigen Repo laden
-      const response = await fetch(
-        'https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json',
-        {
-          headers: { 'Accept': 'application/json' },
-          cache: 'no-store'
-        }
-      );
+      let latestVersion: string = '';
 
-      if (!response.ok) {
-        console.warn('[UpdateChecker] latest.json nicht erreichbar:', response.status);
-        return;
+      // Methode 1: Versuche GitHub API für Releases zu nutzen
+      try {
+        console.log('[UpdateChecker] Trying GitHub API...');
+        const response = await fetch(
+          'https://api.github.com/repos/FrameSphere/FrameTrain-App/releases/latest',
+          {
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store'
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          latestVersion = (data.tag_name as string)?.replace(/^v/, '') ?? '';
+          console.log('[UpdateChecker] Latest version from GitHub API:', latestVersion);
+        }
+      } catch (err) {
+        console.warn('[UpdateChecker] GitHub API fehlgeschlagen, versuche alternatives Verfahren:', err);
       }
 
-      const data = await response.json();
-      const latestVersion = (data.version as string)?.replace(/^v/, '') ?? '';
+      // Methode 2: Fallback zu latest.json
+      if (!latestVersion) {
+        try {
+          console.log('[UpdateChecker] Trying latest.json...');
+          const response = await fetch(
+            'https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json',
+            {
+              headers: { 'Accept': 'application/json' },
+              cache: 'no-store'
+            }
+          );
 
-      console.log('[UpdateChecker] Latest version from GitHub:', latestVersion);
+          if (response.ok) {
+            const data = await response.json();
+            latestVersion = (data.version as string)?.replace(/^v/, '') ?? '';
+            console.log('[UpdateChecker] Latest version from latest.json:', latestVersion);
+          }
+        } catch (err) {
+          console.warn('[UpdateChecker] latest.json nicht erreichbar:', err);
+        }
+      }
 
       if (!latestVersion) {
-        console.warn('[UpdateChecker] Kein version-Feld in latest.json gefunden');
+        console.warn('[UpdateChecker] Keine Versionsinformation verfügbar');
         return;
       }
 

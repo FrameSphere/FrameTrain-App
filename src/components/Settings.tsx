@@ -311,7 +311,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             </p>
             
             <a
-              href="https://github.com/KarolP-tech/FrameTrain/releases/latest"
+              href="https://github.com/FrameSphere/FrameTrain-App/releases/latest"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all"

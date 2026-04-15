@@ -1,6 +1,6 @@
 {
   "name": "frametrain-app-2",
-  "version": "1.0.70",
+  "version": "1.0.71",
   "description": "FrameTrain Desktop App 2 - Local ML Training",
   "type": "module",
   "scripts": {
