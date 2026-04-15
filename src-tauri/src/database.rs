@@ -208,33 +208,50 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
             |row| row.get(0)
         );
         
-        if let Ok(count) = migration_check {
-            if count > 0 {
-                // Migration bereits durchgeführt - nur Indexes erstellen
-                let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_models_user_id ON models(user_id)", []);
-                let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_model_versions_user_id ON model_versions(user_id)", []);
-                let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_datasets_user_id ON datasets(user_id)", []);
-                let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id)", []);
-                return Ok(());
-            }
+        let user_id_migration_done = migration_check.map(|count| count > 0).unwrap_or(false);
+        
+        if !user_id_migration_done {
+            // Führe Migration aus - mit Fehlerbehandlung für bereits existierende Spalten
+            // Add user_id columns
+            let _ = conn.execute("ALTER TABLE models ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
+            let _ = conn.execute("ALTER TABLE model_versions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
+            let _ = conn.execute("ALTER TABLE datasets ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
+            let _ = conn.execute("ALTER TABLE test_results ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
         }
         
-        // Führe Migration aus - mit Fehlerbehandlung für bereits existierende Spalten
-        // Add user_id columns
-        let _ = conn.execute("ALTER TABLE models ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
-        let _ = conn.execute("ALTER TABLE model_versions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
-        let _ = conn.execute("ALTER TABLE datasets ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
-        let _ = conn.execute("ALTER TABLE test_results ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default_user'", []);
-        
-        // Create indexes
+        // Create indexes (always safe to run)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_models_user_id ON models(user_id)", [])?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_model_versions_user_id ON model_versions(user_id)", [])?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_datasets_user_id ON datasets(user_id)", [])?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id)", [])?;
 
         // Migration: training_count + last_used_at für bestehende DBs
-        let _ = conn.execute("ALTER TABLE datasets ADD COLUMN training_count INTEGER NOT NULL DEFAULT 0", []);
-        let _ = conn.execute("ALTER TABLE datasets ADD COLUMN last_used_at TEXT", []);
+        // IMMER prüfen, ob Spalten existieren (auch wenn user_id Migration bereits fertig ist)
+        let check_training_count: Result<i32> = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('datasets') WHERE name='training_count'",
+            [],
+            |row| row.get(0)
+        );
+        
+        if let Ok(count) = check_training_count {
+            if count == 0 {
+                // Spalte existiert nicht, füge sie hinzu
+                let _ = conn.execute("ALTER TABLE datasets ADD COLUMN training_count INTEGER NOT NULL DEFAULT 0", []);
+            }
+        }
+        
+        let check_last_used: Result<i32> = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('datasets') WHERE name='last_used_at'",
+            [],
+            |row| row.get(0)
+        );
+        
+        if let Ok(count) = check_last_used {
+            if count == 0 {
+                // Spalte existiert nicht, füge sie hinzu
+                let _ = conn.execute("ALTER TABLE datasets ADD COLUMN last_used_at TEXT", []);
+            }
+        }
         
         Ok(())
     }

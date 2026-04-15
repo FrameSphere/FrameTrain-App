@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
@@ -11,12 +11,71 @@ interface UserData {
   email: string;
 }
 
+// Support-related types
+interface SupportMessage {
+  id: number;
+  sender: 'user' | 'admin';
+  message: string;
+  created_at: string;
+}
+
+interface StoredTicket {
+  ticket_id: number;
+  user_token: string;
+  subject: string;
+}
+
+interface SupportTicket {
+  id: number;
+  subject: string;
+  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  created_at: string;
+  updated_at: string;
+}
+
 interface SettingsProps {
   userData: UserData;
   onLogout: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'docs' | 'about';
+type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'docs' | 'support' | 'about';
+
+// Status helpers for Support tickets
+const STATUS_LABEL: Record<string, string> = {
+  open: 'Offen',
+  in_progress: 'In Bearbeitung',
+  resolved: 'Gelöst',
+  closed: 'Geschlossen',
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  open: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  in_progress: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20',
+  resolved: 'text-green-400 bg-green-500/10 border-green-500/20',
+  closed: 'text-gray-400 bg-gray-500/10 border-gray-500/20',
+};
+
+const MANAGER_API = 'https://webcontrol-hq-api.karol-paschek.workers.dev';
+
+// Support hook – persists ticket list in localStorage
+function useStoredTickets(userId: string) {
+  const key = `ft_tickets_${userId || 'anon'}`;
+
+  const getAll = useCallback((): StoredTicket[] => {
+    try {
+      return JSON.parse(localStorage.getItem(key) || '[]');
+    } catch {
+      return [];
+    }
+  }, [key]);
+
+  const add = useCallback((t: StoredTicket) => {
+    const list = getAll().filter(x => x.ticket_id !== t.ticket_id);
+    localStorage.setItem(key, JSON.stringify([t, ...list]));
+  }, [key, getAll]);
+
+  return { getAll, add };
+}
 
 export default function Settings({ userData, onLogout }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('account');
@@ -28,9 +87,59 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [updateStatus, setUpdateStatus] = useState<'checking' | 'up-to-date' | 'update-available' | 'error'>('checking');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
 
+  // Support state
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportView, setSupportView] = useState<'list' | 'new' | 'thread'>('list');
+  const [storedTickets, setStoredTickets] = useState<StoredTicket[]>([]);
+  const [activeTicket, setActiveTicket] = useState<StoredTicket | null>(null);
+  const [ticketInfo, setTicketInfo] = useState<SupportTicket | null>(null);
+  const [messages, setMessages] = useState<SupportMessage[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [newSubject, setNewSubject] = useState('');
+  const [newMessage, setNewMessage] = useState('');
+  const [replyText, setReplyText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
+  const [supportBadge, setSupportBadge] = useState(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { getAll, add } = useStoredTickets(userData.userId);
+
   useEffect(() => {
     loadAppVersion();
   }, []);
+
+  // Check for unread admin replies
+  useEffect(() => {
+    async function checkBadge() {
+      const tickets = getAll();
+      if (!tickets.length) return;
+      let unread = 0;
+      for (const t of tickets) {
+        const lastSeenKey = `ft_ticket_seen_${t.ticket_id}`;
+        const lastSeen = parseInt(localStorage.getItem(lastSeenKey) || '0', 10);
+        try {
+          const res = await fetch(`${MANAGER_API}/api/support/${t.ticket_id}/thread?token=${t.user_token}`);
+          if (!res.ok) continue;
+          const data = await res.json();
+          const msgs: SupportMessage[] = data.messages || [];
+          const adminMsgs = msgs.filter((m: SupportMessage) => m.sender === 'admin');
+          if (adminMsgs.length > 0) {
+            const lastAdmin = new Date(adminMsgs[adminMsgs.length - 1].created_at).getTime();
+            if (lastAdmin > lastSeen) unread++;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      setSupportBadge(unread);
+    }
+    checkBadge();
+  }, [supportOpen, getAll]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const loadAppVersion = async () => {
     try {
@@ -123,12 +232,94 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     });
   };
 
+  // Support API functions
+  const submitTicket = async () => {
+    if (!newSubject.trim() || !newMessage.trim()) {
+      setNotification({ type: 'error', message: 'Bitte Betreff und Nachricht ausfüllen' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${MANAGER_API}/api/support/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userData.userId,
+          name: userData.email?.split('@')[0] || 'FrameTrain User',
+          email: userData.email || '',
+          subject: newSubject.trim(),
+          message: newMessage.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error();
+
+      const stored: StoredTicket = {
+        ticket_id: data.ticket_id,
+        user_token: data.user_token,
+        subject: newSubject.trim(),
+      };
+      add(stored);
+      setStoredTickets(getAll());
+      setNewSubject('');
+      setNewMessage('');
+      openThread(stored);
+      setNotification({ type: 'success', message: 'Ticket erfolgreich eingereicht!' });
+      setTimeout(() => setNotification(null), 3000);
+    } catch {
+      setNotification({ type: 'error', message: 'Fehler beim Einreichen des Tickets' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openThread = async (stored: StoredTicket) => {
+    setActiveTicket(stored);
+    setSupportView('thread');
+    setThreadLoading(true);
+    try {
+      const res = await fetch(`${MANAGER_API}/api/support/${stored.ticket_id}/thread?token=${stored.user_token}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setTicketInfo(data.ticket);
+      setMessages(data.messages);
+    } catch {
+      setTicketInfo(null);
+      setMessages([]);
+    } finally {
+      setThreadLoading(false);
+    }
+  };
+
+  const sendReply = async () => {
+    if (!replyText.trim() || !activeTicket) return;
+    setSendingReply(true);
+    const text = replyText.trim();
+    setReplyText('');
+    try {
+      const res = await fetch(`${MANAGER_API}/api/support/${activeTicket.ticket_id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: activeTicket.user_token, message: text }),
+      });
+      if (!res.ok) throw new Error();
+      setMessages(prev => [...prev, { id: Date.now(), sender: 'user', message: text, created_at: new Date().toISOString() }]);
+      if (ticketInfo) setTicketInfo({ ...ticketInfo, status: 'in_progress' });
+    } catch {
+      setNotification({ type: 'error', message: 'Senden fehlgeschlagen' });
+      setReplyText(text);
+    } finally {
+      setSendingReply(false);
+    }
+  };
+
   const tabs = [
     { id: 'account' as SettingsTab, label: 'Konto', icon: User },
     { id: 'appearance' as SettingsTab, label: 'Darstellung', icon: Palette },
     { id: 'notifications' as SettingsTab, label: 'Benachrichtigungen', icon: Bell },
     { id: 'updates' as SettingsTab, label: 'Updates', icon: Download },
     { id: 'docs' as SettingsTab, label: 'Dokumentation', icon: BookOpen },
+    { id: 'support' as SettingsTab, label: 'Support', icon: MessageCircle },
     { id: 'about' as SettingsTab, label: 'Über', icon: Info },
   ];
 
@@ -593,6 +784,249 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     </div>
   );
 
+  const renderSupportTab = () => (
+    <div className="space-y-6">
+      {/* Support Header */}
+      <div className="glass-strong rounded-2xl shadow-lg border border-white/10 overflow-hidden">
+        {/* Header */}
+        <button
+          onClick={() => {
+            const opening = !supportOpen;
+            setSupportOpen(opening);
+            if (opening) {
+              // Mark all tickets seen
+              getAll().forEach((t) => {
+                localStorage.setItem(`ft_ticket_seen_${t.ticket_id}`, Date.now().toString());
+              });
+              setSupportBadge(0);
+            }
+          }}
+          className="w-full flex items-center justify-between px-8 py-6 hover:bg-white/5 transition-colors relative"
+        >
+          {/* Unread admin reply badge */}
+          {supportBadge > 0 && !supportOpen && (
+            <span className="absolute top-3 right-16 flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white text-[11px] font-black shadow-lg shadow-red-500/40 animate-pulse">
+              {supportBadge}
+            </span>
+          )}
+          <div className="flex items-center gap-3">
+            <MessageCircle className="w-6 h-6 text-purple-400" />
+            <h2 className="text-2xl font-bold text-white">Support</h2>
+            {storedTickets.length > 0 && (
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                {storedTickets.length} Ticket{storedTickets.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${supportOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {supportOpen && (
+          <div className="border-t border-white/10">
+            {/* Sub-nav */}
+            <div className="flex border-b border-white/10">
+              {[
+                { id: 'list' as const, label: '📬 Meine Tickets' },
+                { id: 'new' as const, label: '✏️ Neues Ticket' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setSupportView(tab.id);
+                    setActiveTicket(null);
+                  }}
+                  className={`px-6 py-3 text-sm font-semibold transition-colors ${
+                    supportView === tab.id || (supportView === 'thread' && tab.id === 'list')
+                      ? 'text-purple-400 border-b-2 border-purple-400'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-8">
+              {/* New ticket form */}
+              {supportView === 'new' && (
+                <div className="max-w-2xl">
+                  <h3 className="text-lg font-bold text-white mb-6">Neues Support-Ticket</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">Betreff</label>
+                      <input
+                        value={newSubject}
+                        onChange={(e) => setNewSubject(e.target.value)}
+                        placeholder="Kurze Beschreibung deines Problems..."
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">Nachricht</label>
+                      <textarea
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        placeholder="Beschreibe dein Anliegen so detailliert wie möglich..."
+                        rows={5}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors resize-none"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3 pt-2">
+                      <p className="text-xs text-gray-500 flex-1">
+                        Deine User-ID <code className="text-purple-400 bg-white/5 px-1 rounded">{userData.userId}</code> wird automatisch
+                        mitgeschickt.
+                      </p>
+                      <button
+                        onClick={submitTicket}
+                        disabled={submitting || !newSubject.trim() || !newMessage.trim()}
+                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        {submitting ? 'Wird gesendet...' : 'Ticket einreichen'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Ticket list */}
+              {supportView === 'list' && !activeTicket && (
+                <div>
+                  {storedTickets.length === 0 ? (
+                    <div className="text-center py-12">
+                      <div className="text-5xl mb-4">📭</div>
+                      <p className="text-gray-400 mb-2">Du hast noch keine Support-Tickets.</p>
+                      <p className="text-gray-500 text-sm mb-6">Hast du ein Problem oder eine Frage? Wir helfen gerne.</p>
+                      <button
+                        onClick={() => setSupportView('new')}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors mx-auto text-sm font-semibold"
+                      >
+                        <Plus className="w-4 h-4" /> Erstes Ticket erstellen
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-white">Deine Tickets</h3>
+                        <button
+                          onClick={() => setSupportView('new')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm transition-colors border border-purple-500/20"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Neues Ticket
+                        </button>
+                      </div>
+                      {storedTickets.map((t) => (
+                        <button
+                          key={t.ticket_id}
+                          onClick={() => openThread(t)}
+                          className="w-full flex items-center justify-between glass rounded-xl px-5 py-4 border border-white/10 hover:border-purple-500/30 hover:bg-white/5 transition-all text-left"
+                        >
+                          <div>
+                            <p className="text-white font-semibold text-sm">{t.subject}</p>
+                            <p className="text-gray-500 text-xs mt-0.5">Ticket #{t.ticket_id}</p>
+                          </div>
+                          <MessageCircle className="w-4 h-4 text-gray-500" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Thread view */}
+              {supportView === 'thread' && activeTicket && (
+                <div className="max-w-2xl">
+                  {/* Back */}
+                  <button
+                    onClick={() => {
+                      setSupportView('list');
+                      setActiveTicket(null);
+                    }}
+                    className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm mb-5 transition-colors"
+                  >
+                    ← Zurück zur Übersicht
+                  </button>
+
+                  {threadLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <RefreshCw className="w-6 h-6 text-purple-400 animate-spin" />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Ticket meta */}
+                      <div className="glass rounded-xl px-5 py-4 border border-white/10 mb-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3 className="text-white font-bold">{activeTicket.subject}</h3>
+                            <p className="text-gray-500 text-xs mt-0.5">Ticket #{activeTicket.ticket_id}</p>
+                          </div>
+                          {ticketInfo && (
+                            <span className={`text-xs font-bold px-3 py-1 rounded-full border flex-shrink-0 ${STATUS_COLOR[ticketInfo.status] || STATUS_COLOR.open}`}>
+                              {STATUS_LABEL[ticketInfo.status] || ticketInfo.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Messages */}
+                      <div className="space-y-4 mb-5 max-h-96 overflow-y-auto pr-1">
+                        {messages.length === 0 && <p className="text-center text-gray-500 text-sm py-8">Noch keine Nachrichten</p>}
+                        {messages.map((m) => (
+                          <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                              className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                                m.sender === 'user'
+                                  ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-br-sm'
+                                  : 'glass border border-white/10 text-gray-200 rounded-bl-sm'
+                              }`}
+                            >
+                              <p style={{ whiteSpace: 'pre-wrap' }}>{m.message}</p>
+                              <p className={`text-xs mt-1.5 ${m.sender === 'user' ? 'text-purple-200' : 'text-gray-500'}`}>
+                                {m.sender === 'user' ? 'Du' : '🔧 Support'} · {new Date(m.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                        <div ref={messagesEndRef} />
+                      </div>
+
+                      {/* Reply box – nur wenn nicht geschlossen */}
+                      {ticketInfo?.status !== 'closed' && ticketInfo?.status !== 'resolved' ? (
+                        <div className="flex gap-3">
+                          <textarea
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendReply();
+                            }}
+                            placeholder="Nachricht schreiben... (Strg+Enter zum Senden)"
+                            rows={3}
+                            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors resize-none text-sm"
+                          />
+                          <button
+                            onClick={sendReply}
+                            disabled={sendingReply || !replyText.trim()}
+                            className="self-end flex items-center gap-1.5 px-5 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors disabled:opacity-50 font-semibold text-sm"
+                          >
+                            {sendingReply ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="glass rounded-xl px-4 py-3 border border-white/10 text-center text-gray-500 text-sm">
+                          Dieses Ticket ist {STATUS_LABEL[ticketInfo.status]?.toLowerCase()} – du kannst keine weitere Nachricht schreiben.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   const renderAboutTab = () => (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10 text-center">
@@ -721,6 +1155,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'notifications' && renderNotificationsTab()}
           {activeTab === 'updates' && renderUpdatesTab()}
           {activeTab === 'docs' && renderDocsTab()}
+          {activeTab === 'support' && renderSupportTab()}
           {activeTab === 'about' && renderAboutTab()}
         </div>
       </div>
