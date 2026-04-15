@@ -19,6 +19,9 @@ pub struct DatasetInfo {
     pub created_at: DateTime<Utc>,
     pub status: DatasetStatus,      // unused, split, etc.
     pub split_info: Option<SplitInfo>,
+    // Nutzungs-Tracking
+    pub training_count: i32,        // Wie oft für Training benutzt
+    pub last_used_at: Option<String>, // ISO-8601 Zeitstempel letzter Benutzung
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -278,6 +281,8 @@ fn convert_db_dataset_to_info(
         created_at: Utc::now(),
         status,
         split_info,
+        training_count: db_dataset.training_count,
+        last_used_at: db_dataset.last_used_at,
     }
 }
 
@@ -438,6 +443,8 @@ pub async fn import_local_dataset(
         created_at: Utc::now(),
         status: DatasetStatus::Unused,
         split_info: None,
+        training_count: 0,
+        last_used_at: None,
     };
     
     // Speichere Metadata JSON (deprecated but kept for backward compatibility)
@@ -927,6 +934,8 @@ pub async fn download_huggingface_dataset(
         created_at: Utc::now(),
         status: final_status,
         split_info: final_split_info,
+        training_count: 0,
+        last_used_at: None,
     };
     
     save_dataset_metadata(&app_handle, &dataset_info)?;
@@ -1345,6 +1354,8 @@ pub async fn split_dataset_in_half(
             val_ratio: 0.0,
             test_ratio: 0.0,
         }),
+        training_count: 0,
+        last_used_at: None,
     };
 
     Ok(SplitHalfResult {

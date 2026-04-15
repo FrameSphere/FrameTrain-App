@@ -883,12 +883,13 @@ model_id.clone()
     let model_name_clone = job.model_name.clone();
     let version_id_clone = version_id.clone();
     let user_id_clone = user_id.clone();
+    let dataset_id_clone = dataset_id.clone();
     
     let state_clone = Arc::clone(&state);
     drop(state_lock);  // Release lock before spawning thread
     
     thread::spawn(move || {
-        run_training_process(app_handle_clone, job_id, config_path_str, model_id_clone, model_name_clone, version_id_clone, user_id_clone, state_clone);
+        run_training_process(app_handle_clone, job_id, config_path_str, model_id_clone, model_name_clone, version_id_clone, user_id_clone, dataset_id_clone, state_clone);
     });
     
     Ok(job)
@@ -1330,7 +1331,7 @@ fn save_metrics_from_data(
     Ok(())
 }
 
-fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_path: String, model_id: String, model_name: String, version_id: Option<String>, user_id: String, state: Arc<Mutex<TrainingState>>) {
+fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_path: String, model_id: String, model_name: String, version_id: Option<String>, user_id: String, dataset_id: String, state: Arc<Mutex<TrainingState>>) {
     let python = get_python_path();
     
     println!("[Training] Using Python: {}", python);
@@ -1488,6 +1489,20 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
                                                 &user_id_clone,  // CRITICAL: Pass user_id
                                             ) {
                                                 eprintln!("[Training] Warning: Could not save metrics: {}", e);
+                                            }
+                                            
+                                            // FIXED: Mark dataset as used only on successful completion
+                                            {
+                                                let app_state = app_handle_clone.state::<crate::AppState>();
+                                                match app_state.db.lock() {
+                                                    Ok(db) => {
+                                                        match db.mark_dataset_used(&dataset_id) {
+                                                            Ok(_)  => println!("[Training] ✅ Dataset '{}' als benutzt markiert (Training erfolgreich)", dataset_id),
+                                                            Err(e) => eprintln!("[Training] ⚠️ mark_dataset_used fehlgeschlagen: {}", e),
+                                                        }
+                                                    }
+                                                    Err(e) => eprintln!("[Training] ⚠️ DB-Lock für mark_dataset_used fehlgeschlagen: {}", e),
+                                                }
                                             }
                                             
                                             let _ = app_handle_clone.emit("training-complete", serde_json::json!({

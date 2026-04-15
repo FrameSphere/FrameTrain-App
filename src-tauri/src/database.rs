@@ -63,6 +63,10 @@ pub struct Dataset {
     pub columns_count: Option<i32>,
     pub validated: bool,
     pub created_at: String,
+    #[serde(default)]
+    pub training_count: i32,
+    #[serde(default)]
+    pub last_used_at: Option<String>,
 }
 
 pub struct Database {
@@ -156,6 +160,8 @@ CREATE TABLE IF NOT EXISTS datasets (
     columns_count INTEGER,
     validated BOOLEAN NOT NULL DEFAULT 0,
     user_id TEXT NOT NULL DEFAULT 'default_user',
+    training_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -225,6 +231,10 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
         conn.execute("CREATE INDEX IF NOT EXISTS idx_model_versions_user_id ON model_versions(user_id)", [])?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_datasets_user_id ON datasets(user_id)", [])?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id)", [])?;
+
+        // Migration: training_count + last_used_at für bestehende DBs
+        let _ = conn.execute("ALTER TABLE datasets ADD COLUMN training_count INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE datasets ADD COLUMN last_used_at TEXT", []);
         
         Ok(())
     }
@@ -489,11 +499,25 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
         Ok(())
     }
     
+    /// Markiert ein Dataset als benutzt (training_count + 1, last_used_at = jetzt)
+    pub fn mark_dataset_used(&self, dataset_id: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE datasets 
+             SET training_count = training_count + 1,
+                 last_used_at   = ?1
+             WHERE id = ?2",
+            params![now, dataset_id],
+        )?;
+        Ok(())
+    }
+    
     pub fn list_datasets(&self) -> Result<Vec<Dataset>> {
         let user_id = self.require_user_id().map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))))?;
         
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, file_path, file_type, size_bytes, rows_count, columns_count, validated, created_at 
+            "SELECT id, name, file_path, file_type, size_bytes, rows_count, columns_count, validated, created_at,
+                    COALESCE(training_count, 0), last_used_at
              FROM datasets WHERE user_id = ?1 ORDER BY created_at DESC"
         )?;
         
@@ -508,6 +532,8 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
                 columns_count: row.get(6)?,
                 validated: row.get(7)?,
                 created_at: row.get(8)?,
+                training_count: row.get(9).unwrap_or(0),
+                last_used_at: row.get(10).unwrap_or(None),
             })
         })?;
         

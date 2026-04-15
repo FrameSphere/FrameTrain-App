@@ -46,6 +46,8 @@ interface DatasetInfo {
   created_at: string;
   status: 'unused' | 'split';
   split_info: SplitInfo | null;
+  training_count: number;       // neu
+  last_used_at: string | null;  // neu
 }
 
 interface SplitInfo {
@@ -634,13 +636,21 @@ export default function DatasetUpload() {
                     <h3 className="font-semibold text-white truncate max-w-[180px]" title={dataset.name}>
                       {dataset.name}
                     </h3>
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      dataset.status === 'split' 
-                        ? 'bg-green-500/20 text-green-400' 
-                        : 'bg-amber-500/20 text-amber-400'
-                    }`}>
-                      {dataset.status === 'split' ? 'Aufgeteilt' : 'Unbenutzt'}
-                    </span>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        dataset.status === 'split' 
+                          ? 'bg-green-500/20 text-green-400' 
+                          : 'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {dataset.status === 'split' ? 'Aufgeteilt' : 'Unbenutzt'}
+                      </span>
+                      {dataset.training_count > 0 && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" />
+                          {dataset.training_count}x benutzt
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <button
@@ -664,8 +674,15 @@ export default function DatasetUpload() {
 
                 <div className="flex items-center gap-2 text-gray-500 text-xs">
                   <Calendar className="w-3 h-3" />
-                  <span>{formatDate(dataset.created_at)}</span>
+                  <span>Erstellt: {formatDate(dataset.created_at)}</span>
                 </div>
+
+                {dataset.last_used_at && (
+                  <div className="flex items-center gap-2 text-gray-500 text-xs">
+                    <CheckCircle className="w-3 h-3 text-cyan-400" />
+                    <span>Zuletzt benutzt: {formatDate(dataset.last_used_at)}</span>
+                  </div>
+                )}
 
                 {/* Split Info */}
                 {dataset.split_info && (
