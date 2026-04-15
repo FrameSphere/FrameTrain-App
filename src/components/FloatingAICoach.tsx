@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2 } from 'lucide-react';
+import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2, Brain } from 'lucide-react';
 import { useAISettings, AIProvider } from '../contexts/AISettingsContext';
+import { usePageContext } from '../contexts/PageContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { 
+  AI_SYSTEM_PROMPT_WITH_INSTRUCTIONS,
+  getRelevantKnowledge,
+  formatKnowledgeForContext 
+} from '../contexts/AIKnowledgeBaseSmart';
 
 const PROVIDER_META: Record<AIProvider, {
   label: string; emoji: string; needsKey: boolean;
@@ -60,7 +66,10 @@ interface FloatingAICoachProps {
 export default function FloatingAICoach({ currentPageContent }: FloatingAICoachProps) {
   const { settings } = useAISettings();
   const { currentTheme } = useTheme();
+  const { currentPageContent: contextPageContent } = usePageContext();
   
+  // Nutze Page Context wenn verfügbar, ansonsten Props
+  const pageContent = contextPageContent || currentPageContent;
   const [isOpen, setIsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -68,8 +77,23 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Load initial position from localStorage, otherwise calculate safe default
+  const getInitialPosition = () => {
+    try {
+      const saved = localStorage.getItem('aiCoachPosition');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed;
+      }
+    } catch (e) {
+      // Fall through to default
+    }
+    // Safe default: bottom right with padding to stay visible
+    return { x: window.innerWidth - 400, y: window.innerHeight - 540 };
+  };
+
   // Floating position state
-  const [position, setPosition] = useState({ x: window.innerWidth - 380, y: window.innerHeight - 200 });
+  const [position, setPosition] = useState(getInitialPosition());
   const [size, setSize] = useState({ width: 360, height: 500 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -137,15 +161,29 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     });
   };
 
-  const buildSystemPrompt = (): string => {
-    let context = 'Du bist ein hilfreicher AI-Assistent in der FrameTrain-Anwendung.';
+  // Save position to localStorage when it changes
+  useEffect(() => {
+    if (isOpen && !isMaximized) {
+      localStorage.setItem('aiCoachPosition', JSON.stringify(position));
+    }
+  }, [position, isOpen, isMaximized]);
+
+  const buildSystemPrompt = (userMessage?: string): string => {
+    let prompt = AI_SYSTEM_PROMPT_WITH_INSTRUCTIONS;
     
-    if (currentPageContent) {
-      context += `\n\nAktueller Kontext der Anwendung:\n${currentPageContent.slice(0, 2000)}`;
+    // Wenn Nutzer eine Frage hat: Relevante Dokumentation laden
+    if (userMessage?.trim()) {
+      const relevantSections = getRelevantKnowledge(userMessage);
+      const formattedKnowledge = formatKnowledgeForContext(relevantSections);
+      prompt += formattedKnowledge;
+    }
+    
+    // Aktuelle Page-Context hinzufügen
+    if (pageContent) {
+      prompt += `\n\n### Aktueller App-Kontext:\n${pageContent.slice(0, 500)}`;
     }
 
-    context += '\n\nAntworte prägnant und hilfreich. Erkläre komplexe Konzepte einfach.';
-    return context;
+    return prompt;
   };
 
   const sendMessage = async () => {
@@ -183,7 +221,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
-            prompt: buildSystemPrompt() + '\n\nUser: ' + userMessage.content + '\n\nAssistant:',
+            prompt: buildSystemPrompt(userMessage.content) + '\n\nUser: ' + userMessage.content + '\n\nAssistant:',
             stream: false,
             options: { temperature: 0.7, num_ctx: 2048 },
           }),
@@ -202,7 +240,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
             max_tokens: 1000,
             temperature: 0.7,
             messages: [
-              { role: 'system', content: buildSystemPrompt() },
+              { role: 'system', content: buildSystemPrompt(userMessage.content) },
               { role: 'user', content: userMessage.content },
             ],
           }),
@@ -227,7 +265,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           body: JSON.stringify({
             model,
             max_tokens: 1000,
-            system: buildSystemPrompt(),
+            system: buildSystemPrompt(userMessage.content),
             messages: [{ role: 'user', content: userMessage.content }],
           }),
         });
@@ -249,7 +287,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
             max_tokens: 1000,
             temperature: 0.7,
             messages: [
-              { role: 'system', content: buildSystemPrompt() },
+              { role: 'system', content: buildSystemPrompt(userMessage.content) },
               { role: 'user', content: userMessage.content },
             ],
           }),
@@ -286,10 +324,11 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg hover:shadow-xl hover:scale-110 transition-all flex items-center justify-center text-2xl z-40"
+        className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2 font-semibold z-40`}
         title="KI-Coach öffnen"
       >
-        🤖
+        <Brain className="w-5 h-5" />
+        <span>AI Coach</span>
       </button>
     );
   }
@@ -303,9 +342,9 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           ref={modalRef}
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0 bg-gradient-to-r from-purple-500/10 to-pink-500/10">
+          <div className={`flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0 bg-gradient-to-r ${currentTheme.colors.gradient} opacity-10`}>
             <div className="flex items-center gap-3">
-              <span className="text-3xl">🤖</span>
+              <Brain className="w-6 h-6 text-white" />
               <div>
                 <h2 className="text-xl font-bold text-white">KI-Coach</h2>
                 <p className="text-xs text-gray-400">Frag mich anything!</p>
@@ -323,6 +362,8 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
                 onClick={() => {
                   setIsOpen(false);
                   setMessages([]);
+                  // Save final position
+                  localStorage.setItem('aiCoachPosition', JSON.stringify(position));
                 }}
                 className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
               >
@@ -335,7 +376,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="text-5xl mb-4">🤖</div>
+                <Brain className="w-16 h-16 text-purple-400 mb-4" />
                 <p className="text-gray-400 text-lg">Hallo! Ich bin dein KI-Coach.</p>
                 <p className="text-gray-500 text-sm mt-2">Stelle mir eine Frage zu dem, was du gerade machst.</p>
               </div>
@@ -345,7 +386,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
                 <div
                   className={`max-w-xs px-4 py-2 rounded-lg ${
                     msg.role === 'user'
-                      ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
                       : 'bg-white/10 text-gray-100 border border-white/10'
                   }`}
                 >
@@ -387,7 +428,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
               <button
                 onClick={sendMessage}
                 disabled={isLoading || !inputText.trim()}
-                className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50"
+                className={`p-2 bg-gradient-to-r ${currentTheme.colors.gradient} text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50`}
               >
                 <Send className="w-5 h-5" />
               </button>
@@ -412,11 +453,11 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     >
       {/* Header - draggable */}
       <div
-        className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-b border-white/10 p-3 cursor-move flex items-center justify-between flex-shrink-0 select-none"
+        className={`bg-gradient-to-r ${currentTheme.colors.gradient} opacity-10 border-b border-white/10 p-3 cursor-move flex items-center justify-between flex-shrink-0 select-none`}
         onMouseDown={handleHeaderMouseDown}
       >
         <div className="flex items-center gap-2 pointer-events-none">
-          <span className="text-lg">🤖</span>
+          <Brain className="w-5 h-5 text-white" />
           <div>
             <div className="text-sm font-bold text-white">KI-Coach</div>
             <div className="text-xs text-gray-400">Quick Chat</div>
@@ -447,7 +488,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-3xl mb-2">🤖</div>
+            <Brain className="w-8 h-8 text-purple-400 mb-2" />
             <p className="text-gray-400 text-xs">Hallo! Stell mir eine Frage.</p>
           </div>
         )}
@@ -456,7 +497,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
             <div
               className={`max-w-[75%] px-3 py-2 rounded-lg text-xs ${
                 msg.role === 'user'
-                  ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                  ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
                   : 'bg-white/10 text-gray-100 border border-white/10'
               }`}
             >
@@ -498,7 +539,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           <button
             onClick={sendMessage}
             disabled={isLoading || !inputText.trim()}
-            className="p-1.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center"
+            className={`p-1.5 bg-gradient-to-r ${currentTheme.colors.gradient} text-white rounded hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center`}
           >
             <Send className="w-4 h-4" />
           </button>

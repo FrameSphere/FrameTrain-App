@@ -10,6 +10,7 @@ import { UpdateChecker } from './components/UpdateChecker';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { AISettingsProvider } from './contexts/AISettingsContext';
+import { PageContextProvider } from './contexts/PageContext';
 import './App.css';
 
 interface ApiKeyValidation {
@@ -273,7 +274,9 @@ function App() {
       <ThemeProvider>
         <NotificationProvider>
           <AISettingsProvider>
-            <FirstLaunchSetup onComplete={handleFirstLaunchComplete} />
+            <PageContextProvider>
+              <FirstLaunchSetup onComplete={handleFirstLaunchComplete} />
+            </PageContextProvider>
           </AISettingsProvider>
         </NotificationProvider>
       </ThemeProvider>
@@ -284,29 +287,31 @@ function App() {
     <ThemeProvider>
       <NotificationProvider>
         <AISettingsProvider>
-          <div className="app">
-          {isAuthenticated && userData ? (
-            <>
-              <Dashboard 
-                userData={userData}
-                onLogout={handleLogout} 
-              />
-              <GlobalTrainingProgress />
-              <UpdateChecker />
-            </>
-          ) : (
-            <Login onLogin={handleLogin} />
-          )}
-        </div>
+          <PageContextProvider>
+            <div className="app">
+            {isAuthenticated && userData ? (
+              <>
+                <Dashboard 
+                  userData={userData}
+                  onLogout={handleLogout} 
+                />
+                <GlobalTrainingProgress />
+                <UpdateChecker />
+              </>
+            ) : (
+              <Login onLogin={handleLogin} />
+            )}
+          </div>
 
-          {/* App-Close-Dialog — über allem */}
-          {showCloseDialog && (
-            <CloseConfirmDialog
-              isTraining={isTrainingActive}
-              onConfirm={handleConfirmClose}
-              onCancel={handleCancelClose}
-            />
-          )}
+            {/* App-Close-Dialog — über allem */}
+            {showCloseDialog && (
+              <CloseConfirmDialog
+                isTraining={isTrainingActive}
+                onConfirm={handleConfirmClose}
+                onCancel={handleCancelClose}
+              />
+            )}
+          </PageContextProvider>
         </AISettingsProvider>
       </NotificationProvider>
     </ThemeProvider>

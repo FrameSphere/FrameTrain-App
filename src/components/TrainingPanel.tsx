@@ -42,6 +42,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
+import { usePageContext } from '../contexts/PageContext';
 
 // ============ Types ============
 
@@ -2286,6 +2287,7 @@ function LossChart({ history, primaryColor }: LossChartProps) {
 export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAnalysis?: (versionId: string | null) => void }) {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
 
   // Data State
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -2369,6 +2371,20 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  // ============ Update AI Coach with Page Context ============
+  useEffect(() => {
+    const pageContent = [
+      'Training Panel:',
+      selectedModelId ? `Selected Model: ${models.find(m => m.id === selectedModelId)?.name || selectedModelId}` : 'No model selected',
+      selectedDatasetId ? `Selected Dataset: ${datasets.find(d => d.id === selectedDatasetId)?.name || selectedDatasetId}` : 'No dataset selected',
+      selectedVersionId ? `Selected Version: ${selectedVersionId}` : 'No version selected',
+      `Config - Epochs: ${config.epochs}, Batch Size: ${config.batch_size}, Learning Rate: ${config.learning_rate}`,
+      config.use_lora ? `LoRA enabled - Rank: ${config.lora_r}, Alpha: ${config.lora_alpha}` : 'LoRA disabled',
+      config.scheduler === 'cosine' ? `Scheduler: Cosine with ${config.warmup_steps} warmup steps` : `Scheduler: ${config.scheduler}`,
+    ].filter(Boolean).join('\n');
+    setCurrentPageContent(pageContent);
+  }, [selectedModelId, selectedDatasetId, selectedVersionId, config, models, datasets, setCurrentPageContent]);
 
   useEffect(() => {
     if (selectedModelId) {
