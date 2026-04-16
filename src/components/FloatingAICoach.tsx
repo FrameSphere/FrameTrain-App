@@ -1,98 +1,33 @@
-import { useState, useRef, useEffect } from 'react';
-import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2, Brain, Zap, BookOpen, MessageSquare, Trash2 } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2,
+  MessageSquare, Plus, Trash2, ChevronDown, ChevronRight, Brain,
+  FileSearch, Cpu, Sparkles, ArrowLeft
+} from 'lucide-react';
 import { useAISettings, AIProvider } from '../contexts/AISettingsContext';
-import { usePageContext } from '../contexts/PageContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { 
-  AI_SYSTEM_PROMPT_WITH_INSTRUCTIONS,
-  getRelevantKnowledge,
-  formatKnowledgeForContext 
-} from '../contexts/AIKnowledgeBaseSmart';
+import { usePageContext } from '../contexts/PageContext';
 
-// CSS Styles for Animations
-const ANIMATION_STYLES = `
-  @keyframes pulse {
-    0%, 100% { opacity: 0.2; transform: scale(0.8); }
-    50% { opacity: 1; transform: scale(1); }
-  }
-`;
+// ============ Types ============
 
-// Formatter: Convert Markdown to HTML in messages
-function formatMessageContent(text: string): React.ReactNode {
-  // Split by double newlines to preserve paragraph breaks
-  const paragraphs = text.split('\n\n');
-  
-  return paragraphs.map((para, idx) => {
-    // Split lines within paragraph
-    const lines = para.split('\n');
-    const formattedLines = lines.map((line, lineIdx) => {
-      // Replace bold **text** -> <strong>
-      let formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      // Replace italics *text* -> <em>
-      formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
-      // Replace code `text` -> <code>
-      formatted = formatted.replace(/`(.*?)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-family: monospace;">$1</code>');
-      
-      return (
-        <div key={`${idx}-${lineIdx}`} dangerouslySetInnerHTML={{ __html: formatted }} />
-      );
-    });
-    
-    return <div key={idx} style={{ marginBottom: '0.5em' }}>{formattedLines}</div>;
-  });
+interface ThinkingStep {
+  id: string;
+  label: string;
+  detail?: string;
+  icon: 'search' | 'brain' | 'cpu' | 'sparkles' | 'check' | 'error';
+  status: 'pending' | 'active' | 'done' | 'error';
 }
-
-const PROVIDER_META: Record<AIProvider, {
-  label: string; emoji: string; needsKey: boolean;
-  keyPlaceholder: string; keyHint: string; keyLink: string;
-  models: string[];
-}> = {
-  anthropic: {
-    label: 'Claude (Anthropic)',
-    emoji: '🤖',
-    needsKey: true,
-    keyPlaceholder: 'sk-ant-api03-...',
-    keyHint: 'Kostenlos testen: console.anthropic.com',
-    keyLink: 'https://console.anthropic.com',
-    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
-  },
-  openai: {
-    label: 'GPT-4o (OpenAI)',
-    emoji: '🟢',
-    needsKey: true,
-    keyPlaceholder: 'sk-...',
-    keyHint: 'platform.openai.com/api-keys',
-    keyLink: 'https://platform.openai.com/api-keys',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
-  },
-  groq: {
-    label: 'Groq (Kostenlos)',
-    emoji: '⚡',
-    needsKey: true,
-    keyPlaceholder: 'gsk_...',
-    keyHint: '✅ Kostenloser Account — console.groq.com',
-    keyLink: 'https://console.groq.com',
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
-  },
-  ollama: {
-    label: 'Ollama (Lokal, kein Key)',
-    emoji: '🦙',
-    needsKey: false,
-    keyPlaceholder: '',
-    keyHint: '✅ Kein Account nötig — ollama.com installieren',
-    keyLink: 'https://ollama.com',
-    models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2', 'qwen2.5'],
-  },
-};
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  thinkingSteps?: ThinkingStep[];
+  thinkingCollapsed?: boolean;
 }
 
-interface ChatSession {
+interface Chat {
   id: string;
   title: string;
   messages: Message[];
@@ -100,129 +35,347 @@ interface ChatSession {
   updatedAt: number;
 }
 
+const PROVIDER_META: Record<AIProvider, {
+  label: string; emoji: string; needsKey: boolean; models: string[];
+}> = {
+  anthropic: {
+    label: 'Claude (Anthropic)', emoji: '🤖', needsKey: true,
+    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+  },
+  openai: {
+    label: 'GPT-4o (OpenAI)', emoji: '🟢', needsKey: true,
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
+  },
+  groq: {
+    label: 'Groq', emoji: '⚡', needsKey: true,
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+  },
+  ollama: {
+    label: 'Ollama (Lokal)', emoji: '🦙', needsKey: false,
+    models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2'],
+  },
+};
+
+const STORAGE_KEY = 'ft_ai_chats_v2';
+const MAX_CHATS = 50;
+
+// ============ Helpers ============
+
+function loadChats(): Chat[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveChats(chats: Chat[]): void {
+  try {
+    const limited = chats.slice(0, MAX_CHATS);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(limited));
+  } catch { /* ignore */ }
+}
+
+function createChat(): Chat {
+  return {
+    id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    title: 'Neuer Chat',
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function generateTitle(firstMessage: string): string {
+  return firstMessage.slice(0, 40) + (firstMessage.length > 40 ? '…' : '');
+}
+
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (mins < 1) return 'Gerade eben';
+  if (mins < 60) return `vor ${mins} Min.`;
+  if (hours < 24) return `vor ${hours} Std.`;
+  return `vor ${days} Tag${days !== 1 ? 'en' : ''}`;
+}
+
+// ============ Markdown Renderer ============
+
+function renderInline(str: string, key?: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  let lastIndex = 0;
+  let match;
+  let i = 0;
+
+  while ((match = regex.exec(str)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(<span key={`t${i++}`}>{str.slice(lastIndex, match.index)}</span>);
+    }
+    if (match[0].startsWith('**')) {
+      parts.push(<strong key={`b${i++}`} className="font-semibold text-white">{match[2]}</strong>);
+    } else if (match[0].startsWith('*')) {
+      parts.push(<em key={`em${i++}`} className="italic">{match[3]}</em>);
+    } else if (match[0].startsWith('`')) {
+      parts.push(
+        <code key={`c${i++}`} className="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono text-purple-300">
+          {match[4]}
+        </code>
+      );
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < str.length) {
+    parts.push(<span key={`t${i++}`}>{str.slice(lastIndex)}</span>);
+  }
+  return parts.length > 0 ? parts : str;
+}
+
+function MarkdownText({ text, className = '' }: { text: string; className?: string }) {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      elements.push(<div key={i} className="h-1.5" />);
+      i++;
+      continue;
+    }
+
+    // Bullet list
+    if (trimmed.match(/^[-*•]\s/)) {
+      const items: string[] = [];
+      while (i < lines.length && lines[i].trim().match(/^[-*•]\s/)) {
+        items.push(lines[i].trim().replace(/^[-*•]\s+/, ''));
+        i++;
+      }
+      elements.push(
+        <ul key={`ul-${i}`} className="space-y-1 my-1.5">
+          {items.map((item, j) => (
+            <li key={j} className="flex items-start gap-2">
+              <span className="text-purple-400 mt-0.5 flex-shrink-0 text-xs">•</span>
+              <span>{renderInline(item)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // Numbered list
+    if (trimmed.match(/^\d+\.\s/)) {
+      const items: string[] = [];
+      let num = 1;
+      while (i < lines.length && lines[i].trim().match(/^\d+\.\s/)) {
+        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+        i++;
+        num++;
+      }
+      elements.push(
+        <ol key={`ol-${i}`} className="space-y-1 my-1.5">
+          {items.map((item, j) => (
+            <li key={j} className="flex items-start gap-2">
+              <span className="text-purple-400 flex-shrink-0 font-medium text-xs w-4">{j + 1}.</span>
+              <span>{renderInline(item)}</span>
+            </li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    // Heading (### or ##)
+    if (trimmed.startsWith('###')) {
+      elements.push(
+        <div key={i} className="font-semibold text-white mt-2 mb-1 text-sm">
+          {renderInline(trimmed.replace(/^#+\s*/, ''))}
+        </div>
+      );
+    } else if (trimmed.startsWith('##')) {
+      elements.push(
+        <div key={i} className="font-bold text-white mt-2 mb-1">
+          {renderInline(trimmed.replace(/^#+\s*/, ''))}
+        </div>
+      );
+    } else {
+      elements.push(
+        <p key={i} className="leading-relaxed">
+          {renderInline(line)}
+        </p>
+      );
+    }
+    i++;
+  }
+
+  return <div className={`text-sm space-y-0.5 ${className}`}>{elements}</div>;
+}
+
+// ============ Thinking Block ============
+
+function ThinkingBlock({
+  steps,
+  isActive,
+  collapsed,
+  onToggle,
+}: {
+  steps: ThinkingStep[];
+  isActive: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const iconMap: Record<ThinkingStep['icon'], React.ReactNode> = {
+    search: <FileSearch className="w-3 h-3" />,
+    brain: <Brain className="w-3 h-3" />,
+    cpu: <Cpu className="w-3 h-3" />,
+    sparkles: <Sparkles className="w-3 h-3" />,
+    check: <CheckCircle className="w-3 h-3 text-green-400" />,
+    error: <AlertCircle className="w-3 h-3 text-red-400" />,
+  };
+
+  const activeStep = steps.find(s => s.status === 'active');
+  const doneCount = steps.filter(s => s.status === 'done').length;
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors group"
+      >
+        {isActive ? (
+          <Loader2 className="w-3 h-3 animate-spin text-purple-400" />
+        ) : (
+          <Brain className="w-3 h-3 text-purple-400" />
+        )}
+        <span className="text-purple-300/70">
+          {isActive
+            ? (activeStep?.label || 'Denkt nach...')
+            : `Denkprozess (${doneCount} Schritte)`
+          }
+        </span>
+        {!isActive && (
+          <ChevronDown className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+        )}
+      </button>
+
+      {(!collapsed || isActive) && (
+        <div className="mt-1.5 pl-1 space-y-1 border-l-2 border-purple-500/20 ml-1.5">
+          {steps.map(step => (
+            <div
+              key={step.id}
+              className={`flex items-start gap-2 py-0.5 transition-all ${
+                step.status === 'pending' ? 'opacity-30' :
+                step.status === 'active' ? 'opacity-100' : 'opacity-60'
+              }`}
+            >
+              <div className={`flex-shrink-0 mt-0.5 ${
+                step.status === 'active' ? 'text-purple-300' :
+                step.status === 'done' ? 'text-green-400' :
+                'text-gray-600'
+              }`}>
+                {step.status === 'active'
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : iconMap[step.icon]
+                }
+              </div>
+              <div className="min-w-0">
+                <div className={`text-xs ${
+                  step.status === 'active' ? 'text-white' :
+                  step.status === 'done' ? 'text-gray-400' :
+                  'text-gray-600'
+                }`}>
+                  {step.label}
+                </div>
+                {step.detail && step.status !== 'pending' && (
+                  <div className="text-[10px] text-gray-600 mt-0.5 break-words">{step.detail}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Main Component ============
+
 interface FloatingAICoachProps {
-  currentPageContent?: string; // Kontext der aktuellen Seite
+  currentPageContent?: string;
 }
 
 export default function FloatingAICoach({ currentPageContent }: FloatingAICoachProps) {
   const { settings } = useAISettings();
   const { currentTheme } = useTheme();
-  const { currentPageContent: contextPageContent } = usePageContext();
-  
-  // Nutze Page Context wenn verfügbar, ansonsten Props
-  const pageContent = contextPageContent || currentPageContent;
+  const { currentPageContent: ctxPageContent } = usePageContext();
+
+  const pageContent = currentPageContent || ctxPageContent || '';
+
+  // Modal state
   const [isOpen, setIsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [view, setView] = useState<'chat' | 'chatList'>('chat');
+
+  // Chat state
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  // Chat History & Session Management
-  const [currentChatId, setCurrentChatId] = useState<string>('');
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
-  const [showChatHistory, setShowChatHistory] = useState(false);
-
-  // Extended Thinking Display State
-  interface ThinkingStep {
-    type: 'thinking' | 'analyzing' | 'loading_docs' | 'generating' | 'complete';
-    message: string;
-  }
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
+  const [thinkingCollapsed, setThinkingCollapsed] = useState(false);
 
-  // Load initial position from localStorage, otherwise calculate safe default
-  const getInitialPosition = () => {
-    try {
-      const saved = localStorage.getItem('aiCoachPosition');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed;
-      }
-    } catch (e) {
-      // Fall through to default
-    }
-    // Safe default: bottom right with padding to stay visible
-    return { x: window.innerWidth - 400, y: window.innerHeight - 540 };
-  };
-
-  // Floating position state
-  const [position, setPosition] = useState(getInitialPosition());
-  const [size, setSize] = useState({ width: 360, height: 500 });
+  // Draggable/resizable state
+  const [position, setPosition] = useState({ x: window.innerWidth - 390, y: window.innerHeight - 560 });
+  const [size, setSize] = useState({ width: 370, height: 520 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, startWidth: 0, startHeight: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom
+  // Load chats from localStorage on mount
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Load chat sessions from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('aiCoachChatSessions');
-      if (saved) {
-        const sessions: ChatSession[] = JSON.parse(saved);
-        setChatSessions(sessions);
-        
-        // Load last active chat or create new one
-        const lastChatId = localStorage.getItem('aiCoachLastChatId');
-        if (lastChatId && sessions.find(s => s.id === lastChatId)) {
-          loadChat(lastChatId, sessions);
-        } else if (sessions.length > 0) {
-          loadChat(sessions[0].id, sessions);
-        } else {
-          createNewChat();
-        }
-      } else {
-        // No chats exist, create first one
-        createNewChat();
-      }
-    } catch (e) {
-      console.error('Error loading chat history:', e);
-      createNewChat();
+    const loaded = loadChats();
+    setChats(loaded);
+    if (loaded.length > 0) {
+      setActiveChatId(loaded[0].id);
     }
   }, []);
 
-  // Save current chat whenever messages change
-  useEffect(() => {
-    if (currentChatId && messages.length > 0) {
-      saveCurrentChat(messages);
-    }
-  }, [messages]);
+  const activeChat = chats.find(c => c.id === activeChatId) || null;
 
-  // Save position whenever it changes
+  // Scroll to bottom
   useEffect(() => {
-    localStorage.setItem('aiCoachPosition', JSON.stringify(position));
-  }, [position]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeChat?.messages]);
 
-  // Handle mouse move for dragging/resizing
+  // Drag/resize mouse handling
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging) {
-        setPosition({
-          x: e.clientX - dragOffset.x,
-          y: e.clientY - dragOffset.y,
-        });
+        const newX = Math.max(0, Math.min(window.innerWidth - size.width, e.clientX - dragOffset.x));
+        const newY = Math.max(0, Math.min(window.innerHeight - size.height, e.clientY - dragOffset.y));
+        setPosition({ x: newX, y: newY });
       } else if (isResizing) {
-        const deltaX = e.clientX - resizeStart.x;
-        const deltaY = e.clientY - resizeStart.y;
+        const dx = e.clientX - resizeStart.x;
+        const dy = e.clientY - resizeStart.y;
         setSize({
-          width: Math.max(280, resizeStart.startWidth + deltaX),
-          height: Math.max(300, resizeStart.startHeight + deltaY),
+          width: Math.max(300, resizeStart.w + dx),
+          height: Math.max(320, resizeStart.h + dy),
         });
       }
     };
-
     const handleMouseUp = () => {
       setIsDragging(false);
       setIsResizing(false);
     };
-
     if (isDragging || isResizing) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
@@ -231,225 +384,213 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         document.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, isResizing, dragOffset, resizeStart]);
+  }, [isDragging, isResizing, dragOffset, resizeStart, size]);
 
   const handleHeaderMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return; // Dont drag if clicking a button
+    if ((e.target as HTMLElement).closest('button')) return;
     setIsDragging(true);
-    setDragOffset({
-      x: e.clientX - position.x,
-      y: e.clientY - position.y,
-    });
+    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
-    setResizeStart({
-      x: e.clientX,
-      y: e.clientY,
-      startWidth: size.width,
-      startHeight: size.height,
-    });
+    setResizeStart({ x: e.clientX, y: e.clientY, w: size.width, h: size.height });
   };
 
-  // Save position to localStorage when it changes
-  useEffect(() => {
-    if (isOpen && !isMaximized) {
-      localStorage.setItem('aiCoachPosition', JSON.stringify(position));
-    }
-  }, [position, isOpen, isMaximized]);
+  // Chat management
+  const createNewChat = useCallback(() => {
+    const chat = createChat();
+    const updated = [chat, ...chats];
+    setChats(updated);
+    saveChats(updated);
+    setActiveChatId(chat.id);
+    setView('chat');
+    setError('');
+  }, [chats]);
 
-  const buildSystemPrompt = (userMessage?: string): string => {
-    let prompt = AI_SYSTEM_PROMPT_WITH_INSTRUCTIONS;
-    
-    // Wenn Nutzer eine Frage hat: Relevante Dokumentation laden
-    if (userMessage?.trim()) {
-      const relevantSections = getRelevantKnowledge(userMessage);
-      const formattedKnowledge = formatKnowledgeForContext(relevantSections);
-      prompt += formattedKnowledge;
+  const switchToChat = useCallback((chatId: string) => {
+    setActiveChatId(chatId);
+    setView('chat');
+    setError('');
+  }, []);
+
+  const deleteChat = useCallback((chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = chats.filter(c => c.id !== chatId);
+    setChats(updated);
+    saveChats(updated);
+    if (activeChatId === chatId) {
+      setActiveChatId(updated.length > 0 ? updated[0].id : null);
     }
-    
-    // Aktuelle Page-Context hinzufügen
+  }, [chats, activeChatId]);
+
+  const updateChat = useCallback((chatId: string, updater: (c: Chat) => Chat) => {
+    setChats(prev => {
+      const updated = prev.map(c => c.id === chatId ? updater(c) : c);
+      saveChats(updated);
+      return updated;
+    });
+  }, []);
+
+  // Build system prompt with page context
+  const buildSystemPrompt = (): string => {
+    let prompt = `Du bist ein hilfreicher KI-Assistent in der FrameTrain Desktop-Anwendung für Machine Learning Training.
+
+AKTUELLE SEITE UND KONTEXT:`;
+
     if (pageContent) {
-      prompt += `\n\n### Aktueller App-Kontext:\n${pageContent.slice(0, 500)}`;
+      prompt += `\n${pageContent}`;
+    } else {
+      prompt += `\nKein spezifischer Seitenkontext verfügbar.`;
     }
+
+    prompt += `\n\nANWEISUNGEN:
+- Antworte auf Deutsch, prägnant und hilfreich
+- Erkläre ML-Konzepte verständlich  
+- Wenn du Fehler siehst, erkläre ihre Ursache und Lösung
+- Nutze Markdown-Formatierung: **fett** für wichtige Begriffe, Listen für Schritte
+- Beziehe dich konkret auf den Seiteninhalt wenn relevant`;
 
     return prompt;
   };
 
-  // ============ Chat Management Functions ============
-  
-  const generateChatTitle = (messages: Message[]): string => {
-    if (messages.length > 0 && messages[0].role === 'user') {
-      return messages[0].content.slice(0, 50) + (messages[0].content.length > 50 ? '...' : '');
-    }
-    return 'Neuer Chat';
-  };
+  // Thinking steps helper
+  const runThinkingAnimation = async (hasPageContent: boolean): Promise<ThinkingStep[]> => {
+    const steps: ThinkingStep[] = [
+      { id: 's1', label: 'Seite analysieren', icon: 'search', status: 'pending',
+        detail: hasPageContent ? pageContent.slice(0, 80) + '...' : 'Kein Kontext verfügbar' },
+      { id: 's2', label: 'Kontext verarbeiten', icon: 'brain', status: 'pending', detail: undefined },
+      { id: 's3', label: 'Antwort generieren', icon: 'sparkles', status: 'pending', detail: undefined },
+    ];
 
-  const createNewChat = () => {
-    const newChat: ChatSession = {
-      id: `chat_${Date.now()}`,
-      title: 'Neuer Chat',
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+    const setSteps = (updater: (prev: ThinkingStep[]) => ThinkingStep[]) => {
+      setThinkingSteps(prev => updater(prev));
+      return new Promise<void>(r => setTimeout(r, 0));
     };
-    
-    const newSessions = [newChat, ...chatSessions];
-    setChatSessions(newSessions);
-    setCurrentChatId(newChat.id);
-    setMessages([]);
-    setInputText('');
-    
-    localStorage.setItem('aiCoachChatSessions', JSON.stringify(newSessions));
-    localStorage.setItem('aiCoachLastChatId', newChat.id);
+
+    setThinkingSteps(steps);
+    await new Promise(r => setTimeout(r, 50));
+
+    // Step 1 active
+    setThinkingSteps(s => s.map((st, i) => i === 0 ? { ...st, status: 'active' } : st));
+    await new Promise(r => setTimeout(r, 400));
+
+    // Step 1 done, step 2 active
+    setThinkingSteps(s => s.map((st, i) =>
+      i === 0 ? { ...st, status: 'done' } :
+      i === 1 ? { ...st, status: 'active' } : st
+    ));
+    await new Promise(r => setTimeout(r, 350));
+
+    // Step 2 done, step 3 active
+    setThinkingSteps(s => s.map((st, i) =>
+      i === 1 ? { ...st, status: 'done' } :
+      i === 2 ? { ...st, status: 'active' } : st
+    ));
+
+    return steps;
   };
 
-  const loadChat = (chatId: string, sessions?: ChatSession[]) => {
-    const sessionsToUse = sessions || chatSessions;
-    const chat = sessionsToUse.find(s => s.id === chatId);
-    
-    if (chat) {
-      setCurrentChatId(chatId);
-      setMessages(chat.messages);
-      setInputText('');
-      localStorage.setItem('aiCoachLastChatId', chatId);
-    }
+  const completeThinkingSteps = () => {
+    setThinkingSteps(s => s.map(st => ({ ...st, status: 'done' as const })));
+    setThinkingCollapsed(true);
   };
 
-  const saveCurrentChat = (updatedMessages: Message[]) => {
-    if (!currentChatId) return;
-    
-    const updatedSessions = chatSessions.map(session => {
-      if (session.id === currentChatId) {
-        const newTitle = updatedMessages.length > 0 ? generateChatTitle(updatedMessages) : 'Neuer Chat';
-        return {
-          ...session,
-          messages: updatedMessages,
-          title: session.title === 'Neuer Chat' ? newTitle : session.title,
-          updatedAt: Date.now(),
-        };
-      }
-      return session;
-    });
-    
-    setChatSessions(updatedSessions);
-    localStorage.setItem('aiCoachChatSessions', JSON.stringify(updatedSessions));
-  };
-
-  const deleteChat = (chatId: string) => {
-    const remaining = chatSessions.filter(s => s.id !== chatId);
-    setChatSessions(remaining);
-    localStorage.setItem('aiCoachChatSessions', JSON.stringify(remaining));
-    
-    if (currentChatId === chatId) {
-      if (remaining.length > 0) {
-        loadChat(remaining[0].id, remaining);
-      } else {
-        createNewChat();
-      }
-    }
-  };
-
+  // Send message
   const sendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+    const text = inputText.trim();
+    if (!text || isLoading) return;
 
     if (!settings.enabled) {
-      setError('KI-Assistent ist deaktiviert. Bitte aktiviere ihn in den Einstellungen.');
+      setError('KI-Assistent ist deaktiviert. Bitte in Einstellungen aktivieren.');
       return;
     }
 
-    const userMessage: Message = {
+    // Ensure we have a chat
+    let currentChatId = activeChatId;
+    if (!currentChatId) {
+      const chat = createChat();
+      const updated = [chat, ...chats];
+      setChats(updated);
+      saveChats(updated);
+      setActiveChatId(chat.id);
+      currentChatId = chat.id;
+    }
+
+    const userMsg: Message = {
       id: `msg-${Date.now()}`,
       role: 'user',
-      content: inputText.trim(),
+      content: text,
       timestamp: Date.now(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
     setInputText('');
-    setIsLoading(true);
     setError('');
-    setThinkingSteps([]); // Reset thinking steps
+    setThinkingCollapsed(false);
+
+    // Add user message and update title
+    updateChat(currentChatId, c => ({
+      ...c,
+      messages: [...c.messages, userMsg],
+      title: c.messages.length === 0 ? generateTitle(text) : c.title,
+      updatedAt: Date.now(),
+    }));
+
+    setIsLoading(true);
+
+    // Animate thinking steps
+    const hasContent = !!pageContent;
+    await runThinkingAnimation(hasContent);
 
     try {
-      // Extended Thinking: Detailed steps for user visibility
-      setThinkingSteps([
-        { type: 'thinking', message: 'Analyzing your question...' },
-      ]);
-
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Step 2: Read page content
-      setThinkingSteps(prev => [
-        ...prev,
-        { type: 'analyzing', message: 'Reading page content and status...' },
-      ]);
-
-      await new Promise(resolve => setTimeout(resolve, 200));
-
-      // Step 3: Check for errors/special content
-      if (pageContent && pageContent.includes('Error')) {
-        setThinkingSteps(prev => [
-          ...prev,
-          { type: 'analyzing', message: 'Found error on page - analyzing...' },
-        ]);
-        await new Promise(resolve => setTimeout(resolve, 150));
-      }
-
-      // Step 4: Match keywords and load docs
-      const relevantSections = getRelevantKnowledge(userMessage.content);
-      
-      setThinkingSteps(prev => [
-        ...prev,
-        { type: 'loading_docs', message: `Found ${relevantSections.length} relevant documentation section(s)` },
-      ]);
-
-      await new Promise(resolve => setTimeout(resolve, 250));
-
-      // Step 5: Generating response
-      setThinkingSteps(prev => [
-        ...prev,
-        { type: 'generating', message: 'Generating response from AI...' },
-      ]);
-
       const meta = PROVIDER_META[settings.provider];
       if (meta.needsKey && !settings.apiKey) {
-        throw new Error('API-Key nicht konfiguriert. Bitte in Einstellungen einstellen.');
+        throw new Error('API-Key fehlt. Bitte in Einstellungen → KI-Assistent konfigurieren.');
       }
 
+      // Get current chat messages for context (up to last 10)
+      const currentChat = chats.find(c => c.id === currentChatId);
+      const history = currentChat?.messages.slice(-10) || [];
+      const systemPrompt = buildSystemPrompt();
       let responseText = '';
 
       if (settings.provider === 'ollama') {
-        const model = settings.ollamaModel || 'llama3.2';
+        const conversationText = [
+          systemPrompt,
+          ...history.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`),
+          `User: ${text}`,
+          'Assistant:',
+        ].join('\n\n');
+
         const res = await fetch('http://localhost:11434/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model,
-            prompt: buildSystemPrompt(userMessage.content) + '\n\nUser: ' + userMessage.content + '\n\nAssistant:',
+            model: settings.ollamaModel || 'llama3.2',
+            prompt: conversationText,
             stream: false,
-            options: { temperature: 0.7, num_ctx: 2048 },
+            options: { temperature: 0.7, num_ctx: 4096 },
           }),
         });
-        if (!res.ok) throw new Error(`Ollama nicht erreichbar. Läuft Ollama? (http://localhost:11434)`);
+        if (!res.ok) throw new Error('Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
         const data = await res.json();
         responseText = data.response || '';
 
       } else if (settings.provider === 'groq') {
-        const model = settings.selectedModel || 'llama-3.3-70b-versatile';
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          ...history.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: text },
+        ];
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
           body: JSON.stringify({
-            model,
-            max_tokens: 1000,
+            model: settings.selectedModel || 'llama-3.3-70b-versatile',
+            max_tokens: 1500,
             temperature: 0.7,
-            messages: [
-              { role: 'system', content: buildSystemPrompt(userMessage.content) },
-              { role: 'user', content: userMessage.content },
-            ],
+            messages,
           }),
         });
         if (!res.ok) {
@@ -460,7 +601,10 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         responseText = data.choices?.[0]?.message?.content || '';
 
       } else if (settings.provider === 'anthropic') {
-        const model = settings.selectedModel || 'claude-opus-4-5';
+        const messages = [
+          ...history.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: text },
+        ];
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
@@ -470,10 +614,10 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
             'anthropic-dangerous-direct-browser-access': 'true',
           },
           body: JSON.stringify({
-            model,
-            max_tokens: 1000,
-            system: buildSystemPrompt(userMessage.content),
-            messages: [{ role: 'user', content: userMessage.content }],
+            model: settings.selectedModel || 'claude-haiku-4-5',
+            max_tokens: 1500,
+            system: systemPrompt,
+            messages,
           }),
         });
         if (!res.ok) {
@@ -485,18 +629,19 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
       } else {
         // OpenAI
-        const model = settings.selectedModel || 'gpt-4o';
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          ...history.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: text },
+        ];
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
           body: JSON.stringify({
-            model,
-            max_tokens: 1000,
+            model: settings.selectedModel || 'gpt-4o-mini',
+            max_tokens: 1500,
             temperature: 0.7,
-            messages: [
-              { role: 'system', content: buildSystemPrompt(userMessage.content) },
-              { role: 'user', content: userMessage.content },
-            ],
+            messages,
           }),
         });
         if (!res.ok) {
@@ -507,380 +652,375 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         responseText = data.choices?.[0]?.message?.content || '';
       }
 
-      // Extended Thinking: Complete
-      setThinkingSteps(prev => [
-        ...prev,
-        { type: 'complete', message: 'Complete' },
-      ]);
+      completeThinkingSteps();
 
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}`,
+      const assistantMsg: Message = {
+        id: `msg-${Date.now()}-ai`,
         role: 'assistant',
         content: responseText,
         timestamp: Date.now(),
+        thinkingSteps: thinkingSteps.map(s => ({ ...s, status: 'done' as const })),
+        thinkingCollapsed: true,
       };
-      setMessages(prev => [...prev, assistantMessage]);
 
-      // Clear thinking steps after showing complete
-      setTimeout(() => setThinkingSteps([]), 2000);
-    } catch (e: any) {
-      setError('Error: ' + (e?.message || 'Unknown error'));
+      updateChat(currentChatId, c => ({
+        ...c,
+        messages: [...c.messages, assistantMsg],
+        updatedAt: Date.now(),
+      }));
       setThinkingSteps([]);
+
+    } catch (e: any) {
+      completeThinkingSteps();
+      setThinkingSteps([]);
+      setError(e?.message || 'Unbekannter Fehler');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // If not enabled, don't show the button
-  if (!settings.enabled) {
-    return null;
-  }
+  // Toggle thinking steps for a specific message
+  const toggleMessageThinking = (msgId: string) => {
+    updateChat(activeChatId!, c => ({
+      ...c,
+      messages: c.messages.map(m =>
+        m.id === msgId ? { ...m, thinkingCollapsed: !m.thinkingCollapsed } : m
+      ),
+    }));
+  };
 
-  // Minimized button (bottom right)
+  if (!settings.enabled) return null;
+
+  // ── Closed state: floating button ──
   if (!isOpen) {
     return (
       <button
-        onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 right-6 p-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-1.5 z-40`}
-        title="AI Coach öffnen"
+        onClick={() => {
+          setIsOpen(true);
+          if (!activeChatId && chats.length === 0) createNewChat();
+        }}
+        className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl hover:shadow-purple-500/30 hover:scale-110 transition-all flex items-center justify-center z-40"
+        style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}
+        title="KI-Coach öffnen"
       >
-        <Brain className="w-5 h-5" />
-        <span className="text-xs font-semibold">Ask</span>
+        <Brain className="w-6 h-6 text-white" />
       </button>
     );
   }
 
-  // Maximized modal - overlay the entire app
-  if (isMaximized) {
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div
-          className="bg-slate-900 rounded-2xl border border-white/10 w-full h-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
-          ref={modalRef}
-        >
-          {/* Header */}
-          <div className={`flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0 bg-gradient-to-r ${currentTheme.colors.gradient} opacity-30`}>
-            <div className="flex items-center gap-3">
-              <Brain className="w-6 h-6 text-purple-300" />
-              <div>
-                <h2 className="text-xl font-bold text-white">KI-Coach</h2>
-                <p className="text-xs text-gray-400">Frag mich anything!</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowChatHistory(!showChatHistory)}
-                className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-                title="Chat-Verlauf"
-              >
-                <MessageSquare className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setIsMaximized(false)}
-                className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-                title="Minimieren"
-              >
-                <Minimize2 className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  setMessages([]);
-                  // Save final position
-                  localStorage.setItem('aiCoachPosition', JSON.stringify(position));
-                }}
-                className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Messages area */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {showChatHistory ? (
-              // Chat History View
-              <div className="space-y-3">
-                <button
-                  onClick={() => {
-                    createNewChat();
-                    setShowChatHistory(false);
-                  }}
-                  className={`w-full px-4 py-2 rounded-lg bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-medium hover:shadow-lg transition-all text-sm`}
-                >
-                  + Neuer Chat
-                </button>
-                
-                {chatSessions.length === 0 ? (
-                  <p className="text-center text-gray-400 text-sm mt-8">Keine Chats noch.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {chatSessions.map(chat => (
-                      <div
-                        key={chat.id}
-                        className={`p-3 rounded-lg cursor-pointer transition-all ${
-                          currentChatId === chat.id
-                            ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
-                            : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                        }`}
-                        onClick={() => {
-                          loadChat(chat.id);
-                          setShowChatHistory(false);
-                        }}
-                      >
-                        <p className="font-medium text-sm truncate">{chat.title}</p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {new Date(chat.updatedAt).toLocaleString('de-DE', { 
-                            month: 'short', 
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              // Chat Messages View
-              <>
-                {/* Extended Thinking Display */}
-                {thinkingSteps.length > 0 && (
-                  <div className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/10">
-                    {thinkingSteps.map((step, idx) => {
-                      const isActive = idx === thinkingSteps.findIndex(s => s.type !== 'complete');
-                      const isComplete = step.type === 'complete' || idx < thinkingSteps.findIndex(s => s.type === 'complete');
-
-                      return (
-                        <div
-                          key={idx}
-                          className={`flex items-center gap-2 text-xs transition-all duration-300 ${
-                            isActive ? 'opacity-100' : isComplete ? 'opacity-60' : 'opacity-40'
-                          }`}
-                        >
-                          {/* Icon with animation */}
-                          <div className={`flex-shrink-0 ${isActive ? 'animate-spin' : ''}`}>
-                            {step.type === 'thinking' && <Brain className="w-3.5 h-3.5 text-purple-400" />}
-                            {step.type === 'analyzing' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
-                            {step.type === 'loading_docs' && <BookOpen className="w-3.5 h-3.5 text-blue-400" />}
-                            {step.type === 'generating' && <Loader2 className="w-3.5 h-3.5 text-green-400 animate-spin" />}
-                            {step.type === 'complete' && (
-                              <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-purple-400 to-pink-400" />
-                            )}
-                          </div>
-
-                          {/* Text */}
-                          <span className={`${isActive ? 'text-gray-100 font-medium' : 'text-gray-500'}`}>
-                            {step.message}
-                          </span>
-
-                          {/* Pulse dots for active step */}
-                          {isActive && <div className="flex-1" />}
-                          {isActive && (
-                            <div className="flex gap-1">
-                              {[0, 1, 2].map(i => (
-                                <div
-                                  key={i}
-                                  className="w-1 h-1 rounded-full bg-purple-400"
-                                  style={{
-                                    animation: `pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite`,
-                                    animationDelay: `${i * 0.2}s`,
-                                  }}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {messages.length === 0 && thinkingSteps.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-full text-center">
-                    <Brain className="w-16 h-16 text-purple-400 mb-4" />
-                    <p className="text-gray-400 text-lg">Hello! I am your AI Coach.</p>
-                    <p className="text-gray-500 text-sm mt-2">Ask me a question about what you are currently doing.</p>
-                  </div>
-                )}
-                {messages.map(msg => (
-                  <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-xs px-4 py-2 rounded-lg ${
-                        msg.role === 'user'
-                          ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
-                          : 'bg-white/10 text-gray-100 border border-white/10'
-                      }`}
-                    >
-                      <p className="text-sm leading-relaxed">{formatMessageContent(msg.content)}</p>
-                    </div>
-                  </div>
-                ))}
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-white/10 text-gray-300 px-4 py-3 rounded-lg border border-white/10 flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm">KI denkt nach...</span>
-                    </div>
-                  </div>
-                )}
-                {error && (
-                  <div className="flex justify-start">
-                    <div className="bg-red-500/10 text-red-300 px-4 py-3 rounded-lg border border-red-500/20 flex items-center gap-2 text-sm">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      {error}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input */}
-          {!showChatHistory && (
-            <div className="p-4 border-t border-white/10 bg-slate-800/50 flex-shrink-0">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={inputText}
-                  onChange={e => setInputText(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                  placeholder="Deine Frage..."
-                  disabled={isLoading}
-                  className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={isLoading || !inputText.trim()}
-                  className={`p-2 bg-gradient-to-r ${currentTheme.colors.gradient} text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50`}
-                >
-                  <Send className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Floating window
-  return (
-    <div
-      className="fixed bg-slate-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden flex flex-col z-50"
-      style={{
-        width: `${size.width}px`,
-        height: `${size.height}px`,
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-      }}
-      ref={modalRef}
-    >
-      {/* Header - draggable */}
+  // ── Content for both floating and maximized ──
+  const renderChatListView = () => (
+    <div className="flex flex-col h-full">
+      {/* Chat list header */}
       <div
-        className={`bg-gradient-to-r ${currentTheme.colors.gradient} opacity-30 border-b border-white/10 p-3 cursor-move flex items-center justify-between flex-shrink-0 select-none`}
+        className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0 select-none cursor-move"
         onMouseDown={handleHeaderMouseDown}
       >
         <div className="flex items-center gap-2 pointer-events-none">
-          <Brain className="w-5 h-5 text-purple-300" />
-          <div>
-            <div className="text-sm font-bold text-gray-100">AI Coach</div>
-            <div className="text-xs text-gray-500">Quick Chat</div>
-          </div>
+          <MessageSquare className="w-4 h-4 text-purple-400" />
+          <span className="text-sm font-semibold text-white">Chatverläufe</span>
+          <span className="text-xs text-gray-500">({chats.length})</span>
         </div>
-        <div className="flex items-center gap-1 pointer-events-auto">
+        <div className="pointer-events-auto flex items-center gap-1">
           <button
-            onClick={() => setIsMaximized(true)}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all text-center"
-            title="Maximieren"
+            onClick={createNewChat}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
+            title="Neuer Chat"
           >
-            <Maximize2 className="w-4 h-4" />
+            <Plus className="w-4 h-4" />
           </button>
           <button
-            onClick={() => {
-              setIsOpen(false);
-              setMessages([]);
-            }}
+            onClick={() => setView('chat')}
             className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-            title="Schließen"
+            title="Zurück"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setIsOpen(false)}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <Brain className="w-8 h-8 text-purple-400 mb-2" />
-            <p className="text-gray-400 text-xs">Hallo! Stell mir eine Frage.</p>
-          </div>
-        )}
-        {messages.map(msg => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-[75%] px-3 py-2 rounded-lg text-xs ${
-                msg.role === 'user'
-                  ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
-                  : 'bg-white/10 text-gray-100 border border-white/10'
-              }`}
+      {/* Chat list */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {chats.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-4">
+            <MessageSquare className="w-8 h-8 text-gray-600" />
+            <p className="text-gray-500 text-sm">Noch keine Chats</p>
+            <button
+              onClick={createNewChat}
+              className="px-3 py-2 text-xs font-medium bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg border border-purple-500/30 transition-all flex items-center gap-1.5"
             >
-              <p className="leading-relaxed break-words">{formatMessageContent(msg.content)}</p>
-            </div>
+              <Plus className="w-3.5 h-3.5" />
+              Ersten Chat starten
+            </button>
           </div>
-        ))}
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-white/10 text-gray-300 px-3 py-2 rounded-lg border border-white/10 flex items-center gap-2 text-xs">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Denken...
-            </div>
-          </div>
+        ) : (
+          <>
+            <button
+              onClick={createNewChat}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-white/10 hover:border-purple-500/30 hover:bg-purple-500/5 text-gray-400 hover:text-purple-300 transition-all text-xs font-medium"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Neuer Chat
+            </button>
+            {chats.map(chat => (
+              <button
+                key={chat.id}
+                onClick={() => switchToChat(chat.id)}
+                className={`w-full flex items-start justify-between gap-2 px-3 py-2.5 rounded-xl border text-left transition-all group ${
+                  chat.id === activeChatId
+                    ? 'bg-purple-500/15 border-purple-500/30 text-white'
+                    : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06] hover:border-white/10 text-gray-300'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium truncate">{chat.title}</div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-gray-600">{formatRelativeTime(chat.updatedAt)}</span>
+                    {chat.messages.length > 0 && (
+                      <span className="text-[10px] text-gray-600">{chat.messages.length} Nachrichten</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => deleteChat(chat.id, e)}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400 transition-all flex-shrink-0"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </button>
+            ))}
+          </>
         )}
-        {error && (
-          <div className="flex justify-start">
-            <div className="bg-red-500/10 text-red-300 px-3 py-2 rounded-lg border border-red-500/20 flex items-center gap-1 text-xs col-span-full">
-              <AlertCircle className="w-3 h-3 flex-shrink-0" />
-              <span className="break-words">{error}</span>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
       </div>
+    </div>
+  );
 
-      {/* Input */}
-      <div className="p-3 border-t border-white/10 bg-slate-800/50 flex-shrink-0">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-            placeholder="Frage..."
-            disabled={isLoading}
-            className="flex-1 px-2 py-1.5 bg-white/5 border border-white/10 rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
-          />
+  const renderChatView = () => (
+    <div className="flex flex-col h-full">
+      {/* Chat header */}
+      <div
+        className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 flex-shrink-0 select-none cursor-move"
+        style={{ background: 'linear-gradient(to right, rgba(168,85,247,0.1), rgba(236,72,153,0.05))' }}
+        onMouseDown={handleHeaderMouseDown}
+      >
+        <div className="flex items-center gap-2 pointer-events-none min-w-0">
+          <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}>
+            <Brain className="w-3.5 h-3.5 text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-white truncate max-w-[160px]">
+              {activeChat?.title || 'KI-Coach'}
+            </div>
+            {pageContent && (
+              <div className="text-[10px] text-gray-500 truncate max-w-[160px]">
+                {pageContent.split('\n')[0]?.slice(0, 35)}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 pointer-events-auto flex-shrink-0">
           <button
-            onClick={sendMessage}
-            disabled={isLoading || !inputText.trim()}
-            className={`p-1.5 bg-gradient-to-r ${currentTheme.colors.gradient} text-white rounded hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center`}
+            onClick={() => setView('chatList')}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
+            title="Chatverläufe"
           >
-            <Send className="w-4 h-4" />
+            <MessageSquare className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={createNewChat}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
+            title="Neuer Chat"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+          {!isMaximized && (
+            <button
+              onClick={() => setIsMaximized(true)}
+              className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {isMaximized && (
+            <button
+              onClick={() => setIsMaximized(false)}
+              className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+            >
+              <Minimize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button
+            onClick={() => setIsOpen(false)}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+          >
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Resize handle (bottom right) */}
-      <div
-        className="absolute bottom-0 right-0 w-4 h-4 bg-gradient-to-tl from-purple-500/50 to-transparent cursor-se-resize rounded-tl"
-        onMouseDown={handleResizeMouseDown}
-      />
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+        {(!activeChat || activeChat.messages.length === 0) && !isLoading && (
+          <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.2), rgba(236,72,153,0.1))' }}>
+              <Brain className="w-6 h-6 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-gray-300 text-sm font-medium">Hallo! Ich bin dein KI-Coach.</p>
+              <p className="text-gray-600 text-xs mt-1">
+                {pageContent
+                  ? 'Ich kenne deinen aktuellen Seiteninhalt und helfe dir gerne weiter.'
+                  : 'Stelle mir eine Frage zu FrameTrain.'}
+              </p>
+            </div>
+            {pageContent && (
+              <div className="w-full max-w-xs px-3 py-2 bg-white/[0.03] border border-white/5 rounded-xl">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <FileSearch className="w-3 h-3 text-purple-400" />
+                  <span className="text-[10px] text-purple-300/70 font-medium">Geladener Kontext</span>
+                </div>
+                <p className="text-[10px] text-gray-600 leading-relaxed truncate">
+                  {pageContent.split('\n')[0]}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Animation styles */}
-      <style>{ANIMATION_STYLES}</style>
+        {activeChat?.messages.map(msg => (
+          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {msg.role === 'assistant' ? (
+              <div className="max-w-[88%] space-y-1">
+                {/* Thinking steps for this message */}
+                {msg.thinkingSteps && msg.thinkingSteps.length > 0 && (
+                  <ThinkingBlock
+                    steps={msg.thinkingSteps}
+                    isActive={false}
+                    collapsed={msg.thinkingCollapsed ?? true}
+                    onToggle={() => toggleMessageThinking(msg.id)}
+                  />
+                )}
+                {/* Message content */}
+                <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.06] border border-white/[0.08] text-gray-200">
+                  <MarkdownText text={msg.content} />
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-[85%] px-3 py-2.5 rounded-2xl rounded-tr-sm text-white text-sm leading-relaxed"
+                style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}>
+                {msg.content}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Active thinking steps */}
+        {isLoading && thinkingSteps.length > 0 && (
+          <div className="flex justify-start">
+            <div className="max-w-[88%]">
+              <ThinkingBlock
+                steps={thinkingSteps}
+                isActive={true}
+                collapsed={thinkingCollapsed}
+                onToggle={() => setThinkingCollapsed(c => !c)}
+              />
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex justify-start">
+            <div className="max-w-[88%] px-3 py-2.5 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-start gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+              <span className="text-red-300 text-xs leading-relaxed break-words">{error}</span>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-white/5">
+        <div className="flex gap-2 items-end">
+          <textarea
+            ref={inputRef}
+            value={inputText}
+            onChange={e => setInputText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Frage stellen... (Enter senden)"
+            disabled={isLoading}
+            rows={1}
+            className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500/40 disabled:opacity-50 resize-none leading-relaxed"
+            style={{ maxHeight: '80px' }}
+            onInput={e => {
+              const el = e.target as HTMLTextAreaElement;
+              el.style.height = 'auto';
+              el.style.height = Math.min(el.scrollHeight, 80) + 'px';
+            }}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={isLoading || !inputText.trim()}
+            className="p-2 rounded-xl text-white flex-shrink-0 transition-all disabled:opacity-40 hover:opacity-90 active:scale-95"
+            style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}
+          >
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const content = view === 'chatList' ? renderChatListView() : renderChatView();
+
+  // ── Maximized overlay ──
+  if (isMaximized) {
+    return (
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+        <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+          {content}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Floating window ──
+  return (
+    <div
+      className="fixed bg-slate-900/95 backdrop-blur-md rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden flex flex-col z-50"
+      style={{
+        width: `${size.width}px`,
+        height: `${size.height}px`,
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        boxShadow: '0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)',
+      }}
+    >
+      {content}
+
+      {/* Resize handle */}
+      <div
+        className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize"
+        onMouseDown={handleResizeMouseDown}
+        style={{
+          background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.3) 100%)',
+          borderRadius: '0 0 16px 0',
+        }}
+      />
     </div>
   );
 }

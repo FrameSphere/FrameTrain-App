@@ -28,9 +28,65 @@ def detect_sample_type(sample_path: str) -> str:
     return 'unknown'
 
 
+def resolve_actual_model_path(model_path: str) -> str:
+    """
+    Resolves the actual loadable model path from a FrameTrain storage directory.
+    
+    FrameTrain stores models in app_data/models/{model_id}/ with a model_info.json.
+    The actual HuggingFace model name or local weights path is stored in source_path.
+    
+    Priority:
+    1. If path has HF model files (config.json + weights) -> use as-is
+    2. If path has model_info.json -> use source_path from it
+    3. Return as-is (might be a HF model ID string directly)
+    """
+    p = Path(model_path)
+    
+    # Check if it's a FrameTrain storage directory with model_info.json
+    model_info_path = p / 'model_info.json'
+    if model_info_path.exists():
+        try:
+            with open(model_info_path) as f:
+                info = json.load(f)
+            
+            source_path = info.get('source_path')
+            source = info.get('source', '')
+            
+            # Check if the FrameTrain dir itself has valid HF model files
+            has_config = (p / 'config.json').exists()
+            has_safetensors = (p / 'model.safetensors').exists()
+            has_pytorch = (p / 'pytorch_model.bin').exists()
+            
+            if has_config and (has_safetensors or has_pytorch):
+                # This directory IS a proper HF model directory - use it directly
+                return model_path
+            
+            # Use source_path (HuggingFace repo ID or local path to original model)
+            if source_path and source_path.strip():
+                return source_path
+                
+        except Exception:
+            pass
+    
+    # Check if path itself has valid HF model files
+    if p.exists() and p.is_dir():
+        has_config = (p / 'config.json').exists()
+        has_safetensors = (p / 'model.safetensors').exists()
+        has_pytorch = (p / 'pytorch_model.bin').exists()
+        
+        if has_config and (has_safetensors or has_pytorch):
+            return model_path
+    
+    # Return as-is - might be a HuggingFace model ID ("microsoft/deberta-v3-base")
+    return model_path
+
+
 def detect_task_type(model_path: str) -> str:
     """Erkennt den Task-Typ aus der model config.json"""
-    config_path = Path(model_path) / 'config.json'
+    # First resolve the actual model path
+    resolved = resolve_actual_model_path(model_path)
+    config_path = Path(resolved) / 'config.json'
+    
     if config_path.exists():
         try:
             with open(config_path) as f:
@@ -186,70 +242,93 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
     start = time.time()
     sample_type = detect_sample_type(sample_path)
 
+    # Resolve the actual model path (handles FrameTrain storage format)
+    resolved_model_path = resolve_actual_model_path(model_path)
+
     if task_type == 'auto':
         task_type = detect_task_type(model_path)
 
     try:
         import torch
-        from transformers import pipeline
+        from transformers import pipeline, AutoModel, AutoTokenizer, AutoModelForCausalLM
 
         device = 0 if torch.cuda.is_available() else -1
-        device_str = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         # Apple Silicon MPS
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             device = -1  # pipeline nutzt mps automatisch in neueren Versionen
 
-        # Pipeline erstellen - mit besserem Error Handling
+        # ============ VALIDATE MODEL PATH ============
+        model_path_obj = Path(resolved_model_path)
+        
+        # For local paths: validate they exist and have model files
+        # For HF model IDs (like "microsoft/deberta-v3-base"): skip local validation
+        is_local_path = model_path_obj.exists() or '/' in resolved_model_path or '\\' in resolved_model_path
+        is_hf_id = '/' in resolved_model_path and not model_path_obj.exists()
+        
+        if is_local_path and not is_hf_id:
+            if not model_path_obj.exists():
+                # Path doesn't exist - provide helpful error
+                original_name = Path(model_path).name
+                raise FileNotFoundError(
+                    f"❌ Modell nicht gefunden: '{original_name}'\n\n"
+                    f"Gesuchter Pfad: {resolved_model_path}\n\n"
+                    f"Mögliche Ursachen:\n"
+                    f"1. Das Modell wurde noch nicht trainiert (nur das Original-Modell gespeichert)\n"
+                    f"2. Das Modell wurde gelöscht oder verschoben\n"
+                    f"3. Der Laboratory-Test braucht ein trainiertes Modell\n\n"
+                    f"💡 Tipp: Trainiere zuerst das Modell, dann teste im Laboratory"
+                )
+            
+            # Check if it's a valid model directory
+            has_safetensors = (model_path_obj / 'model.safetensors').exists()
+            has_pytorch = (model_path_obj / 'pytorch_model.bin').exists()
+            has_config = (model_path_obj / 'config.json').exists()
+            has_weights_any = list(model_path_obj.glob('*.pt')) or list(model_path_obj.glob('*.pth')) or list(model_path_obj.glob('*.onnx'))
+            
+            if not (has_safetensors or has_pytorch or has_config or has_weights_any):
+                raise ValueError(
+                    f"❌ Das Verzeichnis enthält keine Modell-Dateien.\n"
+                    f"Pfad: {resolved_model_path}\n\n"
+                    f"Erwartet: config.json, model.safetensors, pytorch_model.bin oder *.pt Dateien\n\n"
+                    f"Wurde das Training erfolgreich abgeschlossen?"
+                )
+
+        # ============ LOAD MODEL ============
         pipe = None
         last_error = None
         
-        # Versuche verschiedene Wege:
-        # 1. Lokaler Pfad
-        # 2. Model Name aus Path
-        # 3. Direkter HF Model ID (falls bereits gültig)
-        attempts = [
-            ('local_path', model_path),
-            ('model_name', Path(model_path).name if model_path else None),
-        ]
-        
-        for attempt_type, attempt_path in attempts:
-            if not attempt_path:
-                continue
-                
+        try:
+            if task_type == 'auto':
+                pipe = pipeline(model=resolved_model_path, device=device)
+            else:
+                pipe = pipeline(task=task_type, model=resolved_model_path, device=device)
+        except Exception as e:
+            last_error = str(e)
+            # Try without specifying task
             try:
-                if task_type == 'auto':
-                    pipe = pipeline(model=attempt_path, device=device)
-                else:
-                    pipe = pipeline(task=task_type, model=attempt_path, device=device)
-                break  # Success
-            except Exception as e:
-                last_error = str(e)
-                continue
+                pipe = pipeline(model=resolved_model_path, device=device)
+            except Exception as e2:
+                last_error = str(e2)
         
         if pipe is None:
-            # Alle Versuche fehlgeschlagen
-            error_msg = last_error or "Model konnte nicht geladen werden"
-            
-            # Bessere Error Message für den User
-            if "is not a local folder" in error_msg and "is not a valid model identifier" in error_msg:
-                raise ValueError(
-                    f"Das Model mit der ID '{Path(model_path).name}' existiert nicht auf HuggingFace oder ist privat.\n"
-                    f"Bitte überprüfe:\n"
-                    f"1. Die Model-ID ist korrekt geschrieben\n"
-                    f"2. Wenn privat: Mit 'huggingface-cli login' anmelden\n"
-                    f"3. Oder ein anderes bekanntes Model auswählen\n\n"
-                    f"Original Error: {error_msg}"
-                )
-            else:
-                raise ValueError(f"Model konnte nicht geladen werden: {error_msg}")
+            raise ValueError(
+                f"❌ Das Modell konnte nicht geladen werden.\n"
+                f"Pfad: {resolved_model_path}\n\n"
+                f"Fehler: {last_error}\n\n"
+                f"💡 Mögliche Lösungen:\n"
+                f"1. Ist die Model-Version korrekt gespeichert?\n"
+                f"2. Fehlen Abhängigkeiten (z.B. transformers, torch)?\n"
+                f"3. Ist genug RAM/VRAM verfügbar?\n"
+                f"4. Ist das Modell mit transformers kompatibel?"
+            )
 
         # Input laden je nach Typ
         if sample_type == 'image':
             from PIL import Image
             input_data = Image.open(sample_path).convert('RGB')
         elif sample_type == 'audio':
-            input_data = sample_path  # pipeline nimmt Pfad
+            input_data = sample_path
         elif sample_type in ('text', 'json', 'csv', 'unknown'):
             with open(sample_path, 'r', encoding='utf-8', errors='replace') as f:
                 input_data = f.read(4000)
@@ -265,11 +344,9 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
 
         elapsed_ms = int((time.time() - start) * 1000)
 
-        # Erkannten task_type für Mapping verwenden
         actual_task = pipe.task if hasattr(pipe, 'task') else task_type
         rendered = parse_hf_output(raw_result, actual_task)
 
-        # raw_output serialisierbar machen
         try:
             json.dumps(raw_result)
             serializable_raw = raw_result
@@ -288,19 +365,12 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
     except ImportError as e:
         elapsed_ms = int((time.time() - start) * 1000)
         error_msg = f"⚠️ Fehlende Bibliothek: {str(e)}\n\n"
-        error_msg += "Bitte installiere die erforderlichen Pakete in diese Python-Version:\n\n"
         error_msg += f"Aktuelle Python: {sys.executable}\n"
         error_msg += f"Python Version: {sys.version.split()[0]}\n\n"
         error_msg += "Installation:\n"
-        error_msg += f"{sys.executable.replace('/bin/python3', '').replace('/bin/python', '')} -m pip install torch transformers pillow\n\n"
-        error_msg += "Alternative (für andere Versionen):\n"
-        error_msg += "pip3 install torch transformers pillow\n"
-        error_msg += "pip install torch transformers pillow\n\n"
-        error_msg += "Frametrain sucht Python in diesen Orten:\n"
-        error_msg += "  🍎 macOS: /Library/Frameworks/Python.framework/Versions/3.11-3.13/bin/\n"
-        error_msg += "  🍎 macOS Homebrew: /opt/homebrew/bin/, /usr/local/bin/\n"
-        error_msg += "  🐧 Linux: Homebrew oder System Python\n"
-        error_msg += "  🪟 Windows: python.exe von python.org oder Homebrew"
+        error_msg += "pip install torch transformers pillow\n"
+        error_msg += "  ODER\n"
+        error_msg += "pip3 install torch transformers pillow"
         output = build_error_output(sample_path, error_msg, elapsed_ms)
 
     except Exception as e:

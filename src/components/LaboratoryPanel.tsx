@@ -241,6 +241,19 @@ function HighlightedText({ text, spans }: { text: string; spans: TextSpan[] }) {
 // ============ Error Message Helper ============
 
 function getDetailedErrorMessage(errorMsg: string): string {
+  // Local model path errors (PRIMARY)
+  if (errorMsg.includes("trainierte Modell") || errorMsg.includes("wurde auf deinem Computer nicht gefunden")) {
+    return `❌ Modell nicht gefunden (lokaler Fehler)\n\n${errorMsg}\n\n💡 Das bedeutet:\n• Das Modell existiert nicht auf deinem Rechner\n• Prüfe: Hast du es wirklich trainiert und gespeichert?\n• Verifikation: Schau in den Modell-Ort im Settings`;
+  }
+  
+  if (errorMsg.includes("sieht nicht wie ein gültiges Modell aus") || errorMsg.includes("Model-Dateien")) {
+    return `⚠️ Ungültiges Modell-Verzeichnis:\n\n${errorMsg}\n\n💡 Mögliche Lösungen:\n• Wurde das Training abgebrochen?\n• Sind die Modell-Dateienim Verzeichnis?\n• Versuche das Modell nochmal zu trainieren`;
+  }
+  
+  if (errorMsg.includes("Das Modell konnte nicht geladen werden") && errorMsg.includes("Pfad:")) {
+    return `⚠️ Modell-Laden fehlgeschlagen\n\n${errorMsg}\n\n💡 Das könnte bedeuten:\n• Wenig RAM/VRAM verfügbar\n• Modell-Komponenten beschädigt\n• Python-Abhängigkeiten fehlen`;
+  }
+
   // Check for common library import errors
   if (errorMsg.includes("No module named 'torch'")) {
     return `⚠️ Fehlende Bibliothek: torch\n\nBitte installiere die erforderlichen Pakete:\n\n# Versuche je nach Python-Version:\npip install torch transformers pillow\n  ODER\npip3 install torch transformers pillow\n\nNutzer-Hinweise:\n• Stelle sicher, dass du die richtige Python-Umgebung verwendest\n• Prüfe: python --version oder python3 --version\n• Bei virtuellen Umgebungen: Aktiviere die Umgebung zuerst\n• Nutze pip3 wenn du mehrere Python-Versionen hast\n• Bei macOS Silicon: Möglicherweise conda statt pip besser`;
