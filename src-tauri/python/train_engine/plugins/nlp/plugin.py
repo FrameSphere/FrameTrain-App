@@ -848,12 +848,39 @@ class Plugin(TrainPlugin):
                 for p in self.model.parameters():
                     if p.data is not None and not p.is_contiguous():
                         p.data = p.data.contiguous()
+                # CRITICAL FIX: Nach merge_and_unload() zeigt self.model auf das
+                # zusammengeführte Vollmodell — aber self.trainer.model zeigt NOCH
+                # auf den alten PEFT-Pointer. Ohne diesen Update würde trainer.save_model()
+                # nur den LoRA-Adapter speichern (adapter_model.safetensors), NICHT
+                # das vollständige Modell (model.safetensors + config.json).
+                if self.trainer is not None:
+                    self.trainer.model = self.model
                 MessageProtocol.status("saving", "LoRA-Gewichte zusammengeführt")
             except Exception as e:
                 MessageProtocol.warning(f"LoRA merge fehlgeschlagen: {e}")
+                # Merge fehlgeschlagen → LoRA-Adapter direkt speichern als Fallback
+                # (lab_inference kann Adapter-Only-Modelle nicht laden, aber
+                # wenigstens gehen die Gewichte nicht verloren)
+                try:
+                    if self.trainer is not None:
+                        self.trainer.model.save_pretrained(str(out))
+                    elif self.model is not None:
+                        self.model.save_pretrained(str(out))
+                    if self.tokenizer:
+                        self.tokenizer.save_pretrained(str(out))
+                    MessageProtocol.warning(
+                        "LoRA-Adapter ohne Merge gespeichert. "
+                        "Inferenz im Laboratory erfordert ein vollständiges Modell. "
+                        "Nutze 'merge_and_unload' manuell oder deaktiviere LoRA."
+                    )
+                except Exception as e2:
+                    MessageProtocol.warning(f"Adapter-Fallback-Speicherung fehlgeschlagen: {e2}")
 
         if self.trainer:
             self.trainer.save_model(str(out))
+        elif self.model is not None:
+            # Kein Trainer vorhanden (sollte nicht vorkommen, aber sicher ist sicher)
+            self.model.save_pretrained(str(out))
         if self.tokenizer:
             self.tokenizer.save_pretrained(str(out))
 

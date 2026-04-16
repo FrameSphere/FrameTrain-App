@@ -313,6 +313,11 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const { currentTheme } = useTheme();
   const { currentPageContent: ctxPageContent } = usePageContext();
 
+  // Theme-abhängige Farben (reagieren auf Design-Wechsel in Einstellungen)
+  const themeGradient = `linear-gradient(135deg, ${currentTheme.colors.primary}, ${currentTheme.colors.secondary})`;
+  const themeGradientSubtle = `linear-gradient(to right, ${currentTheme.colors.primary}1a, ${currentTheme.colors.secondary}0d)`;
+  const themeAccentAlpha = `${currentTheme.colors.primary}4d`; // ~30% opacity
+
   const pageContent = currentPageContent || ctxPageContent || '';
 
   // Modal state
@@ -700,7 +705,7 @@ AKTUELLE SEITE UND KONTEXT:`;
           if (!activeChatId && chats.length === 0) createNewChat();
         }}
         className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl hover:shadow-purple-500/30 hover:scale-110 transition-all flex items-center justify-center z-40"
-        style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}
+        style={{ background: themeGradient }}
         title="KI-Coach öffnen"
       >
         <Brain className="w-6 h-6 text-white" />
@@ -806,12 +811,12 @@ AKTUELLE SEITE UND KONTEXT:`;
       {/* Chat header */}
       <div
         className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 flex-shrink-0 select-none cursor-move"
-        style={{ background: 'linear-gradient(to right, rgba(168,85,247,0.1), rgba(236,72,153,0.05))' }}
+        style={{ background: themeGradientSubtle }}
         onMouseDown={handleHeaderMouseDown}
       >
         <div className="flex items-center gap-2 pointer-events-none min-w-0">
           <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}>
+            style={{ background: themeGradient }}>
             <Brain className="w-3.5 h-3.5 text-white" />
           </div>
           <div className="min-w-0">
@@ -870,7 +875,7 @@ AKTUELLE SEITE UND KONTEXT:`;
         {(!activeChat || activeChat.messages.length === 0) && !isLoading && (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.2), rgba(236,72,153,0.1))' }}>
+              style={{ background: `linear-gradient(135deg, ${currentTheme.colors.primary}33, ${currentTheme.colors.secondary}1a)` }}>
               <Brain className="w-6 h-6 text-purple-400" />
             </div>
             <div>
@@ -915,7 +920,7 @@ AKTUELLE SEITE UND KONTEXT:`;
               </div>
             ) : (
               <div className="max-w-[85%] px-3 py-2.5 rounded-2xl rounded-tr-sm text-white text-sm leading-relaxed"
-                style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}>
+                style={{ background: themeGradient }}>
                 {msg.content}
               </div>
             )}
@@ -976,7 +981,7 @@ AKTUELLE SEITE UND KONTEXT:`;
             onClick={sendMessage}
             disabled={isLoading || !inputText.trim()}
             className="p-2 rounded-xl text-white flex-shrink-0 transition-all disabled:opacity-40 hover:opacity-90 active:scale-95"
-            style={{ background: 'linear-gradient(135deg, #a855f7, #ec4899)' }}
+            style={{ background: themeGradient }}
           >
             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
@@ -1017,7 +1022,7 @@ AKTUELLE SEITE UND KONTEXT:`;
         className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize"
         onMouseDown={handleResizeMouseDown}
         style={{
-          background: 'linear-gradient(135deg, transparent 50%, rgba(168,85,247,0.3) 100%)',
+          background: `linear-gradient(135deg, transparent 50%, ${currentTheme.colors.primary}4d 100%)`,
           borderRadius: '0 0 16px 0',
         }}
       />

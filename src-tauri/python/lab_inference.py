@@ -123,14 +123,26 @@ def find_actual_model_dir(model_path: str) -> tuple[str, str]:
     # Kein Modell gefunden
     files_found = [f.name for f in p.iterdir() if f.is_file()][:10]
     dirs_found = [d.name for d in p.iterdir() if d.is_dir()][:5]
-    
+
+    # Spezialfall: LoRA-Adapter ohne Merge erkannt
+    has_adapter = (p / 'adapter_model.safetensors').exists() or any(p.glob('adapter_model*.safetensors'))
+    if has_adapter:
+        return '', (
+            f"❌ LoRA-Adapter gefunden, aber kein vollst\u00e4ndiges Modell in:\n{model_path}\n\n"
+            f"Gefundene Dateien: {files_found}\n\n"
+            f"\u26a0\ufe0f Das Training hat nur den LoRA-Adapter gespeichert (adapter_model.safetensors),\n"
+            f"aber NICHT das zusammengef\u00fchrte Vollmodell.\n\n"
+            f"\ud83d\udca1 Ursache: Ein Bug im LoRA-Export wurde behoben. Bitte trainiere das Modell\n"
+            f"   erneut \u2014 ab sofort wird das vollst\u00e4ndige Modell korrekt gespeichert."
+        )
+
     return '', (
-        f"❌ Keine Modell-Gewichte in:\n{model_path}\n\n"
+        f"\u274c Keine Modell-Gewichte in:\n{model_path}\n\n"
         f"Gefundene Dateien: {files_found}\n"
         f"Gefundene Ordner: {dirs_found}\n\n"
         f"Erwartet: config.json + model.safetensors oder pytorch_model.bin\n\n"
-        f"💡 Das Training muss erst vollständig abgeschlossen sein.\n"
-        f"   Unterbrochene Trainings speichern kein vollständiges Modell."
+        f"\ud83d\udca1 Das Training muss erst vollst\u00e4ndig abgeschlossen sein.\n"
+        f"   Unterbrochene Trainings speichern kein vollst\u00e4ndiges Modell."
     )
 
 
