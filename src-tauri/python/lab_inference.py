@@ -201,10 +201,23 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
             device = -1  # pipeline nutzt mps automatisch in neueren Versionen
 
         # Pipeline erstellen
-        if task_type == 'auto':
-            pipe = pipeline(model=model_path, device=device)
-        else:
-            pipe = pipeline(task=task_type, model=model_path, device=device)
+        # Try local model first, if it's a valid local path
+        try:
+            if task_type == 'auto':
+                pipe = pipeline(model=model_path, device=device)
+            else:
+                pipe = pipeline(task=task_type, model=model_path, device=device)
+        except (ValueError, RuntimeError) as e:
+            # Wenn lokaler Pfad fehlschlägt, versuche als HuggingFace Model ID
+            if "Repo id must be" in str(e) or not Path(model_path).exists():
+                # Extract model name from path (z.B. 'hf_31ed74b60e9e' -> versuche als HF ID)
+                model_name = Path(model_path).name
+                if task_type == 'auto':
+                    pipe = pipeline(model=model_name, device=device)
+                else:
+                    pipe = pipeline(task=task_type, model=model_name, device=device)
+            else:
+                raise
 
         # Input laden je nach Typ
         if sample_type == 'image':

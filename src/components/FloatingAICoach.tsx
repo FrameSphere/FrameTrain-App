@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2, Brain } from 'lucide-react';
+import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2, Brain, Zap, BookOpen } from 'lucide-react';
 import { useAISettings, AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -8,6 +8,14 @@ import {
   getRelevantKnowledge,
   formatKnowledgeForContext 
 } from '../contexts/AIKnowledgeBaseSmart';
+
+// CSS Styles for Animations
+const ANIMATION_STYLES = `
+  @keyframes pulse {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+`;
 
 const PROVIDER_META: Record<AIProvider, {
   label: string; emoji: string; needsKey: boolean;
@@ -76,6 +84,13 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Extended Thinking Display State
+  interface ThinkingStep {
+    type: 'thinking' | 'analyzing' | 'loading_docs' | 'generating' | 'complete';
+    message: string;
+  }
+  const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
 
   // Load initial position from localStorage, otherwise calculate safe default
   const getInitialPosition = () => {
@@ -205,8 +220,42 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     setInputText('');
     setIsLoading(true);
     setError('');
+    setThinkingSteps([]); // Reset thinking steps
 
     try {
+      // Extended Thinking: Start
+      setThinkingSteps([
+        { type: 'thinking', message: 'Thinking...' },
+      ]);
+
+      // Delay for visual effect
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Extended Thinking: Analyzing
+      setThinkingSteps(prev => [
+        ...prev,
+        { type: 'analyzing', message: 'Analyzing keywords...' },
+      ]);
+
+      // Get relevant knowledge sections
+      const relevantSections = getRelevantKnowledge(userMessage.content);
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Extended Thinking: Loading docs
+      setThinkingSteps(prev => [
+        ...prev,
+        { type: 'loading_docs', message: `Loading ${relevantSections.length} knowledge section(s)...` },
+      ]);
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Extended Thinking: Generating
+      setThinkingSteps(prev => [
+        ...prev,
+        { type: 'generating', message: 'Generating response...' },
+      ]);
+
       const meta = PROVIDER_META[settings.provider];
       if (meta.needsKey && !settings.apiKey) {
         throw new Error('API-Key nicht konfiguriert. Bitte in Einstellungen einstellen.');
@@ -300,6 +349,12 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         responseText = data.choices?.[0]?.message?.content || '';
       }
 
+      // Extended Thinking: Complete
+      setThinkingSteps(prev => [
+        ...prev,
+        { type: 'complete', message: 'Complete' },
+      ]);
+
       const assistantMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -307,8 +362,12 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Clear thinking steps after showing complete
+      setTimeout(() => setThinkingSteps([]), 2000);
     } catch (e: any) {
-      setError('Fehler: ' + (e?.message || 'Unbekannter Fehler'));
+      setError('Error: ' + (e?.message || 'Unknown error'));
+      setThinkingSteps([]);
     } finally {
       setIsLoading(false);
     }
@@ -324,11 +383,11 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2 font-semibold z-40`}
-        title="KI-Coach öffnen"
+        className={`fixed bottom-6 right-6 p-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-1.5 z-40`}
+        title="AI Coach öffnen"
       >
         <Brain className="w-5 h-5" />
-        <span>AI Coach</span>
+        <span className="text-xs font-semibold">Ask</span>
       </button>
     );
   }
@@ -342,9 +401,9 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           ref={modalRef}
         >
           {/* Header */}
-          <div className={`flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0 bg-gradient-to-r ${currentTheme.colors.gradient} opacity-10`}>
+          <div className={`flex items-center justify-between p-5 border-b border-white/10 flex-shrink-0 bg-gradient-to-r ${currentTheme.colors.gradient} opacity-30`}>
             <div className="flex items-center gap-3">
-              <Brain className="w-6 h-6 text-white" />
+              <Brain className="w-6 h-6 text-purple-300" />
               <div>
                 <h2 className="text-xl font-bold text-white">KI-Coach</h2>
                 <p className="text-xs text-gray-400">Frag mich anything!</p>
@@ -374,11 +433,63 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
           {/* Messages area */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {messages.length === 0 && (
+            {/* Extended Thinking Display */}
+            {thinkingSteps.length > 0 && (
+              <div className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/10">
+                {thinkingSteps.map((step, idx) => {
+                  const isActive = idx === thinkingSteps.findIndex(s => s.type !== 'complete');
+                  const isComplete = step.type === 'complete' || idx < thinkingSteps.findIndex(s => s.type === 'complete');
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-center gap-2 text-xs transition-all duration-300 ${
+                        isActive ? 'opacity-100' : isComplete ? 'opacity-60' : 'opacity-40'
+                      }`}
+                    >
+                      {/* Icon with animation */}
+                      <div className={`flex-shrink-0 ${isActive ? 'animate-spin' : ''}`}>
+                        {step.type === 'thinking' && <Brain className="w-3.5 h-3.5 text-purple-400" />}
+                        {step.type === 'analyzing' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
+                        {step.type === 'loading_docs' && <BookOpen className="w-3.5 h-3.5 text-blue-400" />}
+                        {step.type === 'generating' && <Loader2 className="w-3.5 h-3.5 text-green-400 animate-spin" />}
+                        {step.type === 'complete' && (
+                          <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-purple-400 to-pink-400" />
+                        )}
+                      </div>
+
+                      {/* Text */}
+                      <span className={`${isActive ? 'text-gray-100 font-medium' : 'text-gray-500'}`}>
+                        {step.message}
+                      </span>
+
+                      {/* Pulse dots for active step */}
+                      {isActive && <div className="flex-1" />}
+                      {isActive && (
+                        <div className="flex gap-1">
+                          {[0, 1, 2].map(i => (
+                            <div
+                              key={i}
+                              className="w-1 h-1 rounded-full bg-purple-400"
+                              style={{
+                                animation: `pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite`,
+                                animationDelay: `${i * 0.2}s`,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {messages.length === 0 && thinkingSteps.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <Brain className="w-16 h-16 text-purple-400 mb-4" />
-                <p className="text-gray-400 text-lg">Hallo! Ich bin dein KI-Coach.</p>
-                <p className="text-gray-500 text-sm mt-2">Stelle mir eine Frage zu dem, was du gerade machst.</p>
+                <p className="text-gray-400 text-lg">Hello! I am your AI Coach.</p>
+                <p className="text-gray-500 text-sm mt-2">Ask me a question about what you are currently doing.</p>
               </div>
             )}
             {messages.map(msg => (
@@ -453,14 +564,14 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     >
       {/* Header - draggable */}
       <div
-        className={`bg-gradient-to-r ${currentTheme.colors.gradient} opacity-10 border-b border-white/10 p-3 cursor-move flex items-center justify-between flex-shrink-0 select-none`}
+        className={`bg-gradient-to-r ${currentTheme.colors.gradient} opacity-30 border-b border-white/10 p-3 cursor-move flex items-center justify-between flex-shrink-0 select-none`}
         onMouseDown={handleHeaderMouseDown}
       >
         <div className="flex items-center gap-2 pointer-events-none">
-          <Brain className="w-5 h-5 text-white" />
+          <Brain className="w-5 h-5 text-purple-300" />
           <div>
-            <div className="text-sm font-bold text-white">KI-Coach</div>
-            <div className="text-xs text-gray-400">Quick Chat</div>
+            <div className="text-sm font-bold text-gray-100">AI Coach</div>
+            <div className="text-xs text-gray-500">Quick Chat</div>
           </div>
         </div>
         <div className="flex items-center gap-1 pointer-events-auto">
@@ -551,6 +662,9 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         className="absolute bottom-0 right-0 w-4 h-4 bg-gradient-to-tl from-purple-500/50 to-transparent cursor-se-resize rounded-tl"
         onMouseDown={handleResizeMouseDown}
       />
+
+      {/* Animation styles */}
+      <style>{ANIMATION_STYLES}</style>
     </div>
   );
 }
