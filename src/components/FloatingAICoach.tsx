@@ -75,7 +75,7 @@ function saveChats(chats: Chat[]): void {
   } catch { /* ignore */ }
 }
 
-function createChat(): Chat {
+function createFreshChat(): Chat {
   return {
     id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     title: 'Neuer Chat',
@@ -147,7 +147,6 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
       continue;
     }
 
-    // Bullet list
     if (trimmed.match(/^[-*•]\s/)) {
       const items: string[] = [];
       while (i < lines.length && lines[i].trim().match(/^[-*•]\s/)) {
@@ -167,14 +166,11 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
       continue;
     }
 
-    // Numbered list
     if (trimmed.match(/^\d+\.\s/)) {
       const items: string[] = [];
-      let num = 1;
       while (i < lines.length && lines[i].trim().match(/^\d+\.\s/)) {
         items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
         i++;
-        num++;
       }
       elements.push(
         <ol key={`ol-${i}`} className="space-y-1 my-1.5">
@@ -189,7 +185,6 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
       continue;
     }
 
-    // Heading (### or ##)
     if (trimmed.startsWith('###')) {
       elements.push(
         <div key={i} className="font-semibold text-white mt-2 mb-1 text-sm">
@@ -240,30 +235,15 @@ function ThinkingBlock({
   const activeStep = steps.find(s => s.status === 'active');
   const doneCount = steps.filter(s => s.status === 'done').length;
 
-  return (
-    <div className="mb-3">
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors group"
-      >
-        {isActive ? (
+  if (isActive) {
+    // Still thinking – show animated steps
+    return (
+      <div className="mb-3">
+        <div className="flex items-center gap-1.5 text-xs text-purple-300/70 mb-1.5">
           <Loader2 className="w-3 h-3 animate-spin text-purple-400" />
-        ) : (
-          <Brain className="w-3 h-3 text-purple-400" />
-        )}
-        <span className="text-purple-300/70">
-          {isActive
-            ? (activeStep?.label || 'Denkt nach...')
-            : `Denkprozess (${doneCount} Schritte)`
-          }
-        </span>
-        {!isActive && (
-          <ChevronDown className={`w-3 h-3 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
-        )}
-      </button>
-
-      {(!collapsed || isActive) && (
-        <div className="mt-1.5 pl-1 space-y-1 border-l-2 border-purple-500/20 ml-1.5">
+          <span>{activeStep?.label || 'Denkt nach...'}</span>
+        </div>
+        <div className="pl-1 space-y-1 border-l-2 border-purple-500/20 ml-1.5">
           {steps.map(step => (
             <div
               key={step.id}
@@ -297,6 +277,41 @@ function ThinkingBlock({
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // Finished – show collapsible summary above message
+  return (
+    <div className="mb-2">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/15 hover:border-purple-500/30 transition-all group"
+      >
+        <Brain className="w-3 h-3 text-purple-400 flex-shrink-0" />
+        <span className="text-[11px] text-purple-300/80 font-medium">
+          Hat nachgedacht
+        </span>
+        <span className="text-[10px] text-purple-400/50 ml-0.5">· {doneCount} Schritte</span>
+        <ChevronDown className={`w-3 h-3 text-purple-400/60 ml-auto transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+      </button>
+
+      {!collapsed && (
+        <div className="mt-1.5 pl-1 space-y-1 border-l-2 border-purple-500/20 ml-1.5 pb-1">
+          {steps.map(step => (
+            <div key={step.id} className="flex items-start gap-2 py-0.5 opacity-60">
+              <div className="flex-shrink-0 mt-0.5 text-green-400">
+                {iconMap[step.icon]}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs text-gray-400">{step.label}</div>
+                {step.detail && (
+                  <div className="text-[10px] text-gray-600 mt-0.5 break-words">{step.detail}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -313,10 +328,8 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const { currentTheme } = useTheme();
   const { currentPageContent: ctxPageContent } = usePageContext();
 
-  // Theme-abhängige Farben (reagieren auf Design-Wechsel in Einstellungen)
   const themeGradient = `linear-gradient(135deg, ${currentTheme.colors.primary}, ${currentTheme.colors.secondary})`;
   const themeGradientSubtle = `linear-gradient(to right, ${currentTheme.colors.primary}1a, ${currentTheme.colors.secondary}0d)`;
-  const themeAccentAlpha = `${currentTheme.colors.primary}4d`; // ~30% opacity
 
   const pageContent = currentPageContent || ctxPageContent || '';
 
@@ -325,14 +338,18 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const [isMaximized, setIsMaximized] = useState(false);
   const [view, setView] = useState<'chat' | 'chatList'>('chat');
 
-  // Chat state
+  // ── Chat state ──
+  // `chats` = only persisted chats (have at least one message)
+  // `currentChat` = the currently displayed chat (may be unsaved/empty)
   const [chats, setChats] = useState<Chat[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [currentChat, setCurrentChat] = useState<Chat | null>(null);
+  // Track if currentChat is already in `chats` (persisted)
+  const currentChatPersistedRef = useRef(false);
+
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
-  const [thinkingCollapsed, setThinkingCollapsed] = useState(false);
 
   // Draggable/resizable state
   const [position, setPosition] = useState({ x: window.innerWidth - 390, y: window.innerHeight - 560 });
@@ -345,23 +362,18 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load chats from localStorage on mount
+  // Load chats from localStorage on mount (only persisted ones)
   useEffect(() => {
     const loaded = loadChats();
     setChats(loaded);
-    if (loaded.length > 0) {
-      setActiveChatId(loaded[0].id);
-    }
   }, []);
 
-  const activeChat = chats.find(c => c.id === activeChatId) || null;
-
-  // Scroll to bottom
+  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeChat?.messages]);
+  }, [currentChat?.messages]);
 
-  // Drag/resize mouse handling
+  // ── Drag / resize ──
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging) {
@@ -371,16 +383,10 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       } else if (isResizing) {
         const dx = e.clientX - resizeStart.x;
         const dy = e.clientY - resizeStart.y;
-        setSize({
-          width: Math.max(300, resizeStart.w + dx),
-          height: Math.max(320, resizeStart.h + dy),
-        });
+        setSize({ width: Math.max(300, resizeStart.w + dx), height: Math.max(320, resizeStart.h + dy) });
       }
     };
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      setIsResizing(false);
-    };
+    const handleMouseUp = () => { setIsDragging(false); setIsResizing(false); };
     if (isDragging || isResizing) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
@@ -403,64 +409,97 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     setResizeStart({ x: e.clientX, y: e.clientY, w: size.width, h: size.height });
   };
 
-  // Chat management
-  const createNewChat = useCallback(() => {
-    const chat = createChat();
-    const updated = [chat, ...chats];
-    setChats(updated);
-    saveChats(updated);
-    setActiveChatId(chat.id);
+  // ── Opens modal with a fresh empty chat (never saved until message sent) ──
+  const openModal = () => {
+    const fresh = createFreshChat();
+    setCurrentChat(fresh);
+    currentChatPersistedRef.current = false;
+    setView('chat');
+    setError('');
+    setInputText('');
+    setThinkingSteps([]);
+    setIsOpen(true);
+  };
+
+  // ── Start a new chat (from chat list or header button) ──
+  // Creates a fresh unsaved chat and switches to it, without touching `chats`
+  const handleNewChat = useCallback(() => {
+    const fresh = createFreshChat();
+    setCurrentChat(fresh);
+    currentChatPersistedRef.current = false;
+    setView('chat');
+    setError('');
+    setInputText('');
+    setThinkingSteps([]);
+  }, []);
+
+  // ── Switch to an existing persisted chat ──
+  const switchToChat = useCallback((chatId: string) => {
+    const chat = chats.find(c => c.id === chatId);
+    if (chat) {
+      setCurrentChat(chat);
+      currentChatPersistedRef.current = true;
+    }
     setView('chat');
     setError('');
   }, [chats]);
 
-  const switchToChat = useCallback((chatId: string) => {
-    setActiveChatId(chatId);
-    setView('chat');
-    setError('');
-  }, []);
-
+  // ── Delete a persisted chat ──
   const deleteChat = useCallback((chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const updated = chats.filter(c => c.id !== chatId);
     setChats(updated);
     saveChats(updated);
-    if (activeChatId === chatId) {
-      setActiveChatId(updated.length > 0 ? updated[0].id : null);
+    // If we're currently viewing this chat, open a fresh one
+    if (currentChat?.id === chatId) {
+      const fresh = createFreshChat();
+      setCurrentChat(fresh);
+      currentChatPersistedRef.current = false;
     }
-  }, [chats, activeChatId]);
+  }, [chats, currentChat]);
 
-  const updateChat = useCallback((chatId: string, updater: (c: Chat) => Chat) => {
-    setChats(prev => {
-      const updated = prev.map(c => c.id === chatId ? updater(c) : c);
-      saveChats(updated);
+  // ── Update currentChat and sync to `chats` if already persisted ──
+  const applyToCurrentChat = useCallback((updater: (c: Chat) => Chat) => {
+    setCurrentChat(prev => {
+      if (!prev) return prev;
+      const updated = updater(prev);
+      // Also update in chats list if this chat is persisted
+      if (currentChatPersistedRef.current) {
+        setChats(prevChats => {
+          const newChats = prevChats.map(c => c.id === updated.id ? updated : c);
+          saveChats(newChats);
+          return newChats;
+        });
+      }
       return updated;
     });
   }, []);
 
-  // Build system prompt with page context
+  // ── Ensure currentChat is persisted (call before first message) ──
+  const ensurePersisted = useCallback((chat: Chat) => {
+    if (!currentChatPersistedRef.current) {
+      currentChatPersistedRef.current = true;
+      setChats(prev => {
+        const newChats = [chat, ...prev];
+        saveChats(newChats);
+        return newChats;
+      });
+    }
+  }, []);
+
+  // ── Build system prompt ──
   const buildSystemPrompt = (): string => {
-    let prompt = `Du bist ein hilfreicher KI-Assistent in der FrameTrain Desktop-Anwendung für Machine Learning Training.
-
-AKTUELLE SEITE UND KONTEXT:`;
-
+    let prompt = `Du bist ein hilfreicher KI-Assistent in der FrameTrain Desktop-Anwendung für Machine Learning Training.\n\nAKTUELLE SEITE UND KONTEXT:`;
     if (pageContent) {
       prompt += `\n${pageContent}`;
     } else {
       prompt += `\nKein spezifischer Seitenkontext verfügbar.`;
     }
-
-    prompt += `\n\nANWEISUNGEN:
-- Antworte auf Deutsch, prägnant und hilfreich
-- Erkläre ML-Konzepte verständlich  
-- Wenn du Fehler siehst, erkläre ihre Ursache und Lösung
-- Nutze Markdown-Formatierung: **fett** für wichtige Begriffe, Listen für Schritte
-- Beziehe dich konkret auf den Seiteninhalt wenn relevant`;
-
+    prompt += `\n\nANWEISUNGEN:\n- Antworte auf Deutsch, prägnant und hilfreich\n- Erkläre ML-Konzepte verständlich\n- Wenn du Fehler siehst, erkläre ihre Ursache und Lösung\n- Nutze Markdown-Formatierung: **fett** für wichtige Begriffe, Listen für Schritte\n- Beziehe dich konkret auf den Seiteninhalt wenn relevant`;
     return prompt;
   };
 
-  // Thinking steps helper
+  // ── Thinking animation — returns the steps array for use after async gap ──
   const runThinkingAnimation = async (hasPageContent: boolean): Promise<ThinkingStep[]> => {
     const steps: ThinkingStep[] = [
       { id: 's1', label: 'Seite analysieren', icon: 'search', status: 'pending',
@@ -469,58 +508,33 @@ AKTUELLE SEITE UND KONTEXT:`;
       { id: 's3', label: 'Antwort generieren', icon: 'sparkles', status: 'pending', detail: undefined },
     ];
 
-    const setSteps = (updater: (prev: ThinkingStep[]) => ThinkingStep[]) => {
-      setThinkingSteps(prev => updater(prev));
-      return new Promise<void>(r => setTimeout(r, 0));
-    };
-
     setThinkingSteps(steps);
     await new Promise(r => setTimeout(r, 50));
 
-    // Step 1 active
     setThinkingSteps(s => s.map((st, i) => i === 0 ? { ...st, status: 'active' } : st));
     await new Promise(r => setTimeout(r, 400));
 
-    // Step 1 done, step 2 active
     setThinkingSteps(s => s.map((st, i) =>
-      i === 0 ? { ...st, status: 'done' } :
-      i === 1 ? { ...st, status: 'active' } : st
+      i === 0 ? { ...st, status: 'done' } : i === 1 ? { ...st, status: 'active' } : st
     ));
     await new Promise(r => setTimeout(r, 350));
 
-    // Step 2 done, step 3 active
     setThinkingSteps(s => s.map((st, i) =>
-      i === 1 ? { ...st, status: 'done' } :
-      i === 2 ? { ...st, status: 'active' } : st
+      i === 1 ? { ...st, status: 'done' } : i === 2 ? { ...st, status: 'active' } : st
     ));
 
-    return steps;
+    // Return a done copy for attaching to the assistant message (avoids stale closure)
+    return steps.map(s => ({ ...s, status: 'done' as const }));
   };
 
-  const completeThinkingSteps = () => {
-    setThinkingSteps(s => s.map(st => ({ ...st, status: 'done' as const })));
-    setThinkingCollapsed(true);
-  };
-
-  // Send message
+  // ── Send message ──
   const sendMessage = async () => {
     const text = inputText.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || !currentChat) return;
 
     if (!settings.enabled) {
       setError('KI-Assistent ist deaktiviert. Bitte in Einstellungen aktivieren.');
       return;
-    }
-
-    // Ensure we have a chat
-    let currentChatId = activeChatId;
-    if (!currentChatId) {
-      const chat = createChat();
-      const updated = [chat, ...chats];
-      setChats(updated);
-      saveChats(updated);
-      setActiveChatId(chat.id);
-      currentChatId = chat.id;
     }
 
     const userMsg: Message = {
@@ -530,23 +544,40 @@ AKTUELLE SEITE UND KONTEXT:`;
       timestamp: Date.now(),
     };
 
+    // Snapshot of currentChat before any async
+    const chatSnapshot = currentChat;
+
     setInputText('');
     setError('');
-    setThinkingCollapsed(false);
 
-    // Add user message and update title
-    updateChat(currentChatId, c => ({
-      ...c,
-      messages: [...c.messages, userMsg],
-      title: c.messages.length === 0 ? generateTitle(text) : c.title,
+    // Build updated chat with user message
+    const isFirstMessage = chatSnapshot.messages.length === 0;
+    const chatWithUserMsg: Chat = {
+      ...chatSnapshot,
+      messages: [...chatSnapshot.messages, userMsg],
+      title: isFirstMessage ? generateTitle(text) : chatSnapshot.title,
       updatedAt: Date.now(),
-    }));
+    };
+
+    // Persist if this is the first message
+    if (isFirstMessage) {
+      ensurePersisted(chatWithUserMsg);
+    }
+
+    // Update local state immediately
+    setCurrentChat(chatWithUserMsg);
+    if (!isFirstMessage && currentChatPersistedRef.current) {
+      setChats(prev => {
+        const updated = prev.map(c => c.id === chatWithUserMsg.id ? chatWithUserMsg : c);
+        saveChats(updated);
+        return updated;
+      });
+    }
 
     setIsLoading(true);
 
-    // Animate thinking steps
-    const hasContent = !!pageContent;
-    await runThinkingAnimation(hasContent);
+    // Run thinking animation — get the final done-steps for later
+    const finalThinkingSteps = await runThinkingAnimation(!!pageContent);
 
     try {
       const meta = PROVIDER_META[settings.provider];
@@ -554,9 +585,7 @@ AKTUELLE SEITE UND KONTEXT:`;
         throw new Error('API-Key fehlt. Bitte in Einstellungen → KI-Assistent konfigurieren.');
       }
 
-      // Get current chat messages for context (up to last 10)
-      const currentChat = chats.find(c => c.id === currentChatId);
-      const history = currentChat?.messages.slice(-10) || [];
+      const history = chatWithUserMsg.messages.slice(-10);
       const systemPrompt = buildSystemPrompt();
       let responseText = '';
 
@@ -564,10 +593,8 @@ AKTUELLE SEITE UND KONTEXT:`;
         const conversationText = [
           systemPrompt,
           ...history.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`),
-          `User: ${text}`,
           'Assistant:',
         ].join('\n\n');
-
         const res = await fetch('http://localhost:11434/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -586,7 +613,6 @@ AKTUELLE SEITE UND KONTEXT:`;
         const messages = [
           { role: 'system', content: systemPrompt },
           ...history.map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: text },
         ];
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
@@ -598,18 +624,12 @@ AKTUELLE SEITE UND KONTEXT:`;
             messages,
           }),
         });
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}));
-          throw new Error(e?.error?.message || `HTTP ${res.status}`);
-        }
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
         const data = await res.json();
         responseText = data.choices?.[0]?.message?.content || '';
 
       } else if (settings.provider === 'anthropic') {
-        const messages = [
-          ...history.map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: text },
-        ];
+        const messages = history.map(m => ({ role: m.role, content: m.content }));
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
@@ -625,19 +645,14 @@ AKTUELLE SEITE UND KONTEXT:`;
             messages,
           }),
         });
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}));
-          throw new Error(e?.error?.message || `HTTP ${res.status}`);
-        }
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
         const data = await res.json();
         responseText = data.content?.[0]?.text || '';
 
       } else {
-        // OpenAI
         const messages = [
           { role: 'system', content: systemPrompt },
           ...history.map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: text },
         ];
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -649,34 +664,37 @@ AKTUELLE SEITE UND KONTEXT:`;
             messages,
           }),
         });
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}));
-          throw new Error(e?.error?.message || `HTTP ${res.status}`);
-        }
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
         const data = await res.json();
         responseText = data.choices?.[0]?.message?.content || '';
       }
 
-      completeThinkingSteps();
+      setThinkingSteps([]);
 
       const assistantMsg: Message = {
         id: `msg-${Date.now()}-ai`,
         role: 'assistant',
         content: responseText,
         timestamp: Date.now(),
-        thinkingSteps: thinkingSteps.map(s => ({ ...s, status: 'done' as const })),
+        // Use the locally captured finalThinkingSteps (no stale closure!)
+        thinkingSteps: finalThinkingSteps,
         thinkingCollapsed: true,
       };
 
-      updateChat(currentChatId, c => ({
-        ...c,
-        messages: [...c.messages, assistantMsg],
-        updatedAt: Date.now(),
-      }));
-      setThinkingSteps([]);
+      setCurrentChat(prev => {
+        if (!prev) return prev;
+        const updated: Chat = { ...prev, messages: [...prev.messages, assistantMsg], updatedAt: Date.now() };
+        if (currentChatPersistedRef.current) {
+          setChats(prevChats => {
+            const newChats = prevChats.map(c => c.id === updated.id ? updated : c);
+            saveChats(newChats);
+            return newChats;
+          });
+        }
+        return updated;
+      });
 
     } catch (e: any) {
-      completeThinkingSteps();
       setThinkingSteps([]);
       setError(e?.message || 'Unbekannter Fehler');
     } finally {
@@ -684,9 +702,9 @@ AKTUELLE SEITE UND KONTEXT:`;
     }
   };
 
-  // Toggle thinking steps for a specific message
+  // ── Toggle thinking collapse for a specific message ──
   const toggleMessageThinking = (msgId: string) => {
-    updateChat(activeChatId!, c => ({
+    applyToCurrentChat(c => ({
       ...c,
       messages: c.messages.map(m =>
         m.id === msgId ? { ...m, thinkingCollapsed: !m.thinkingCollapsed } : m
@@ -696,14 +714,11 @@ AKTUELLE SEITE UND KONTEXT:`;
 
   if (!settings.enabled) return null;
 
-  // ── Closed state: floating button ──
+  // ── Closed: floating button ──
   if (!isOpen) {
     return (
       <button
-        onClick={() => {
-          setIsOpen(true);
-          if (!activeChatId && chats.length === 0) createNewChat();
-        }}
+        onClick={openModal}
         className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl hover:shadow-purple-500/30 hover:scale-110 transition-all flex items-center justify-center z-40"
         style={{ background: themeGradient }}
         title="KI-Coach öffnen"
@@ -713,10 +728,9 @@ AKTUELLE SEITE UND KONTEXT:`;
     );
   }
 
-  // ── Content for both floating and maximized ──
+  // ── Chat list view ──
   const renderChatListView = () => (
     <div className="flex flex-col h-full">
-      {/* Chat list header */}
       <div
         className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0 select-none cursor-move"
         onMouseDown={handleHeaderMouseDown}
@@ -728,7 +742,7 @@ AKTUELLE SEITE UND KONTEXT:`;
         </div>
         <div className="pointer-events-auto flex items-center gap-1">
           <button
-            onClick={createNewChat}
+            onClick={handleNewChat}
             className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
             title="Neuer Chat"
           >
@@ -741,33 +755,30 @@ AKTUELLE SEITE UND KONTEXT:`;
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <button
-            onClick={() => setIsOpen(false)}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-          >
+          <button onClick={() => setIsOpen(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all">
             <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Chat list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {chats.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-4">
             <MessageSquare className="w-8 h-8 text-gray-600" />
             <p className="text-gray-500 text-sm">Noch keine Chats</p>
+            <p className="text-gray-600 text-xs">Starte einen neuen Chat und schreibe eine Nachricht.</p>
             <button
-              onClick={createNewChat}
+              onClick={handleNewChat}
               className="px-3 py-2 text-xs font-medium bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg border border-purple-500/30 transition-all flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              Ersten Chat starten
+              Neuen Chat starten
             </button>
           </div>
         ) : (
           <>
             <button
-              onClick={createNewChat}
+              onClick={handleNewChat}
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-white/10 hover:border-purple-500/30 hover:bg-purple-500/5 text-gray-400 hover:text-purple-300 transition-all text-xs font-medium"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -778,7 +789,7 @@ AKTUELLE SEITE UND KONTEXT:`;
                 key={chat.id}
                 onClick={() => switchToChat(chat.id)}
                 className={`w-full flex items-start justify-between gap-2 px-3 py-2.5 rounded-xl border text-left transition-all group ${
-                  chat.id === activeChatId
+                  chat.id === currentChat?.id
                     ? 'bg-purple-500/15 border-purple-500/30 text-white'
                     : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06] hover:border-white/10 text-gray-300'
                 }`}
@@ -806,9 +817,9 @@ AKTUELLE SEITE UND KONTEXT:`;
     </div>
   );
 
+  // ── Chat view ──
   const renderChatView = () => (
     <div className="flex flex-col h-full">
-      {/* Chat header */}
       <div
         className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 flex-shrink-0 select-none cursor-move"
         style={{ background: themeGradientSubtle }}
@@ -821,7 +832,7 @@ AKTUELLE SEITE UND KONTEXT:`;
           </div>
           <div className="min-w-0">
             <div className="text-xs font-bold text-white truncate max-w-[160px]">
-              {activeChat?.title || 'KI-Coach'}
+              {currentChat?.title || 'KI-Coach'}
             </div>
             {pageContent && (
               <div className="text-[10px] text-gray-500 truncate max-w-[160px]">
@@ -831,40 +842,23 @@ AKTUELLE SEITE UND KONTEXT:`;
           </div>
         </div>
         <div className="flex items-center gap-1 pointer-events-auto flex-shrink-0">
-          <button
-            onClick={() => setView('chatList')}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
-            title="Chatverläufe"
-          >
+          <button onClick={() => setView('chatList')} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title="Chatverläufe">
             <MessageSquare className="w-3.5 h-3.5" />
           </button>
-          <button
-            onClick={createNewChat}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
-            title="Neuer Chat"
-          >
+          <button onClick={handleNewChat} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title="Neuer Chat">
             <Plus className="w-3.5 h-3.5" />
           </button>
           {!isMaximized && (
-            <button
-              onClick={() => setIsMaximized(true)}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-            >
+            <button onClick={() => setIsMaximized(true)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all">
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
           )}
           {isMaximized && (
-            <button
-              onClick={() => setIsMaximized(false)}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-            >
+            <button onClick={() => setIsMaximized(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all">
               <Minimize2 className="w-3.5 h-3.5" />
             </button>
           )}
-          <button
-            onClick={() => setIsOpen(false)}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-          >
+          <button onClick={() => setIsOpen(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -872,7 +866,7 @@ AKTUELLE SEITE UND KONTEXT:`;
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
-        {(!activeChat || activeChat.messages.length === 0) && !isLoading && (
+        {(!currentChat || currentChat.messages.length === 0) && !isLoading && (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
               style={{ background: `linear-gradient(135deg, ${currentTheme.colors.primary}33, ${currentTheme.colors.secondary}1a)` }}>
@@ -900,11 +894,11 @@ AKTUELLE SEITE UND KONTEXT:`;
           </div>
         )}
 
-        {activeChat?.messages.map(msg => (
+        {currentChat?.messages.map(msg => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'assistant' ? (
               <div className="max-w-[88%] space-y-1">
-                {/* Thinking steps for this message */}
+                {/* Thinking block — shown above the message when finished */}
                 {msg.thinkingSteps && msg.thinkingSteps.length > 0 && (
                   <ThinkingBlock
                     steps={msg.thinkingSteps}
@@ -913,7 +907,6 @@ AKTUELLE SEITE UND KONTEXT:`;
                     onToggle={() => toggleMessageThinking(msg.id)}
                   />
                 )}
-                {/* Message content */}
                 <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.06] border border-white/[0.08] text-gray-200">
                   <MarkdownText text={msg.content} />
                 </div>
@@ -927,15 +920,15 @@ AKTUELLE SEITE UND KONTEXT:`;
           </div>
         ))}
 
-        {/* Active thinking steps */}
+        {/* Active thinking steps (while loading) */}
         {isLoading && thinkingSteps.length > 0 && (
           <div className="flex justify-start">
             <div className="max-w-[88%]">
               <ThinkingBlock
                 steps={thinkingSteps}
                 isActive={true}
-                collapsed={thinkingCollapsed}
-                onToggle={() => setThinkingCollapsed(c => !c)}
+                collapsed={false}
+                onToggle={() => {}}
               />
             </div>
           </div>
@@ -961,10 +954,7 @@ AKTUELLE SEITE UND KONTEXT:`;
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
             }}
             placeholder="Frage stellen... (Enter senden)"
             disabled={isLoading}
@@ -1016,8 +1006,6 @@ AKTUELLE SEITE UND KONTEXT:`;
       }}
     >
       {content}
-
-      {/* Resize handle */}
       <div
         className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize"
         onMouseDown={handleResizeMouseDown}
