@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2, Brain, Zap, BookOpen } from 'lucide-react';
+import { X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2, Brain, Zap, BookOpen, MessageSquare, Trash2 } from 'lucide-react';
 import { useAISettings, AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -16,6 +16,31 @@ const ANIMATION_STYLES = `
     50% { opacity: 1; transform: scale(1); }
   }
 `;
+
+// Formatter: Convert Markdown to HTML in messages
+function formatMessageContent(text: string): React.ReactNode {
+  // Split by double newlines to preserve paragraph breaks
+  const paragraphs = text.split('\n\n');
+  
+  return paragraphs.map((para, idx) => {
+    // Split lines within paragraph
+    const lines = para.split('\n');
+    const formattedLines = lines.map((line, lineIdx) => {
+      // Replace bold **text** -> <strong>
+      let formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // Replace italics *text* -> <em>
+      formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      // Replace code `text` -> <code>
+      formatted = formatted.replace(/`(.*?)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-family: monospace;">$1</code>');
+      
+      return (
+        <div key={`${idx}-${lineIdx}`} dangerouslySetInnerHTML={{ __html: formatted }} />
+      );
+    });
+    
+    return <div key={idx} style={{ marginBottom: '0.5em' }}>{formattedLines}</div>;
+  });
+}
 
 const PROVIDER_META: Record<AIProvider, {
   label: string; emoji: string; needsKey: boolean;
@@ -67,6 +92,14 @@ interface Message {
   timestamp: number;
 }
 
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface FloatingAICoachProps {
   currentPageContent?: string; // Kontext der aktuellen Seite
 }
@@ -84,6 +117,11 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // Chat History & Session Management
+  const [currentChatId, setCurrentChatId] = useState<string>('');
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [showChatHistory, setShowChatHistory] = useState(false);
 
   // Extended Thinking Display State
   interface ThinkingStep {
@@ -122,6 +160,45 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Load chat sessions from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('aiCoachChatSessions');
+      if (saved) {
+        const sessions: ChatSession[] = JSON.parse(saved);
+        setChatSessions(sessions);
+        
+        // Load last active chat or create new one
+        const lastChatId = localStorage.getItem('aiCoachLastChatId');
+        if (lastChatId && sessions.find(s => s.id === lastChatId)) {
+          loadChat(lastChatId, sessions);
+        } else if (sessions.length > 0) {
+          loadChat(sessions[0].id, sessions);
+        } else {
+          createNewChat();
+        }
+      } else {
+        // No chats exist, create first one
+        createNewChat();
+      }
+    } catch (e) {
+      console.error('Error loading chat history:', e);
+      createNewChat();
+    }
+  }, []);
+
+  // Save current chat whenever messages change
+  useEffect(() => {
+    if (currentChatId && messages.length > 0) {
+      saveCurrentChat(messages);
+    }
+  }, [messages]);
+
+  // Save position whenever it changes
+  useEffect(() => {
+    localStorage.setItem('aiCoachPosition', JSON.stringify(position));
+  }, [position]);
 
   // Handle mouse move for dragging/resizing
   useEffect(() => {
@@ -201,6 +278,80 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     return prompt;
   };
 
+  // ============ Chat Management Functions ============
+  
+  const generateChatTitle = (messages: Message[]): string => {
+    if (messages.length > 0 && messages[0].role === 'user') {
+      return messages[0].content.slice(0, 50) + (messages[0].content.length > 50 ? '...' : '');
+    }
+    return 'Neuer Chat';
+  };
+
+  const createNewChat = () => {
+    const newChat: ChatSession = {
+      id: `chat_${Date.now()}`,
+      title: 'Neuer Chat',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    
+    const newSessions = [newChat, ...chatSessions];
+    setChatSessions(newSessions);
+    setCurrentChatId(newChat.id);
+    setMessages([]);
+    setInputText('');
+    
+    localStorage.setItem('aiCoachChatSessions', JSON.stringify(newSessions));
+    localStorage.setItem('aiCoachLastChatId', newChat.id);
+  };
+
+  const loadChat = (chatId: string, sessions?: ChatSession[]) => {
+    const sessionsToUse = sessions || chatSessions;
+    const chat = sessionsToUse.find(s => s.id === chatId);
+    
+    if (chat) {
+      setCurrentChatId(chatId);
+      setMessages(chat.messages);
+      setInputText('');
+      localStorage.setItem('aiCoachLastChatId', chatId);
+    }
+  };
+
+  const saveCurrentChat = (updatedMessages: Message[]) => {
+    if (!currentChatId) return;
+    
+    const updatedSessions = chatSessions.map(session => {
+      if (session.id === currentChatId) {
+        const newTitle = updatedMessages.length > 0 ? generateChatTitle(updatedMessages) : 'Neuer Chat';
+        return {
+          ...session,
+          messages: updatedMessages,
+          title: session.title === 'Neuer Chat' ? newTitle : session.title,
+          updatedAt: Date.now(),
+        };
+      }
+      return session;
+    });
+    
+    setChatSessions(updatedSessions);
+    localStorage.setItem('aiCoachChatSessions', JSON.stringify(updatedSessions));
+  };
+
+  const deleteChat = (chatId: string) => {
+    const remaining = chatSessions.filter(s => s.id !== chatId);
+    setChatSessions(remaining);
+    localStorage.setItem('aiCoachChatSessions', JSON.stringify(remaining));
+    
+    if (currentChatId === chatId) {
+      if (remaining.length > 0) {
+        loadChat(remaining[0].id, remaining);
+      } else {
+        createNewChat();
+      }
+    }
+  };
+
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
 
@@ -223,37 +374,44 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     setThinkingSteps([]); // Reset thinking steps
 
     try {
-      // Extended Thinking: Start
+      // Extended Thinking: Detailed steps for user visibility
       setThinkingSteps([
-        { type: 'thinking', message: 'Thinking...' },
+        { type: 'thinking', message: 'Analyzing your question...' },
       ]);
 
-      // Delay for visual effect
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Extended Thinking: Analyzing
+      // Step 2: Read page content
       setThinkingSteps(prev => [
         ...prev,
-        { type: 'analyzing', message: 'Analyzing keywords...' },
+        { type: 'analyzing', message: 'Reading page content and status...' },
       ]);
 
-      // Get relevant knowledge sections
-      const relevantSections = getRelevantKnowledge(userMessage.content);
-      
       await new Promise(resolve => setTimeout(resolve, 200));
 
-      // Extended Thinking: Loading docs
+      // Step 3: Check for errors/special content
+      if (pageContent && pageContent.includes('Error')) {
+        setThinkingSteps(prev => [
+          ...prev,
+          { type: 'analyzing', message: 'Found error on page - analyzing...' },
+        ]);
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+
+      // Step 4: Match keywords and load docs
+      const relevantSections = getRelevantKnowledge(userMessage.content);
+      
       setThinkingSteps(prev => [
         ...prev,
-        { type: 'loading_docs', message: `Loading ${relevantSections.length} knowledge section(s)...` },
+        { type: 'loading_docs', message: `Found ${relevantSections.length} relevant documentation section(s)` },
       ]);
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 250));
 
-      // Extended Thinking: Generating
+      // Step 5: Generating response
       setThinkingSteps(prev => [
         ...prev,
-        { type: 'generating', message: 'Generating response...' },
+        { type: 'generating', message: 'Generating response from AI...' },
       ]);
 
       const meta = PROVIDER_META[settings.provider];
@@ -411,6 +569,13 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
             </div>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setShowChatHistory(!showChatHistory)}
+                className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+                title="Chat-Verlauf"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </button>
+              <button
                 onClick={() => setIsMaximized(false)}
                 className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
                 title="Minimieren"
@@ -433,118 +598,169 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
           {/* Messages area */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {/* Extended Thinking Display */}
-            {thinkingSteps.length > 0 && (
-              <div className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/10">
-                {thinkingSteps.map((step, idx) => {
-                  const isActive = idx === thinkingSteps.findIndex(s => s.type !== 'complete');
-                  const isComplete = step.type === 'complete' || idx < thinkingSteps.findIndex(s => s.type === 'complete');
+            {showChatHistory ? (
+              // Chat History View
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    createNewChat();
+                    setShowChatHistory(false);
+                  }}
+                  className={`w-full px-4 py-2 rounded-lg bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-medium hover:shadow-lg transition-all text-sm`}
+                >
+                  + Neuer Chat
+                </button>
+                
+                {chatSessions.length === 0 ? (
+                  <p className="text-center text-gray-400 text-sm mt-8">Keine Chats noch.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {chatSessions.map(chat => (
+                      <div
+                        key={chat.id}
+                        className={`p-3 rounded-lg cursor-pointer transition-all ${
+                          currentChatId === chat.id
+                            ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
+                            : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                        }`}
+                        onClick={() => {
+                          loadChat(chat.id);
+                          setShowChatHistory(false);
+                        }}
+                      >
+                        <p className="font-medium text-sm truncate">{chat.title}</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {new Date(chat.updatedAt).toLocaleString('de-DE', { 
+                            month: 'short', 
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Chat Messages View
+              <>
+                {/* Extended Thinking Display */}
+                {thinkingSteps.length > 0 && (
+                  <div className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/10">
+                    {thinkingSteps.map((step, idx) => {
+                      const isActive = idx === thinkingSteps.findIndex(s => s.type !== 'complete');
+                      const isComplete = step.type === 'complete' || idx < thinkingSteps.findIndex(s => s.type === 'complete');
 
-                  return (
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-center gap-2 text-xs transition-all duration-300 ${
+                            isActive ? 'opacity-100' : isComplete ? 'opacity-60' : 'opacity-40'
+                          }`}
+                        >
+                          {/* Icon with animation */}
+                          <div className={`flex-shrink-0 ${isActive ? 'animate-spin' : ''}`}>
+                            {step.type === 'thinking' && <Brain className="w-3.5 h-3.5 text-purple-400" />}
+                            {step.type === 'analyzing' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
+                            {step.type === 'loading_docs' && <BookOpen className="w-3.5 h-3.5 text-blue-400" />}
+                            {step.type === 'generating' && <Loader2 className="w-3.5 h-3.5 text-green-400 animate-spin" />}
+                            {step.type === 'complete' && (
+                              <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-purple-400 to-pink-400" />
+                            )}
+                          </div>
+
+                          {/* Text */}
+                          <span className={`${isActive ? 'text-gray-100 font-medium' : 'text-gray-500'}`}>
+                            {step.message}
+                          </span>
+
+                          {/* Pulse dots for active step */}
+                          {isActive && <div className="flex-1" />}
+                          {isActive && (
+                            <div className="flex gap-1">
+                              {[0, 1, 2].map(i => (
+                                <div
+                                  key={i}
+                                  className="w-1 h-1 rounded-full bg-purple-400"
+                                  style={{
+                                    animation: `pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite`,
+                                    animationDelay: `${i * 0.2}s`,
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {messages.length === 0 && thinkingSteps.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full text-center">
+                    <Brain className="w-16 h-16 text-purple-400 mb-4" />
+                    <p className="text-gray-400 text-lg">Hello! I am your AI Coach.</p>
+                    <p className="text-gray-500 text-sm mt-2">Ask me a question about what you are currently doing.</p>
+                  </div>
+                )}
+                {messages.map(msg => (
+                  <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div
-                      key={idx}
-                      className={`flex items-center gap-2 text-xs transition-all duration-300 ${
-                        isActive ? 'opacity-100' : isComplete ? 'opacity-60' : 'opacity-40'
+                      className={`max-w-xs px-4 py-2 rounded-lg ${
+                        msg.role === 'user'
+                          ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
+                          : 'bg-white/10 text-gray-100 border border-white/10'
                       }`}
                     >
-                      {/* Icon with animation */}
-                      <div className={`flex-shrink-0 ${isActive ? 'animate-spin' : ''}`}>
-                        {step.type === 'thinking' && <Brain className="w-3.5 h-3.5 text-purple-400" />}
-                        {step.type === 'analyzing' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
-                        {step.type === 'loading_docs' && <BookOpen className="w-3.5 h-3.5 text-blue-400" />}
-                        {step.type === 'generating' && <Loader2 className="w-3.5 h-3.5 text-green-400 animate-spin" />}
-                        {step.type === 'complete' && (
-                          <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-purple-400 to-pink-400" />
-                        )}
-                      </div>
-
-                      {/* Text */}
-                      <span className={`${isActive ? 'text-gray-100 font-medium' : 'text-gray-500'}`}>
-                        {step.message}
-                      </span>
-
-                      {/* Pulse dots for active step */}
-                      {isActive && <div className="flex-1" />}
-                      {isActive && (
-                        <div className="flex gap-1">
-                          {[0, 1, 2].map(i => (
-                            <div
-                              key={i}
-                              className="w-1 h-1 rounded-full bg-purple-400"
-                              style={{
-                                animation: `pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite`,
-                                animationDelay: `${i * 0.2}s`,
-                              }}
-                            />
-                          ))}
-                        </div>
-                      )}
+                      <p className="text-sm leading-relaxed">{formatMessageContent(msg.content)}</p>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {messages.length === 0 && thinkingSteps.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Brain className="w-16 h-16 text-purple-400 mb-4" />
-                <p className="text-gray-400 text-lg">Hello! I am your AI Coach.</p>
-                <p className="text-gray-500 text-sm mt-2">Ask me a question about what you are currently doing.</p>
-              </div>
-            )}
-            {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-xs px-4 py-2 rounded-lg ${
-                    msg.role === 'user'
-                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white`
-                      : 'bg-white/10 text-gray-100 border border-white/10'
-                  }`}
-                >
-                  <p className="text-sm leading-relaxed">{msg.content}</p>
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white/10 text-gray-300 px-4 py-3 rounded-lg border border-white/10 flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span className="text-sm">KI denkt nach...</span>
-                </div>
-              </div>
-            )}
-            {error && (
-              <div className="flex justify-start">
-                <div className="bg-red-500/10 text-red-300 px-4 py-3 rounded-lg border border-red-500/20 flex items-center gap-2 text-sm">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  {error}
-                </div>
-              </div>
+                  </div>
+                ))}
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-white/10 text-gray-300 px-4 py-3 rounded-lg border border-white/10 flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">KI denkt nach...</span>
+                    </div>
+                  </div>
+                )}
+                {error && (
+                  <div className="flex justify-start">
+                    <div className="bg-red-500/10 text-red-300 px-4 py-3 rounded-lg border border-red-500/20 flex items-center gap-2 text-sm">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      {error}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
-          <div className="p-4 border-t border-white/10 bg-slate-800/50 flex-shrink-0">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inputText}
-                onChange={e => setInputText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                placeholder="Deine Frage..."
-                disabled={isLoading}
-                className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={isLoading || !inputText.trim()}
-                className={`p-2 bg-gradient-to-r ${currentTheme.colors.gradient} text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50`}
-              >
-                <Send className="w-5 h-5" />
-              </button>
+          {!showChatHistory && (
+            <div className="p-4 border-t border-white/10 bg-slate-800/50 flex-shrink-0">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={e => setInputText(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+                  placeholder="Deine Frage..."
+                  disabled={isLoading}
+                  className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
+                />
+                <button
+                  onClick={sendMessage}
+                  disabled={isLoading || !inputText.trim()}
+                  className={`p-2 bg-gradient-to-r ${currentTheme.colors.gradient} text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50`}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     );
@@ -612,7 +828,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
                   : 'bg-white/10 text-gray-100 border border-white/10'
               }`}
             >
-              <p className="leading-relaxed break-words">{msg.content}</p>
+              <p className="leading-relaxed break-words">{formatMessageContent(msg.content)}</p>
             </div>
           </div>
         ))}

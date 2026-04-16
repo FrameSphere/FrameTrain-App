@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { usePageContext } from '../contexts/PageContext';
 
 // ============ Types ============
 
@@ -262,6 +263,7 @@ function getDetailedErrorMessage(errorMsg: string): string {
 export default function LaboratoryPanel() {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
 
   // Data
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -304,6 +306,28 @@ export default function LaboratoryPanel() {
   // ============ Load ============
 
   useEffect(() => { loadData(); }, []);
+
+  // Update Page Context with Laboratory info
+  useEffect(() => {
+    const pageInfo = [
+      'Laboratory Panel:',
+      selectedModel ? `Selected Model: ${selectedModel.name}` : 'No model selected',
+      selectedDataset ? `Selected Dataset: ${selectedDataset.name}` : 'No dataset selected',
+      runningInference ? 'Status: Running Inference...' : 'Status: Ready',
+      currentSample ? `Sample loaded` : 'No sample loaded',
+    ];
+
+    // Add inference result info if available
+    if (inferenceResult) {
+      if (inferenceResult.error) {
+        pageInfo.push(`Error: ${inferenceResult.error.slice(0, 100)}...`);
+      } else {
+        pageInfo.push(`Result: Inference complete`);
+      }
+    }
+
+    setCurrentPageContent(pageInfo.filter(Boolean).join('\n'));
+  }, [selectedModelId, selectedModel, selectedDataset, selectedDatasetId, inferenceResult, runningInference, currentSample, setCurrentPageContent]);
 
   useEffect(() => {
     if (selectedModelId) {

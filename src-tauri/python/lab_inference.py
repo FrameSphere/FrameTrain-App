@@ -200,24 +200,49 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             device = -1  # pipeline nutzt mps automatisch in neueren Versionen
 
-        # Pipeline erstellen
-        # Try local model first, if it's a valid local path
-        try:
-            if task_type == 'auto':
-                pipe = pipeline(model=model_path, device=device)
-            else:
-                pipe = pipeline(task=task_type, model=model_path, device=device)
-        except (ValueError, RuntimeError) as e:
-            # Wenn lokaler Pfad fehlschlägt, versuche als HuggingFace Model ID
-            if "Repo id must be" in str(e) or not Path(model_path).exists():
-                # Extract model name from path (z.B. 'hf_31ed74b60e9e' -> versuche als HF ID)
-                model_name = Path(model_path).name
+        # Pipeline erstellen - mit besserem Error Handling
+        pipe = None
+        last_error = None
+        
+        # Versuche verschiedene Wege:
+        # 1. Lokaler Pfad
+        # 2. Model Name aus Path
+        # 3. Direkter HF Model ID (falls bereits gültig)
+        attempts = [
+            ('local_path', model_path),
+            ('model_name', Path(model_path).name if model_path else None),
+        ]
+        
+        for attempt_type, attempt_path in attempts:
+            if not attempt_path:
+                continue
+                
+            try:
                 if task_type == 'auto':
-                    pipe = pipeline(model=model_name, device=device)
+                    pipe = pipeline(model=attempt_path, device=device)
                 else:
-                    pipe = pipeline(task=task_type, model=model_name, device=device)
+                    pipe = pipeline(task=task_type, model=attempt_path, device=device)
+                break  # Success
+            except Exception as e:
+                last_error = str(e)
+                continue
+        
+        if pipe is None:
+            # Alle Versuche fehlgeschlagen
+            error_msg = last_error or "Model konnte nicht geladen werden"
+            
+            # Bessere Error Message für den User
+            if "is not a local folder" in error_msg and "is not a valid model identifier" in error_msg:
+                raise ValueError(
+                    f"Das Model mit der ID '{Path(model_path).name}' existiert nicht auf HuggingFace oder ist privat.\n"
+                    f"Bitte überprüfe:\n"
+                    f"1. Die Model-ID ist korrekt geschrieben\n"
+                    f"2. Wenn privat: Mit 'huggingface-cli login' anmelden\n"
+                    f"3. Oder ein anderes bekanntes Model auswählen\n\n"
+                    f"Original Error: {error_msg}"
+                )
             else:
-                raise
+                raise ValueError(f"Model konnte nicht geladen werden: {error_msg}")
 
         # Input laden je nach Typ
         if sample_type == 'image':
