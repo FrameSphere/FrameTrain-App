@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 FrameTrain Laboratory Inference Script
-Führt Modell-Inferenz auf einem einzelnen Sample aus und gibt strukturiertes JSON zurück.
-Unterstützt: Klassifikation, Objekterkennung, NER, Textgenerierung, Audio, Tabellendaten
+Lädt ein lokal gespeichertes Modell und führt Inferenz auf einem Sample aus.
+WICHTIG: Alle Modelle liegen LOKAL. Es wird NICHTS von HuggingFace heruntergeladen.
 """
 
 import sys
@@ -28,99 +28,147 @@ def detect_sample_type(sample_path: str) -> str:
     return 'unknown'
 
 
-def resolve_actual_model_path(model_path: str) -> str:
+def find_actual_model_dir(model_path: str) -> tuple[str, str]:
     """
-    Resolves the actual loadable model path from a FrameTrain storage directory.
+    Findet das tatsächliche Verzeichnis mit den Modell-Gewichten.
     
-    FrameTrain stores models in app_data/models/{model_id}/ with a model_info.json.
-    The actual HuggingFace model name or local weights path is stored in source_path.
+    Gibt zurück: (resolved_path, error_message)
+    - resolved_path: Pfad der geladen werden kann (leer wenn Fehler)
+    - error_message: Fehlerbeschreibung (leer wenn OK)
     
-    Priority:
-    1. If path has HF model files (config.json + weights) -> use as-is
-    2. If path has model_info.json -> use source_path from it
-    3. Return as-is (might be a HF model ID string directly)
+    FrameTrain speichert Modelle lokal in verschiedenen Strukturen:
+    
+    Struktur 1 - Basis-Modell (heruntergeladen von HF):
+      /app_data/models/{model_id}/
+        ├── config.json
+        ├── model.safetensors  (oder pytorch_model.bin)
+        ├── tokenizer.json
+        └── model_info.json    (FrameTrain Metadata)
+    
+    Struktur 2 - Trainiertes Modell (nach Training):
+      /app_data/training_outputs/{job_id}/
+        ├── final_model/
+        │   ├── config.json
+        │   ├── model.safetensors
+        │   └── tokenizer.json
+        └── checkpoints/
+    
+    Struktur 3 - Modell-Version (in model_versions_new.path):
+      Kann direkt auf final_model zeigen, oder auf einen Checkpoint
     """
     p = Path(model_path)
     
-    # Check if it's a FrameTrain storage directory with model_info.json
-    model_info_path = p / 'model_info.json'
-    if model_info_path.exists():
-        try:
-            with open(model_info_path) as f:
-                info = json.load(f)
-            
-            source_path = info.get('source_path')
-            source = info.get('source', '')
-            
-            # Check if the FrameTrain dir itself has valid HF model files
-            has_config = (p / 'config.json').exists()
-            has_safetensors = (p / 'model.safetensors').exists()
-            has_pytorch = (p / 'pytorch_model.bin').exists()
-            
-            if has_config and (has_safetensors or has_pytorch):
-                # This directory IS a proper HF model directory - use it directly
-                return model_path
-            
-            # Use source_path (HuggingFace repo ID or local path to original model)
-            if source_path and source_path.strip():
-                return source_path
-                
-        except Exception:
-            pass
+    if not p.exists():
+        return '', (
+            f"❌ Modell-Verzeichnis existiert nicht:\n{model_path}\n\n"
+            f"Mögliche Ursachen:\n"
+            f"• Das Modell wurde noch nicht trainiert\n"
+            f"• Das Training wurde abgebrochen bevor das Modell gespeichert wurde\n"
+            f"• Der Pfad in der Datenbank ist veraltet\n\n"
+            f"💡 Tipp: Trainiere das Modell zuerst im Training-Panel"
+        )
     
-    # Check if path itself has valid HF model files
-    if p.exists() and p.is_dir():
-        has_config = (p / 'config.json').exists()
-        has_safetensors = (p / 'model.safetensors').exists()
-        has_pytorch = (p / 'pytorch_model.bin').exists()
-        
-        if has_config and (has_safetensors or has_pytorch):
-            return model_path
+    if not p.is_dir():
+        return '', f"❌ Kein Verzeichnis: {model_path}"
     
-    # Return as-is - might be a HuggingFace model ID ("microsoft/deberta-v3-base")
-    return model_path
-
-
-def detect_task_type(model_path: str) -> str:
-    """Erkennt den Task-Typ aus der model config.json"""
-    # First resolve the actual model path
-    resolved = resolve_actual_model_path(model_path)
-    config_path = Path(resolved) / 'config.json'
+    def has_model_files(d: Path) -> bool:
+        """Prüft ob ein Verzeichnis Modell-Gewichte enthält."""
+        has_config = (d / 'config.json').exists()
+        has_weights = (
+            (d / 'model.safetensors').exists() or
+            (d / 'pytorch_model.bin').exists() or
+            any(d.glob('*.pt')) or
+            any(d.glob('*.pth')) or
+            any(d.glob('pytorch_model-*.bin'))  # sharded models
+        )
+        return has_config and has_weights
     
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
+    # 1. Direkt prüfen
+    if has_model_files(p):
+        return str(p), ''
+    
+    # 2. final_model Unterverzeichnis prüfen (Standard-Output nach Training)
+    final_model = p / 'final_model'
+    if final_model.exists() and has_model_files(final_model):
+        return str(final_model), ''
+    
+    # 3. Checkpoints prüfen (neuester zuerst)
+    checkpoint_patterns = ['checkpoint-*', 'checkpoints/checkpoint-*']
+    checkpoints = []
+    for pattern in checkpoint_patterns:
+        checkpoints.extend(p.glob(pattern))
+    
+    if checkpoints:
+        # Sortiere nach Step-Nummer (neuester = höchste Zahl)
+        def get_step(cp: Path) -> int:
+            try:
+                return int(cp.name.split('-')[-1])
+            except ValueError:
+                return 0
+        checkpoints_with_files = [cp for cp in checkpoints if has_model_files(cp)]
+        if checkpoints_with_files:
+            latest = sorted(checkpoints_with_files, key=get_step, reverse=True)[0]
+            return str(latest), ''
+    
+    # 4. Rekursiv suchen (max 2 Ebenen tief)
+    for subdir in sorted(p.iterdir()):
+        if subdir.is_dir() and has_model_files(subdir):
+            return str(subdir), ''
+    
+    # 5. Nur config.json (ohne Gewichte) - transformers kann trotzdem versuchen zu laden
+    if (p / 'config.json').exists():
+        # Gib den Pfad zurück, transformers zeigt einen besseren Fehler
+        return str(p), ''
+    
+    # Kein Modell gefunden
+    files_found = [f.name for f in p.iterdir() if f.is_file()][:10]
+    dirs_found = [d.name for d in p.iterdir() if d.is_dir()][:5]
+    
+    return '', (
+        f"❌ Keine Modell-Gewichte in:\n{model_path}\n\n"
+        f"Gefundene Dateien: {files_found}\n"
+        f"Gefundene Ordner: {dirs_found}\n\n"
+        f"Erwartet: config.json + model.safetensors oder pytorch_model.bin\n\n"
+        f"💡 Das Training muss erst vollständig abgeschlossen sein.\n"
+        f"   Unterbrochene Trainings speichern kein vollständiges Modell."
+    )
 
-            # Aus architectures
-            arch = config.get('architectures', [''])[0].lower()
-            if 'forsequenceclassification' in arch:
-                return 'text-classification'
-            elif 'fortokenclassification' in arch:
-                return 'token-classification'
-            elif 'forobjectdetection' in arch or 'detr' in arch:
-                return 'object-detection'
-            elif 'forimageclassification' in arch or 'vit' in arch:
-                return 'image-classification'
-            elif 'causallm' in arch or 'gpt' in arch or 'llama' in arch or 'mistral' in arch:
-                return 'text-generation'
-            elif 'seq2seq' in arch or 't5' in arch or 'bart' in arch:
-                return 'text2text-generation'
-            elif 'forquestionanswering' in arch:
-                return 'question-answering'
 
-            # Aus pipeline_tag
-            tag = config.get('pipeline_tag', '')
-            if tag:
-                return tag
+def detect_task_type(model_dir: str) -> str:
+    """Erkennt den Task-Typ aus config.json."""
+    config_path = Path(model_dir) / 'config.json'
+    if not config_path.exists():
+        return 'auto'
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
 
-        except Exception:
-            pass
+        arch = config.get('architectures', [''])[0].lower()
+        if 'forsequenceclassification' in arch:
+            return 'text-classification'
+        elif 'fortokenclassification' in arch:
+            return 'token-classification'
+        elif 'forobjectdetection' in arch or 'detr' in arch:
+            return 'object-detection'
+        elif 'forimageclassification' in arch or 'vit' in arch:
+            return 'image-classification'
+        elif 'causallm' in arch or 'gpt' in arch or 'llama' in arch or 'mistral' in arch:
+            return 'text-generation'
+        elif 'seq2seq' in arch or 't5' in arch or 'bart' in arch:
+            return 'text2text-generation'
+        elif 'forquestionanswering' in arch:
+            return 'question-answering'
+
+        tag = config.get('pipeline_tag', '')
+        if tag:
+            return tag
+    except Exception:
+        pass
     return 'auto'
 
 
 def parse_hf_output(result, task_type: str) -> dict:
-    """Parst HuggingFace pipeline output in unser RenderedOutput-Format"""
+    """Parst HuggingFace pipeline output in RenderedOutput-Format."""
     colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6']
 
     rendered = {
@@ -134,12 +182,11 @@ def parse_hf_output(result, task_type: str) -> dict:
     }
 
     if isinstance(result, list):
-        if len(result) == 0:
+        if not result:
             return rendered
         first = result[0]
 
         if isinstance(first, dict):
-            # Klassifikation: [{label, score}, ...]
             if 'label' in first and 'score' in first:
                 rendered['primary_label'] = first['label']
                 rendered['confidence'] = float(first['score'])
@@ -148,7 +195,6 @@ def parse_hf_output(result, task_type: str) -> dict:
                     for r in result[:8]
                 ]
 
-            # Token-Klassifikation / NER: [{entity, entity_group, start, end, score}, ...]
             elif 'entity' in first or 'entity_group' in first:
                 label_colors = {}
                 color_idx = 0
@@ -169,7 +215,6 @@ def parse_hf_output(result, task_type: str) -> dict:
                 if spans:
                     rendered['primary_label'] = f"{len(spans)} Entität(en) erkannt"
 
-            # Objekterkennung: [{label, score, box: {xmin,ymin,xmax,ymax}}, ...]
             elif 'box' in first or 'xmin' in first:
                 boxes = []
                 for det in result:
@@ -181,16 +226,13 @@ def parse_hf_output(result, task_type: str) -> dict:
                     boxes.append({
                         'label': str(det.get('label', '')),
                         'score': float(det.get('score', 0)),
-                        'x': xmin,
-                        'y': ymin,
-                        'width': xmax - xmin,
-                        'height': ymax - ymin,
+                        'x': xmin, 'y': ymin,
+                        'width': xmax - xmin, 'height': ymax - ymin,
                     })
                 rendered['bounding_boxes'] = boxes
                 if boxes:
                     rendered['primary_label'] = f"{len(boxes)} Objekt(e) erkannt"
 
-            # Generierter Text als Liste
             elif 'generated_text' in first:
                 rendered['generated_text'] = str(first['generated_text'])
                 rendered['primary_label'] = 'Text generiert'
@@ -242,88 +284,66 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
     start = time.time()
     sample_type = detect_sample_type(sample_path)
 
-    # Resolve the actual model path (handles FrameTrain storage format)
-    resolved_model_path = resolve_actual_model_path(model_path)
+    # Finde das echte Modell-Verzeichnis (rein lokal, kein HF-Download)
+    resolved_path, resolve_error = find_actual_model_dir(model_path)
+
+    if resolve_error:
+        elapsed_ms = int((time.time() - start) * 1000)
+        print(json.dumps(build_error_output(sample_path, resolve_error, elapsed_ms), ensure_ascii=False))
+        return
 
     if task_type == 'auto':
-        task_type = detect_task_type(model_path)
+        task_type = detect_task_type(resolved_path)
 
     try:
         import torch
-        from transformers import pipeline, AutoModel, AutoTokenizer, AutoModelForCausalLM
+        from transformers import pipeline
 
         device = 0 if torch.cuda.is_available() else -1
 
         # Apple Silicon MPS
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device = -1  # pipeline nutzt mps automatisch in neueren Versionen
+            device = -1  # transformers setzt MPS automatisch in neueren Versionen
 
-        # ============ VALIDATE MODEL PATH ============
-        model_path_obj = Path(resolved_model_path)
-        
-        # For local paths: validate they exist and have model files
-        # For HF model IDs (like "microsoft/deberta-v3-base"): skip local validation
-        is_local_path = model_path_obj.exists() or '/' in resolved_model_path or '\\' in resolved_model_path
-        is_hf_id = '/' in resolved_model_path and not model_path_obj.exists()
-        
-        if is_local_path and not is_hf_id:
-            if not model_path_obj.exists():
-                # Path doesn't exist - provide helpful error
-                original_name = Path(model_path).name
-                raise FileNotFoundError(
-                    f"❌ Modell nicht gefunden: '{original_name}'\n\n"
-                    f"Gesuchter Pfad: {resolved_model_path}\n\n"
-                    f"Mögliche Ursachen:\n"
-                    f"1. Das Modell wurde noch nicht trainiert (nur das Original-Modell gespeichert)\n"
-                    f"2. Das Modell wurde gelöscht oder verschoben\n"
-                    f"3. Der Laboratory-Test braucht ein trainiertes Modell\n\n"
-                    f"💡 Tipp: Trainiere zuerst das Modell, dann teste im Laboratory"
-                )
-            
-            # Check if it's a valid model directory
-            has_safetensors = (model_path_obj / 'model.safetensors').exists()
-            has_pytorch = (model_path_obj / 'pytorch_model.bin').exists()
-            has_config = (model_path_obj / 'config.json').exists()
-            has_weights_any = list(model_path_obj.glob('*.pt')) or list(model_path_obj.glob('*.pth')) or list(model_path_obj.glob('*.onnx'))
-            
-            if not (has_safetensors or has_pytorch or has_config or has_weights_any):
-                raise ValueError(
-                    f"❌ Das Verzeichnis enthält keine Modell-Dateien.\n"
-                    f"Pfad: {resolved_model_path}\n\n"
-                    f"Erwartet: config.json, model.safetensors, pytorch_model.bin oder *.pt Dateien\n\n"
-                    f"Wurde das Training erfolgreich abgeschlossen?"
-                )
-
-        # ============ LOAD MODEL ============
+        # KRITISCH: local_files_only=True verhindert jeglichen HF-Download
+        # Das Modell MUSS lokal vorhanden sein.
         pipe = None
         last_error = None
-        
+
+        load_kwargs = {
+            'local_files_only': True,  # NIEMALS HuggingFace kontaktieren
+            'device': device,
+        }
+
         try:
             if task_type == 'auto':
-                pipe = pipeline(model=resolved_model_path, device=device)
+                pipe = pipeline(model=resolved_path, **load_kwargs)
             else:
-                pipe = pipeline(task=task_type, model=resolved_model_path, device=device)
+                pipe = pipeline(task=task_type, model=resolved_path, **load_kwargs)
         except Exception as e:
             last_error = str(e)
-            # Try without specifying task
+            # Fallback ohne task
             try:
-                pipe = pipeline(model=resolved_model_path, device=device)
+                pipe = pipeline(model=resolved_path, **load_kwargs)
             except Exception as e2:
                 last_error = str(e2)
-        
-        if pipe is None:
-            raise ValueError(
-                f"❌ Das Modell konnte nicht geladen werden.\n"
-                f"Pfad: {resolved_model_path}\n\n"
-                f"Fehler: {last_error}\n\n"
-                f"💡 Mögliche Lösungen:\n"
-                f"1. Ist die Model-Version korrekt gespeichert?\n"
-                f"2. Fehlen Abhängigkeiten (z.B. transformers, torch)?\n"
-                f"3. Ist genug RAM/VRAM verfügbar?\n"
-                f"4. Ist das Modell mit transformers kompatibel?"
-            )
 
-        # Input laden je nach Typ
+        if pipe is None:
+            elapsed_ms = int((time.time() - start) * 1000)
+            error_msg = (
+                f"❌ Modell konnte nicht geladen werden\n\n"
+                f"Pfad: {resolved_path}\n\n"
+                f"Fehler: {last_error}\n\n"
+                f"💡 Mögliche Ursachen:\n"
+                f"• Zu wenig RAM/VRAM\n"
+                f"• Inkompatible transformers-Version\n"
+                f"• Modell-Dateien beschädigt\n"
+                f"• Fehlende Abhängigkeiten (pip install transformers torch pillow)"
+            )
+            print(json.dumps(build_error_output(sample_path, error_msg, elapsed_ms), ensure_ascii=False))
+            return
+
+        # Input laden
         if sample_type == 'image':
             from PIL import Image
             input_data = Image.open(sample_path).convert('RGB')
@@ -361,23 +381,24 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
             "inference_time_ms": elapsed_ms,
             "error": None,
         }
+        print(json.dumps(output, ensure_ascii=False))
 
     except ImportError as e:
         elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"⚠️ Fehlende Bibliothek: {str(e)}\n\n"
-        error_msg += f"Aktuelle Python: {sys.executable}\n"
-        error_msg += f"Python Version: {sys.version.split()[0]}\n\n"
-        error_msg += "Installation:\n"
-        error_msg += "pip install torch transformers pillow\n"
-        error_msg += "  ODER\n"
-        error_msg += "pip3 install torch transformers pillow"
-        output = build_error_output(sample_path, error_msg, elapsed_ms)
+        error_msg = (
+            f"⚠️ Fehlende Bibliothek: {e}\n\n"
+            f"Python: {sys.executable}\n"
+            f"Version: {sys.version.split()[0]}\n\n"
+            f"Installation:\n"
+            f"pip install torch transformers pillow\n"
+            f"  oder\n"
+            f"pip3 install torch transformers pillow"
+        )
+        print(json.dumps(build_error_output(sample_path, error_msg, elapsed_ms), ensure_ascii=False))
 
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
-        output = build_error_output(sample_path, str(e), elapsed_ms)
-
-    print(json.dumps(output, ensure_ascii=False))
+        print(json.dumps(build_error_output(sample_path, str(e), elapsed_ms), ensure_ascii=False))
 
 
 def build_error_output(sample_path: str, error_msg: str, elapsed_ms: int) -> dict:
@@ -400,10 +421,9 @@ def build_error_output(sample_path: str, error_msg: str, elapsed_ms: int) -> dic
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='FrameTrain Laboratory Inference')
-    parser.add_argument('--model_path', required=True, help='Pfad zum Modell-Verzeichnis')
-    parser.add_argument('--sample_path', required=True, help='Pfad zum Sample')
-    parser.add_argument('--task_type', default='auto', help='HuggingFace task type oder "auto"')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_path', required=True)
+    parser.add_argument('--sample_path', required=True)
+    parser.add_argument('--task_type', default='auto')
     args = parser.parse_args()
-
     run_inference(args.model_path, args.sample_path, args.task_type)

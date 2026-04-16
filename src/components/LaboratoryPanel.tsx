@@ -320,27 +320,91 @@ export default function LaboratoryPanel() {
 
   useEffect(() => { loadData(); }, []);
 
-  // Update Page Context with Laboratory info
+  // Update Page Context – detaillierter Kontext für den KI-Coach
   useEffect(() => {
-    const pageInfo = [
-      'Laboratory Panel:',
-      selectedModel ? `Selected Model: ${selectedModel.name}` : 'No model selected',
-      selectedDataset ? `Selected Dataset: ${selectedDataset.name}` : 'No dataset selected',
-      runningInference ? 'Status: Running Inference...' : 'Status: Ready',
-      currentSample ? `Sample loaded` : 'No sample loaded',
+    const selectedVersion = selectedModelWithVersions?.versions.find(v => v.id === selectedVersionId);
+    const lines: string[] = [
+      '=== FrameTrain Laboratory Panel ===',
+      '',
+      '--- Aktuelle Auswahl ---',
+      selectedModel
+        ? `Modell: "${selectedModel.name}" (ID: ${selectedModel.id}, Quelle: ${selectedModel.source})`
+        : 'Kein Modell ausgewählt',
+      selectedVersion
+        ? `Version: "${selectedVersion.name}" (ID: ${selectedVersion.id}${selectedVersion.is_root ? ', Original-Version' : `, v${selectedVersion.version_number}`})`
+        : 'Keine Version ausgewählt',
+      selectedDataset
+        ? `Dataset: "${selectedDataset.name}" (${selectedDataset.file_count} Dateien)`
+        : 'Kein Dataset ausgewählt',
+      '',
+      '--- Verfügbare Modelle ---',
+      ...models.map(m => `• ${m.name} (${m.source})`),
+      '',
+      '--- Aktueller Status ---',
+      runningInference ? 'Inferenz läuft gerade...' : loadingSample ? 'Sample wird geladen...' : 'Bereit',
     ];
 
-    // Add inference result info if available
-    if (inferenceResult) {
-      if (inferenceResult.error) {
-        pageInfo.push(`Error: ${inferenceResult.error.slice(0, 100)}...`);
-      } else {
-        pageInfo.push(`Result: Inference complete`);
+    if (currentSample) {
+      lines.push('', '--- Geladenes Sample ---');
+      lines.push(`Datei: ${currentSample.filename}`);
+      lines.push(`Typ: ${currentSample.sample_type}`);
+      lines.push(`Index: ${currentSample.sample_index + 1} von ${currentSample.total_samples}`);
+      if (currentSample.content) {
+        lines.push(`Inhalt (erste 300 Zeichen): ${currentSample.content.slice(0, 300)}`);
       }
     }
 
-    setCurrentPageContent(pageInfo.filter(Boolean).join('\n'));
-  }, [selectedModelId, selectedModel, selectedDataset, selectedDatasetId, inferenceResult, runningInference, currentSample, setCurrentPageContent]);
+    if (inferenceResult) {
+      lines.push('', '--- Letztes Inferenz-Ergebnis ---');
+      lines.push(`Output-Typ: ${inferenceResult.model_output_type}`);
+      lines.push(`Dauer: ${inferenceResult.inference_time_ms}ms`);
+      if (inferenceResult.error) {
+        lines.push(`FEHLER: ${inferenceResult.error}`);
+      } else {
+        const r = inferenceResult.rendered;
+        if (r.primary_label) lines.push(`Hauptergebnis: ${r.primary_label}`);
+        if (r.confidence !== null && r.confidence !== undefined) {
+          lines.push(`Konfidenz: ${(r.confidence * 100).toFixed(1)}%`);
+        }
+        if (r.labels.length > 0) {
+          lines.push('Top Vorhersagen:');
+          r.labels.slice(0, 5).forEach(l => lines.push(`  • ${l.label}: ${(l.score * 100).toFixed(1)}%`));
+        }
+        if (r.bounding_boxes.length > 0) {
+          lines.push(`Erkannte Objekte (${r.bounding_boxes.length}): ${r.bounding_boxes.map(b => b.label).join(', ')}`);
+        }
+        if (r.generated_text) {
+          lines.push(`Generierter Text: ${r.generated_text.slice(0, 200)}`);
+        }
+        if (r.highlighted_spans.length > 0) {
+          const entityTypes = [...new Set(r.highlighted_spans.map(s => s.label))];
+          lines.push(`Erkannte Entitäten: ${entityTypes.join(', ')}`);
+        }
+      }
+    }
+
+    if (feedbackRating) {
+      lines.push('', '--- Aktuelles Feedback ---');
+      lines.push(`Bewertung: ${feedbackRating === 'correct' ? 'Richtig' : feedbackRating === 'partial' ? 'Teilweise richtig' : 'Falsch'}`);
+      if (feedbackComment) lines.push(`Kommentar: ${feedbackComment}`);
+      if (correctedLabel) lines.push(`Korrektes Label: ${correctedLabel}`);
+    }
+
+    if (stats && stats.total_sessions > 0) {
+      lines.push('', '--- Session-Statistiken ---');
+      lines.push(`Gesamt: ${stats.total_sessions} Sessions`);
+      lines.push(`Richtig: ${stats.correct} | Teilweise: ${stats.partial} | Falsch: ${stats.incorrect}`);
+      lines.push(`Genauigkeit: ${(stats.accuracy_rate * 100).toFixed(0)}%`);
+    }
+
+    setCurrentPageContent(lines.join('\n'));
+  }, [
+    selectedModelId, selectedModel, selectedDataset, selectedDatasetId,
+    selectedVersionId, selectedModelWithVersions, models,
+    inferenceResult, runningInference, loadingSample,
+    currentSample, feedbackRating, feedbackComment, correctedLabel,
+    stats, setCurrentPageContent
+  ]);
 
   useEffect(() => {
     if (selectedModelId) {
