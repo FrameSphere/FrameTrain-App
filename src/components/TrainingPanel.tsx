@@ -1705,6 +1705,26 @@ function RequirementsModal({ requirements, onClose, onRefresh, gradient }: Requi
 
 // ============ Training History Modal ============
 
+function formatElapsed(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt) return '–';
+  const start = new Date(startedAt).getTime();
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const secs = Math.floor((end - start) / 1000);
+  const mins = Math.floor(secs / 60);
+  const hours = Math.floor(mins / 60);
+  if (hours > 0) return `${hours}h ${mins % 60}min`;
+  if (mins > 0) return `${mins}min ${secs % 60}s`;
+  return `${secs}s`;
+}
+
+function JobStatusIcon({ status }: { status: string }) {
+  if (status === 'completed') return <CheckCircle className="w-4 h-4 text-green-400" />;
+  if (status === 'failed')    return <AlertCircle className="w-4 h-4 text-red-400" />;
+  if (status === 'stopped')   return <Square className="w-4 h-4 text-amber-400" />;
+  if (status === 'running')   return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />;
+  return <Clock className="w-4 h-4 text-gray-400" />;
+}
+
 interface HistoryModalProps {
   jobs: TrainingJob[];
   onClose: () => void;
@@ -1713,106 +1733,268 @@ interface HistoryModalProps {
 }
 
 function HistoryModal({ jobs, onClose, onDelete, gradient }: HistoryModalProps) {
-  const statusColors: Record<string, string> = {
-    pending: 'bg-gray-500/20 text-gray-400',
-    running: 'bg-blue-500/20 text-blue-400',
-    completed: 'bg-green-500/20 text-green-400',
-    failed: 'bg-red-500/20 text-red-400',
-    stopped: 'bg-amber-500/20 text-amber-400',
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>('all');
+
+  const statusMeta: Record<string, { label: string; pill: string; border: string; bg: string }> = {
+    pending:   { label: 'Wartend',       pill: 'bg-gray-500/20 text-gray-400',    border: 'border-gray-500/20',  bg: 'bg-gray-500/5'  },
+    running:   { label: 'Läuft',         pill: 'bg-blue-500/20 text-blue-400',    border: 'border-blue-500/20',  bg: 'bg-blue-500/5'  },
+    completed: { label: 'Erfolgreich',   pill: 'bg-green-500/20 text-green-400',  border: 'border-green-500/30', bg: 'bg-green-500/5' },
+    failed:    { label: 'Fehlgeschlagen',pill: 'bg-red-500/20 text-red-400',      border: 'border-red-500/30',   bg: 'bg-red-500/5'   },
+    stopped:   { label: 'Gestoppt',      pill: 'bg-amber-500/20 text-amber-400',  border: 'border-amber-500/20', bg: 'bg-amber-500/5' },
   };
 
-  const statusLabels: Record<string, string> = {
-    pending: 'Wartend',
-    running: 'Läuft',
-    completed: 'Abgeschlossen',
-    failed: 'Fehlgeschlagen',
-    stopped: 'Gestoppt',
+  const counts = {
+    all:       jobs.length,
+    completed: jobs.filter(j => j.status === 'completed').length,
+    failed:    jobs.filter(j => j.status === 'failed').length,
+    stopped:   jobs.filter(j => j.status === 'stopped').length,
+    running:   jobs.filter(j => j.status === 'running').length,
   };
+
+  const filtered = filter === 'all' ? jobs : jobs.filter(j => j.status === filter);
+  const sorted = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[80vh] overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-white/10">
+      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <History className="w-6 h-6 text-purple-400" />
-            <h2 className="text-xl font-bold text-white">Training-Verlauf</h2>
+            <History className="w-5 h-5 text-purple-400" />
+            <h2 className="text-lg font-bold text-white">Trainings-Verlauf</h2>
+            <span className="px-2 py-0.5 rounded-full bg-white/10 text-gray-400 text-xs">{jobs.length} Einträge</span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all"
-          >
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[60vh]">
-          {jobs.length === 0 ? (
-            <div className="text-center py-12 text-gray-400">
-              <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Noch keine Trainings durchgeführt.</p>
+        {/* Filter Tabs */}
+        <div className="flex items-center gap-1 px-6 py-3 border-b border-white/5 flex-shrink-0 overflow-x-auto">
+          {([['all','Alle'],['completed','Erfolgreich'],['failed','Fehlgeschlagen'],['stopped','Gestoppt'],['running','Läuft']] as [string,string][]).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+                filter === key
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+              }`}
+            >
+              {label}
+              {(counts as Record<string,number>)[key] > 0 && (
+                <span className="ml-1.5 opacity-60">{(counts as Record<string,number>)[key]}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Job List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {sorted.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+              <History className="w-12 h-12 text-gray-600 opacity-50" />
+              <p className="text-gray-400 text-sm">Keine Trainings gefunden.</p>
+              {filter !== 'all' && (
+                <button onClick={() => setFilter('all')} className="text-xs text-purple-400 hover:text-purple-300 underline">Alle anzeigen</button>
+              )}
             </div>
           ) : (
-            <div className="space-y-3">
-              {jobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="p-4 bg-white/5 rounded-xl border border-white/10 hover:bg-white/[0.07] transition-all"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-white">{job.model_name}</span>
-                        <span className={`px-2 py-0.5 rounded text-xs ${statusColors[job.status]}`}>
-                          {statusLabels[job.status]}
-                        </span>
+            sorted.map((job) => {
+              const meta = statusMeta[job.status] || statusMeta.pending;
+              const isExpanded = expandedId === job.id;
+              return (
+                <div key={job.id} className={`rounded-xl border transition-all overflow-hidden ${meta.border} ${isExpanded ? meta.bg : 'bg-white/[0.03]'}`}>
+
+                  {/* Job header row – clickable to expand */}
+                  <div
+                    className="flex items-start gap-3 p-4 cursor-pointer hover:bg-white/[0.03]"
+                    onClick={() => setExpandedId(isExpanded ? null : job.id)}
+                  >
+                    <div className="flex-shrink-0 mt-0.5"><JobStatusIcon status={job.status} /></div>
+
+                    <div className="flex-1 min-w-0">
+                      {/* Title row */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-white text-sm truncate">{job.model_name}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${meta.pill}`}>{meta.label}</span>
+                        {job.config.use_lora && <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 text-[10px] font-medium">LoRA</span>}
+                        {job.config.fp16 && <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-medium">FP16</span>}
+                        {job.config.load_in_4bit && <span className="px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 text-[10px] font-medium">4bit</span>}
                       </div>
-                      <div className="text-sm text-gray-400 mt-1">
-                        Dataset: {job.dataset_name}
+
+                      {/* Meta info row */}
+                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
+                        <span className="flex items-center gap-1"><Database className="w-3 h-3" />{job.dataset_name}</span>
+                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDate(job.created_at)}</span>
+                        {job.started_at && (
+                          <span className="flex items-center gap-1"><Zap className="w-3 h-3" />{formatElapsed(job.started_at, job.completed_at)}</span>
+                        )}
+                        {job.progress.total_epochs > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Gauge className="w-3 h-3" />
+                            Ep. {job.progress.epoch}/{job.progress.total_epochs}
+                            {job.progress.progress_percent > 0 && <span className="text-gray-600">({job.progress.progress_percent.toFixed(1)}%)</span>}
+                          </span>
+                        )}
                       </div>
-                      <div className="text-xs text-gray-500 mt-2">
-                        {formatDate(job.created_at)}
-                      </div>
+
+                      {/* Error preview – always visible when there's an error */}
+                      {job.error && (
+                        <div className="mt-2 flex items-start gap-1.5 px-2.5 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+                          <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0 mt-0.5" />
+                          <span className="text-[11px] text-red-300 line-clamp-2 break-all">{job.error}</span>
+                        </div>
+                      )}
+
+                      {/* Progress bar */}
+                      {job.progress.progress_percent > 0 && (
+                        <div className="mt-2">
+                          <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                job.status === 'completed' ? 'bg-green-500' :
+                                job.status === 'failed'    ? 'bg-red-400' :
+                                job.status === 'stopped'   ? 'bg-amber-400' : 'bg-blue-400'
+                              }`}
+                              style={{ width: `${Math.min(job.progress.progress_percent, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={() => onDelete(job.id)}
-                      className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(job.id); }}
+                        className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                        title="Eintrag löschen"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                      <ChevronDown className={`w-4 h-4 text-gray-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </div>
                   </div>
 
-                  {job.status === 'completed' && (
-                    <div className="mt-3 pt-3 border-t border-white/10 grid grid-cols-3 gap-3 text-xs">
-                      <div className="text-center">
-                        <div className="text-gray-400">Train Loss</div>
-                        <div className="text-white font-medium">
-                          {job.progress.train_loss.toFixed(8)}
+                  {/* ── Expanded detail panel ── */}
+                  {isExpanded && (
+                    <div className="px-4 pb-5 space-y-4 border-t border-white/[0.06] pt-4">
+
+                      {/* Full error / reason */}
+                      {job.error && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                            <span className="text-xs font-semibold text-red-300">Fehlerursache / Abbruchgrund</span>
+                          </div>
+                          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                            <pre className="text-xs text-red-300 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-44 overflow-y-auto">{job.error}</pre>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Metrics */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <TrendingDown className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="text-xs font-semibold text-gray-300">Trainings-Metriken</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {[
+                            { label: 'Train Loss', value: job.progress.train_loss > 0 ? job.progress.train_loss.toFixed(6) : '–' },
+                            { label: 'Val Loss',   value: job.progress.val_loss != null ? job.progress.val_loss.toFixed(6) : '–' },
+                            { label: 'Schritte',   value: job.progress.step > 0 ? `${job.progress.step}/${job.progress.total_steps || '?'}` : '–' },
+                            { label: 'Epochen',    value: job.progress.total_epochs > 0 ? `${job.progress.epoch}/${job.progress.total_epochs}` : '–' },
+                          ].map(({ label, value }) => (
+                            <div key={label} className="p-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-center">
+                              <div className="text-[10px] text-gray-500 mb-0.5">{label}</div>
+                              <div className="text-sm font-semibold text-white font-mono">{value}</div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                     <div className="text-center">
-                        <div className="text-gray-400">Val Loss</div>
-                        <div className="text-white font-medium">
-                          {job.progress.val_loss?.toFixed(8) || '-'}
+
+                      {/* Timestamps + duration */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Clock className="w-3.5 h-3.5 text-gray-400" />
+                          <span className="text-xs font-semibold text-gray-300">Zeitstempel</span>
+                        </div>
+                        <div className="space-y-1">
+                          {[
+                            { label: 'Erstellt:',   val: new Date(job.created_at).toLocaleString('de-DE') },
+                            ...(job.started_at   ? [{ label: 'Gestartet:', val: new Date(job.started_at).toLocaleString('de-DE') }] : []),
+                            ...(job.completed_at ? [{ label: job.status === 'failed' ? 'Abgebrochen:' : job.status === 'stopped' ? 'Gestoppt:' : 'Fertig:', val: new Date(job.completed_at).toLocaleString('de-DE') }] : []),
+                          ].map(({ label, val }) => (
+                            <div key={label} className="flex items-center gap-2 px-2.5 py-1.5 bg-white/[0.03] rounded-lg text-xs">
+                              <span className="text-gray-600 w-24 shrink-0">{label}</span>
+                              <span className="text-gray-300 font-mono">{val}</span>
+                            </div>
+                          ))}
+                          {job.started_at && (
+                            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.03] rounded-lg w-fit text-xs">
+                              <Zap className="w-3 h-3 text-yellow-400" />
+                              <span className="text-gray-400">Laufzeit: <span className="text-white font-medium">{formatElapsed(job.started_at, job.completed_at)}</span></span>
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="text-center">
-                        <div className="text-gray-400">Epochen</div>
-                        <div className="text-white font-medium">
-                          {job.progress.epoch}/{job.progress.total_epochs}
+
+                      {/* Config snapshot */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Settings2 className="w-3.5 h-3.5 text-gray-400" />
+                          <span className="text-xs font-semibold text-gray-300">Verwendete Konfiguration</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                          {[
+                            { label: 'Epochen',     value: job.config.epochs },
+                            { label: 'Batch Size',  value: job.config.batch_size },
+                            { label: 'Grad. Accum', value: job.config.gradient_accumulation_steps },
+                            { label: 'Learn. Rate', value: job.config.learning_rate.toExponential(2) },
+                            { label: 'Optimizer',   value: job.config.optimizer.toUpperCase() },
+                            { label: 'Scheduler',   value: job.config.scheduler },
+                            { label: 'Max Seq Len', value: job.config.max_seq_length },
+                            { label: 'Grad Clip',   value: job.config.max_grad_norm },
+                            { label: 'Weight Decay',value: job.config.weight_decay },
+                            ...(job.config.use_lora ? [
+                              { label: 'LoRA Rank',  value: job.config.lora_r },
+                              { label: 'LoRA Alpha', value: job.config.lora_alpha },
+                            ] : []),
+                            ...(job.config.load_in_4bit ? [{ label: 'Quantisierung', value: '4-bit' }] : []),
+                            ...(job.config.load_in_8bit ? [{ label: 'Quantisierung', value: '8-bit' }] : []),
+                            ...(job.config.fp16 ? [{ label: 'Präzision', value: 'FP16' }] : []),
+                            ...(job.config.bf16 ? [{ label: 'Präzision', value: 'BF16' }] : []),
+                          ].map(({ label, value }) => (
+                            <div key={label} className="flex items-center justify-between px-2.5 py-1.5 bg-white/[0.03] rounded-lg text-xs">
+                              <span className="text-gray-500">{label}</span>
+                              <span className="text-white font-mono font-medium">{String(value)}</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
+
+                      {/* Job ID */}
+                      <div className="text-[10px] text-gray-700 font-mono">ID: {job.id}</div>
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
+              );
+            })
           )}
         </div>
 
-        <div className="p-6 border-t border-white/10">
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-white/10 flex items-center justify-between flex-shrink-0">
+          <div className="text-xs text-gray-600">
+            {counts.completed} erfolgreich · {counts.failed} fehlgeschlagen · {counts.stopped} gestoppt
+          </div>
           <button
             onClick={onClose}
-            className={`w-full py-3 bg-gradient-to-r ${gradient} rounded-lg text-white font-medium hover:opacity-90 transition-all`}
+            className={`px-6 py-2 bg-gradient-to-r ${gradient} rounded-lg text-white text-sm font-medium hover:opacity-90 transition-all`}
           >
             Schließen
           </button>
