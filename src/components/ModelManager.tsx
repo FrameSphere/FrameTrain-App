@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { usePageContext } from '../contexts/PageContext';
 
 // ============ Types ============
 
@@ -81,6 +82,7 @@ function formatDownloads(num: number | undefined): string {
 export default function ModelManager() {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
 
   // State
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -114,6 +116,44 @@ const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     loadModels();
   }, []);
+
+  // Page context for AI coach
+  useEffect(() => {
+    const lines = [
+      '=== FrameTrain Modell-Verwaltung (ModelManager) ===',
+      '',
+      '--- Seitenzweck ---',
+      'Hier kannst du KI-Modelle hinzufügen, anzeigen und löschen.',
+      'Modelle sind die Basis für Training, Laboratory-Tests und Analyse.',
+      '',
+      '--- Verfügbare Aktionen ---',
+      '• Modell hinzufügen (Button oben rechts): Öffnet Import-Dialog',
+      '  - Tab "Lokaler Ordner": Modell-Ordner vom Dateisystem importieren (Drag & Drop oder Ordner-Auswahl)',
+      '    Erwartet: Ordner mit config.json + model.safetensors oder pytorch_model.bin',
+      '  - Tab "Hugging Face": Modell per Suche von HuggingFace.co herunterladen',
+      '    Suche gibt Modelle mit Downloads-Zahl, Likes und Task-Typ zurück',
+      '• Modell löschen: Hover über Modell-Karte → Trash-Icon erscheint',
+      '  ACHTUNG: Löscht alle zugehörigen Versionen, Datensätze und Trainingsdaten!',
+      '• Refresh-Button: Modell-Liste neu laden',
+      '',
+      '--- Mögliche Fehler ---',
+      '• "Keine Standard-Modelldateien erkannt": Ordner enthält kein HF-Modell (fehlende .safetensors/.bin)',
+      '• Download-Fehler bei HF: Internetverbindung prüfen, Modell-ID korrekt?',
+      '• Import schlägt fehl: Ordner-Berechtigungen prüfen',
+      '',
+      `--- Aktuell geladene Modelle (${models.length}) ---`,
+      ...(models.length === 0
+        ? ['Keine Modelle vorhanden. Füge ein Modell über den Import-Button hinzu.']
+        : models.map(m => [
+            `• ${m.name}`,
+            `  Quelle: ${m.source === 'huggingface' ? 'HuggingFace' : 'Lokal'} | Typ: ${m.model_type || 'unbekannt'}`,
+            `  Größe: ${m.size_bytes > 0 ? (m.size_bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB' : 'unbekannt'} | ${m.file_count} Dateien`,
+            m.source_path ? `  Pfad/Repo: ${m.source_path}` : '',
+          ].filter(Boolean).join('\n'))
+      ),
+    ];
+    setCurrentPageContent(lines.join('\n'));
+  }, [models, setCurrentPageContent]);
 
   // Debounced HuggingFace search - triggers 300ms after user stops typing
   useEffect(() => {

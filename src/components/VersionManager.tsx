@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { usePageContext } from '../contexts/PageContext';
 
 // ============ Types ============
 
@@ -472,6 +473,7 @@ function VersionsModal({
 export default function VersionManager() {
   const { currentTheme } = useTheme();
   const { success, error, warning } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
 
   const [models, setModels] = useState<ModelWithVersions[]>([]);
   const [loading, setLoading] = useState(true);
@@ -482,6 +484,53 @@ export default function VersionManager() {
   useEffect(() => {
     loadModels();
   }, []);
+
+  // Page context for AI coach
+  useEffect(() => {
+    const lines = [
+      '=== FrameTrain Versionen-Manager (VersionManager) ===',
+      '',
+      '--- Seitenzweck ---',
+      'Hier werden alle trainierten Modell-Versionen verwaltet.',
+      'Jede Trainingsrunde erstellt eine neue Version. Original-Modelle sind mit ⭐ markiert.',
+      '',
+      '--- Verf\u00fcgbare Aktionen ---',
+      '\u2022 Versionen anzeigen: Klick auf ein Modell \u2192 \u00d6ffnet Versions-\u00dcbersicht mit allen Trainingsst\u00e4nden',
+      '  - Jede Version zeigt: Trainings-Metriken (Loss, Epochen), Dateigr\u00f6\u00dfe, Erstellungsdatum',
+      '  - Version umbenennen: Stift-Icon \u2192 Name \u00e4ndern + Enter',
+      '  - Version exportieren: Download-Icon \u2192 Kopiert Modell in ausgew\u00e4hlten Ordner',
+      '  - Version l\u00f6schen: Trash-Icon \u2192 Entfernt Version dauerhaft (Original kann nicht gel\u00f6scht werden)',
+      '\u2022 Refresh-Button: Versionen nach Training neu laden',
+      '',
+      '--- Versionsstruktur ---',
+      '  Original (v0, ⭐): Das urspr\u00fcnglich importierte Modell, kann nicht gel\u00f6scht werden',
+      '  v1, v2, v3...: Jede abgeschlossene Trainingsrunde erstellt eine neue Version',
+      '  Versionen bauen aufeinander auf (Tree-Struktur)',
+      '',
+      '--- M\u00f6gliche Fehler ---',
+      '\u2022 "Keine Versionen": Modell wurde noch nicht trainiert (nur Original vorhanden)',
+      '\u2022 "Export fehlgeschlagen": Zielordner-Berechtigungen pr\u00fcfen',
+      '\u2022 "L\u00f6schen fehlgeschlagen": Version wird m\u00f6glicherweise noch verwendet',
+      '',
+      `--- Vorhandene Modelle (${models.length}) ---`,
+      ...(models.length === 0
+        ? ['Keine Modelle vorhanden. F\u00fcge zuerst ein Modell auf der Modelle-Seite hinzu.']
+        : models.map(m => [
+            `\u2022 "${m.name}" | ${m.version_count} Version(en) | ${formatBytes(m.total_size)}`,
+            m.model_type ? `  Typ: ${m.model_type}` : '',
+          ].filter(Boolean).join('\n'))
+      ),
+      selectedModel ? `\n--- Aktuell ge\u00f6ffnetes Modell: "${selectedModel.name}" ---` : '',
+      selectedModel && modelVersions.length > 0 ? [
+        `Versionen (${modelVersions.length}):`,
+        ...modelVersions.map(v => [
+          `  \u2022 ${v.is_root ? '⭐ ' : ''}"${v.version_name}" (v${v.version_number})`,
+          v.training_metrics ? `    Loss: ${v.training_metrics.final_train_loss.toFixed(6)} | Epochen: ${v.training_metrics.total_epochs} | Steps: ${v.training_metrics.total_steps}` : '    (keine Trainings-Metriken)',
+        ].join('\n'))
+      ].join('\n') : '',
+    ].filter(Boolean);
+    setCurrentPageContent(lines.join('\n'));
+  }, [models, selectedModel, modelVersions, setCurrentPageContent]);
 
   // Auto-refresh when training completes
   useEffect(() => {

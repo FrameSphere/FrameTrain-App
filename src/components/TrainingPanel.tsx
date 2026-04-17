@@ -2554,6 +2554,56 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
     loadInitialData();
   }, []);
 
+  // Page context for AI coach
+  useEffect(() => {
+    const selectedModel = models.find(m => m.id === selectedModelId);
+    const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
+    const isTraining = currentJob?.status === 'running' || currentJob?.status === 'pending';
+    const lines = [
+      '=== FrameTrain Training-Panel ===',
+      '',
+      '--- Seitenzweck ---',
+      'Hier werden KI-Modelle trainiert (Fine-Tuning). Parameter k\u00f6nnen konfiguriert, Presets geladen und Training gestartet werden.',
+      '',
+      '--- Ausgew\u00e4hltes Modell & Dataset ---',
+      selectedModel ? `Modell: "${selectedModel.name}" (${selectedModel.source})` : 'Kein Modell ausgew\u00e4hlt',
+      selectedDataset ? `Dataset: "${selectedDataset.name}" (${selectedDataset.file_count} Dateien, Status: ${selectedDataset.status})` : 'Kein Dataset ausgew\u00e4hlt',
+      selectedDataset?.status === 'unused' ? '\u26a0\ufe0f ACHTUNG: Dataset ist nicht aufgeteilt! Bitte zuerst in Datens\u00e4tze-Seite aufteilen.' : '',
+      '',
+      '--- Aktuelle Trainings-Konfiguration ---',
+      `Epochen: ${config.epochs} | Batch Size: ${config.batch_size} | Gradient Accumulation: ${config.gradient_accumulation_steps}`,
+      `Learning Rate: ${config.learning_rate} | Optimizer: ${config.optimizer} | Scheduler: ${config.scheduler}`,
+      `LoRA: ${config.use_lora ? `aktiv (r=${config.lora_r}, alpha=${config.lora_alpha})` : 'deaktiviert'}`,
+      `FP16: ${config.fp16} | BF16: ${config.bf16} | 4-bit: ${config.load_in_4bit} | 8-bit: ${config.load_in_8bit}`,
+      `Max Seq Length: ${config.max_seq_length} | Num Workers: ${config.num_workers} | Gradient Checkpointing: ${config.gradient_checkpointing}`,
+      '',
+      '--- Training Status ---',
+      isTraining ? `Training l\u00e4uft: Epoche ${currentJob?.progress.epoch}/${currentJob?.progress.total_epochs}, Step ${currentJob?.progress.step}/${currentJob?.progress.total_steps}, Loss: ${currentJob?.progress.train_loss.toFixed(6)}, Fortschritt: ${currentJob?.progress.progress_percent.toFixed(1)}%` : 'Training bereit (kein aktives Training)',
+      requirements ? `System: Python ${requirements.python_installed ? '\u2705' : '\u274c'} | PyTorch ${requirements.torch_installed ? '\u2705' : '\u274c'} | ${requirements.cuda_available ? 'CUDA GPU' : requirements.mps_available ? 'Apple Silicon MPS' : 'CPU'} | Bereit: ${requirements.ready ? '\u2705' : '\u274c'}` : 'System-Anforderungen nicht gepr\u00fcft',
+      '',
+      '--- Verf\u00fcgbare Aktionen ---',
+      '\u2022 Training starten: Nur m\u00f6glich wenn Modell + aufgeteiltes Dataset ausgew\u00e4hlt und Anforderungen erf\u00fcllt',
+      '\u2022 Training stoppen: Stoppt Training sofort (Checkpoint geht verloren wenn nicht gespeichert)',
+      '\u2022 Ab Checkpoint beenden: Stoppt sauber wenn Checkpoint vorhanden',
+      '\u2022 Presets: Vorkonfigurierte Einstellungen f\u00fcr typische Szenarien',
+      '\u2022 KI-Assistent: Automatische Parameteroptimierung per KI',
+      '\u2022 Templates: Gespeicherte Analyse-Empfehlungen laden',
+      '\u2022 JSON hochladen: Eigene Konfigurationsdatei importieren',
+      '\u2022 JSON herunterladen: Aktuelle Konfiguration exportieren',
+      '\u2022 Sleep-Prevention: Verhindert Computerschlaf w\u00e4hrend Training',
+      '',
+      '--- M\u00f6gliche Fehler ---',
+      '\u2022 "Dataset nicht aufgeteilt": Dataset muss zuerst auf der Datens\u00e4tze-Seite gesplittet werden',
+      '\u2022 "Python/PyTorch nicht installiert": pip install torch transformers peft',
+      '\u2022 SIGKILL / OOM: Zu wenig RAM \u2192 Batch Size/Seq Length reduzieren, LoRA aktivieren, Gradient Checkpointing an',
+      '\u2022 LoRA Module nicht gefunden: Andere target_modules angeben (z.B. query, value statt q_proj, v_proj)',
+      '\u2022 MPS + num_workers > 0: Deadlocks auf Apple Silicon, num_workers=0 setzen',
+      '',
+      rating ? `--- Parameter-Bewertung ---\nScore: ${rating.score}/100 (${rating.rating_info.label})\n${rating.issues.length > 0 ? 'Probleme: ' + rating.issues.join('; ') : ''}\n${rating.warnings.length > 0 ? 'Warnungen: ' + rating.warnings.join('; ') : ''}\n${rating.tips.length > 0 ? 'Tipps: ' + rating.tips.slice(0,3).join('; ') : ''}` : '',
+    ].filter(Boolean);
+    setCurrentPageContent(lines.join('\n'));
+  }, [models, selectedModelId, selectedDatasetId, datasets, config, currentJob, requirements, rating, setCurrentPageContent]);
+
   // ============ Update AI Coach with Page Context ============
   useEffect(() => {
     const pageContent = [

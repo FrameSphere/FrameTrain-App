@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { usePageContext } from '../contexts/PageContext';
 
 // ============ Types ============
 
@@ -183,6 +184,7 @@ interface AnalysisPanelProps { initialVersionId?: string | null; }
 export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) {
   const { currentTheme } = useTheme();
   const { success, error: notifyError, info } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
 
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
   const [loading, setLoading] = useState(true);
@@ -219,6 +221,62 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   const [savingAITemplate, setSavingAITemplate] = useState(false);
 
   useEffect(() => { loadModels(); loadTemplates(); }, []);
+
+  // Page context for AI coach
+  useEffect(() => {
+    const selectedModel = modelsWithVersions.find(m => m.id === selectedModelId);
+    const selectedVersion = selectedModel?.versions.find(v => v.id === selectedVersionId);
+    const lines = [
+      '=== FrameTrain Analyse-Panel (AnalysisPanel) ===',
+      '',
+      '--- Seitenzweck ---',
+      'Zeigt Trainings-Metriken, Loss-Kurven und KI-Analysen zu trainierten Modell-Versionen.',
+      'Hier können KI-Berichte generiert und Training-Qualität bewertet werden.',
+      '',
+      '--- Ausgewähltes Modell & Version ---',
+      selectedModel ? `Modell: "${selectedModel.name}"` : 'Kein Modell ausgewählt',
+      selectedVersion ? `Version: "${selectedVersion.name}" (${selectedVersion.is_root ? 'Original' : `v${selectedVersion.version_number}`})` : 'Keine Version ausgewählt',
+      selectedModel ? `Alle Versionen: ${selectedModel.versions.map(v => v.name).join(', ')}` : '',
+      '',
+      '--- Trainings-Metriken ---',
+      metrics ? [
+        `Train Loss: ${metrics.final_train_loss.toFixed(6)}`,
+        metrics.final_val_loss !== null ? `Val Loss: ${metrics.final_val_loss.toFixed(6)}` : 'Val Loss: nicht verfügbar',
+        `Epochen: ${metrics.total_epochs} | Steps: ${metrics.total_steps}`,
+        metrics.best_epoch !== null ? `Beste Epoche: ${metrics.best_epoch}` : '',
+        metrics.training_duration_seconds ? `Trainingsdauer: ${formatDuration(metrics.training_duration_seconds)}` : '',
+      ].filter(Boolean).join('\n') : 'Keine Metriken verfügbar (Version wurde möglicherweise noch nicht trainiert)',
+      '',
+      '--- Loss-Interpretation ---',
+      metrics ? [
+        metrics.final_train_loss < 0.1 ? '✅ Sehr niedriger Train Loss - Modell hat gut gelernt' :
+        metrics.final_train_loss < 0.5 ? '🟡 Mittlerer Train Loss - weiteres Training könnte helfen' :
+        '❌ Hoher Train Loss - Modell hat möglicherweise Probleme beim Lernen',
+        metrics.final_val_loss && metrics.final_train_loss ?
+          (metrics.final_val_loss > metrics.final_train_loss * 1.5 ?
+            '⚠️ Val Loss deutlich höher als Train Loss: möglicherweise Overfitting' :
+            '✅ Val Loss nahe Train Loss: kein starkes Overfitting erkennbar') : '',
+      ].filter(Boolean).join('\n') : '',
+      '',
+      '--- Verfügbare Aktionen ---',
+      '• KI-Bericht generieren: Analysiert Metriken mit gewähltem KI-Modell und gibt Empfehlungen',
+      '• Chat: Stellt Folgefragen zum Trainingsverlauf',
+      '• Als Template speichern: Speichert empfohlene Hyperparameter für späteres Training',
+      '• Daten exportieren: Lädt vollständige Trainingsdaten als JSON herunter',
+      '',
+      '--- Mögliche Fehler ---',
+      '• "Keine Metriken verfügbar": Version wurde nicht trainiert oder Training wurde abgebrochen',
+      '• KI-Bericht schlägt fehl: API-Key fehlt oder Anbieter nicht erreichbar',
+      '• "Keine Trainingsdaten": Logs wurden nicht gespeichert (Training zu kurz?)',
+      '',
+      report ? [
+        '--- Vorhandener KI-Bericht ---',
+        `Generiert am: ${formatDate(report.generated_at)} mit ${report.provider}/${report.model}`,
+        `Bericht (Zusammenfassung): ${report.report_text.slice(0, 500)}...`,
+      ].join('\n') : '--- Kein KI-Bericht vorhanden ---',
+    ].filter(l => l !== undefined);
+    setCurrentPageContent(lines.join('\n'));
+  }, [modelsWithVersions, selectedModelId, selectedVersionId, metrics, versionDetails, report, setCurrentPageContent]);
   useEffect(() => {
     if (!selectedModelId) { setSelectedVersionId(null); return; }
     const m = modelsWithVersions.find(x => x.id === selectedModelId);

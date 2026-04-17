@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { usePageContext } from '../contexts/PageContext';
 import DatasetFileManager from './DatasetFileManager';
 
 // ============ Types ============
@@ -110,6 +111,7 @@ function formatDownloads(num: number | undefined): string {
 export default function DatasetUpload() {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
 
   // Models & Datasets State
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -179,6 +181,49 @@ export default function DatasetUpload() {
       loadDatasets();
     }
   }, [selectedModelId]);
+
+  // Page context for AI coach
+  useEffect(() => {
+    const selectedModel = models.find(m => m.id === selectedModelId);
+    const lines = [
+      '=== FrameTrain Datensätze (DatasetUpload) ===',
+      '',
+      '--- Seitenzweck ---',
+      'Hier werden Datensätze für das Training verwaltet.',
+      'Ein Datensatz muss einem Modell zugewiesen und aufgeteilt (split) sein, bevor er trainiert werden kann.',
+      '',
+      '--- Ausgewähltes Modell ---',
+      selectedModel ? `Modell: "${selectedModel.name}" (${selectedModel.source})` : 'Kein Modell ausgewählt',
+      `Alle Modelle: ${models.map(m => m.name).join(', ') || 'keine'}`,
+      '',
+      '--- Verfügbare Aktionen ---',
+      '• Dataset hinzufügen (+ Button): Lokalen Ordner oder HuggingFace-Dataset importieren',
+      '• Dataset aufteilen (Scissors-Icon): Train/Val/Test-Aufteilung festlegen (Standard: 80%/10%/10%)',
+      '  Nur aufgeteilte Datasets können für Training verwendet werden!',
+      '• Datei-Manager (Files-Icon): Einzelne Dateien im Dataset anzeigen und verwalten',
+      '• Dataset löschen (Trash-Icon): Entfernt Dataset dauerhaft',
+      '',
+      '--- Dataset-Status ---',
+      '  "unused" = noch nicht aufgeteilt, kann NICHT für Training genutzt werden',
+      '  "split" = aufgeteilt in Train/Val/Test, bereit für Training',
+      '',
+      '--- Mögliche Fehler ---',
+      '• Dataset kann nicht aufgeteilt werden: Zu wenige Dateien (mindestens 3 für 80/10/10)',
+      '• HF-Download schlägt fehl: Internetverbindung oder privates Dataset ohne Token',
+      '• Kein Dataset sichtbar: Richtiges Modell in Dropdown ausgewählt?',
+      '',
+      `--- Datensätze für gewähltes Modell (${datasets.length}) ---`,
+      ...(datasets.length === 0
+        ? ['Keine Datensätze vorhanden. Füge einen über den + Button hinzu.']
+        : datasets.map(d => [
+            `• "${d.name}" | Status: ${d.status === 'split' ? '✅ Aufgeteilt' : '⚠️ Nicht aufgeteilt'}`,
+            `  Dateien: ${d.file_count} | Größe: ${(d.size_bytes / 1024 / 1024).toFixed(1)} MB | Trainings: ${d.training_count}`,
+            d.split_info ? `  Split: ${Math.round(d.split_info.train_ratio * 100)}% Train / ${Math.round(d.split_info.val_ratio * 100)}% Val / ${Math.round(d.split_info.test_ratio * 100)}% Test` : '',
+          ].filter(Boolean).join('\n'))
+      ),
+    ];
+    setCurrentPageContent(lines.join('\n'));
+  }, [models, selectedModelId, datasets, setCurrentPageContent]);
 
   // Debounced HuggingFace search
   useEffect(() => {

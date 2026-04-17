@@ -247,8 +247,38 @@ def _base_args(cfg: TrainingConfig, eval_strat: str, device: str, out_dir: str,
                use_gradient_checkpointing: bool) -> dict:
     use_fp16       = cfg.fp16 and device == "cuda"
     use_bf16       = cfg.bf16 and device in ("cuda", "cpu")
-    save_steps_val = cfg.save_steps if cfg.save_strategy == "steps" else None
-    eval_steps_val = cfg.eval_steps  if eval_strat      == "steps" else None
+
+    # ── Save/Eval-Synchronisierung ────────────────────────────────────────
+    # load_best_model_at_end=True erfordert, dass bei JEDEM Save-Checkpoint
+    # eval_loss vorhanden ist. Das ist nur garantiert wenn save_steps == eval_steps.
+    # Wenn die User-Werte nicht übereinstimmen, erzwingen wir Gleichheit:
+    #   - Beide "steps": save_steps auf eval_steps angleichen
+    #   - Eval "epoch" aber Save "steps": Save ebenfalls auf "epoch" umstellen
+    #   - Kein Eval: load_best_model_at_end=False, keine Anpassung nötig
+    actual_save_strategy = cfg.save_strategy
+    actual_save_steps    = cfg.save_steps
+
+    if eval_strat != "no":
+        if eval_strat == "epoch" and actual_save_strategy == "steps":
+            # Epoch-Eval mit Steps-Save → beides auf epoch setzen
+            actual_save_strategy = "epoch"
+            actual_save_steps    = None
+            MessageProtocol.status(
+                "init",
+                "Save-Strategie auf 'epoch' angepasst (eval_strategy='epoch' erfordert sync)"
+            )
+        elif eval_strat == "steps" and actual_save_strategy == "steps":
+            if actual_save_steps != cfg.eval_steps:
+                # Steps nicht synchron → save_steps = eval_steps
+                actual_save_steps = cfg.eval_steps
+                MessageProtocol.status(
+                    "init",
+                    f"save_steps auf {cfg.eval_steps} angepasst (muss = eval_steps sein, "
+                    "sonst KeyError 'eval_loss' beim Checkpoint)"
+                )
+
+    save_steps_val = actual_save_steps if actual_save_strategy == "steps" else None
+    eval_steps_val = cfg.eval_steps    if eval_strat            == "steps" else None
 
     # MPS und CPU: pin_memory nicht unterstützt (kein CUDA-Pinned-Memory-Pfad),
     # num_workers > 0 führt auf MPS zu Deadlocks beim fork-basierten Multiprocessing.
@@ -279,7 +309,7 @@ def _base_args(cfg: TrainingConfig, eval_strat: str, device: str, out_dir: str,
         max_grad_norm=cfg.max_grad_norm,
         fp16=use_fp16,
         bf16=use_bf16,
-        save_strategy=cfg.save_strategy,
+        save_strategy=actual_save_strategy,
         save_steps=save_steps_val,
         save_total_limit=cfg.save_total_limit,
         logging_steps=cfg.logging_steps,
