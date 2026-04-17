@@ -210,6 +210,27 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
   return <div className={`text-sm space-y-0.5 ${className}`}>{elements}</div>;
 }
 
+// ============ Light-Color Detection (Fix für Monochrome / Arctic White) ============
+
+function hexLuminance(hex: string): number {
+  try {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const toL = (c: number) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
+  } catch { return 0.5; }
+}
+
+function darkenHex(hex: string, amount: number): string {
+  try {
+    const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - amount);
+    const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - amount);
+    const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - amount);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  } catch { return hex; }
+}
+
 // ============ Thinking Block ============
 
 function ThinkingBlock({
@@ -223,6 +244,17 @@ function ThinkingBlock({
   collapsed: boolean;
   onToggle: () => void;
 }) {
+  // Fix 4: Theme-Farben im ThinkingBlock
+  const { currentTheme } = useTheme();
+  const tPrimary = hexLuminance(currentTheme.colors.primary) > 0.5
+    ? darkenHex(currentTheme.colors.primary, 100)
+    : currentTheme.colors.primary;
+  const borderColor = `${tPrimary}33`;
+  const bgColor     = `${tPrimary}1a`;
+  const bgHover     = `${tPrimary}26`;
+  const textColor   = `${tPrimary}cc`;
+  const chevronColor = `${tPrimary}99`;
+
   const iconMap: Record<ThinkingStep['icon'], React.ReactNode> = {
     search: <FileSearch className="w-3 h-3" />,
     brain: <Brain className="w-3 h-3" />,
@@ -236,27 +268,23 @@ function ThinkingBlock({
   const doneCount = steps.filter(s => s.status === 'done').length;
 
   if (isActive) {
-    // Still thinking – show animated steps
     return (
       <div className="mb-3">
-        <div className="flex items-center gap-1.5 text-xs text-purple-300/70 mb-1.5">
-          <Loader2 className="w-3 h-3 animate-spin text-purple-400" />
+        <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: textColor }}>
+          <Loader2 className="w-3 h-3 animate-spin" style={{ color: tPrimary }} />
           <span>{activeStep?.label || 'Denkt nach...'}</span>
         </div>
-        <div className="pl-1 space-y-1 border-l-2 border-purple-500/20 ml-1.5">
+        <div className="pl-1 space-y-1 ml-1.5" style={{ borderLeft: `2px solid ${borderColor}` }}>
           {steps.map(step => (
             <div
               key={step.id}
               className={`flex items-start gap-2 py-0.5 transition-all ${
-                step.status === 'pending' ? 'opacity-30' :
                 step.status === 'active' ? 'opacity-100' : 'opacity-60'
               }`}
             >
               <div className={`flex-shrink-0 mt-0.5 ${
-                step.status === 'active' ? 'text-purple-300' :
-                step.status === 'done' ? 'text-green-400' :
-                'text-gray-600'
-              }`}>
+                step.status === 'done' ? 'text-green-400' : ''
+              }`} style={step.status === 'active' ? { color: tPrimary } : undefined}>
                 {step.status === 'active'
                   ? <Loader2 className="w-3 h-3 animate-spin" />
                   : iconMap[step.icon]
@@ -264,13 +292,11 @@ function ThinkingBlock({
               </div>
               <div className="min-w-0">
                 <div className={`text-xs ${
-                  step.status === 'active' ? 'text-white' :
-                  step.status === 'done' ? 'text-gray-400' :
-                  'text-gray-600'
+                  step.status === 'active' ? 'text-white' : 'text-gray-400'
                 }`}>
                   {step.label}
                 </div>
-                {step.detail && step.status !== 'pending' && (
+                {step.detail && (
                   <div className="text-[10px] text-gray-600 mt-0.5 break-words">{step.detail}</div>
                 )}
               </div>
@@ -281,23 +307,28 @@ function ThinkingBlock({
     );
   }
 
-  // Finished – show collapsible summary above message
   return (
     <div className="mb-2">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/15 hover:border-purple-500/30 transition-all group"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all group"
+        style={{ background: bgColor, border: `1px solid ${borderColor}` }}
+        onMouseEnter={e => (e.currentTarget.style.background = bgHover)}
+        onMouseLeave={e => (e.currentTarget.style.background = bgColor)}
       >
-        <Brain className="w-3 h-3 text-purple-400 flex-shrink-0" />
-        <span className="text-[11px] text-purple-300/80 font-medium">
+        <Brain className="w-3 h-3 flex-shrink-0" style={{ color: tPrimary }} />
+        <span className="text-[11px] font-medium" style={{ color: textColor }}>
           Hat nachgedacht
         </span>
-        <span className="text-[10px] text-purple-400/50 ml-0.5">· {doneCount} Schritte</span>
-        <ChevronDown className={`w-3 h-3 text-purple-400/60 ml-auto transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+        <span className="text-[10px] ml-0.5" style={{ color: chevronColor }}>· {doneCount} Schritte</span>
+        <ChevronDown
+          className={`w-3 h-3 ml-auto transition-transform ${collapsed ? '' : 'rotate-180'}`}
+          style={{ color: chevronColor }}
+        />
       </button>
 
       {!collapsed && (
-        <div className="mt-1.5 pl-1 space-y-1 border-l-2 border-purple-500/20 ml-1.5 pb-1">
+        <div className="mt-1.5 pl-1 space-y-1 ml-1.5 pb-1" style={{ borderLeft: `2px solid ${borderColor}` }}>
           {steps.map(step => (
             <div key={step.id} className="flex items-start gap-2 py-0.5 opacity-60">
               <div className="flex-shrink-0 mt-0.5 text-green-400">
@@ -328,8 +359,11 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   const { currentTheme } = useTheme();
   const { currentPageContent: ctxPageContent } = usePageContext();
 
-  const themeGradient = `linear-gradient(135deg, ${currentTheme.colors.primary}, ${currentTheme.colors.secondary})`;
-  const themeGradientSubtle = `linear-gradient(to right, ${currentTheme.colors.primary}1a, ${currentTheme.colors.secondary}0d)`;
+  // Theme-Farben mit Light-Color-Detection (Fix für Monochrome / Arctic White)
+  const safePrimary   = hexLuminance(currentTheme.colors.primary)   > 0.5 ? darkenHex(currentTheme.colors.primary,   100) : currentTheme.colors.primary;
+  const safeSecondary = hexLuminance(currentTheme.colors.secondary) > 0.5 ? darkenHex(currentTheme.colors.secondary, 100) : currentTheme.colors.secondary;
+  const themeGradient       = `linear-gradient(135deg, ${safePrimary}, ${safeSecondary})`;
+  const themeGradientSubtle = `linear-gradient(to right, ${safePrimary}1a, ${safeSecondary}0d)`;
 
   const pageContent = currentPageContent || ctxPageContent || '';
 
@@ -361,6 +395,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const prevMsgCountRef = useRef(0);
 
   // Load chats from localStorage on mount (only persisted ones)
   useEffect(() => {
@@ -368,9 +403,13 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     setChats(loaded);
   }, []);
 
-  // Scroll to bottom when messages change
+  // Fix 3: Scroll nur wenn neue Nachricht hinzukommt, nicht bei Collapse-Toggle
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const count = currentChat?.messages.length ?? 0;
+    if (count > prevMsgCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevMsgCountRef.current = count;
   }, [currentChat?.messages]);
 
   // ── Drag / resize ──
@@ -499,7 +538,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     return prompt;
   };
 
-  // ── Thinking animation — returns the steps array for use after async gap ──
+  // Fix 2: Schritte sequenziell aufdecken — nur den aktuellen Schritt zeigen
   const runThinkingAnimation = async (hasPageContent: boolean): Promise<ThinkingStep[]> => {
     const steps: ThinkingStep[] = [
       { id: 's1', label: 'Seite analysieren', icon: 'search', status: 'pending',
@@ -508,22 +547,24 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       { id: 's3', label: 'Antwort generieren', icon: 'sparkles', status: 'pending', detail: undefined },
     ];
 
-    setThinkingSteps(steps);
-    await new Promise(r => setTimeout(r, 50));
-
-    setThinkingSteps(s => s.map((st, i) => i === 0 ? { ...st, status: 'active' } : st));
+    // Nur Step 1 sichtbar + aktiv
+    setThinkingSteps([{ ...steps[0], status: 'active' }]);
     await new Promise(r => setTimeout(r, 400));
 
-    setThinkingSteps(s => s.map((st, i) =>
-      i === 0 ? { ...st, status: 'done' } : i === 1 ? { ...st, status: 'active' } : st
-    ));
+    // Step 1 fertig, Step 2 wird sichtbar + aktiv
+    setThinkingSteps([
+      { ...steps[0], status: 'done' },
+      { ...steps[1], status: 'active' },
+    ]);
     await new Promise(r => setTimeout(r, 350));
 
-    setThinkingSteps(s => s.map((st, i) =>
-      i === 1 ? { ...st, status: 'done' } : i === 2 ? { ...st, status: 'active' } : st
-    ));
+    // Step 2 fertig, Step 3 wird sichtbar + aktiv
+    setThinkingSteps([
+      { ...steps[0], status: 'done' },
+      { ...steps[1], status: 'done' },
+      { ...steps[2], status: 'active' },
+    ]);
 
-    // Return a done copy for attaching to the assistant message (avoids stale closure)
     return steps.map(s => ({ ...s, status: 'done' as const }));
   };
 
