@@ -401,18 +401,49 @@ def make_progress_callback(total_epochs: int, collector: MetricsCollector):
             has_train_loss = "loss" in logs or "train_loss" in logs
             has_eval_loss  = "eval_loss" in logs
 
-            # Reines Eval-Event (kein train_loss) → nur Val-Loss tracken,
-            # KEINEN Progress-Eintrag mit train_loss=0 senden (würde Spike erzeugen).
+            # Reines Eval-Event (kein train_loss) → val_loss aufzeichnen
+            # UND progress() senden damit der Live-Graph im Frontend sich aktualisiert.
+            # Ohne progress() sieht das Frontend val_loss nie während des Trainings.
             if not has_train_loss and has_eval_loss:
                 v_loss = float(logs["eval_loss"])
-                # Bestes Val-Loss intern aktualisieren ohne neuen Step zu erzeugen
-                epoch = int(state.epoch or 0) + 1
+                epoch  = int(state.epoch or 0) + 1
+                step   = state.global_step or self._last_step or 0
+                total  = state.max_steps or 1
+
+                # Letzten bekannten train_loss aus History holen
+                # (vermeidet false 0.0 in training_logs.json und im Chart)
+                last_train_loss = next(
+                    (e["train_loss"] for e in reversed(collector.history)
+                     if "train_loss" in e and e["train_loss"] > 0),
+                    0.0
+                )
+                last_lr = next(
+                    (e["learning_rate"] for e in reversed(collector.history)
+                     if "learning_rate" in e),
+                    0.0
+                )
+
+                # In History aufzeichnen mit letztem train_loss (nicht 0.0)
                 if self._last_step is not None:
-                    collector.record(epoch, self._last_step, {"val_loss": v_loss})
-                # Bestes Val-Loss für MetricsCollector
+                    collector.record(epoch, self._last_step, {
+                        "train_loss": last_train_loss,
+                        "val_loss":   v_loss,
+                        "learning_rate": last_lr,
+                    })
+
+                # Bestes Val-Loss aktualisieren
                 if collector.best_val_loss is None or v_loss < collector.best_val_loss:
                     collector.best_val_loss = v_loss
                     collector.best_epoch    = epoch
+
+                # progress() senden — Frontend bekommt val_loss im Live-Graphen
+                MessageProtocol.progress(
+                    epoch=epoch, total_epochs=total_epochs,
+                    step=step, total_steps=total,
+                    train_loss=last_train_loss,
+                    val_loss=v_loss,
+                    learning_rate=last_lr,
+                )
                 return
 
             if not has_train_loss:
@@ -452,6 +483,26 @@ def make_progress_callback(total_epochs: int, collector: MetricsCollector):
                 None,
             )
             collector.record_epoch_end(epoch, val_loss)
+
+            # Overfitting-Warnung: Train Loss sehr niedrig aber kein Val-Loss
+            # (passiert wenn Dataset sehr klein und Modell es auswendig lernt)
+            final_train = next(
+                (e["train_loss"] for e in reversed(collector.history)
+                 if "train_loss" in e and e["train_loss"] > 0),
+                None
+            )
+            if final_train is not None and final_train < 0.001 and val_loss is None:
+                MessageProtocol.warning(
+                    f"\u26a0\ufe0f Train Loss = {final_train:.8f} nach Epoche {epoch} \u2014 "
+                    "das Modell hat das Dataset wahrscheinlich auswendig gelernt (Overfitting).\n"
+                    "Empfehlungen: mehr Trainingsdaten, h\u00f6here Dropout-Rate, fr\u00fcheres Stoppen."
+                )
+            elif final_train is not None and final_train < 0.001 and val_loss is not None:
+                MessageProtocol.warning(
+                    f"\u26a0\ufe0f Train Loss = {final_train:.8f}, Val Loss = {val_loss:.6f} \u2014 "
+                    "starkes Overfitting erkannt! Das Modell hat das Training-Set auswendig gelernt.\n"
+                    "Empfehlungen: mehr Daten, Dropout erh\u00f6hen, LoRA-Rank reduzieren."
+                )
 
         def on_save(self, args, state, control, **kwargs):
             ep = int(state.epoch or 0) + 1
