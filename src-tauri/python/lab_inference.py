@@ -350,6 +350,15 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
     try:
         import torch
         from transformers import pipeline
+        import os
+
+        # Offline-Modus erzwingen — verhindert jeden HuggingFace Hub-Kontakt.
+        # WICHTIG: local_files_only darf NICHT in load_kwargs stehen,
+        # weil pipeline() es intern speichert und beim Inferenz-Aufruf
+        # pipe(input) ans Modell weitergibt – das model.generate() kennt
+        # diesen Parameter nicht → UserWarning / Exception.
+        os.environ['TRANSFORMERS_OFFLINE'] = '1'
+        os.environ['HF_DATASETS_OFFLINE'] = '1'
 
         device = 0 if torch.cuda.is_available() else -1
 
@@ -357,14 +366,12 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             device = -1  # transformers setzt MPS automatisch in neueren Versionen
 
-        # KRITISCH: local_files_only=True verhindert jeglichen HF-Download
-        # Das Modell MUSS lokal vorhanden sein.
         pipe = None
         last_error = None
 
         load_kwargs = {
-            'local_files_only': True,  # NIEMALS HuggingFace kontaktieren
             'device': device,
+            # local_files_only bewusst NICHT hier — stattdessen über TRANSFORMERS_OFFLINE env
         }
 
         try:

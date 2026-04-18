@@ -49,6 +49,7 @@ class Plugin(TestPlugin):
     # ── Modell laden ───────────────────────────────────────────────────────
 
     def load_model(self) -> None:
+        import os
         import torch
         from transformers import (
             AutoConfig,
@@ -57,6 +58,9 @@ class Plugin(TestPlugin):
             AutoModelForSequenceClassification,
             AutoTokenizer,
         )
+
+        # Offline-Modus: verhindert versehentliche Hub-Downloads
+        os.environ['TRANSFORMERS_OFFLINE'] = '1'
 
         model_path = self.config.model_path
         self.proto.status("loading", f"Lade Modell: {Path(model_path).name} …")
