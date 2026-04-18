@@ -249,32 +249,33 @@ def _base_args(cfg: TrainingConfig, eval_strat: str, device: str, out_dir: str,
     use_bf16       = cfg.bf16 and device in ("cuda", "cpu")
 
     # ── Save/Eval-Synchronisierung ────────────────────────────────────────
-    # load_best_model_at_end=True erfordert, dass bei JEDEM Save-Checkpoint
-    # eval_loss vorhanden ist. Das ist nur garantiert wenn save_steps == eval_steps.
-    # Wenn die User-Werte nicht übereinstimmen, erzwingen wir Gleichheit:
-    #   - Beide "steps": save_steps auf eval_steps angleichen
-    #   - Eval "epoch" aber Save "steps": Save ebenfalls auf "epoch" umstellen
-    #   - Kein Eval: load_best_model_at_end=False, keine Anpassung nötig
+    # load_best_model_at_end=True erfordert, dass bei JEDEM Checkpoint-Save
+    # eval_loss im metrics-Dict vorhanden ist. Das ist nur garantiert wenn
+    # save_steps == eval_steps UND beide zur gleichen Zeit feuern.
+    # In der Praxis gibt es viele Edge-Cases (erste Checkpoint vor erstem Eval,
+    # bestimmte transformers-Versionen, Epoch-Grenzen etc.) die zu
+    # KeyError: 'eval_loss' führen.
+    #
+    # LÖSUNG: load_best_model_at_end=False — das finale Modell wird immer am
+    # Ende gespeichert (trainer.save_model() in export()). Kein Checkpoint-
+    # Laden notwendig. Einfacher, robuster, keine KeyError-Gefahr.
     actual_save_strategy = cfg.save_strategy
     actual_save_steps    = cfg.save_steps
 
     if eval_strat != "no":
         if eval_strat == "epoch" and actual_save_strategy == "steps":
-            # Epoch-Eval mit Steps-Save → beides auf epoch setzen
             actual_save_strategy = "epoch"
             actual_save_steps    = None
             MessageProtocol.status(
                 "init",
-                "Save-Strategie auf 'epoch' angepasst (eval_strategy='epoch' erfordert sync)"
+                "Save-Strategie auf 'epoch' angepasst (synchron mit eval_strategy='epoch')"
             )
         elif eval_strat == "steps" and actual_save_strategy == "steps":
             if actual_save_steps != cfg.eval_steps:
-                # Steps nicht synchron → save_steps = eval_steps
                 actual_save_steps = cfg.eval_steps
                 MessageProtocol.status(
                     "init",
-                    f"save_steps auf {cfg.eval_steps} angepasst (muss = eval_steps sein, "
-                    "sonst KeyError 'eval_loss' beim Checkpoint)"
+                    f"save_steps auf {cfg.eval_steps} angepasst (synchron mit eval_steps)"
                 )
 
     save_steps_val = actual_save_steps if actual_save_strategy == "steps" else None
@@ -317,8 +318,12 @@ def _base_args(cfg: TrainingConfig, eval_strat: str, device: str, out_dir: str,
         dataloader_num_workers=_num_workers,
         seed=cfg.seed,
         report_to="none",
-        load_best_model_at_end=(eval_strat != "no"),
-        metric_for_best_model="eval_loss" if eval_strat != "no" else None,
+        # load_best_model_at_end=False: verhindert KeyError 'eval_loss' beim Checkpoint.
+        # Transformers versucht beim Speichern metrics[metric_for_best_model] zu lesen,
+        # was fehlschlägt wenn Save- und Eval-Step nicht exakt zusammenfallen.
+        # Das finale Modell wird via trainer.save_model() in export() gespeichert.
+        load_best_model_at_end=False,
+        metric_for_best_model=None,
         greater_is_better=False,
         # RAM-Optimierungen
         group_by_length=cfg.group_by_length,

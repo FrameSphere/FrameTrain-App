@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
+import { usePageContext } from '../contexts/PageContext';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 
@@ -127,6 +128,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const { currentTheme, setTheme, themes: allThemes } = useTheme();
   const { settings: aiSettings, updateSettings: updateAISettings } = useAISettings();
+  const { setCurrentPageContent } = usePageContext();
   const [appVersion, setAppVersion] = useState<string>('Loading...');
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<'checking' | 'up-to-date' | 'update-available' | 'error'>('checking');
@@ -154,6 +156,63 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   useEffect(() => {
     loadAppVersion();
   }, []);
+
+  // Page context for AI coach
+  useEffect(() => {
+    const providerInfo = PROVIDER_META[aiSettings.provider];
+    const tabs: Record<string, string> = {
+      account:      'Account (E-Mail, API-Key, Passwort, Abmelden)',
+      appearance:   'Erscheinungsbild (Farbthemen für die App)',
+      notifications: 'Benachrichtigungen',
+      updates:      'Updates (Versionsinformationen, Update-Prüfung)',
+      docs:         'Dokumentation (Anleitungen, Tipps)',
+      support:      'Support (Tickets erstellen, mit Team kommunizieren)',
+      'ai-assistant': 'KI-Assistent (Provider, API-Key, Modell konfigurieren)',
+      about:        'Informationen (Über FrameTrain)',
+    };
+    const lines = [
+      '=== FrameTrain Einstellungen (Settings) ===',
+      '',
+      '--- Aktueller Tab ---',
+      `Aktiver Tab: "${tabs[activeTab] || activeTab}"`,
+      '',
+      '--- Alle verfügbaren Tabs ---',
+      ...Object.entries(tabs).map(([k, v]) => `\u2022 ${v}`),
+      '',
+      '--- KI-Assistent Konfiguration ---',
+      `Status: ${aiSettings.enabled ? '\u2705 Aktiviert' : '\u274c Deaktiviert'}`,
+      `Anbieter: ${providerInfo.label} (${aiSettings.provider})`,
+      providerInfo.needsKey
+        ? `API-Key: ${aiSettings.apiKey ? '\u2705 eingetragen' : '\u274c fehlt! (' + providerInfo.keyHint + ')'}`
+        : `API-Key: nicht benötigt (${providerInfo.keyHint})`,
+      `Modell: ${aiSettings.selectedModel || providerInfo.models[0]}`,
+      aiSettings.provider === 'ollama' ? `Ollama-Modell: ${aiSettings.ollamaModel || 'llama3.2'}` : '',
+      '',
+      '--- Anbieter-Vergleich ---',
+      '\u2022 Anthropic (Claude): Bezahlt, bestes Modell, sk-ant-... Key',
+      '\u2022 OpenAI (GPT-4o): Bezahlt, sehr gut, sk-... Key',
+      '\u2022 Groq: KOSTENLOS, schnell, gsk_... Key von console.groq.com',
+      '\u2022 Ollama: KOSTENLOS, lokal, kein Key — ollama.com installieren',
+      '',
+      '--- App-Version ---',
+      `Version: ${appVersion}`,
+      updateStatus === 'update-available' ? `\u26a0\ufe0f Update verfügbar: ${latestVersion}` :
+      updateStatus === 'up-to-date' ? '\u2705 App ist aktuell' : '',
+      '',
+      '--- Account ---',
+      `E-Mail: ${userData.email || 'nicht gesetzt'}`,
+      `User-ID: ${userData.userId || 'nicht gesetzt'}`,
+      '',
+      '--- Mögliche Aktionen ---',
+      '\u2022 KI-Assistent aktivieren/deaktivieren (Toggle im KI-Assistent-Tab)',
+      '\u2022 Anbieter wechseln: KI-Assistent-Tab > Anbieter auswählen',
+      '\u2022 API-Key eintragen: KI-Assistent-Tab > API-Key Feld',
+      '\u2022 Farbthema ändern: Erscheinungsbild-Tab',
+      '\u2022 Support-Ticket erstellen: Support-Tab',
+      '\u2022 Abmelden: Account-Tab > Abmelden-Button',
+    ].filter(Boolean);
+    setCurrentPageContent(lines.join('\n'));
+  }, [activeTab, aiSettings, appVersion, updateStatus, latestVersion, userData, setCurrentPageContent]);
 
   // Check for unread admin replies
   useEffect(() => {

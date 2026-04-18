@@ -717,17 +717,17 @@ function AIAssistantModal({
 
   const handleSaveAsTemplate = async () => {
     if (!parsedConfig) return;
+    const cleaned = (parsedConfig as any)._cleaned || parsedConfig;
     setSavingTemplate(true);
     try {
       const tmpl = await invoke<MetricsTemplate>('save_metrics_template', {
         name: `KI-Assistent · ${new Date().toLocaleDateString('de-DE')}`,
         description: `Prompt: ${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}`,
-        config: parsedConfig,
+        config: cleaned,
         source: 'ai',
       });
       setTemplates(prev => [...prev, tmpl]);
       setError('');
-      // Kurze visuelle Bestätigung
       setSavingTemplate(false);
     } catch (e: any) {
       setError('Template konnte nicht gespeichert werden: ' + String(e));
@@ -775,14 +775,59 @@ KONTEXT DES USERS:
 - Hardware/GPU: ${requirements?.cuda_available ? 'NVIDIA GPU mit CUDA — bitsandbytes verfügbar, load_in_4bit/8bit möglich' : requirements?.mps_available ? 'Apple Silicon MPS — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen. Stattdessen use_lora=true für RAM-Effizienz nutzen. fp16=false und bf16=false setzen.' : 'Nur CPU — bitsandbytes NICHT verfügbar! Kein load_in_4bit oder load_in_8bit empfehlen.'}
 - Aktuelle Konfiguration:
 ${JSON.stringify({
-  epochs: config.epochs, batch_size: config.batch_size,
+  // Basis
+  epochs: config.epochs,
+  batch_size: config.batch_size,
   gradient_accumulation_steps: config.gradient_accumulation_steps,
-  learning_rate: config.learning_rate, optimizer: config.optimizer,
-  scheduler: config.scheduler, use_lora: config.use_lora,
-  lora_r: config.lora_r, lora_alpha: config.lora_alpha,
-  fp16: config.fp16, bf16: config.bf16, load_in_4bit: config.load_in_4bit,
-  max_seq_length: config.max_seq_length, gradient_checkpointing: config.gradient_checkpointing,
+  max_steps: config.max_steps,
+  // Lernrate & Scheduler
+  learning_rate: config.learning_rate,
+  optimizer: config.optimizer,
+  adam_beta1: config.adam_beta1,
+  adam_beta2: config.adam_beta2,
+  adam_epsilon: config.adam_epsilon,
+  sgd_momentum: config.sgd_momentum,
+  scheduler: config.scheduler,
+  scheduler_step_size: config.scheduler_step_size,
+  scheduler_gamma: config.scheduler_gamma,
+  cosine_min_lr: config.cosine_min_lr,
+  warmup_steps: config.warmup_steps,
+  warmup_ratio: config.warmup_ratio,
+  weight_decay: config.weight_decay,
+  // Regularisierung
+  dropout: config.dropout,
+  max_grad_norm: config.max_grad_norm,
+  label_smoothing: config.label_smoothing,
+  // Precision
+  fp16: config.fp16,
+  bf16: config.bf16,
+  // LoRA
+  use_lora: config.use_lora,
+  lora_r: config.lora_r,
+  lora_alpha: config.lora_alpha,
+  lora_dropout: config.lora_dropout,
+  lora_target_modules: config.lora_target_modules,
+  // Quantisierung
+  load_in_4bit: config.load_in_4bit,
+  load_in_8bit: config.load_in_8bit,
+  // Sequenz & DataLoader
+  max_seq_length: config.max_seq_length,
   num_workers: config.num_workers,
+  pin_memory: config.pin_memory,
+  dataloader_drop_last: config.dataloader_drop_last,
+  group_by_length: config.group_by_length,
+  // Eval & Speichern
+  eval_strategy: config.eval_strategy,
+  eval_steps: config.eval_steps,
+  save_strategy: config.save_strategy,
+  save_steps: config.save_steps,
+  save_total_limit: config.save_total_limit,
+  logging_steps: config.logging_steps,
+  // Sonstiges
+  gradient_checkpointing: config.gradient_checkpointing,
+  seed: config.seed,
+  task_type: config.task_type,
+  training_type: config.training_type,
 }, null, 2)}${templatesSection}${analysisSection}
 
 DEINE AUFGABE:
@@ -797,29 +842,73 @@ WICHTIG für Apple Silicon / CPU-Training:
 - num_workers=0 oder 1 empfehlen (MPS + multi-processing = Deadlocks)
 - Bei wenig RAM: use_lora=true + load_in_4bit=true + gradient_checkpointing=true + batch_size=1 + gradient_accumulation_steps=8
 
-JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
+NULLABLE-FELDER — REGEL:
+Setze einen Wert auf null, wenn er für diesen konkreten Fall nicht benötigt wird.
+Null-Werte werden NICHT übernommen (bestehende Einstellung bleibt erhalten).
+Beispiel: warmup_ratio=null wenn warmup_steps gesetzt ist. cosine_min_lr=null wenn kein cosine-Scheduler.
+
+Optionale Felder (können null sein):
+- warmup_steps / warmup_ratio: nur EINEN setzen, den anderen auf null
+- cosine_min_lr: nur bei scheduler=\"cosine\" relevant, sonst null
+- scheduler_step_size / scheduler_gamma: nur bei scheduler=\"step\" relevant, sonst null
+- sgd_momentum: nur bei optimizer=\"sgd\" relevant, sonst null
+- lora_r / lora_alpha / lora_dropout: null wenn use_lora=false
+- load_in_4bit / load_in_8bit: null wenn nicht benötigt (statt false)
+- label_smoothing: null wenn kein Label-Smoothing gewünscht
+- dropout: null wenn kein explizites Dropout gewünscht
+- max_steps: null wenn Epochen-basiertes Training (nicht -1, sondern null)
+- eval_steps: null wenn eval_strategy=\"epoch\"
+- save_steps: null wenn save_strategy=\"epoch\"
+- group_by_length: null wenn nicht relevant
+- dataloader_drop_last: null wenn nicht relevant
+- pin_memory: null wenn nicht relevant (MPS/CPU setzen es ohnehin auf false)
+
+JSON-FORMAT (null = Feld wird übersprungen, bestehender Wert bleibt):
 \`\`\`json
 {
   "epochs": 3,
   "batch_size": 2,
   "gradient_accumulation_steps": 4,
+  "max_steps": null,
   "learning_rate": 0.0002,
   "optimizer": "adamw",
+  "adam_beta1": 0.9,
+  "adam_beta2": 0.999,
+  "adam_epsilon": 1e-8,
+  "sgd_momentum": null,
   "scheduler": "cosine",
+  "cosine_min_lr": 0.0,
+  "scheduler_step_size": null,
+  "scheduler_gamma": null,
+  "warmup_steps": null,
   "warmup_ratio": 0.05,
   "weight_decay": 0.01,
+  "dropout": null,
+  "max_grad_norm": 1.0,
+  "label_smoothing": null,
   "use_lora": true,
   "lora_r": 16,
   "lora_alpha": 32,
   "lora_dropout": 0.05,
-  "load_in_4bit": false,
+  "load_in_4bit": null,
+  "load_in_8bit": null,
   "fp16": false,
   "bf16": false,
   "max_seq_length": 512,
-  "gradient_checkpointing": true,
   "num_workers": 0,
-  "max_grad_norm": 1.0
-}
+  "pin_memory": null,
+  "dataloader_drop_last": null,
+  "group_by_length": null,
+  "eval_strategy": "epoch",
+  "eval_steps": null,
+  "save_strategy": "epoch",
+  "save_steps": null,
+  "save_total_limit": 3,
+  "logging_steps": 50,
+  "gradient_checkpointing": true,
+  "seed": 42,
+  "task_type": "causal_lm",
+  "training_type": "fine_tuning"
 }
 \`\`\`
 `;
@@ -926,11 +1015,20 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
       }
 
       setResult(responseText);
-      // JSON-Block extrahieren
+      // JSON-Block extrahieren und null-Werte separieren
       const match = responseText.match(/```json\s*([\s\S]*?)```/);
       if (match) {
-        try { setParsedConfig(JSON.parse(match[1].trim())); }
-        catch (_) { setError('JSON konnte nicht geparst werden. Parameter manuell übertragen.'); }
+        try {
+          const raw = JSON.parse(match[1].trim());
+          // null-Werte rausfiltern — sie bedeuten "nicht übernehmen"
+          const cleaned: Partial<TrainingConfig> = {};
+          for (const [k, v] of Object.entries(raw)) {
+            if (v !== null && v !== undefined) {
+              (cleaned as any)[k] = v;
+            }
+          }
+          setParsedConfig({ _raw: raw, _cleaned: cleaned } as any);
+        } catch (_) { setError('JSON konnte nicht geparst werden. Parameter manuell übertragen.'); }
       }
     } catch (e: any) {
       setError('Fehler: ' + String(e?.message || e));
@@ -1045,21 +1143,35 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
               <div className="p-4 bg-white/[0.03] border border-white/10 rounded-xl max-h-64 overflow-y-auto">
                 <pre className="text-sm text-gray-300 whitespace-pre-wrap break-words leading-relaxed font-sans">{result}</pre>
               </div>
-              {parsedConfig && (
-                <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                  <div className="flex items-center gap-2 text-green-400 text-sm font-semibold mb-2">
-                    <CheckCircle className="w-4 h-4" />
-                    {Object.keys(parsedConfig).length} Parameter erkannt und übertragbar
+              {parsedConfig && (() => {
+                const cleaned = (parsedConfig as any)._cleaned || parsedConfig;
+                const raw = (parsedConfig as any)._raw || parsedConfig;
+                const nullKeys = Object.entries(raw).filter(([, v]) => v === null).map(([k]) => k);
+                const activeCount = Object.keys(cleaned).length;
+                return (
+                  <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 text-green-400 text-sm font-semibold mb-2">
+                      <CheckCircle className="w-4 h-4" />
+                      {activeCount} Parameter übertragbar
+                      {nullKeys.length > 0 && (
+                        <span className="text-gray-400 font-normal">· {nullKeys.length} übersprungen</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Object.entries(cleaned).map(([k, v]) => (
+                        <span key={k} className="text-xs px-2 py-0.5 bg-green-500/10 text-green-300 rounded font-mono">
+                          {k}: {String(v)}
+                        </span>
+                      ))}
+                      {nullKeys.map(k => (
+                        <span key={k} className="text-xs px-2 py-0.5 bg-white/5 text-gray-500 rounded font-mono line-through">
+                          {k}: null
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(parsedConfig).map(([k, v]) => (
-                      <span key={k} className="text-xs px-2 py-0.5 bg-green-500/10 text-green-300 rounded font-mono">
-                        {k}: {String(v)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
               {parsedConfig && (
                 <button
                   onClick={handleSaveAsTemplate}
@@ -1087,7 +1199,7 @@ JSON-FORMAT (nur diese Felder, exakt dieser Block am Ende):
           </button>
           {parsedConfig && (
             <button
-              onClick={() => { if (parsedConfig) { onApply(parsedConfig); onClose(); } }}
+              onClick={() => { if (parsedConfig) { const cleaned = (parsedConfig as any)._cleaned || parsedConfig; onApply(cleaned); onClose(); } }}
               className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-500/20 hover:bg-green-500/30 border border-green-500/40 rounded-xl text-green-300 font-semibold transition-all"
             >
               <CheckCircle className="w-4 h-4" /> Parameter übernehmen
