@@ -422,6 +422,12 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
                 input_data = f.read(4000)
 
         # Inferenz
+        # fill-mask: Mask-Token auto-injizieren wenn nicht im Input vorhanden
+        if task_type == 'fill-mask' and isinstance(input_data, str):
+            mask_token = getattr(pipe.tokenizer, 'mask_token', None) or '<mask>'
+            if mask_token not in input_data:
+                input_data = input_data.rstrip() + f' {mask_token}'
+
         if task_type in ('text-generation', 'text2text-generation'):
             raw_result = pipe(input_data, max_new_tokens=200)
         else:

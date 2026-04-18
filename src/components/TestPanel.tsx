@@ -142,6 +142,18 @@ function getSingleInputPlaceholder(taskType: string, inputType: string): string 
 function SingleResultView({ result, taskType }: { result: Record<string, any>; taskType: string }) {
   const t = taskType.toLowerCase();
 
+  // Fehler-Anzeige
+  if (result.error) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-red-300 text-sm leading-relaxed whitespace-pre-wrap break-words">{result.error}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (t.includes('audio') || result.transcript !== undefined) {
     return (
       <div className="space-y-3">
@@ -595,8 +607,15 @@ export default function TestPanel() {
     unlisteners.push(listen('test-error', (event: any) => {
       const err = event.payload.error || event.payload.data?.error || 'Unbekannter Fehler';
       setCurrentTest(prev => prev ? { ...prev, status: 'failed', error: err } : null);
+      // Im Single-Modus den Fehler als Ergebnis anzeigen statt nur als Toast
+      setSingleResult({
+        task_type: '',
+        input: singleInput,
+        input_type: singleInputType,
+        result: { error: err, output: '' },
+      });
       setSingleRunning(false);
-      notifyError('Test fehlgeschlagen', err);
+      notifyError('Test fehlgeschlagen', err.slice(0, 120));
     }));
 
     unlisteners.push(listen('test-finished', () => {
