@@ -97,6 +97,12 @@ class Plugin(TestPlugin):
             elif any(x in arch for x in ["T5", "MT5", "Bart", "Pegasus", "Marian", "Mbart"]):
                 self.model_class = "seq2seq"
                 self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path, local_files_only=True)
+            elif "MaskedLM" in arch or "ForMaskedLM" in arch:
+                # Encoder-Modelle (BERT, RoBERTa, XLM-R, etc.) trainiert mit MLM
+                # → für Inferenz als fill-mask verwenden
+                self.model_class = "fill_mask"
+                from transformers import AutoModelForMaskedLM
+                self.model = AutoModelForMaskedLM.from_pretrained(model_path, local_files_only=True)
             else:
                 self.model_class = "causal_lm"
                 self.model = AutoModelForCausalLM.from_pretrained(model_path, local_files_only=True)
@@ -109,6 +115,10 @@ class Plugin(TestPlugin):
             elif task in ("seq2seq", "seq2seq_lm", "summarization", "translation"):
                 self.model_class = "seq2seq"
                 self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path, local_files_only=True)
+            elif task in ("masked_lm", "fill_mask", "mlm"):
+                self.model_class = "fill_mask"
+                from transformers import AutoModelForMaskedLM
+                self.model = AutoModelForMaskedLM.from_pretrained(model_path, local_files_only=True)
             else:
                 self.model_class = "causal_lm"
                 self.model = AutoModelForCausalLM.from_pretrained(model_path, local_files_only=True)
@@ -273,6 +283,42 @@ class Plugin(TestPlugin):
                     except Exception:
                         pass
 
+            elif self.model_class == "fill_mask":
+                # Encoder MLM: Text mit [MASK] oder <mask> für fill-mask,
+                # oder als Embedding-Ähnlichkeit falls kein Mask-Token vorhanden
+                mask_token = self.tokenizer.mask_token or '[MASK]'
+                # Falls der Input kein Mask-Token enthält, hänge es ans Ende
+                if mask_token not in inp:
+                    masked_inp = inp.rstrip() + f' {mask_token}'
+                else:
+                    masked_inp = inp
+
+                enc_masked = self.tokenizer(
+                    masked_inp, return_tensors='pt', truncation=True, max_length=512
+                ).to(self.device)
+
+                out = self.model(**enc_masked)
+                logits = out.logits  # (1, seq_len, vocab)
+
+                # Mask-Position finden
+                mask_id = self.tokenizer.mask_token_id
+                input_ids = enc_masked['input_ids'][0]
+                mask_positions = (input_ids == mask_id).nonzero(as_tuple=True)[0]
+
+                if len(mask_positions) > 0:
+                    mask_pos = mask_positions[0].item()
+                    mask_logits = logits[0, mask_pos]  # (vocab,)
+                    top_k = torch.topk(torch.softmax(mask_logits, dim=-1), k=5)
+                    top_tokens = [self.tokenizer.decode([idx]) for idx in top_k.indices]
+                    top_scores = top_k.values.tolist()
+                    predicted = top_tokens[0].strip()
+                    confidence = top_scores[0]
+                else:
+                    predicted = '(kein Mask-Token erkannt)'
+                    confidence = None
+
+                loss = None
+
             else:  # causal_lm
                 input_len = enc.input_ids.shape[1]
                 out_ids = self.model.generate(
@@ -287,8 +333,6 @@ class Plugin(TestPlugin):
                 loss = None
 
         inference_time = time.time() - t0
-
-        # Korrektheit prüfen
         is_correct = False
         if expected is not None:
             is_correct = predicted.strip().lower() == str(expected).strip().lower()

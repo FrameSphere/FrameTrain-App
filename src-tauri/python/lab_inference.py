@@ -147,36 +147,76 @@ def find_actual_model_dir(model_path: str) -> tuple[str, str]:
 
 
 def detect_task_type(model_dir: str) -> str:
-    """Erkennt den Task-Typ aus config.json."""
+    """Erkennt den Task-Typ aus config.json. Gibt NIE 'auto' zurück."""
     config_path = Path(model_dir) / 'config.json'
     if not config_path.exists():
-        return 'auto'
+        return 'text-generation'  # sicherer Default ohne config
     try:
         with open(config_path) as f:
             config = json.load(f)
 
-        arch = config.get('architectures', [''])[0].lower()
-        if 'forsequenceclassification' in arch:
-            return 'text-classification'
-        elif 'fortokenclassification' in arch:
-            return 'token-classification'
-        elif 'forobjectdetection' in arch or 'detr' in arch:
-            return 'object-detection'
-        elif 'forimageclassification' in arch or 'vit' in arch:
-            return 'image-classification'
-        elif 'causallm' in arch or 'gpt' in arch or 'llama' in arch or 'mistral' in arch:
-            return 'text-generation'
-        elif 'seq2seq' in arch or 't5' in arch or 'bart' in arch:
-            return 'text2text-generation'
-        elif 'forquestionanswering' in arch:
-            return 'question-answering'
-
+        # 1. Explizites pipeline_tag hat höchste Priorität
         tag = config.get('pipeline_tag', '')
         if tag:
             return tag
+
+        # 2. Architecture-String-Matching
+        arch = (config.get('architectures') or [''])[0].lower()
+        if arch:
+            if 'forsequenceclassification' in arch:
+                return 'text-classification'
+            if 'fortokenclassification' in arch:
+                return 'token-classification'
+            if 'forobjectdetection' in arch or 'detr' in arch:
+                return 'object-detection'
+            if 'forimageclassification' in arch or ('vit' in arch and 'classification' in arch):
+                return 'image-classification'
+            if 'causallm' in arch:
+                return 'text-generation'
+            if 'seq2seqlm' in arch or 'conditional' in arch:
+                return 'text2text-generation'
+            if 'forquestionanswering' in arch:
+                return 'question-answering'
+            if 'formaskedlm' in arch or 'maskedlm' in arch:
+                return 'fill-mask'
+            # Decoder-Modelle am Namen erkennbar
+            if any(x in arch for x in ['gpt', 'llama', 'mistral', 'falcon', 'bloom', 'opt', 'phi', 'qwen']):
+                return 'text-generation'
+            # Seq2Seq-Modelle
+            if any(x in arch for x in ['t5', 'bart', 'pegasus', 'marian', 'mbart']):
+                return 'text2text-generation'
+
+        # 3. model_type-Fallback (zuverlässiger als Architekturname)
+        model_type = config.get('model_type', '').lower().replace('_', '-')
+        _CAUSAL = {'gpt2', 'gpt-neo', 'gpt-j', 'gpt-neox', 'llama', 'mistral',
+                   'falcon', 'bloom', 'opt', 'phi', 'qwen', 'qwen2', 'gemma',
+                   'stablelm', 'codellama', 'deepseek', 'yi', 'internlm'}
+        _SEQ2SEQ = {'t5', 'mt5', 'bart', 'mbart', 'mbart50', 'pegasus',
+                    'marian', 'led', 'prophetnet', 'longt5'}
+        _ENCODER = {'bert', 'roberta', 'xlm-roberta', 'xlmroberta', 'distilbert',
+                    'albert', 'electra', 'deberta', 'deberta-v2', 'camembert',
+                    'xlnet', 'longformer', 'bigbird', 'rembert', 'ernie'}
+        _VISION  = {'vit', 'swin', 'beit', 'convnext', 'deit', 'resnet',
+                    'efficientnet', 'mobilenet', 'poolformer'}
+        _AUDIO   = {'whisper', 'wav2vec2', 'hubert', 'speech-encoder-decoder'}
+
+        if model_type in _CAUSAL:
+            return 'text-generation'
+        if model_type in _SEQ2SEQ:
+            return 'text2text-generation'
+        if model_type in _ENCODER:
+            return 'fill-mask'
+        if model_type in _VISION:
+            return 'image-classification'
+        if model_type in _AUDIO:
+            return 'automatic-speech-recognition'
+
     except Exception:
         pass
-    return 'auto'
+
+    # Absoluter Fallback: fill-mask ist sicherer als 'auto'
+    # (causal-LM wäre falsch für Encoder, aber 'auto' crasht den pipeline()-Call)
+    return 'fill-mask'
 
 
 def parse_hf_output(result, task_type: str) -> dict:
@@ -329,16 +369,22 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
 
         try:
             if task_type == 'auto':
-                pipe = pipeline(model=resolved_path, **load_kwargs)
-            else:
-                pipe = pipeline(task=task_type, model=resolved_path, **load_kwargs)
+                # 'auto' würde pipeline() zu einem Hub-Lookup zwingen (auch mit local_files_only).
+                # detect_task_type() gibt nie mehr 'auto' zurück, aber als Sicherheitsnetz:
+                task_type = detect_task_type(resolved_path)
+            pipe = pipeline(task=task_type, model=resolved_path, **load_kwargs)
         except Exception as e:
             last_error = str(e)
-            # Fallback ohne task
-            try:
-                pipe = pipeline(model=resolved_path, **load_kwargs)
-            except Exception as e2:
-                last_error = str(e2)
+            # Fallback-Kette: bei unbekanntem Task andere gängige Tasks probieren
+            for fallback_task in ['text-generation', 'fill-mask', 'text2text-generation', 'text-classification']:
+                if fallback_task == task_type:
+                    continue
+                try:
+                    pipe = pipeline(task=fallback_task, model=resolved_path, **load_kwargs)
+                    task_type = fallback_task
+                    break
+                except Exception as e2:
+                    last_error = str(e2)
 
         if pipe is None:
             elapsed_ms = int((time.time() - start) * 1000)
