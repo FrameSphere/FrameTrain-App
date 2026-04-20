@@ -197,6 +197,15 @@ interface RequirementsCheck {
   ready: boolean;
 }
 
+interface LossDebugState {
+  progressEventCount: number;
+  trainLossFieldCount: number;
+  zeroTrainLossCount: number;
+  nonZeroTrainLossCount: number;
+  lastTrainLossValue: number | null;
+  lastTrainLossStep: number | null;
+}
+
 // ============ Default Config ============
 
 const defaultConfig: TrainingConfig = {
@@ -288,6 +297,34 @@ function formatDuration(ms: number): string {
 function formatLearningRate(lr: number): string {
   if (lr >= 0.01) return lr.toFixed(3);
   return lr.toExponential(1);
+}
+
+function createEmptyLossDebugState(): LossDebugState {
+  return {
+    progressEventCount: 0,
+    trainLossFieldCount: 0,
+    zeroTrainLossCount: 0,
+    nonZeroTrainLossCount: 0,
+    lastTrainLossValue: null,
+    lastTrainLossStep: null,
+  };
+}
+
+function buildLossDebugFromHistory(
+  history: { epoch: number; train_loss: number; val_loss: number | null }[]
+): LossDebugState {
+  const zeroTrainLossCount = history.filter((entry) => entry.train_loss === 0).length;
+  const nonZeroTrainLossCount = history.length - zeroTrainLossCount;
+  const lastEntry = history[history.length - 1];
+
+  return {
+    progressEventCount: history.length,
+    trainLossFieldCount: history.length,
+    zeroTrainLossCount,
+    nonZeroTrainLossCount,
+    lastTrainLossValue: lastEntry ? lastEntry.train_loss : null,
+    lastTrainLossStep: history.length > 0 ? history.length : null,
+  };
 }
 
 // ============ Sub-Components ============
@@ -2576,6 +2613,45 @@ function LossChart({ history, primaryColor }: LossChartProps) {
   );
 }
 
+function LossDebugPanel({ debug }: { debug: LossDebugState }) {
+  let title = 'Warte auf Live-Loss';
+  let body = 'Es wurden noch keine training-progress Events empfangen.';
+  let toneClasses = 'bg-amber-500/10 border-amber-500/30 text-amber-200';
+  let Icon = AlertCircle;
+
+  if (debug.progressEventCount > 0 && debug.trainLossFieldCount === 0) {
+    title = 'Progress ohne train_loss';
+    body = 'Es kommen Progress-Events an, aber das Feld train_loss fehlt im Payload.';
+    toneClasses = 'bg-amber-500/10 border-amber-500/30 text-amber-200';
+    Icon = AlertTriangle;
+  } else if (debug.trainLossFieldCount > 0 && debug.nonZeroTrainLossCount === 0) {
+    title = 'Loss wird gesendet, aber nur als 0.0';
+    body = `Das Backend hat ${debug.trainLossFieldCount} train_loss-Werte geliefert, bisher alle exakt 0.0.`;
+    toneClasses = 'bg-orange-500/10 border-orange-500/30 text-orange-200';
+    Icon = AlertCircle;
+  } else if (debug.nonZeroTrainLossCount > 0) {
+    title = 'Live-Loss empfangen';
+    body = `Es wurden ${debug.nonZeroTrainLossCount} nicht-nullige Loss-Werte empfangen, zuletzt bei Step ${debug.lastTrainLossStep ?? '–'}.`;
+    toneClasses = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200';
+    Icon = CheckCircle;
+  }
+
+  return (
+    <div className={`rounded-xl border p-4 ${toneClasses}`}>
+      <div className="flex items-start gap-3">
+        <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <div className="text-sm font-semibold">{title}</div>
+          <div className="text-xs opacity-90">{body}</div>
+          <div className="text-xs opacity-70">
+            Progress-Events: {debug.progressEventCount} | train_loss-Feld: {debug.trainLossFieldCount} | 0.0-Werte: {debug.zeroTrainLossCount}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ Main Component ============
 
 export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAnalysis?: (versionId: string | null) => void }) {
@@ -2623,6 +2699,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
   const [currentJob, setCurrentJob] = useState<TrainingJob | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<string>('');
   const [lossHistory, setLossHistory] = useState<{ epoch: number; train_loss: number; val_loss: number | null }[]>([]);
+  const [lossDebug, setLossDebug] = useState<LossDebugState>(createEmptyLossDebugState);
   const [trainingStartTime, setTrainingStartTime] = useState<number | null>(null);
   const [trainingElapsed, setTrainingElapsed] = useState<number>(0);
   const [lastCheckpointStep, setLastCheckpointStep] = useState<number>(0);
@@ -2812,6 +2889,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
             try {
               const history = JSON.parse(savedLossHistory);
               setLossHistory(history);
+              setLossDebug(buildLossDebugFromHistory(history));
             } catch (e) {
               console.warn('Could not restore loss history:', e);
             }
@@ -2865,6 +2943,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
           setTrainingStartTime(Date.now());
           setTrainingElapsed(0);
           setLastCheckpointStep(0);
+          setLossDebug(createEmptyLossDebugState());
         })
       );
 
@@ -2879,9 +2958,20 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
         await listen<any>('training-progress', (event) => {
           const data = event.payload.data;
           if (data) {
+            const hasTrainLossField = Object.prototype.hasOwnProperty.call(data, 'train_loss');
+            const trainLossValue = typeof data.train_loss === 'number' ? data.train_loss : null;
+
             setCurrentJob((prev) =>
               prev ? { ...prev, progress: data, status: 'running' } : prev
             );
+            setLossDebug((prev) => ({
+              progressEventCount: prev.progressEventCount + 1,
+              trainLossFieldCount: prev.trainLossFieldCount + (hasTrainLossField ? 1 : 0),
+              zeroTrainLossCount: prev.zeroTrainLossCount + (hasTrainLossField && trainLossValue === 0 ? 1 : 0),
+              nonZeroTrainLossCount: prev.nonZeroTrainLossCount + (hasTrainLossField && trainLossValue !== null && trainLossValue !== 0 ? 1 : 0),
+              lastTrainLossValue: hasTrainLossField ? trainLossValue : prev.lastTrainLossValue,
+              lastTrainLossStep: hasTrainLossField ? (typeof data.step === 'number' ? data.step : prev.lastTrainLossStep) : prev.lastTrainLossStep,
+            }));
             // Update loss history every logging step
             setLossHistory((prev) => {
               const newEntry = {
@@ -3323,6 +3413,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
 
     try {
       setLossHistory([]);
+      setLossDebug(createEmptyLossDebugState());
       // Aktiviere Sleep-Prevention automatisch beim Trainingsstart
       try {
         await invoke('enable_prevent_sleep');
@@ -4149,9 +4240,21 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-400">Train Loss</span>
                       <span className="text-white font-medium font-mono">
-                        {currentJob.progress.train_loss.toFixed(8)}
+                        {lossDebug.trainLossFieldCount > 0
+                          ? currentJob.progress.train_loss.toFixed(8)
+                          : '–'}
                       </span>
                     </div>
+                    {lossDebug.progressEventCount > 0 && lossDebug.trainLossFieldCount === 0 && (
+                      <div className="text-[11px] text-amber-400">
+                        Debug: Progress empfangen, aber bisher kein `train_loss`-Feld.
+                      </div>
+                    )}
+                    {lossDebug.trainLossFieldCount > 0 && lossDebug.nonZeroTrainLossCount === 0 && (
+                      <div className="text-[11px] text-orange-400">
+                        Debug: Backend sendet `train_loss`, bisher aber nur `0.0`.
+                      </div>
+                    )}
                     {currentJob.progress.val_loss !== null && (
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-400">Val Loss</span>
@@ -4245,6 +4348,9 @@ export default function TrainingPanel({ onNavigateToAnalysis }: { onNavigateToAn
           {/* Loss Chart */}
           {lossHistory.length > 0 && (
             <LossChart history={lossHistory} primaryColor={currentTheme.colors.primary} />
+          )}
+          {currentJob && (currentJob.status === 'running' || currentJob.status === 'pending') && (
+            <LossDebugPanel debug={lossDebug} />
           )}
 
           {/* Info Cards */}
