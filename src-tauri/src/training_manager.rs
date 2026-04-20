@@ -207,6 +207,63 @@ fn default_seed() -> u32 { 42 }
 fn default_training_type() -> String { "fine_tuning".to_string() }
 fn default_task_type() -> String { "causal_lm".to_string() }
 
+fn validate_version_training_base(version_path: &std::path::Path) -> Result<(), String> {
+    if !version_path.exists() || !version_path.is_dir() {
+        return Err(format!(
+            "Die gewählte Modellversion existiert nicht oder ist kein Verzeichnis: {}",
+            version_path.display()
+        ));
+    }
+
+    let entries = fs::read_dir(version_path)
+        .map_err(|e| format!("Konnte Modellversion nicht lesen: {}", e))?;
+
+    let mut has_config = false;
+    let mut has_full_weights = false;
+    let mut has_adapter_only = false;
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_lowercase();
+        if file_name == "config.json" || file_name == "model_index.json" {
+            has_config = true;
+        }
+        if file_name.ends_with(".safetensors")
+            || file_name.ends_with(".bin")
+            || file_name.ends_with(".pt")
+            || file_name.ends_with(".pth")
+        {
+            if file_name.starts_with("adapter_model") {
+                has_adapter_only = true;
+            } else {
+                has_full_weights = true;
+            }
+        }
+    }
+
+    if has_adapter_only && !has_full_weights {
+        return Err(
+            "Diese Modellversion enthält nur einen LoRA-Adapter ohne vollständige Gewichte. Bitte nutze das Originalmodell oder trainiere die Version nach einem vollständigen Merge erneut."
+                .to_string(),
+        );
+    }
+
+    if !has_config {
+        return Err(
+            "Die gewählte Modellversion enthält keine config.json bzw. model_index.json und kann nicht sicher weitertrainiert werden."
+                .to_string(),
+        );
+    }
+
+    if !has_full_weights {
+        return Err(
+            "Die gewählte Modellversion enthält keine vollständigen Modellgewichte (z. B. model.safetensors oder pytorch_model.bin)."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Preset Configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetConfig {
@@ -833,8 +890,10 @@ model_id.clone()
             [vid],
             |row| row.get(0),
         ).map_err(|e| format!("Version nicht gefunden: {}", e))?;
-        
-        PathBuf::from(version_path)
+
+        let version_path = PathBuf::from(version_path);
+        validate_version_training_base(&version_path)?;
+        version_path
     } else {
         // Use base model path
         models_dir.join(&resolved_model_id)

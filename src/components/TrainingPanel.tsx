@@ -2562,6 +2562,17 @@ function LossChart({ history, primaryColor }: LossChartProps) {
     .map((h, i, arr) => `${(i / (arr.length - 1 || 1)) * 100},${getY(h.val_loss!)}`)
     .join(' ');
 
+  const trainMarkers = history.map((h, i) => ({
+    x: (i / (history.length - 1 || 1)) * 100,
+    y: getY(h.train_loss),
+  }));
+  const valMarkers = history
+    .map((h, i) => h.val_loss !== null ? ({
+      x: (i / (history.length - 1 || 1)) * 100,
+      y: getY(h.val_loss!),
+    }) : null)
+    .filter((marker): marker is { x: number; y: number } => marker !== null);
+
   return (
     <div className="bg-white/5 rounded-xl p-4 border border-white/10">
       <div className="flex items-center justify-between mb-4">
@@ -2592,17 +2603,37 @@ function LossChart({ history, primaryColor }: LossChartProps) {
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+        {trainMarkers.map((marker, index) => (
+          <circle
+            key={`train-${index}`}
+            cx={marker.x}
+            cy={marker.y}
+            r={history.length === 1 ? 2.8 : 1.3}
+            fill="#60a5fa"
+          />
+        ))}
 
         {/* Val loss line */}
         {valPoints && (
-          <polyline
-            points={valPoints}
-            fill="none"
-            stroke="#a855f7"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+          <>
+            <polyline
+              points={valPoints}
+              fill="none"
+              stroke="#a855f7"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {valMarkers.map((marker, index) => (
+              <circle
+                key={`val-${index}`}
+                cx={marker.x}
+                cy={marker.y}
+                r={history.length === 1 ? 2.8 : 1.3}
+                fill="#a855f7"
+              />
+            ))}
+          </>
         )}
       </svg>
       <div className="flex justify-between text-xs text-gray-500 mt-2">

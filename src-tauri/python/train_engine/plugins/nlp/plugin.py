@@ -398,6 +398,13 @@ def make_progress_callback(total_epochs: int, collector: MetricsCollector):
             if not logs:
                 return
 
+            if self._debug_log_events < 10:
+                MessageProtocol.status(
+                    "debug",
+                    f"Trainer-Log[{self._debug_log_events + 1}]: {json.dumps(logs, default=str)}"
+                )
+                self._debug_log_events += 1
+
             has_train_loss = "loss" in logs or "train_loss" in logs
             has_eval_loss  = "eval_loss" in logs
 
@@ -535,6 +542,7 @@ class Plugin(TrainPlugin):
         self._model_ram: float = 0.0
         self._use_gradient_checkpointing: bool = False
         self._use_streaming: bool = False
+        self._debug_log_events: int = 0
 
     # ── setup ─────────────────────────────────────────────────────────────
 
@@ -620,6 +628,22 @@ class Plugin(TrainPlugin):
             f"Spalten → Text: '{text_col}'"
             + (f"  Ziel: '{target_col}'" if target_col else "  (kein Ziel-Feld)")
         )
+        try:
+            sample_preview = train_ds[0]
+            preview_text = str(sample_preview.get(text_col, ""))[:160].replace("\n", " ")
+            preview_target = str(sample_preview.get(target_col, ""))[:120].replace("\n", " ") if target_col else ""
+            MessageProtocol.status(
+                "loading",
+                f"Dataset-Debug: erstes Sample Text-Länge={len(str(sample_preview.get(text_col, '')))}"
+                + (f" | Ziel-Länge={len(str(sample_preview.get(target_col, '')))}" if target_col else "")
+            )
+            MessageProtocol.status(
+                "loading",
+                f"Dataset-Debug Preview: text='{preview_text}'"
+                + (f" | target='{preview_target}'" if target_col else "")
+            )
+        except Exception as e:
+            MessageProtocol.warning(f"Dataset-Debug konnte erstes Sample nicht lesen: {e}")
 
         # Tokenisieren
         MessageProtocol.status("loading", f"Tokenisiere {self._n_train:,} Samples...")
@@ -701,6 +725,20 @@ class Plugin(TrainPlugin):
         fmt_cols = [c for c in ["input_ids", "attention_mask", "token_type_ids", "labels"]
                     if c in tokenized.column_names]
         tokenized.set_format("torch", columns=fmt_cols)
+        try:
+            first = tokenized[0]
+            input_len = len(first.get("input_ids", []))
+            label_len = len(first.get("labels", [])) if "labels" in first else None
+            valid_label_count = None
+            if "labels" in first:
+                valid_label_count = sum(1 for v in first["labels"] if int(v) != -100)
+            MessageProtocol.status(
+                "loading",
+                f"Tokenize-Debug: samples={len(tokenized):,} | input_len[0]={input_len}"
+                + (f" | label_len[0]={label_len} | valid_labels[0]={valid_label_count}" if label_len is not None else " | labels=auto-via-collator")
+            )
+        except Exception as e:
+            MessageProtocol.warning(f"Tokenize-Debug fehlgeschlagen: {e}")
         return tokenized
 
     # ── build_model ───────────────────────────────────────────────────────
