@@ -478,12 +478,21 @@ export default function TestPanel() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const versionIdRef = useRef<string | null>(null);
+  // Refs für stale-closure-sichere Event-Handler
+  const setSingleResultRef = useRef(setSingleResult);
+  const setSingleRunningRef = useRef(setSingleRunning);
+  const notifyErrorRef = useRef(notifyError);
+  const successRef = useRef(success);
+  useEffect(() => { setSingleResultRef.current = setSingleResult; }, [setSingleResult]);
+  useEffect(() => { setSingleRunningRef.current = setSingleRunning; }, [setSingleRunning]);
+  useEffect(() => { notifyErrorRef.current = notifyError; }, [notifyError]);
+  useEffect(() => { successRef.current = success; }, [success]);
 
   // ============ Init ============
 
   useEffect(() => {
     loadInitialData();
-    setupEventListeners();
+    return setupEventListeners();
   }, []);
 
   useEffect(() => {
@@ -568,7 +577,6 @@ export default function TestPanel() {
         hard_examples_file: data?.hard_examples_file || null,
       };
 
-      // Predictions aus DB laden
       if (vid) {
         try {
           const dbResults = await invoke<TestResults[]>('get_test_results_for_version', { versionId: vid });
@@ -587,35 +595,38 @@ export default function TestPanel() {
 
       setTestResults(fullResults);
       setCurrentTest(prev => prev ? { ...prev, status: 'completed', results: fullResults } : null);
-      success('Test abgeschlossen', fullResults.accuracy !== null ? `Accuracy: ${fullResults.accuracy.toFixed(2)}%` : 'Fertig');
+      successRef.current('Test abgeschlossen', fullResults.accuracy !== null ? `Accuracy: ${fullResults.accuracy.toFixed(2)}%` : 'Fertig');
     }));
 
     unlisteners.push(listen('test-single-complete', (event: any) => {
+      console.log('[Test] single-complete payload:', event.payload);
       const data = event.payload.data;
       const result: SingleResult = {
         task_type: data?.task_type || '',
-        input: data?.input || singleInput,
-        input_type: data?.input_type || singleInputType,
+        input: data?.input || '',
+        input_type: data?.input_type || 'text',
         result: data?.result || {},
       };
-      setSingleResult(result);
+      console.log('[Test] setSingleResult:', result);
+      setSingleResultRef.current(result);
       setSingleHistory(prev => [result, ...prev.slice(0, 9)]);
-      setSingleRunning(false);
-      success('Inferenz abgeschlossen', `${(result.result.inference_time * 1000).toFixed(0)}ms`);
+      setSingleRunningRef.current(false);
+      const ms = result.result.inference_time ? (result.result.inference_time * 1000).toFixed(0) : '?';
+      successRef.current('Inferenz abgeschlossen', `${ms}ms`);
     }));
 
     unlisteners.push(listen('test-error', (event: any) => {
       const err = event.payload.error || event.payload.data?.error || 'Unbekannter Fehler';
+      console.log('[Test] test-error:', err);
       setCurrentTest(prev => prev ? { ...prev, status: 'failed', error: err } : null);
-      // Im Single-Modus den Fehler als Ergebnis anzeigen statt nur als Toast
-      setSingleResult({
+      setSingleResultRef.current({
         task_type: '',
-        input: singleInput,
-        input_type: singleInputType,
+        input: '',
+        input_type: 'text',
         result: { error: err, output: '' },
       });
-      setSingleRunning(false);
-      notifyError('Test fehlgeschlagen', err.slice(0, 120));
+      setSingleRunningRef.current(false);
+      notifyErrorRef.current('Test fehlgeschlagen', err.slice(0, 120));
     }));
 
     unlisteners.push(listen('test-finished', () => {
@@ -626,11 +637,11 @@ export default function TestPanel() {
         }
         return prev;
       });
-      setSingleRunning(false);
+      setSingleRunningRef.current(false);
     }));
 
     unlisteners.push(listen('test-done', () => {
-      setSingleRunning(false);
+      setSingleRunningRef.current(false);
     }));
 
     return () => { unlisteners.forEach(u => u.then(fn => fn())); };

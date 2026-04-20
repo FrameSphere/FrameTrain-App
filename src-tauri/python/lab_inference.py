@@ -239,7 +239,17 @@ def parse_hf_output(result, task_type: str) -> dict:
         first = result[0]
 
         if isinstance(first, dict):
-            if 'label' in first and 'score' in first:
+            # fill-mask Output: {'score': 0.3, 'token': 123, 'token_str': ' word', 'sequence': '...'}
+            if 'token_str' in first and 'score' in first:
+                top = result[:8]
+                rendered['primary_label'] = first.get('token_str', '').strip()
+                rendered['confidence'] = float(first['score'])
+                rendered['generated_text'] = first.get('sequence', '')
+                rendered['labels'] = [
+                    {'label': str(r.get('token_str', '')).strip(), 'score': float(r.get('score', 0))}
+                    for r in top
+                ]
+            elif 'label' in first and 'score' in first:
                 rendered['primary_label'] = first['label']
                 rendered['confidence'] = float(first['score'])
                 rendered['labels'] = [
@@ -422,10 +432,26 @@ def run_inference(model_path: str, sample_path: str, task_type: str = 'auto'):
                 input_data = f.read(4000)
 
         # Inferenz
-        # fill-mask: Mask-Token auto-injizieren wenn nicht im Input vorhanden
+        # fill-mask: Input korrekt truncaten UND mask-token sicher einfügen
         if task_type == 'fill-mask' and isinstance(input_data, str):
             mask_token = getattr(pipe.tokenizer, 'mask_token', None) or '<mask>'
-            if mask_token not in input_data:
+            # Max Tokens = max_position_embeddings - 3 (CLS + SEP + mask)
+            max_pos = getattr(pipe.model.config, 'max_position_embeddings', 514)
+            max_content = max_pos - 3
+            if mask_token in input_data:
+                # Mask schon vorhanden → sicherstellen dass Gesamtlänge passt
+                text_no_mask = input_data.replace(mask_token, '').strip()
+                toks = pipe.tokenizer.encode(text_no_mask, add_special_tokens=False)
+                if len(toks) > max_content:
+                    toks = toks[:max_content]
+                    text_no_mask = pipe.tokenizer.decode(toks, skip_special_tokens=True)
+                input_data = text_no_mask.rstrip() + f' {mask_token}'
+            else:
+                # Kein mask-token → Text truncaten dann mask anfügen
+                toks = pipe.tokenizer.encode(input_data, add_special_tokens=False)
+                if len(toks) > max_content:
+                    toks = toks[:max_content]
+                    input_data = pipe.tokenizer.decode(toks, skip_special_tokens=True)
                 input_data = input_data.rstrip() + f' {mask_token}'
 
         if task_type in ('text-generation', 'text2text-generation'):

@@ -650,3 +650,21 @@ pub fn list_models_with_version_tree(state: State<AppState>) -> Result<Vec<Model
     
     db.get_models_with_version_tree()
 }
+
+#[tauri::command]
+pub fn list_version_files(path: String) -> Result<Vec<serde_json::Value>, String> {
+    let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
+    let mut files = Vec::new();
+
+    for entry in entries.flatten() {
+        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        files.push(serde_json::json!({
+            "name": entry.file_name().to_string_lossy().to_string(),
+            "path": entry.path().to_string_lossy().to_string(),
+            "size_bytes": if meta.is_file() { meta.len() } else { 0 },
+            "is_dir": meta.is_dir(),
+        }));
+    }
+
+    Ok(files)
+}

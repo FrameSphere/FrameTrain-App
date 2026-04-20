@@ -221,6 +221,7 @@ fn main() {
             version_manager::delete_model_version,
             version_manager::rename_model_version,
             version_manager::list_models_with_version_tree,
+            version_manager::list_version_files,
             version_manager::export_model_version,
             // Analysis Manager Commands
             analysis_manager::get_training_metrics,

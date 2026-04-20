@@ -288,38 +288,57 @@ class Plugin(TestPlugin):
                         pass
 
             elif self.model_class == "fill_mask":
-                # Encoder MLM: Text mit [MASK] oder <mask> für fill-mask,
-                # oder als Embedding-Ähnlichkeit falls kein Mask-Token vorhanden
                 mask_token = self.tokenizer.mask_token or '[MASK]'
-                # Falls der Input kein Mask-Token enthält, hänge es ans Ende
+                max_pos = getattr(self.model.config, 'max_position_embeddings', 514)
+                max_content = max_pos - 3
+
                 if mask_token not in inp:
+                    toks = self.tokenizer.encode(inp, add_special_tokens=False)
+                    if len(toks) > max_content:
+                        toks = toks[:max_content]
+                        inp = self.tokenizer.decode(toks, skip_special_tokens=True)
                     masked_inp = inp.rstrip() + f' {mask_token}'
                 else:
-                    masked_inp = inp
+                    text_no_mask = inp.replace(mask_token, '').strip()
+                    toks = self.tokenizer.encode(text_no_mask, add_special_tokens=False)
+                    if len(toks) > max_content:
+                        toks = toks[:max_content]
+                        text_no_mask = self.tokenizer.decode(toks, skip_special_tokens=True)
+                    masked_inp = text_no_mask.rstrip() + f' {mask_token}'
 
                 enc_masked = self.tokenizer(
-                    masked_inp, return_tensors='pt', truncation=True, max_length=512
+                    masked_inp, return_tensors='pt', truncation=True,
+                    max_length=max_pos - 2
                 ).to(self.device)
 
                 out = self.model(**enc_masked)
-                logits = out.logits  # (1, seq_len, vocab)
+                logits = out.logits
 
-                # Mask-Position finden
                 mask_id = self.tokenizer.mask_token_id
-                input_ids = enc_masked['input_ids'][0]
-                mask_positions = (input_ids == mask_id).nonzero(as_tuple=True)[0]
+                input_ids_list = enc_masked['input_ids'][0]
+                mask_positions = (input_ids_list == mask_id).nonzero(as_tuple=True)[0]
 
                 if len(mask_positions) > 0:
                     mask_pos = mask_positions[0].item()
-                    mask_logits = logits[0, mask_pos]  # (vocab,)
+                    mask_logits = logits[0, mask_pos]
                     top_k = torch.topk(torch.softmax(mask_logits, dim=-1), k=5)
-                    top_tokens = [self.tokenizer.decode([idx]) for idx in top_k.indices]
+                    top_tokens = [self.tokenizer.decode([idx]).strip() for idx in top_k.indices]
                     top_scores = top_k.values.tolist()
-                    predicted = top_tokens[0].strip()
+                    predicted = top_tokens[0]
                     confidence = top_scores[0]
+                    # Top-predictions für run_single Output
+                    self._fill_mask_tops = [
+                        {'label': tok, 'confidence': sc}
+                        for tok, sc in zip(top_tokens, top_scores)
+                    ]
+                    # Sequenz mit erstem Token
+                    full_seq = masked_inp.replace(mask_token, predicted)
+                    self._fill_mask_sequence = full_seq
                 else:
                     predicted = '(kein Mask-Token erkannt)'
                     confidence = None
+                    self._fill_mask_tops = []
+                    self._fill_mask_sequence = masked_inp
 
                 loss = None
 
@@ -423,9 +442,14 @@ class Plugin(TestPlugin):
     def run_single(self, input_data: str) -> Dict[str, Any]:
         self.proto.status("inferring", "Führe Inferenz durch …")
         result = self._infer_one(input_data, None)
-        return {
+        out: Dict[str, Any] = {
             "output": result["predicted_output"],
             "model_class": self.model_class,
             "confidence": result.get("confidence"),
             "inference_time": result["inference_time"],
         }
+        # fill_mask: Top-Predictions und vollständige Sequenz mitgeben
+        if self.model_class == "fill_mask":
+            out["top_predictions"] = getattr(self, '_fill_mask_tops', [])
+            out["sequence"] = getattr(self, '_fill_mask_sequence', input_data)
+        return out

@@ -464,6 +464,19 @@ fn get_training_output_dir(app_handle: &tauri::AppHandle, job_id: &str) -> Resul
     Ok(output_dir)
 }
 
+fn save_job_to_history(app_handle: &tauri::AppHandle, job: TrainingJob) -> Result<(), String> {
+    let mut jobs = load_training_jobs(app_handle).unwrap_or_default();
+    // Existing job updaten oder neu einfügen
+    if let Some(pos) = jobs.iter().position(|j| j.id == job.id) {
+        jobs[pos] = job;
+    } else {
+        jobs.insert(0, job);
+    }
+    // Max 200 Jobs behalten
+    jobs.truncate(200);
+    save_training_jobs(app_handle, &jobs)
+}
+
 fn save_training_jobs(app_handle: &tauri::AppHandle, jobs: &[TrainingJob]) -> Result<(), String> {
     let data_dir = app_handle
         .path()
@@ -1607,6 +1620,21 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
     // CRITICAL FIX: Reset training state after process finishes
     if let Ok(mut state_lock) = state.lock() {
         println!("[Training] Resetting training state...");
+        // Job in History speichern BEVOR er gelöscht wird
+        if let Some(ref mut job) = state_lock.current_job {
+            if job.completed_at.is_none() {
+                job.completed_at = Some(Utc::now());
+            }
+            // Status nur setzen wenn noch Pending/Running (kein Überschreiben von Stopped)
+            if job.status == TrainingStatus::Pending || job.status == TrainingStatus::Running {
+                job.status = if exited_ok { TrainingStatus::Completed } else { TrainingStatus::Failed };
+            }
+            if let Err(e) = save_job_to_history(&app_handle, job.clone()) {
+                eprintln!("[Training] Warning: Could not save job to history: {}", e);
+            } else {
+                println!("[Training] ✅ Job gespeichert in History (status: {:?})", job.status);
+            }
+        }
         state_lock.current_job = None;
         state_lock.process = None;
         state_lock.process_pid = None;  // PID freigeben
@@ -1624,6 +1652,7 @@ fn run_training_process(app_handle: tauri::AppHandle, job_id: String, config_pat
 /// Stoppt das laufende Training — killt den Python-Prozess zuverlässig
 #[tauri::command]
 pub fn stop_training(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<TrainingState>>>,
 ) -> Result<(), String> {
     let mut state_lock = state.lock().map_err(|e| format!("Lock error: {}", e))?;
@@ -1670,10 +1699,15 @@ pub fn stop_training(
         println!("[Training] ⚠️ Kein PID gespeichert – Prozess kann nicht direkt getötet werden");
     }
 
-    // State aufräumen
+    // State aufräumen + in History speichern
     if let Some(ref mut job) = state_lock.current_job {
         job.status = TrainingStatus::Stopped;
         job.completed_at = Some(Utc::now());
+        if let Err(e) = save_job_to_history(&app_handle, job.clone()) {
+            eprintln!("[Training] Warning: Could not save stopped job to history: {}", e);
+        } else {
+            println!("[Training] ✅ Gestoppter Job in History gespeichert");
+        }
     }
     state_lock.process = None;
     state_lock.process_pid = None;

@@ -19,7 +19,14 @@ import {
   TrendingUp,
   Download,
   Upload,
-  FolderDown
+  FolderDown,
+  ChevronDown,
+  File,
+  FileText,
+  FileCode,
+  Image,
+  Archive,
+  AlertCircle,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -60,6 +67,13 @@ interface TrainingMetrics {
   training_duration_seconds: number | null;
 }
 
+interface VersionFile {
+  name: string;
+  path: string;
+  size_bytes: number;
+  is_dir: boolean;
+}
+
 // ============ Helper Functions ============
 
 function formatBytes(bytes: number): string {
@@ -87,6 +101,102 @@ function formatDuration(seconds: number | null): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+function getFileIcon(name: string, isDir: boolean) {
+  if (isDir) return <FolderOpen className="w-3.5 h-3.5 text-yellow-400" />;
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (['png','jpg','jpeg','gif','webp'].includes(ext)) return <Image className="w-3.5 h-3.5 text-blue-400" />;
+  if (['json','yaml','yml','toml','cfg','config','ini'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-green-400" />;
+  if (['txt','md','log'].includes(ext)) return <FileText className="w-3.5 h-3.5 text-gray-400" />;
+  if (['bin','safetensors','pt','pth','ckpt','pkl'].includes(ext)) return <Archive className="w-3.5 h-3.5 text-purple-400" />;
+  return <File className="w-3.5 h-3.5 text-gray-500" />;
+}
+
+// ============ Version Files Panel ============
+
+function VersionFilesPanel({ versionPath }: { versionPath: string }) {
+  const [files, setFiles] = useState<VersionFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadFiles();
+  }, [versionPath]);
+
+  const loadFiles = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await invoke<VersionFile[]>('list_version_files', { path: versionPath });
+      setFiles(result);
+    } catch (e: any) {
+      // Fallback: versuche Pfad mit read_dir direkt
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-4 text-xs text-gray-500">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        Dateien werden geladen...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-3 py-3">
+        <div className="flex items-start gap-2 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="text-xs font-medium text-red-300 mb-0.5">Dateien konnten nicht geladen werden</div>
+            <div className="text-[10px] text-red-400/70 font-mono break-all">{error}</div>
+          </div>
+        </div>
+        <div className="mt-2 px-1">
+          <div className="text-[10px] text-gray-600 font-mono truncate" title={versionPath}>{versionPath}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (files.length === 0) {
+    return (
+      <div className="px-3 py-4 text-xs text-gray-500 text-center">
+        Keine Dateien gefunden in diesem Verzeichnis
+      </div>
+    );
+  }
+
+  // Ordner zuerst, dann Dateien — alphabetisch
+  const sorted = [...files].sort((a, b) => {
+    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return (
+    <div className="divide-y divide-white/[0.05]">
+      {sorted.map((f) => (
+        <div key={f.path} className="flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors">
+          <div className="shrink-0">{getFileIcon(f.name, f.is_dir)}</div>
+          <span className={`flex-1 text-xs truncate ${f.is_dir ? 'text-yellow-300/80' : 'text-gray-300'}`}>
+            {f.name}
+          </span>
+          {!f.is_dir && f.size_bytes > 0 && (
+            <span className="text-[10px] text-gray-600 shrink-0">{formatBytes(f.size_bytes)}</span>
+          )}
+        </div>
+      ))}
+      <div className="px-3 py-2 text-[10px] text-gray-600">
+        {files.filter(f => !f.is_dir).length} Datei{files.filter(f => !f.is_dir).length !== 1 ? 'en' : ''}
+        {files.filter(f => f.is_dir).length > 0 && `, ${files.filter(f => f.is_dir).length} Ordner`}
+      </div>
+    </div>
+  );
 }
 
 // ============ Versions Modal ============
@@ -119,6 +229,7 @@ function VersionsModal({
   const [loading, setLoading] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportingVersion, setExportingVersion] = useState<ModelVersion | null>(null);
+  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
 
   const handleStartEdit = (version: ModelVersion) => {
     setEditingId(version.id);
@@ -218,18 +329,28 @@ function VersionsModal({
             {sortedVersions.map((version) => (
               <div
                 key={version.id}
-                className={`bg-white/5 rounded-xl border p-4 transition-all ${
+                className={`rounded-xl border transition-all overflow-hidden ${
                   version.is_root 
                     ? 'border-yellow-500/30 bg-yellow-500/5' 
-                    : 'border-white/10 hover:bg-white/[0.07]'
+                    : 'border-white/10'
                 }`}
               >
-                <div className="flex items-start justify-between gap-4">
-                  {/* Version Info */}
+                {/* Klickbarer Header der Karte */}
+                <div
+                  className={`flex items-start gap-4 p-4 cursor-pointer transition-colors ${
+                    expandedVersionId === version.id
+                      ? version.is_root ? 'bg-yellow-500/10' : 'bg-white/[0.07]'
+                      : version.is_root ? 'bg-yellow-500/5 hover:bg-yellow-500/10' : 'bg-white/5 hover:bg-white/[0.07]'
+                  }`}
+                  onClick={() => {
+                    if (editingId === version.id) return; // kein Toggle beim Editieren
+                    setExpandedVersionId(expandedVersionId === version.id ? null : version.id);
+                  }}
+                >
                   <div className="flex-1 min-w-0">
                     {/* Name / Edit */}
                     {editingId === version.id ? (
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2" onClick={e => e.stopPropagation()}>
                         <input
                           type="text"
                           value={editName}
@@ -333,38 +454,57 @@ function VersionsModal({
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  {editingId !== version.id && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleExportClick(version)}
-                        disabled={loading}
-                        className="p-2 rounded-lg text-gray-500 hover:text-green-400 hover:bg-green-500/10 transition-all disabled:opacity-50"
-                        title="Exportieren"
-                      >
-                        <FolderDown className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleStartEdit(version)}
-                        disabled={loading}
-                        className="p-2 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all disabled:opacity-50"
-                        title="Umbenennen"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      {!version.is_root && (
+                  {/* Right side: expand chevron + actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {editingId !== version.id && (
+                      <>
                         <button
-                          onClick={() => handleDelete(version.id, version.version_name)}
+                          onClick={(e) => { e.stopPropagation(); handleExportClick(version); }}
                           disabled={loading}
-                          className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
-                          title="Löschen"
+                          className="p-2 rounded-lg text-gray-500 hover:text-green-400 hover:bg-green-500/10 transition-all disabled:opacity-50"
+                          title="Exportieren"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <FolderDown className="w-4 h-4" />
                         </button>
-                      )}
-                    </div>
-                  )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleStartEdit(version); }}
+                          disabled={loading}
+                          className="p-2 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all disabled:opacity-50"
+                          title="Umbenennen"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        {!version.is_root && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(version.id, version.version_name); }}
+                            disabled={loading}
+                            className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
+                            title="Löschen"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        <div className="w-px h-5 bg-white/10 mx-1" />
+                      </>
+                    )}
+                    <ChevronDown
+                      className={`w-4 h-4 text-gray-500 transition-transform ${
+                        expandedVersionId === version.id ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </div>
                 </div>
+
+                {/* Ausgeklappter Dateibereich */}
+                {expandedVersionId === version.id && (
+                  <div className="border-t border-white/10">
+                    <div className="px-4 py-2 flex items-center gap-2 bg-white/[0.02]">
+                      <FolderOpen className="w-3.5 h-3.5 text-gray-500" />
+                      <span className="text-xs font-medium text-gray-400">Dateien dieser Version</span>
+                    </div>
+                    <VersionFilesPanel versionPath={version.path} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
