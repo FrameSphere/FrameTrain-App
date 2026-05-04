@@ -210,6 +210,7 @@ fn main() {
             test_manager::get_test_results_for_version,
             test_manager::export_hard_examples,
             plugin_commands::get_available_plugins,
+            plugin_commands::check_dependency_status,
             plugin_commands::check_first_launch,
             plugin_commands::install_plugins,
             plugin_commands::handle_plugin_approval,

@@ -47,6 +47,31 @@ pub struct DependencyStatus {
 
 // ============ Hilfsfunktionen ============
 
+fn verify_python_available() -> Result<(), String> {
+    let candidates: Vec<&str> = if cfg!(target_os = "windows") {
+        vec!["python", "python3"]
+    } else {
+        vec!["python3", "python"]
+    };
+
+    for cmd in &candidates {
+        if let Ok(out) = Command::new(cmd).arg("--version").output() {
+            if out.status.success() {
+                let version = String::from_utf8_lossy(&out.stdout);
+                println!("[Deps] ✅ Python gefunden: {} ({})", cmd, version.trim());
+                return Ok(());
+            }
+        }
+    }
+    
+    Err(
+        "Python ist nicht installiert oder nicht im PATH verfügbar. \
+        Bitte installiere Python 3.8+ von python.org oder nutze einen \
+        Package Manager (brew/apt/choco) und versuche es dann erneut."
+            .to_string()
+    )
+}
+
 fn get_python_executable() -> String {
     // Gleiche Logik wie training_manager / test_manager:
     // Python mit torch bevorzugen, falls mehrere Versionen installiert.
@@ -127,6 +152,9 @@ fn mark_first_launch_complete() -> Result<(), String> {
 /// Das Frontend zeigt diese auf der First-Launch-Seite an.
 #[tauri::command]
 pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginInfo>, String> {
+    // Prüfe Python Verfügbarkeit
+    verify_python_available()?;
+    
     let python = get_python_executable();
 
     // Die eine "Plugin-Gruppe" ist die Sequenzklassifikations-Engine
@@ -162,6 +190,9 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 #[tauri::command]
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
     println!("[Deps] Prüfe Abhängigkeitsstatus...");
+    
+    // Prüfe zuerst ob Python überhaupt vorhanden ist
+    verify_python_available()?;
     
     let python = get_python_executable();
     let packages = vec![
@@ -239,9 +270,22 @@ pub async fn install_plugins(
     window: Window,
 ) -> Result<(), String> {
     println!("[Deps] Installiere Dependencies für: {:?}", plugin_ids);
+    
+    // Prüfe Python Verfügbarkeit bevor Installation startet
+    if let Err(e) = verify_python_available() {
+        eprintln!("[Deps] ✗ Python-Fehler: {}", e);
+        let _ = window.emit("plugin-install-progress", PluginInstallProgress {
+            plugin_id: "seq_classification".to_string(),
+            status: "error".to_string(),
+            message: e,
+            progress: None,
+        });
+        return Err("Python konnte nicht gefunden werden".to_string());
+    }
 
     tauri::async_runtime::spawn(async move {
         let python = get_python_executable();
+        println!("[Deps] Verwende Python: {}", python);
 
         // Alle Packages die wir installieren wollen
         let packages = vec![
@@ -276,10 +320,14 @@ pub async fn install_plugins(
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("[Deps] Fehler beim Starten von pip: {}", e);
+                    let msg = format!(
+                        "pip konnte nicht gestartet werden: {}. Stelle sicher, dass Python richtig installiert ist.",
+                        e
+                    );
                     let _ = window.emit("plugin-install-progress", PluginInstallProgress {
                         plugin_id: "seq_classification".to_string(),
                         status:    "failed".to_string(),
-                        message:   format!("pip konnte nicht gestartet werden: {}", e),
+                        message:   msg,
                         progress:  None,
                     });
                     return;
@@ -310,7 +358,7 @@ pub async fn install_plugins(
                 let _ = window.emit("plugin-install-progress", PluginInstallProgress {
                     plugin_id: "seq_classification".to_string(),
                     status:    "failed".to_string(),
-                    message:   format!("Fehler beim Installieren von {}", package),
+                    message:   format!("Fehler beim Installieren von {}. Überprüfe deine Internetverbindung und Festplattenspeicher.", package),
                     progress:  None,
                 });
                 return;

@@ -76,9 +76,25 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
         await installPythonDependencies();
       }
     } catch (error) {
-      console.error('[Setup] Error checking dependencies:', error);
+      const errorMsg = String(error);
+      console.error('[Setup] Error checking dependencies:', errorMsg);
+      
+      // Bessere Fehlermeldungen basierend auf dem Fehlertyp
+      let userFriendlyError = errorMsg;
+      if (errorMsg.includes('not installed') || errorMsg.includes('nicht installiert')) {
+        userFriendlyError = 
+          'Python ist nicht installiert oder nicht im PATH verfügbar.\n\n' +
+          'Lösungen:\n' +
+          '1. Installiere Python 3.8+ von python.org\n' +
+          '2. Oder nutze einen Package Manager:\n' +
+          '   - macOS: brew install python3\n' +
+          '   - Windows: choco install python\n' +
+          '   - Linux: apt install python3\n\n' +
+          'Nach der Installation, bitte starten Sie die App neu.';
+      }
+      
       setPythonSetupPhase('error');
-      setPythonError(String(error));
+      setPythonError(userFriendlyError);
     }
   };
   
@@ -345,17 +361,29 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
             <>
               <div className="text-center mb-8">
                 <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-white mb-2">Installation Failed</h2>
-                <p className="text-gray-400">An error occurred while installing Python packages</p>
+                <h2 className="text-2xl font-bold text-white mb-2">Setup konnte nicht abgeschlossen werden</h2>
+                <p className="text-gray-400">Fehler bei der Python-Konfiguration</p>
               </div>
               
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-8">
-                <p className="text-red-300 text-sm font-mono">{error}</p>
+                <p className="text-red-300 text-sm whitespace-pre-wrap font-mono">{error}</p>
               </div>
               
-              <p className="text-sm text-gray-400 text-center">
-                Please check your Python installation and try again
-              </p>
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-6">
+                <h3 className="text-blue-300 font-semibold mb-2">Nächste Schritte:</h3>
+                <ul className="text-blue-300 text-sm space-y-1 list-disc list-inside">
+                  <li>Installiere Python 3.8 oder neuer</li>
+                  <li>Starte die App nach der Installation neu</li>
+                  <li>Falls weiterhin Fehler auftreten, überprüfe die Logs</li>
+                </ul>
+              </div>
+              
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl transition-all font-semibold"
+              >
+                App neustarten
+              </button>
             </>
           )}
         </div>
