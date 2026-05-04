@@ -1,0 +1,888 @@
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { 
+  GitBranch,
+  Trash2,
+  Edit2,
+  Calendar,
+  HardDrive,
+  Cpu,
+  FileBox,
+  Loader2,
+  X,
+  Check,
+  RefreshCw,
+  FolderOpen,
+  Clock,
+  Star,
+  TrendingUp,
+  Download,
+  Upload,
+  FolderDown,
+  ChevronDown,
+  File,
+  FileText,
+  FileCode,
+  Image,
+  Archive,
+  AlertCircle,
+} from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
+import { useNotification } from '../contexts/NotificationContext';
+import { usePageContext } from '../contexts/PageContext';
+
+// ============ Types ============
+
+interface ModelWithVersions {
+  id: string;
+  name: string;
+  root_path: string;
+  version_count: number;
+  total_size: number;
+  model_type: string | null;
+  last_updated: string;
+}
+
+interface ModelVersion {
+  id: string;
+  model_id: string;
+  version_name: string;
+  version_number: number;
+  path: string;
+  size_bytes: number;
+  file_count: number;
+  created_at: string;
+  is_root: boolean;
+  parent_version_id: string | null;
+  training_metrics: TrainingMetrics | null;
+}
+
+interface TrainingMetrics {
+  final_train_loss: number;
+  final_val_loss: number | null;
+  total_epochs: number;
+  total_steps: number;
+  best_epoch: number | null;
+  training_duration_seconds: number | null;
+}
+
+interface VersionFile {
+  name: string;
+  path: string;
+  size_bytes: number;
+  is_dir: boolean;
+}
+
+// ============ Helper Functions ============
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function formatDuration(seconds: number | null): string {
+  if (!seconds) return '-';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function getFileIcon(name: string, isDir: boolean) {
+  if (isDir) return <FolderOpen className="w-3.5 h-3.5 text-yellow-400" />;
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (['png','jpg','jpeg','gif','webp'].includes(ext)) return <Image className="w-3.5 h-3.5 text-blue-400" />;
+  if (['json','yaml','yml','toml','cfg','config','ini'].includes(ext)) return <FileCode className="w-3.5 h-3.5 text-green-400" />;
+  if (['txt','md','log'].includes(ext)) return <FileText className="w-3.5 h-3.5 text-gray-400" />;
+  if (['bin','safetensors','pt','pth','ckpt','pkl'].includes(ext)) return <Archive className="w-3.5 h-3.5 text-purple-400" />;
+  return <File className="w-3.5 h-3.5 text-gray-500" />;
+}
+
+// ============ Version Files Panel ============
+
+function VersionFilesPanel({ versionPath }: { versionPath: string }) {
+  const [files, setFiles] = useState<VersionFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadFiles();
+  }, [versionPath]);
+
+  const loadFiles = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await invoke<VersionFile[]>('list_version_files', { path: versionPath });
+      setFiles(result);
+    } catch (e: any) {
+      // Fallback: versuche Pfad mit read_dir direkt
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-4 text-xs text-gray-500">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        Dateien werden geladen...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-3 py-3">
+        <div className="flex items-start gap-2 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="text-xs font-medium text-red-300 mb-0.5">Dateien konnten nicht geladen werden</div>
+            <div className="text-[10px] text-red-400/70 font-mono break-all">{error}</div>
+          </div>
+        </div>
+        <div className="mt-2 px-1">
+          <div className="text-[10px] text-gray-600 font-mono truncate" title={versionPath}>{versionPath}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (files.length === 0) {
+    return (
+      <div className="px-3 py-4 text-xs text-gray-500 text-center">
+        Keine Dateien gefunden in diesem Verzeichnis
+      </div>
+    );
+  }
+
+  // Ordner zuerst, dann Dateien — alphabetisch
+  const sorted = [...files].sort((a, b) => {
+    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return (
+    <div className="divide-y divide-white/[0.05]">
+      {sorted.map((f) => (
+        <div key={f.path} className="flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors">
+          <div className="shrink-0">{getFileIcon(f.name, f.is_dir)}</div>
+          <span className={`flex-1 text-xs truncate ${f.is_dir ? 'text-yellow-300/80' : 'text-gray-300'}`}>
+            {f.name}
+          </span>
+          {!f.is_dir && f.size_bytes > 0 && (
+            <span className="text-[10px] text-gray-600 shrink-0">{formatBytes(f.size_bytes)}</span>
+          )}
+        </div>
+      ))}
+      <div className="px-3 py-2 text-[10px] text-gray-600">
+        {files.filter(f => !f.is_dir).length} Datei{files.filter(f => !f.is_dir).length !== 1 ? 'en' : ''}
+        {files.filter(f => f.is_dir).length > 0 && `, ${files.filter(f => f.is_dir).length} Ordner`}
+      </div>
+    </div>
+  );
+}
+
+// ============ Versions Modal ============
+
+interface VersionsModalProps {
+  model: ModelWithVersions;
+  versions: ModelVersion[];
+  onClose: () => void;
+  onDelete: (versionId: string) => Promise<void>;
+  onRename: (versionId: string, newName: string) => Promise<void>;
+  onExport: (versionId: string, versionName: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
+  gradient: string;
+  primaryColor: string;
+}
+
+function VersionsModal({ 
+  model, 
+  versions, 
+  onClose, 
+  onDelete, 
+  onRename,
+  onExport,
+  onRefresh,
+  gradient,
+  primaryColor 
+}: VersionsModalProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportingVersion, setExportingVersion] = useState<ModelVersion | null>(null);
+  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
+
+  const handleStartEdit = (version: ModelVersion) => {
+    setEditingId(version.id);
+    setEditName(version.version_name);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditName('');
+  };
+
+  const handleSaveEdit = async (versionId: string) => {
+    if (!editName.trim()) return;
+    setLoading(true);
+    try {
+      await onRename(versionId, editName.trim());
+      setEditingId(null);
+      setEditName('');
+    } catch (err) {
+      // Error is handled by parent
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (versionId: string, versionName: string) => {
+    if (!confirm(`Möchtest du Version "${versionName}" wirklich löschen?`)) return;
+    setLoading(true);
+    try {
+      await onDelete(versionId);
+    } catch (err) {
+      // Error is handled by parent
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportClick = (version: ModelVersion) => {
+    setExportingVersion(version);
+    setShowExportModal(true);
+  };
+
+  const handleExportLocal = async () => {
+    if (!exportingVersion) return;
+    setLoading(true);
+    try {
+      await onExport(exportingVersion.id, exportingVersion.version_name);
+      setShowExportModal(false);
+      setExportingVersion(null);
+    } catch (err) {
+      // Error is handled by parent
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sort: root first, then by version number desc
+  const sortedVersions = [...versions].sort((a, b) => {
+    if (a.is_root) return -1;
+    if (b.is_root) return 1;
+    return b.version_number - a.version_number;
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-4xl max-h-[85vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <GitBranch className="w-6 h-6 text-purple-400" />
+            <div>
+              <h2 className="text-xl font-bold text-white">{model.name}</h2>
+              <p className="text-sm text-gray-400">{versions.length} Version{versions.length !== 1 ? 'en' : ''}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all disabled:opacity-50"
+              title="Aktualisieren"
+            >
+              <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Versions List */}
+        <div className="p-6 overflow-y-auto max-h-[65vh]">
+          <div className="space-y-3">
+            {sortedVersions.map((version) => (
+              <div
+                key={version.id}
+                className={`rounded-xl border transition-all overflow-hidden ${
+                  version.is_root 
+                    ? 'border-yellow-500/30 bg-yellow-500/5' 
+                    : 'border-white/10'
+                }`}
+              >
+                {/* Klickbarer Header der Karte */}
+                <div
+                  className={`flex items-start gap-4 p-4 cursor-pointer transition-colors ${
+                    expandedVersionId === version.id
+                      ? version.is_root ? 'bg-yellow-500/10' : 'bg-white/[0.07]'
+                      : version.is_root ? 'bg-yellow-500/5 hover:bg-yellow-500/10' : 'bg-white/5 hover:bg-white/[0.07]'
+                  }`}
+                  onClick={() => {
+                    if (editingId === version.id) return; // kein Toggle beim Editieren
+                    setExpandedVersionId(expandedVersionId === version.id ? null : version.id);
+                  }}
+                >
+                  <div className="flex-1 min-w-0">
+                    {/* Name / Edit */}
+                    {editingId === version.id ? (
+                      <div className="flex items-center gap-2 mb-2" onClick={e => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2"
+                          style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveEdit(version.id);
+                            if (e.key === 'Escape') handleCancelEdit();
+                          }}
+                        />
+                        <button
+                          onClick={() => handleSaveEdit(version.id)}
+                          disabled={loading}
+                          className="p-2 rounded-lg bg-green-500/20 hover:bg-green-500/30 text-green-400 transition-all disabled:opacity-50"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          disabled={loading}
+                          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 transition-all disabled:opacity-50"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className="font-semibold text-white">{version.version_name}</h3>
+                        {version.is_root && (
+                          <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded-full flex items-center gap-1">
+                            <Star className="w-3 h-3" />
+                            Original
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <FileBox className="w-4 h-4" />
+                        <span>{version.file_count} Dateien</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <HardDrive className="w-4 h-4" />
+                        <span>{formatBytes(version.size_bytes)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-xs">{formatDate(version.created_at)}</span>
+                      </div>
+                      {!version.is_root && (
+                        <div className="flex items-center gap-2 text-gray-400">
+                          <GitBranch className="w-4 h-4" />
+                          <span className="text-xs">v{version.version_number}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Training Metrics */}
+                    {version.training_metrics && (
+                      <div className="mt-3 pt-3 border-t border-white/10">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                          <div>
+                            <div className="text-gray-500 mb-1">Train Loss</div>
+                            <div className="text-white font-medium flex items-center gap-1">
+                              <TrendingUp className="w-3 h-3 text-blue-400" />
+                              {version.training_metrics.final_train_loss.toFixed(4)}
+                            </div>
+                          </div>
+                          {version.training_metrics.final_val_loss !== null && (
+                            <div>
+                              <div className="text-gray-500 mb-1">Val Loss</div>
+                              <div className="text-white font-medium">
+                                {version.training_metrics.final_val_loss.toFixed(4)}
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <div className="text-gray-500 mb-1">Epochen</div>
+                            <div className="text-white font-medium">
+                              {version.training_metrics.total_epochs}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-1">Dauer</div>
+                            <div className="text-white font-medium flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-purple-400" />
+                              {formatDuration(version.training_metrics.training_duration_seconds)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Path */}
+                    <div className="mt-2 text-xs text-gray-600 truncate" title={version.path}>
+                      {version.path}
+                    </div>
+                  </div>
+
+                  {/* Right side: expand chevron + actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {editingId !== version.id && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleExportClick(version); }}
+                          disabled={loading}
+                          className="p-2 rounded-lg text-gray-500 hover:text-green-400 hover:bg-green-500/10 transition-all disabled:opacity-50"
+                          title="Exportieren"
+                        >
+                          <FolderDown className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleStartEdit(version); }}
+                          disabled={loading}
+                          className="p-2 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all disabled:opacity-50"
+                          title="Umbenennen"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        {!version.is_root && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(version.id, version.version_name); }}
+                            disabled={loading}
+                            className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
+                            title="Löschen"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        <div className="w-px h-5 bg-white/10 mx-1" />
+                      </>
+                    )}
+                    <ChevronDown
+                      className={`w-4 h-4 text-gray-500 transition-transform ${
+                        expandedVersionId === version.id ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {/* Ausgeklappter Dateibereich */}
+                {expandedVersionId === version.id && (
+                  <div className="border-t border-white/10">
+                    <div className="px-4 py-2 flex items-center gap-2 bg-white/[0.02]">
+                      <FolderOpen className="w-3.5 h-3.5 text-gray-500" />
+                      <span className="text-xs font-medium text-gray-400">Dateien dieser Version</span>
+                    </div>
+                    <VersionFilesPanel versionPath={version.path} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 border-t border-white/10">
+          <button
+            onClick={onClose}
+            className={`w-full py-3 bg-gradient-to-r ${gradient} rounded-lg text-white font-medium hover:opacity-90 transition-all`}
+          >
+            Schließen
+          </button>
+        </div>
+      </div>
+
+      {/* Export Modal */}
+      {showExportModal && exportingVersion && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
+            {/* Export Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <FolderDown className="w-6 h-6 text-green-400" />
+                <div>
+                  <h3 className="text-lg font-bold text-white">Version exportieren</h3>
+                  <p className="text-sm text-gray-400">{exportingVersion.version_name}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowExportModal(false);
+                  setExportingVersion(null);
+                }}
+                disabled={loading}
+                className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Export Options */}
+            <div className="p-6 space-y-4">
+              <p className="text-gray-400 text-sm">
+                Wähle eine Export-Option für diese Version:
+              </p>
+
+              {/* Local Download */}
+              <button
+                onClick={handleExportLocal}
+                disabled={loading}
+                className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all disabled:opacity-50 group"
+              >
+                <div className="p-3 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg group-hover:scale-110 transition-transform">
+                  <Download className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-white">Lokal herunterladen</div>
+                  <div className="text-sm text-gray-400">Exportiere in den Downloads-Ordner</div>
+                </div>
+                {loading && <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />}
+              </button>
+
+              {/* SphereNet Upload - Disabled */}
+              <button
+                disabled
+                className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl opacity-50 cursor-not-allowed"
+              >
+                <div className="p-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg">
+                  <Upload className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-white flex items-center gap-2">
+                    Auf SphereNet hochladen
+                    <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded-full">
+                      Bald verfügbar
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-400">Teile dein Modell mit der Community</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Cancel Button */}
+            <div className="p-6 border-t border-white/10">
+              <button
+                onClick={() => {
+                  setShowExportModal(false);
+                  setExportingVersion(null);
+                }}
+                disabled={loading}
+                className="w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-all disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ Main Component ============
+
+export default function VersionManager() {
+  const { currentTheme } = useTheme();
+  const { success, error, warning } = useNotification();
+  const { setCurrentPageContent } = usePageContext();
+
+  const [models, setModels] = useState<ModelWithVersions[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedModel, setSelectedModel] = useState<ModelWithVersions | null>(null);
+  const [modelVersions, setModelVersions] = useState<ModelVersion[]>([]);
+  const [showVersionsModal, setShowVersionsModal] = useState(false);
+
+  useEffect(() => {
+    loadModels();
+  }, []);
+
+  // Page context for AI coach
+  useEffect(() => {
+    const lines = [
+      '=== FrameTrain Versionen-Manager (VersionManager) ===',
+      '',
+      '--- Seitenzweck ---',
+      'Hier werden alle trainierten Modell-Versionen verwaltet.',
+      'Jede Trainingsrunde erstellt eine neue Version. Original-Modelle sind mit ⭐ markiert.',
+      '',
+      '--- Verf\u00fcgbare Aktionen ---',
+      '\u2022 Versionen anzeigen: Klick auf ein Modell \u2192 \u00d6ffnet Versions-\u00dcbersicht mit allen Trainingsst\u00e4nden',
+      '  - Jede Version zeigt: Trainings-Metriken (Loss, Epochen), Dateigr\u00f6\u00dfe, Erstellungsdatum',
+      '  - Version umbenennen: Stift-Icon \u2192 Name \u00e4ndern + Enter',
+      '  - Version exportieren: Download-Icon \u2192 Kopiert Modell in ausgew\u00e4hlten Ordner',
+      '  - Version l\u00f6schen: Trash-Icon \u2192 Entfernt Version dauerhaft (Original kann nicht gel\u00f6scht werden)',
+      '\u2022 Refresh-Button: Versionen nach Training neu laden',
+      '',
+      '--- Versionsstruktur ---',
+      '  Original (v0, ⭐): Das urspr\u00fcnglich importierte Modell, kann nicht gel\u00f6scht werden',
+      '  v1, v2, v3...: Jede abgeschlossene Trainingsrunde erstellt eine neue Version',
+      '  Versionen bauen aufeinander auf (Tree-Struktur)',
+      '',
+      '--- M\u00f6gliche Fehler ---',
+      '\u2022 "Keine Versionen": Modell wurde noch nicht trainiert (nur Original vorhanden)',
+      '\u2022 "Export fehlgeschlagen": Zielordner-Berechtigungen pr\u00fcfen',
+      '\u2022 "L\u00f6schen fehlgeschlagen": Version wird m\u00f6glicherweise noch verwendet',
+      '',
+      `--- Vorhandene Modelle (${models.length}) ---`,
+      ...(models.length === 0
+        ? ['Keine Modelle vorhanden. F\u00fcge zuerst ein Modell auf der Modelle-Seite hinzu.']
+        : models.map(m => [
+            `\u2022 "${m.name}" | ${m.version_count} Version(en) | ${formatBytes(m.total_size)}`,
+            m.model_type ? `  Typ: ${m.model_type}` : '',
+          ].filter(Boolean).join('\n'))
+      ),
+      selectedModel ? `\n--- Aktuell ge\u00f6ffnetes Modell: "${selectedModel.name}" ---` : '',
+      selectedModel && modelVersions.length > 0 ? [
+        `Versionen (${modelVersions.length}):`,
+        ...modelVersions.map(v => [
+          `  \u2022 ${v.is_root ? '⭐ ' : ''}"${v.version_name}" (v${v.version_number})`,
+          v.training_metrics ? `    Loss: ${v.training_metrics.final_train_loss.toFixed(6)} | Epochen: ${v.training_metrics.total_epochs} | Steps: ${v.training_metrics.total_steps}` : '    (keine Trainings-Metriken)',
+        ].join('\n'))
+      ].join('\n') : '',
+    ].filter(Boolean);
+    setCurrentPageContent(lines.join('\n'));
+  }, [models, selectedModel, modelVersions, setCurrentPageContent]);
+
+  // Auto-refresh when training completes
+  useEffect(() => {
+    // Listen for training complete events
+    const unlistenComplete = listen('training-complete', () => {
+      console.log('[VersionManager] Training complete detected, refreshing...');
+      loadModels();
+    });
+
+    const unlistenFinished = listen('training-finished', () => {
+      console.log('[VersionManager] Training finished detected, refreshing...');
+      loadModels();
+    });
+    
+    return () => {
+      unlistenComplete.then(f => f());
+      unlistenFinished.then(f => f());
+    };
+  }, []);
+
+
+  const loadModels = async () => {
+    try {
+      setLoading(true);
+      const modelList = await invoke<ModelWithVersions[]>('list_models_with_versions');
+      setModels(modelList);
+    } catch (err: any) {
+      console.error('Error loading models:', err);
+      error('Fehler beim Laden', String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadVersions = async (modelId: string) => {
+    try {
+      const versions = await invoke<ModelVersion[]>('list_model_versions', { modelId });
+      setModelVersions(versions);
+    } catch (err: any) {
+      console.error('Error loading versions:', err);
+      error('Fehler beim Laden der Versionen', String(err));
+      throw err;
+    }
+  };
+
+  const handleShowVersions = async (model: ModelWithVersions) => {
+    setSelectedModel(model);
+    try {
+      await loadVersions(model.id);
+      setShowVersionsModal(true);
+    } catch (err) {
+      // Error already handled
+    }
+  };
+
+  const handleCloseVersions = () => {
+    setShowVersionsModal(false);
+    setSelectedModel(null);
+    setModelVersions([]);
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    try {
+      await invoke('delete_model_version', { versionId });
+      success('Version gelöscht', 'Die Version wurde erfolgreich entfernt.');
+      if (selectedModel) {
+        await loadVersions(selectedModel.id);
+        await loadModels(); // Refresh model list to update counts
+      }
+    } catch (err: any) {
+      error('Löschen fehlgeschlagen', String(err));
+      throw err;
+    }
+  };
+
+  const handleRenameVersion = async (versionId: string, newName: string) => {
+    try {
+      await invoke('rename_model_version', { versionId, newName });
+      success('Version umbenannt', 'Der Name wurde erfolgreich geändert.');
+      if (selectedModel) {
+        await loadVersions(selectedModel.id);
+      }
+    } catch (err: any) {
+      error('Umbenennen fehlgeschlagen', String(err));
+      throw err;
+    }
+  };
+
+  const handleExportVersion = async (versionId: string, versionName: string) => {
+    try {
+      const exportPath = await invoke<string>('export_model_version', { versionId });
+      success('Export erfolgreich', `Version "${versionName}" wurde nach ${exportPath} exportiert.`);
+    } catch (err: any) {
+      error('Export fehlgeschlagen', String(err));
+      throw err;
+    }
+  };
+
+  const handleRefreshVersions = async () => {
+    if (selectedModel) {
+      try {
+        await loadVersions(selectedModel.id);
+        await loadModels();
+      } catch (err) {
+        // Error already handled
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white">Versionen</h1>
+          <p className="text-gray-400 mt-1">Verwalte Modell-Versionen und Training-Verläufe</p>
+        </div>
+        <button
+          onClick={loadModels}
+          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
+          title="Aktualisieren"
+        >
+          <RefreshCw className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Models List */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
+        </div>
+      ) : models.length === 0 ? (
+        <div className="bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/5 mb-4">
+            <GitBranch className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-white mb-2">Keine Modelle vorhanden</h3>
+          <p className="text-gray-400">Füge zuerst Modelle auf der Modelle-Seite hinzu.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {models.map((model) => (
+            <div
+              key={model.id}
+              className="bg-white/5 rounded-xl border border-white/10 p-5 hover:bg-white/[0.07] transition-all"
+            >
+              {/* Model Header */}
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={`p-2 rounded-lg bg-gradient-to-r ${currentTheme.colors.gradient} flex-shrink-0`}>
+                    <FolderOpen className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-white truncate" title={model.name}>
+                      {model.name}
+                    </h3>
+                    <p className="text-xs text-gray-500 truncate" title={model.root_path}>
+                      {model.root_path}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Model Stats */}
+              <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
+                <div className="flex items-center gap-2 text-gray-400">
+                  <GitBranch className="w-4 h-4" />
+                  <span>{model.version_count} Version{model.version_count !== 1 ? 'en' : ''}</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-400">
+                  <HardDrive className="w-4 h-4" />
+                  <span>{formatBytes(model.total_size)}</span>
+                </div>
+                {model.model_type && (
+                  <div className="flex items-center gap-2 text-gray-400">
+                    <Cpu className="w-4 h-4" />
+                    <span className="capitalize">{model.model_type}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-gray-500 text-xs">
+                  <Calendar className="w-3 h-3" />
+                  <span>{formatDate(model.last_updated)}</span>
+                </div>
+              </div>
+
+              {/* Versionen Button */}
+              <button
+                onClick={() => handleShowVersions(model)}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white font-medium hover:opacity-90 transition-all`}
+              >
+                <GitBranch className="w-4 h-4" />
+                Versionen anzeigen
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Versions Modal */}
+      {showVersionsModal && selectedModel && (
+        <VersionsModal
+          model={selectedModel}
+          versions={modelVersions}
+          onClose={handleCloseVersions}
+          onDelete={handleDeleteVersion}
+          onRename={handleRenameVersion}
+          onExport={handleExportVersion}
+          onRefresh={handleRefreshVersions}
+          gradient={currentTheme.colors.gradient}
+          primaryColor={currentTheme.colors.primary}
+        />
+      )}
+    </div>
+  );
+}

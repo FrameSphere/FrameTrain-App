@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+}
+
+/* DevTrain: lightweight syntax highlighting */
+.tok-kw { color: rgba(167, 139, 250, 0.95); }      /* violet */
+.tok-bi { color: rgba(56, 189, 248, 0.95); }       /* cyan */
+.tok-num { color: rgba(251, 191, 36, 0.95); }      /* amber */
+.tok-str { color: rgba(52, 211, 153, 0.95); }      /* emerald */
+.tok-cmt { color: rgba(148, 163, 184, 0.55); }     /* slate */
+.tok-fn { color: rgba(251, 113, 133, 0.95); }      /* rose */
+.tok-cl { color: rgba(34, 211, 238, 0.95); }       /* cyan */
+.tok-de { color: rgba(251, 191, 36, 0.85); }       /* amber */
+
+/* Notification Animations */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 0.3s ease-in forwards;
+}
+
+/* Progress Bar Animation */
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.animate-progress-slide {
+  animation: progress-slide 1.5s ease-in-out infinite;
+}
+
+/* Shimmer Effect for Progress Bar */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
