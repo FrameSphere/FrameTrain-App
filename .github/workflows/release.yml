@@ -109,19 +109,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      # ✅ FIX: Kein working-directory - das Repo IS bereits der App-Ordner
       - name: Install frontend dependencies
         run: npm ci
 
       - name: Build Tauri App
-        run: npm run tauri build -- ${{ matrix.args }}
+        run: npm run tauri:build -- ${{ matrix.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # ✅ FIX: Signing Keys für .sig Dateien
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # ✅ FIX: Pfade ohne ./desktop-app2/ Prefix
       - name: Upload Release Assets (macOS)
         if: matrix.platform == 'macos-latest'
         uses: softprops/action-gh-release@v2
@@ -162,7 +159,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ✅ FIX: Liest echte .sig Inhalte aus dem Release und baut latest.json korrekt
   generate-latest-json:
     needs: [build-tauri, create-release]
     runs-on: ubuntu-latest
@@ -189,7 +185,6 @@ jobs:
           echo "Downloaded sig files:"
           ls -la ./sigs/ 2>/dev/null || echo "(none)"
 
-          # Read signature content into env vars
           export WIN_SIG="" MAC_ARM_SIG="" LINUX_SIG=""
           for f in ./sigs/*.exe.sig ./sigs/*.msi.sig; do
             [ -f "$f" ] && WIN_SIG=$(cat "$f") && echo "Windows sig: $f" && break
@@ -201,7 +196,6 @@ jobs:
             [ -f "$f" ] && LINUX_SIG=$(cat "$f") && echo "Linux sig: $f" && break
           done
 
-          # Get download URLs via GitHub CLI
           echo "Fetching asset URLs from GitHub release..."
           ASSETS_JSON=$(gh release view "$TAG" --json assets --jq '.assets')
           echo "Assets: $ASSETS_JSON"
@@ -211,21 +205,18 @@ jobs:
           MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.app\\.tar\\.gz$"; "i"))] | first | .browserDownloadUrl // ""')
           LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.AppImage$"; "i"))] | first | .browserDownloadUrl // ""')
 
-          # Sanitize jq "null" strings
           [ "$WIN_URL" = "null" ]     && WIN_URL=""
           [ "$MAC_ARM_URL" = "null" ] && MAC_ARM_URL=""
           [ "$LINUX_URL" = "null" ]   && LINUX_URL=""
 
-          # Fallback constructed URLs
-          [ -z "$WIN_URL" ]     && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_x64-setup.exe"
-          [ -z "$MAC_ARM_URL" ] && MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_aarch64.app.tar.gz"
-          [ -z "$LINUX_URL" ]   && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain.2_${VERSION}_amd64.AppImage"
+          [ -z "$WIN_URL" ]     && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain_${VERSION}_x64-setup.exe"
+          [ -z "$MAC_ARM_URL" ] && MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain_${VERSION}_aarch64.app.tar.gz"
+          [ -z "$LINUX_URL" ]   && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain_${VERSION}_amd64.AppImage"
 
           echo "WIN_URL:     $WIN_URL"
           echo "MAC_ARM_URL: $MAC_ARM_URL"
           echo "LINUX_URL:   $LINUX_URL"
 
-          # Generate latest.json via standalone Python script (no heredoc = no YAML issues)
           python3 scripts/generate_latest_json.py
 
       - name: Upload latest.json to Release
