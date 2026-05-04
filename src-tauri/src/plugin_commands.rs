@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
+use std::time::{Instant, Duration};
 use tauri::{AppHandle, Window};
 use tauri::Emitter;
 
@@ -287,32 +288,34 @@ pub async fn install_plugins(
         let python = get_python_executable();
         println!("[Deps] Verwende Python: {}", python);
 
-        // Alle Packages die wir installieren wollen
+        // Installiere in dieser Reihenfolge (torch first - das ist das größte)
         let packages = vec![
-            "torch",
-            "transformers",
-            "datasets",
-            "scikit-learn",
-            "numpy",
-            "accelerate",
+            ("torch", "PyTorch (enthält große Modelle)"),
+            ("numpy", "NumPy (Numerische Berechnungen)"),
+            ("transformers", "Transformers (Sprachmodelle)"),
+            ("datasets", "Datasets (Datenverwaltung)"),
+            ("scikit-learn", "Scikit-Learn (ML-Tools)"),
+            ("accelerate", "Accelerate (GPU-Unterstützung)"),
         ];
 
         let total = packages.len();
+        let install_start = Instant::now();
 
-        for (i, package) in packages.iter().enumerate() {
-            let progress_pct = ((i as f32 / total as f32) * 90.0) as i32;
+        for (i, (package, description)) in packages.iter().enumerate() {
+            let progress_pct = ((i as f32 / total as f32) * 100.0) as i32;
 
             let _ = window.emit("plugin-install-progress", PluginInstallProgress {
                 plugin_id:  "seq_classification".to_string(),
                 status:     "installing_package".to_string(),
-                message:    format!("Installiere {} ({}/{})...", package, i + 1, total),
+                message:    format!("Installiere {} - {} ({}/{})", package, description, i + 1, total),
                 progress:   Some(progress_pct),
             });
 
-            println!("[Deps] pip install {}", package);
+            println!("[Deps] pip install {} ({})", package, description);
+            let pkg_start = Instant::now();
 
             let mut child = match Command::new(&python)
-                .args(["-m", "pip", "install", "--upgrade", package])
+                .args(["-m", "pip", "install", "--upgrade", "--quiet", package])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -334,17 +337,46 @@ pub async fn install_plugins(
                 }
             };
 
-            // Pip-Output streamen → Live-Fortschritt im Frontend
+            // Nur relevante pip-Output-Zeilen streamen (mit Throttling)
             if let Some(stdout) = child.stdout.take() {
                 let win_clone = window.clone();
                 let pkg_clone = package.to_string();
                 std::thread::spawn(move || {
+                    let mut last_update = Instant::now();
+                    let mut current_line_buffer = String::new();
+                    
                     for line in BufReader::new(stdout).lines().flatten() {
-                        println!("[pip] {}", line);
+                        // Nur Zeilen mit wichtigen Keywords anzeigen
+                        if line.contains("Downloading")
+                            || line.contains("downloading")
+                            || line.contains("Installing")
+                            || line.contains("Collecting")
+                            || line.contains("ERROR")
+                            || line.contains("error")
+                        {
+                            // Maximal eine Update pro 500ms senden (Throttling)
+                            if last_update.elapsed() > Duration::from_millis(500) {
+                                println!("[pip] {} → {}", pkg_clone, line);
+                                let _ = win_clone.emit("plugin-install-progress", PluginInstallProgress {
+                                    plugin_id: "seq_classification".to_string(),
+                                    status:    "installing_package".to_string(),
+                                    message:   line.clone(),
+                                    progress:  None,
+                                });
+                                last_update = Instant::now();
+                            } else {
+                                current_line_buffer = line.clone();
+                            }
+                        }
+                    }
+                    
+                    // Letzte gepufferte Zeile senden
+                    if !current_line_buffer.is_empty() {
+                        println!("[pip] {}", current_line_buffer);
                         let _ = win_clone.emit("plugin-install-progress", PluginInstallProgress {
                             plugin_id: "seq_classification".to_string(),
                             status:    "installing_package".to_string(),
-                            message:   format!("[{}] {}", pkg_clone, line),
+                            message:   current_line_buffer,
                             progress:  None,
                         });
                     }
@@ -352,31 +384,55 @@ pub async fn install_plugins(
             }
 
             let status = child.wait().expect("Warten auf pip fehlgeschlagen");
+            let elapsed = pkg_start.elapsed();
 
             if !status.success() {
                 eprintln!("[Deps] ✗ {} konnte nicht installiert werden", package);
                 let _ = window.emit("plugin-install-progress", PluginInstallProgress {
                     plugin_id: "seq_classification".to_string(),
                     status:    "failed".to_string(),
-                    message:   format!("Fehler beim Installieren von {}. Überprüfe deine Internetverbindung und Festplattenspeicher.", package),
+                    message:   format!(
+                        "Fehler beim Installieren von {}.\n\n\
+                        Mögliche Lösungen:\n\
+                        - Überprüfe deine Internetverbindung\n\
+                        - Stelle sicher, dass genug Festplattenspeicher verfügbar ist (mindestens 20GB)\n\
+                        - Versuche: pip install --upgrade pip setuptools wheel", 
+                        package
+                    ),
                     progress:  None,
                 });
                 return;
             }
 
-            println!("[Deps] ✓ {} installiert", package);
+            let elapsed_secs = elapsed.as_secs();
+            println!("[Deps] ✓ {} installiert ({:.1}s)", package, elapsed_secs);
+            
+            let _ = window.emit("plugin-install-progress", PluginInstallProgress {
+                plugin_id: "seq_classification".to_string(),
+                status: "package_complete".to_string(),
+                message: format!("{} fertig ({} Sekunden)", package, elapsed_secs),
+                progress: Some(progress_pct),
+            });
         }
 
-        // Abschluss
+        // Abschluss mit Gesamtdauer
+        let total_elapsed = install_start.elapsed();
+        let total_secs = total_elapsed.as_secs();
+        let total_mins = total_secs / 60;
+        
         let _ = mark_first_launch_complete();
         let _ = window.emit("plugin-install-progress", PluginInstallProgress {
             plugin_id: "seq_classification".to_string(),
             status:    "complete".to_string(),
-            message:   "Alle Dependencies erfolgreich installiert!".to_string(),
+            message:   format!(
+                "✅ Alle Dependencies erfolgreich installiert!\n\nGesamtdauer: {}m {}s",
+                total_mins,
+                total_secs % 60
+            ),
             progress:  Some(100),
         });
         let _ = window.emit("plugin-install-complete", ());
-        println!("[Deps] ✅ Installation abgeschlossen");
+        println!("[Deps] ✅ Installation abgeschlossen in {:.1}s", total_secs);
     });
 
     Ok(())

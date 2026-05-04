@@ -573,48 +573,85 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
         </>
       ) : (
         /* Installation Progress */
-        <div className="flex-1 flex flex-col items-center justify-center p-8">
-          <div className="w-full max-w-2xl">
+        <div className="flex-1 flex flex-col p-8 overflow-y-auto">
+          <div className="w-full max-w-3xl mx-auto">
             <div className="text-center mb-8">
               <Loader2 className="w-16 h-16 text-blue-400 animate-spin mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-2">Installing Plugins</h2>
-              <p className="text-gray-400">This may take a few minutes...</p>
+              <h2 className="text-2xl font-bold text-white mb-2">Installing Dependencies</h2>
+              <p className="text-gray-300">
+                Installing AI/ML packages. This is normal - PyTorch alone is several GB.
+              </p>
+              <p className="text-sm text-gray-400 mt-4">
+                ⏱️ Estimated time: 10-30 minutes depending on your internet speed
+              </p>
             </div>
             
-            <div className="space-y-3">
+            <div className="space-y-3 mb-8">
               {Array.from(selectedPlugins).map(pluginId => {
                 const plugin = plugins.find(p => p.id === pluginId);
                 const progress = installProgress.get(pluginId);
                 
                 if (!plugin || plugin.built_in) return null;
                 
+                const isComplete = progress?.status === 'complete' || progress?.status === 'package_complete';
+                const isFailed = progress?.status === 'failed';
+                const isInstalling = progress && !isComplete && !isFailed;
+                
                 return (
-                  <div key={pluginId} className="bg-white/5 rounded-xl p-4 border border-white/10">
-                    <div className="flex items-center gap-3 mb-2">
+                  <div 
+                    key={pluginId} 
+                    className={`
+                      rounded-xl p-4 border transition-all
+                      ${isComplete 
+                        ? 'bg-green-500/10 border-green-500/30' 
+                        : isFailed
+                        ? 'bg-red-500/10 border-red-500/30'
+                        : 'bg-white/5 border-white/10'
+                      }
+                    `}
+                  >
+                    <div className="flex items-start gap-3 mb-2">
                       <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${getCategoryColor(plugin.category)} flex items-center justify-center flex-shrink-0`}>
                         <span className="text-xl">{plugin.icon}</span>
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="font-semibold text-white">{plugin.name}</span>
-                          {progress && (
-                            <span className={`text-sm ${getStatusColor(progress.status)}`}>
-                              {progress.status === 'complete' && <Check className="w-4 h-4 inline" />}
-                              {progress.status === 'failed' && '✗ Failed'}
-                              {!['complete', 'failed'].includes(progress.status) && 'Installing...'}
+                          {isComplete && (
+                            <span className="text-green-400 flex items-center gap-1 flex-shrink-0">
+                              <Check className="w-4 h-4" /> Complete
+                            </span>
+                          )}
+                          {isFailed && (
+                            <span className="text-red-400 flex-shrink-0">✗ Failed</span>
+                          )}
+                          {isInstalling && (
+                            <span className="text-blue-400 flex items-center gap-1 flex-shrink-0">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Installing
                             </span>
                           )}
                         </div>
+                        
                         {progress?.message && (
-                          <p className="text-xs text-gray-400 mt-1">{progress.message}</p>
+                          <p className={`text-sm mt-1 break-words ${
+                            isFailed ? 'text-red-300' :
+                            isComplete ? 'text-green-300' :
+                            'text-gray-300'
+                          }`}>
+                            {progress.message}
+                          </p>
                         )}
                       </div>
                     </div>
                     
                     {progress && progress.progress !== undefined && (
-                      <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                      <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden mt-2">
                         <div
-                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300"
+                          className={`h-full transition-all duration-300 bg-gradient-to-r ${
+                            isComplete ? 'from-green-500 to-green-600' :
+                            isFailed ? 'from-red-500 to-red-600' :
+                            'from-blue-500 to-purple-500'
+                          }`}
                           style={{ width: `${progress.progress}%` }}
                         />
                       </div>
@@ -624,9 +661,14 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
               })}
             </div>
             
-            <p className="text-sm text-gray-500 text-center mt-8">
-              Please don't close the application during installation
-            </p>
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
+              <p className="text-sm text-blue-300 text-center">
+                ⏸️ Do NOT close the application or your browser during installation.
+              </p>
+              <p className="text-xs text-blue-400 text-center mt-2">
+                If the browser shows "Page not responding", wait a bit longer - the installation continues in the background.
+              </p>
+            </div>
           </div>
         </div>
       )}
