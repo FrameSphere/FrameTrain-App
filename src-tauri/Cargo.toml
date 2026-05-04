@@ -1,6 +1,6 @@
 [package]
 name = "frametrain-desktop"
-version = "1.0.0"
+version = "1.2.0
 description = "FrameTrain Desktop App"
 authors = ["FrameTrain Team"]
 edition = "2021"
@@ -16,6 +16,7 @@ tauri-plugin-os = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
