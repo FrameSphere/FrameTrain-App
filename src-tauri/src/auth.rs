@@ -16,7 +16,7 @@ pub struct ApiKeyValidation {
 struct CredentialRequest {
     #[serde(rename = "apiKey")]
     api_key: String,
-    password: String,
+    password: String, // leer für OAuth-Accounts, Server entscheidet
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,8 +42,10 @@ pub async fn validate_credentials(api_key: String, password: String) -> Result<A
         return Err("Ungültiges API-Key Format".to_string());
     }
 
-    // 2. Prüfe Password-Länge
-    if password.is_empty() {
+    // Hinweis: Passwort kann leer sein (OAuth-Accounts), Server prüft das
+
+    // 2. Passwort darf nicht leer sein
+    if password.trim().is_empty() {
         return Err("Passwort darf nicht leer sein".to_string());
     }
 

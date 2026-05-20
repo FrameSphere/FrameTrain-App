@@ -16,6 +16,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
+import { openAICoach } from '../ai/aiCoachEvents';
 import { detectPlugin } from '../plugins/registry';
 import { checkDatasetCompat } from '../plugins/datasetCompat';
 import DatasetCompatBadge from './DatasetCompatBadge';
@@ -63,6 +64,10 @@ export interface TrainingConfig {
   use_lora: boolean; lora_r: number; lora_alpha: number;
   lora_dropout: number; lora_target_modules: string;
   load_in_4bit: boolean; load_in_8bit: boolean;
+
+  // Plugin-Routing (Backend)
+  task_type?: string;
+  plugin_config?: Record<string, unknown>;
 }
 
 export interface TrainingProgress {
@@ -103,37 +108,11 @@ interface TrainingPanelProps { onNavigateToAnalysis: (versionId: string) => void
 // ── AI Helper ─────────────────────────────────────────────────────────────
 
 import type { AISettings } from '../contexts/AISettingsContext';
+import { callAI as callAIClient } from '../ai/aiClient';
 
 export async function callAI(settings: AISettings, systemPrompt: string, userPrompt: string, history?: { role: 'user' | 'assistant'; content: string }[]): Promise<string> {
-  if (!settings.enabled) throw new Error('KI-Assistent deaktiviert. Bitte in Einstellungen aktivieren.');
-  const needsKey = settings.provider !== 'ollama';
-  if (needsKey && !settings.apiKey) throw new Error(`API-Key für ${settings.provider} fehlt.`);
-  const msgs = [...(history ?? []), { role: 'user' as const, content: userPrompt }];
-
-  if (settings.provider === 'anthropic') {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: settings.selectedModel || 'claude-haiku-4-5', max_tokens: 2000, system: systemPrompt, messages: msgs }),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as {error?: {message?: string}})?.error?.message ?? `HTTP ${res.status}`); }
-    const data = await res.json();
-    return data.content?.find((b: { type: string }) => b.type === 'text')?.text ?? '';
-  }
-  if (settings.provider === 'openai' || settings.provider === 'groq') {
-    const url = settings.provider === 'groq' ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
-      body: JSON.stringify({ model: settings.selectedModel || (settings.provider === 'groq' ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini'), max_tokens: 2000, messages: [{ role: 'system', content: systemPrompt }, ...msgs] }),
-    });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as {error?: {message?: string}})?.error?.message ?? `HTTP ${res.status}`); }
-    return (await res.json()).choices?.[0]?.message?.content ?? '';
-  }
-  const ctx = [systemPrompt, ...(history ?? []).map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`), `User: ${userPrompt}`, 'Assistant:'].join('\n\n');
-  const res = await fetch('http://localhost:11434/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.ollamaModel || 'llama3.2', prompt: ctx, stream: false }) });
-  if (!res.ok) throw new Error('Ollama nicht erreichbar (localhost:11434)');
-  return (await res.json()).response ?? '';
+  const messages = [...(history ?? []), { role: 'user' as const, content: userPrompt }];
+  return callAIClient(settings, { system: systemPrompt, messages, maxTokens: 2000, temperature: 0.7 });
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────
@@ -592,6 +571,22 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                             </button>
                           )
                         )}
+
+                        {applied && parsed && (
+                          <button
+                            onClick={() => {
+                              const payload = JSON.stringify(parsed, null, 2);
+                              openAICoach({
+                                newChat: true,
+                                prefill: `Ich habe im Training-Panel folgende KI-vorgeschlagene Metriken übernommen:\n\n\`\`\`json\n${payload}\n\`\`\`\n\nZiel: ${goalText || '(kein Ziel angegeben)'}\n\nBitte schlage mir als nächstes ein kleines Experiment-Setup vor (2–3 Varianten), inkl. worauf ich in der Analyse achten soll.`,
+                                titleHint: 'Training-Metriken-Followup',
+                              });
+                            }}
+                            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-200 text-xs font-medium transition-all"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" /> Im KI-Coach weiterplanen
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -785,7 +780,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: TrainingPanelPro
   const selectedModelTree = modelsWithVersions.find(m => m.id === selectedModelId);
   const selectedVersionTree = selectedModelTree?.versions.find(v => v.id === selectedVersionId);
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
-  const detection       = detectionKey ? detectPlugin(detectionKey) : null;
+  const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
   const isSupported     = detection?.supported === true;
   const pluginId        = detection?.supported ? detection.plugin.id : null;
 
@@ -803,6 +798,8 @@ export default function TrainingPanel({ onNavigateToAnalysis }: TrainingPanelPro
         lora_target_modules: typeof config.lora_target_modules === 'string'
           ? config.lora_target_modules.split(',').map(m => m.trim()).filter(m => m)
           : config.lora_target_modules,
+        task_type: detection?.supported ? detection.plugin.taskType : 'seq_classification',
+        plugin_config: detection?.supported ? (detection.plugin.defaultPluginConfig ?? {}) : {},
       };
       
       const job = await invoke<TrainingJob>('start_training', {

@@ -4,9 +4,12 @@ import {
   MessageSquare, Plus, Trash2, ChevronDown, ChevronRight, Brain,
   FileSearch, Cpu, Sparkles, ArrowLeft
 } from 'lucide-react';
-import { useAISettings, AIProvider } from '../contexts/AISettingsContext';
+import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePageContext } from '../contexts/PageContext';
+import { callAI as callAIClient } from '../ai/aiClient';
+import { PROVIDER_META } from '../ai/providerMeta';
+import { onOpenAICoach } from '../ai/aiCoachEvents';
 
 // ============ Types ============
 
@@ -35,26 +38,7 @@ interface Chat {
   updatedAt: number;
 }
 
-const PROVIDER_META: Record<AIProvider, {
-  label: string; emoji: string; needsKey: boolean; models: string[];
-}> = {
-  anthropic: {
-    label: 'Claude (Anthropic)', emoji: '🤖', needsKey: true,
-    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
-  },
-  openai: {
-    label: 'GPT-4o (OpenAI)', emoji: '🟢', needsKey: true,
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
-  },
-  groq: {
-    label: 'Groq', emoji: '⚡', needsKey: true,
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
-  },
-  ollama: {
-    label: 'Ollama (Lokal)', emoji: '🦙', needsKey: false,
-    models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2'],
-  },
-};
+// PROVIDER_META kommt aus src/ai/providerMeta.ts (zentral für die App)
 
 const STORAGE_KEY = 'ft_ai_chats_v2';
 const MAX_CHATS = 50;
@@ -449,7 +433,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   };
 
   // ── Opens modal with a fresh empty chat (never saved until message sent) ──
-  const openModal = () => {
+  const openModal = useCallback(() => {
     const fresh = createFreshChat();
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
@@ -458,7 +442,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     setInputText('');
     setThinkingSteps([]);
     setIsOpen(true);
-  };
+  }, []);
 
   // ── Start a new chat (from chat list or header button) ──
   // Creates a fresh unsaved chat and switches to it, without touching `chats`
@@ -471,6 +455,21 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     setInputText('');
     setThinkingSteps([]);
   }, []);
+
+  // External open (z.B. aus Analysis/Training/Dev Panels)
+  useEffect(() => {
+    return onOpenAICoach(({ prefill, newChat }) => {
+      if (!isOpen) {
+        openModal();
+      } else if (newChat) {
+        handleNewChat();
+      }
+      if (typeof prefill === 'string' && prefill.trim()) {
+        setInputText(prefill);
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    });
+  }, [handleNewChat, isOpen, openModal]);
 
   // ── Switch to an existing persisted chat ──
   const switchToChat = useCallback((chatId: string) => {
@@ -628,87 +627,12 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
       const history = chatWithUserMsg.messages.slice(-10);
       const systemPrompt = buildSystemPrompt();
-      let responseText = '';
-
-      if (settings.provider === 'ollama') {
-        const conversationText = [
-          systemPrompt,
-          ...history.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`),
-          'Assistant:',
-        ].join('\n\n');
-        const res = await fetch('http://localhost:11434/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: settings.ollamaModel || 'llama3.2',
-            prompt: conversationText,
-            stream: false,
-            options: { temperature: 0.7, num_ctx: 4096 },
-          }),
-        });
-        if (!res.ok) throw new Error('Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
-        const data = await res.json();
-        responseText = data.response || '';
-
-      } else if (settings.provider === 'groq') {
-        const messages = [
-          { role: 'system', content: systemPrompt },
-          ...history.map(m => ({ role: m.role, content: m.content })),
-        ];
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
-          body: JSON.stringify({
-            model: settings.selectedModel || 'llama-3.3-70b-versatile',
-            max_tokens: 1500,
-            temperature: 0.7,
-            messages,
-          }),
-        });
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
-        const data = await res.json();
-        responseText = data.choices?.[0]?.message?.content || '';
-
-      } else if (settings.provider === 'anthropic') {
-        const messages = history.map(m => ({ role: m.role, content: m.content }));
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': settings.apiKey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true',
-          },
-          body: JSON.stringify({
-            model: settings.selectedModel || 'claude-haiku-4-5',
-            max_tokens: 1500,
-            system: systemPrompt,
-            messages,
-          }),
-        });
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
-        const data = await res.json();
-        responseText = data.content?.[0]?.text || '';
-
-      } else {
-        const messages = [
-          { role: 'system', content: systemPrompt },
-          ...history.map(m => ({ role: m.role, content: m.content })),
-        ];
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
-          body: JSON.stringify({
-            model: settings.selectedModel || 'gpt-4o-mini',
-            max_tokens: 1500,
-            temperature: 0.7,
-            messages,
-          }),
-        });
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
-        const data = await res.json();
-        responseText = data.choices?.[0]?.message?.content || '';
-      }
+      const responseText = await callAIClient(settings, {
+        system: systemPrompt,
+        messages: history.map(m => ({ role: m.role, content: m.content })),
+        maxTokens: 1500,
+        temperature: 0.7,
+      });
 
       setThinkingSteps([]);
 

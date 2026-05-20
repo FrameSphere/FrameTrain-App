@@ -107,7 +107,7 @@ export default function TestPanel() {
   const detectedPlugin: ModelPlugin | null = (() => {
     if (!selectedModel) return null;
     const key = selectedModel.source_path ?? selectedModel.name;
-    const r = detectPlugin(key);
+    const r = detectPlugin(key, selectedModel.model_type ? { model_type: selectedModel.model_type } : undefined);
     return r.supported ? r.plugin : null;
   })();
 

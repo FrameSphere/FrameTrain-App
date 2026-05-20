@@ -74,8 +74,6 @@ fn verify_python_available() -> Result<(), String> {
 }
 
 fn get_python_executable() -> String {
-    // Gleiche Logik wie training_manager / test_manager:
-    // Python mit torch bevorzugen, falls mehrere Versionen installiert.
     let candidates: Vec<&str> = if cfg!(target_os = "windows") {
         vec!["python", "python3"]
     } else {
@@ -93,15 +91,16 @@ fn get_python_executable() -> String {
 }
 
 fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
-    // Normiert package für import (z.B. scikit-learn → sklearn)
+    // Normiert package für import (z.B. scikit-learn → sklearn, huggingface-hub → huggingface_hub)
     let import_name = match package {
-        "scikit-learn" => "sklearn",
-        "torch"        => "torch",
-        "transformers" => "transformers",
-        "datasets"     => "datasets",
-        "numpy"        => "numpy",
-        "accelerate"   => "accelerate",
-        other          => other,
+        "scikit-learn"    => "sklearn",
+        "torch"           => "torch",
+        "transformers"    => "transformers",
+        "datasets"        => "datasets",
+        "numpy"           => "numpy",
+        "accelerate"      => "accelerate",
+        "huggingface_hub" => "huggingface_hub",
+        other             => other,
     };
 
     let check = Command::new(python)
@@ -150,17 +149,15 @@ fn mark_first_launch_complete() -> Result<(), String> {
 // ============ Tauri Commands ============
 
 /// Gibt die benötigten Dependencies als PluginInfo-Liste zurück.
-/// Das Frontend zeigt diese auf der First-Launch-Seite an.
 #[tauri::command]
 pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginInfo>, String> {
-    // Prüfe Python Verfügbarkeit
     verify_python_available()?;
     
     let python = get_python_executable();
 
-    // Die eine "Plugin-Gruppe" ist die Sequenzklassifikations-Engine
     let packages = vec![
-        "torch", "transformers", "datasets", "scikit-learn", "numpy", "accelerate",
+        "torch", "transformers", "datasets", "huggingface_hub",
+        "scikit-learn", "numpy", "accelerate",
     ];
 
     let all_installed = packages.iter().all(|p| {
@@ -187,12 +184,10 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 }
 
 /// Prüft den Status aller erforderlichen Python-Pakete.
-/// Gibt eine Liste von DependencyStatus für jedes Paket zurück.
 #[tauri::command]
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
     println!("[Deps] Prüfe Abhängigkeitsstatus...");
     
-    // Prüfe zuerst ob Python überhaupt vorhanden ist
     verify_python_available()?;
     
     let python = get_python_executable();
@@ -200,6 +195,7 @@ pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> 
         "torch",
         "transformers",
         "datasets",
+        "huggingface_hub",
         "scikit-learn",
         "numpy",
         "accelerate",
@@ -225,7 +221,6 @@ pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> 
 }
 
 /// Prüft ob der First-Launch-Setup noch ausgeführt werden muss.
-/// Gibt true zurück wenn die Dependencies noch nicht installiert sind.
 #[tauri::command]
 pub async fn check_first_launch() -> Result<bool, String> {
     println!("[Deps] Prüfe First-Launch-Status...");
@@ -249,9 +244,8 @@ pub async fn check_first_launch() -> Result<bool, String> {
     }
 
     // Auch wenn completed=true: prüfe ob die Core-Packages noch vorhanden sind.
-    // So erkennen wir wenn jemand Python neu installiert hat.
     let python = get_python_executable();
-    let core_packages = ["torch", "transformers", "datasets"];
+    let core_packages = ["torch", "transformers", "datasets", "huggingface_hub"];
     let all_ok = core_packages.iter().all(|p| check_package_installed(&python, p).installed);
 
     if !all_ok {
@@ -272,7 +266,6 @@ pub async fn install_plugins(
 ) -> Result<(), String> {
     println!("[Deps] Installiere Dependencies für: {:?}", plugin_ids);
     
-    // Prüfe Python Verfügbarkeit bevor Installation startet
     if let Err(e) = verify_python_available() {
         eprintln!("[Deps] ✗ Python-Fehler: {}", e);
         let _ = window.emit("plugin-install-progress", PluginInstallProgress {
@@ -290,12 +283,13 @@ pub async fn install_plugins(
 
         // Installiere in dieser Reihenfolge (torch first - das ist das größte)
         let packages = vec![
-            ("torch", "PyTorch (enthält große Modelle)"),
-            ("numpy", "NumPy (Numerische Berechnungen)"),
-            ("transformers", "Transformers (Sprachmodelle)"),
-            ("datasets", "Datasets (Datenverwaltung)"),
-            ("scikit-learn", "Scikit-Learn (ML-Tools)"),
-            ("accelerate", "Accelerate (GPU-Unterstützung)"),
+            ("torch",            "PyTorch (enthält große Modelle)"),
+            ("numpy",            "NumPy (Numerische Berechnungen)"),
+            ("transformers",     "Transformers (Sprachmodelle)"),
+            ("datasets",         "Datasets (HuggingFace Datenverwaltung)"),
+            ("huggingface_hub",  "HuggingFace Hub (Dataset & Model Downloads)"),
+            ("scikit-learn",     "Scikit-Learn (ML-Tools)"),
+            ("accelerate",       "Accelerate (GPU-Unterstützung)"),
         ];
 
         let total = packages.len();
@@ -337,7 +331,6 @@ pub async fn install_plugins(
                 }
             };
 
-            // Nur relevante pip-Output-Zeilen streamen (mit Throttling)
             if let Some(stdout) = child.stdout.take() {
                 let win_clone = window.clone();
                 let pkg_clone = package.to_string();
@@ -346,7 +339,6 @@ pub async fn install_plugins(
                     let mut current_line_buffer = String::new();
                     
                     for line in BufReader::new(stdout).lines().flatten() {
-                        // Nur Zeilen mit wichtigen Keywords anzeigen
                         if line.contains("Downloading")
                             || line.contains("downloading")
                             || line.contains("Installing")
@@ -354,7 +346,6 @@ pub async fn install_plugins(
                             || line.contains("ERROR")
                             || line.contains("error")
                         {
-                            // Maximal eine Update pro 500ms senden (Throttling)
                             if last_update.elapsed() > Duration::from_millis(500) {
                                 println!("[pip] {} → {}", pkg_clone, line);
                                 let _ = win_clone.emit("plugin-install-progress", PluginInstallProgress {
@@ -370,7 +361,6 @@ pub async fn install_plugins(
                         }
                     }
                     
-                    // Letzte gepufferte Zeile senden
                     if !current_line_buffer.is_empty() {
                         println!("[pip] {}", current_line_buffer);
                         let _ = win_clone.emit("plugin-install-progress", PluginInstallProgress {
@@ -415,7 +405,6 @@ pub async fn install_plugins(
             });
         }
 
-        // Abschluss mit Gesamtdauer
         let total_elapsed = install_start.elapsed();
         let total_secs = total_elapsed.as_secs();
         let total_mins = total_secs / 60;

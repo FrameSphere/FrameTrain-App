@@ -2,7 +2,6 @@
 // und emitiert die gleichen Events wie der normale Trainer
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 use std::thread;

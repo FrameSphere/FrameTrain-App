@@ -112,6 +112,10 @@ pub struct TrainingConfig {
     /// task_type steuert das Python-Plugin.
     /// Für Sequenzklassifikation: "seq_classification"
     #[serde(default = "default_task_type")]     pub task_type: String,
+
+    /// Plugin-spezifische Parameter — werden 1:1 an Python durchgereicht.
+    /// Jedes Plugin kann hier eigene Werte ablegen (image_size, num_classes, etc.)
+    #[serde(default)]                           pub plugin_config: serde_json::Value,
 }
 
 fn default_epochs() -> u32 { 3 }
@@ -166,6 +170,7 @@ impl Default for TrainingConfig {
             dataloader_drop_last: false, group_by_length: false, gradient_checkpointing: false,
             training_type: "fine_tuning".to_string(),
             task_type: "seq_classification".to_string(),
+            plugin_config: serde_json::Value::Object(serde_json::Map::new()),
         }
     }
 }
@@ -592,8 +597,10 @@ pub async fn start_training(
     final_config.dataset_path  = dataset_path.to_string_lossy().to_string();
     final_config.output_path   = output_dir.join("final_model").to_string_lossy().to_string();
     final_config.checkpoint_dir= checkpoint_dir.to_string_lossy().to_string();
-    // Sicherstellen dass task_type immer seq_classification ist
-    final_config.task_type     = "seq_classification".to_string();
+    // task_type kommt vom Frontend – nur Fallback wenn leer
+    if final_config.task_type.is_empty() {
+        final_config.task_type = "seq_classification".to_string();
+    }
 
     let config_path = output_dir.join("config.json");
     fs::write(&config_path, serde_json::to_string_pretty(&final_config)

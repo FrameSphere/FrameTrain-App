@@ -27,3 +27,5 @@ Thumbs.db
 npm-debug.log*
 
 release.sh
+
+FrameTrain_Plugin_Integration_Guide.md

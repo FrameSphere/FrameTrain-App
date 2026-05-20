@@ -1,0 +1,94 @@
+import type { AISettings, AIProvider } from '../contexts/AISettingsContext';
+import { PROVIDER_META, resolveModel } from './providerMeta';
+
+export type ChatRole = 'system' | 'user' | 'assistant';
+export type ChatMessage = { role: Exclude<ChatRole, 'system'>; content: string };
+
+export type CallAIOptions = {
+  system: string;
+  messages: ChatMessage[];
+  maxTokens?: number;
+  temperature?: number;
+};
+
+function requireEnabled(settings: AISettings) {
+  if (!settings.enabled) throw new Error('KI-Assistent deaktiviert. Bitte in Einstellungen aktivieren.');
+  const meta = PROVIDER_META[settings.provider];
+  if (meta.needsKey && !settings.apiKey) throw new Error(`API-Key für ${meta.label} fehlt.`);
+}
+
+async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+    }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data?.content?.[0]?.text || '';
+}
+
+async function callOpenAICompat(url: string, apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
+    }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content || '';
+}
+
+async function callOllama(model: string, system: string, messages: ChatMessage[], temperature: number) {
+  const res = await fetch('http://localhost:11434/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      options: { temperature, num_ctx: 4096 },
+      messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
+    }),
+  });
+  if (!res.ok) throw new Error('Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
+  const data = await res.json();
+  return data?.message?.content || '';
+}
+
+export async function callAI(settings: AISettings, options: CallAIOptions): Promise<string> {
+  requireEnabled(settings);
+  const provider: AIProvider = settings.provider;
+  const model = resolveModel(provider, settings.selectedModel, settings.ollamaModel);
+  const maxTokens = options.maxTokens ?? 2000;
+  const temperature = options.temperature ?? 0.7;
+  const system = options.system;
+  const messages = options.messages;
+
+  if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature);
+  if (provider === 'openai') return callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
+  if (provider === 'groq') return callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
+  return callOllama(model, system, messages, temperature);
+}
+

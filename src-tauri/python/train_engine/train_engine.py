@@ -1,14 +1,14 @@
 """
-FrameTrain - Train Engine (Sequenzklassifikation)
-==================================================
-Orchestrator für das Training von Sequenzklassifikations-Modellen.
+FrameTrain - Train Engine
+=========================
+Plugin-basierter Orchestrator für KI-Modell-Training.
 
 Wird von Rust aufgerufen:
   python3 train_engine.py --config /path/to/config.json
 
-Unterstützte Modelle: Alle HuggingFace Encoder-Modelle die für
-Sequenzklassifikation geeignet sind (XLM-RoBERTa, BERT, DeBERTa, ...).
-Erkennung erfolgt automatisch über das Architektur-Feld in config.json.
+Verfügbare Plugins werden automatisch aus dem plugins/-Verzeichnis geladen.
+Jedes Plugin-Verzeichnis braucht eine manifest.json mit task_type.
+Das aktive Plugin wird über config.task_type ausgewählt.
 """
 
 import argparse
@@ -52,19 +52,74 @@ class LoggingTee:
 # ============ Plugin-Loader ============
 
 def load_plugin(config: TrainingConfig):
-    plugin_file = Path(__file__).parent / "plugins" / "seq_classification" / "plugin.py"
-    if not plugin_file.exists():
-        raise FileNotFoundError(f"Plugin nicht gefunden: {plugin_file}")
-
+    """
+    Dynamischer Plugin-Loader.
+    Scannt plugins/-Verzeichnis, liest manifest.json jedes Plugins,
+    und lädt das Plugin dessen task_type mit config.task_type übereinstimmt.
+    """
     import importlib.util
-    spec = importlib.util.spec_from_file_location("plugins.seq_classification.plugin", plugin_file)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
 
-    if not hasattr(module, "Plugin"):
-        raise AttributeError("Plugin enthält keine Klasse 'Plugin'")
+    plugins_dir = Path(__file__).parent / "plugins"
 
-    return module.Plugin(config)
+    if not plugins_dir.exists():
+        raise FileNotFoundError(f"plugins/-Verzeichnis nicht gefunden: {plugins_dir}")
+
+    available = []
+
+    for plugin_dir in sorted(plugins_dir.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+
+        manifest_path = plugin_dir / "manifest.json"
+        if not manifest_path.exists():
+            continue
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            MessageProtocol.warning(f"manifest.json in '{plugin_dir.name}' konnte nicht gelesen werden: {e}")
+            continue
+
+        plugin_task = manifest.get("task_type", "")
+        available.append(plugin_task)
+
+        if plugin_task != config.task_type:
+            continue
+
+        # Passendes Plugin gefunden
+        entry = manifest.get("entry", "plugin.py")
+        plugin_file = plugin_dir / entry
+
+        if not plugin_file.exists():
+            raise FileNotFoundError(
+                f"Plugin-Datei nicht gefunden: {plugin_file}\n"
+                f"Prüfe 'entry' in {manifest_path}"
+            )
+
+        spec = importlib.util.spec_from_file_location(
+            f"plugins.{plugin_dir.name}.plugin", plugin_file
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class_name = manifest.get("class", "Plugin")
+        if not hasattr(module, class_name):
+            raise AttributeError(
+                f"Plugin '{plugin_dir.name}' hat keine Klasse '{class_name}'.\n"
+                f"Prüfe 'class' in {manifest_path}"
+            )
+
+        MessageProtocol.status(
+            "init",
+            f"Plugin geladen: {manifest.get('name', plugin_dir.name)} (task_type='{config.task_type}')"
+        )
+        return getattr(module, class_name)(config)
+
+    raise ValueError(
+        f"Kein Plugin für task_type='{config.task_type}' gefunden.\n"
+        f"Verfügbare task_types: {available}\n"
+        f"Prüfe config.task_type oder lege ein neues Plugin in plugins/<name>/manifest.json an."
+    )
 
 
 # ============ Fehlerbehandlung ============
@@ -103,6 +158,13 @@ def handle_exception(exc: Exception) -> None:
         MessageProtocol.error("Datei/Ordner nicht gefunden", str(exc))
         return
 
+    if isinstance(exc, ValueError) and (
+        "wird noch nicht unterstützt" in str(exc) or
+        "Kein Plugin für" in str(exc)
+    ):
+        MessageProtocol.error("Konfigurationsfehler", str(exc))
+        return
+
     MessageProtocol.error(f"{type(exc).__name__}: {exc}", tb)
 
 
@@ -137,14 +199,13 @@ class Orchestrator:
         signal.signal(signal.SIGTERM, self._on_stop)
 
     def _start_logging(self, output_dir: Path) -> None:
-        """Startet Tee-Logger: Logs gehen gleichzeitig in stdout und train.log."""
         log_dir = output_dir
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "train.log"
-        # Header schreiben
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"\n{'='*60}\n")
             f.write(f"Training gestartet: {datetime.now().isoformat()}\n")
+            f.write(f"task_type: {self.config.task_type}\n")
             f.write(f"{'='*60}\n")
         self._tee = _TeeLogger(log_path, sys.stdout)
         sys.stdout = self._tee
@@ -162,11 +223,13 @@ class Orchestrator:
 
     def run(self):
         try:
-            MessageProtocol.status("init", f"Lade Sequenzklassifikations-Plugin | model='{Path(self.config.model_path).name}'")
+            MessageProtocol.status(
+                "init",
+                f"Train Engine gestartet | task_type='{self.config.task_type}' | model='{Path(self.config.model_path).name}'"
+            )
 
             self.plugin = load_plugin(self.config)
 
-            # Log-File im Checkpoint-Verzeichnis starten
             log_dir = Path(self.config.effective_output_dir())
             self._start_logging(log_dir)
 
@@ -212,7 +275,7 @@ class Orchestrator:
 # ============ Einstiegspunkt ============
 
 def main():
-    parser = argparse.ArgumentParser(description="FrameTrain Sequenzklassifikations-Engine")
+    parser = argparse.ArgumentParser(description="FrameTrain Train Engine")
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
 
@@ -239,7 +302,6 @@ def main():
 
     config = TrainingConfig.from_dict(config_dict)
 
-    # Log-Datei im Output-Verzeichnis anlegen
     log_dir = Path(config.effective_output_dir())
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")

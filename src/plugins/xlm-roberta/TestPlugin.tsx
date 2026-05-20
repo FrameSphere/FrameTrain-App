@@ -116,6 +116,8 @@ export default function XLMRobertaTestPlugin({
         versionId,
         singleInput: inputText.trim(),
         singleInputType: 'text',
+        taskType: 'seq_classification',
+        pluginConfig: {},
       });
 
       const u1 = await listen<{
@@ -181,6 +183,8 @@ export default function XLMRobertaTestPlugin({
         datasetName: ds.name,
         batchSize,
         maxSamples: maxSamples === '' ? null : maxSamples,
+        taskType: 'seq_classification',
+        pluginConfig: {},
       });
       const jobId = job.id;
 

@@ -9,6 +9,8 @@ const xlmRobertaPlugin: ModelPlugin = {
   id: 'xlm-roberta',
   name: 'XLM-RoBERTa',
   description: 'Keyword Recognition & Sequence Classification mit XLM-RoBERTa base/large',
+  taskType: 'seq_classification',
+  defaultPluginConfig: {},
   detect: detectXLMRoberta,
   TrainComponent: XLMRobertaTrainPlugin,
   TestComponent: XLMRobertaTestPlugin,

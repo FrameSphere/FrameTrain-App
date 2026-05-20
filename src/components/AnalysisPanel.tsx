@@ -12,8 +12,11 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
-import { useAISettings } from '../contexts/AISettingsContext';
+import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
+import { callAI as callAIClient } from '../ai/aiClient';
+import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
+import { openAICoach } from '../ai/aiCoachEvents';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -48,26 +51,7 @@ interface AIAnalysisReport { version_id: string; report_text: string; provider: 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 interface MetricsTemplate { id: string; name: string; description: string; config: Record<string, any>; created_at: string; source: string; }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AI Provider Layer
-// ─────────────────────────────────────────────────────────────────────────────
-
-type AIProvider = 'anthropic' | 'openai' | 'groq' | 'ollama';
-const PROVIDER_META: Record<AIProvider, { label: string; needsKey: boolean; endpoint: string; authHeader: (k: string) => Record<string, string>; buildBody: (m: string, msgs: ChatMessage[], sys: string) => object; extractText: (d: any) => string; }> = {
-  anthropic: { label: 'Claude (Anthropic)', needsKey: true, endpoint: 'https://api.anthropic.com/v1/messages', authHeader: k => ({ 'x-api-key': k, 'anthropic-version': '2023-06-01' }), buildBody: (m, msgs, sys) => ({ model: m, max_tokens: 6000, system: sys, messages: msgs }), extractText: d => d.content?.[0]?.text || '' },
-  openai: { label: 'GPT-4o (OpenAI)', needsKey: true, endpoint: 'https://api.openai.com/v1/chat/completions', authHeader: k => ({ Authorization: `Bearer ${k}` }), buildBody: (m, msgs, sys) => ({ model: m, max_tokens: 6000, messages: [{ role: 'system', content: sys }, ...msgs] }), extractText: d => d.choices?.[0]?.message?.content || '' },
-  groq: { label: 'Groq', needsKey: true, endpoint: 'https://api.groq.com/openai/v1/chat/completions', authHeader: k => ({ Authorization: `Bearer ${k}` }), buildBody: (m, msgs, sys) => ({ model: m, max_tokens: 6000, messages: [{ role: 'system', content: sys }, ...msgs] }), extractText: d => d.choices?.[0]?.message?.content || '' },
-  ollama: { label: 'Ollama (Lokal)', needsKey: false, endpoint: 'http://localhost:11434/api/chat', authHeader: () => ({}), buildBody: (m, msgs, sys) => ({ model: m, stream: false, messages: [{ role: 'system', content: sys }, ...msgs] }), extractText: d => d.message?.content || '' },
-};
-async function callAI(provider: AIProvider, apiKey: string, model: string, messages: ChatMessage[], systemPrompt: string): Promise<string> {
-  const meta = PROVIDER_META[provider];
-  const resp = await fetch(meta.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', ...meta.authHeader(apiKey) }, body: JSON.stringify(meta.buildBody(model, messages, systemPrompt)) });
-  if (!resp.ok) throw new Error(`API-Fehler (${resp.status}): ${await resp.text()}`);
-  const data = await resp.json();
-  const text = meta.extractText(data);
-  if (!text) throw new Error('Leere Antwort vom KI-Modell');
-  return text;
-}
+// (imports moved to top)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -908,9 +892,15 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     if (meta.needsKey && !aiApiKey.trim()) { notifyError('API-Key fehlt', `${meta.label}-Key konfigurieren.`); return; }
     setGeneratingReport(true);
     try {
-      const text = await callAI(aiProvider, aiApiKey, aiModel, [{ role: 'user', content: `Analysiere folgendes Training:\n\n${buildFullContext()}` }], ANALYSIS_SYSTEM_PROMPT);
-      await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: aiModel });
-      const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: aiModel, generated_at: new Date().toISOString() };
+      const resolvedModel = resolveModel(aiProvider, aiSettings.selectedModel, aiSettings.ollamaModel);
+      const text = await callAIClient(aiSettings, {
+        system: ANALYSIS_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: `Analysiere folgendes Training:\n\n${buildFullContext()}` }],
+        maxTokens: 6000,
+        temperature: 0.4,
+      });
+      await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: resolvedModel });
+      const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: resolvedModel, generated_at: new Date().toISOString() };
       setReport(newReport); setAiRecommendedParams(extractAIRecommendedParams(text));
       setChatMessages([{ role: 'assistant', content: text }]); setShowChat(true);
       success('Analyse abgeschlossen', `Erstellt mit ${PROVIDER_META[aiProvider].label}`);
@@ -927,7 +917,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     setChatMessages(updated); setChatInput(''); setChatLoading(true);
     try {
       const sys = `${ANALYSIS_SYSTEM_PROMPT}\n\nVorherige Analyse:\n${report.report_text}\n\nTrainingsdaten:\n${buildFullContext()}`;
-      const reply = await callAI(aiProvider, aiApiKey, aiModel, updated, sys);
+      const reply = await callAIClient(aiSettings, { system: sys, messages: updated, maxTokens: 3000, temperature: 0.6 });
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (e: any) { setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Fehler: ${String(e)}` }]); }
     finally { setChatLoading(false); }
@@ -1345,6 +1335,21 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                   <MessageSquare className="w-4 h-4" />
                   {showChat ? 'Chat ausblenden' : 'Mit KI über das Training chatten'}
                   {showChat ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+
+                <button
+                  onClick={() => {
+                    const excerpt = report.report_text.length > 900 ? report.report_text.slice(0, 900) + '\n…' : report.report_text;
+                    openAICoach({
+                      newChat: true,
+                      prefill: `Ich bin auf der Analyse-Seite und habe diese KI-Analyse erhalten (Auszug):\n\n${excerpt}\n\nHilf mir bitte, konkrete nächste Schritte abzuleiten (Parameter, nächste Experimente, Risiken).`,
+                      titleHint: 'Analyse-Followup',
+                    });
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-violet-500/10 hover:bg-violet-500/15 border border-violet-500/20 rounded-xl text-violet-200 hover:text-white transition-all text-sm font-medium"
+                >
+                  <Brain className="w-4 h-4" />
+                  Im KI-Coach weiterführen
                 </button>
 
                 {showChat && (

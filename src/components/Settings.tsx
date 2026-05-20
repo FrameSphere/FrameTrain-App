@@ -5,8 +5,10 @@ import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCirc
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
+import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
+import { PROVIDER_META } from '../ai/providerMeta';
 
 interface UserData {
   apiKey: string;
@@ -66,48 +68,7 @@ const STATUS_COLOR: Record<string, string> = {
   closed: 'text-gray-400 bg-gray-500/10 border-gray-500/20',
 };
 
-const PROVIDER_META: Record<AIProvider, {
-  label: string; emoji: string; needsKey: boolean;
-  keyPlaceholder: string; keyHint: string; keyLink: string;
-  models: string[];
-}> = {
-  anthropic: {
-    label: 'Claude (Anthropic)',
-    emoji: '🤖',
-    needsKey: true,
-    keyPlaceholder: 'sk-ant-api03-...',
-    keyHint: 'Kostenlos testen: console.anthropic.com',
-    keyLink: 'https://console.anthropic.com',
-    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
-  },
-  openai: {
-    label: 'GPT-4o (OpenAI)',
-    emoji: '🟢',
-    needsKey: true,
-    keyPlaceholder: 'sk-...',
-    keyHint: 'platform.openai.com/api-keys',
-    keyLink: 'https://platform.openai.com/api-keys',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
-  },
-  groq: {
-    label: 'Groq (Kostenlos)',
-    emoji: '⚡',
-    needsKey: true,
-    keyPlaceholder: 'gsk_...',
-    keyHint: '✅ Kostenloser Account — console.groq.com',
-    keyLink: 'https://console.groq.com',
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
-  },
-  ollama: {
-    label: 'Ollama (Lokal, kein Key)',
-    emoji: '🦙',
-    needsKey: false,
-    keyPlaceholder: '',
-    keyHint: '✅ Kein Account nötig — ollama.com installieren',
-    keyLink: 'https://ollama.com',
-    models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2', 'qwen2.5'],
-  },
-};
+// PROVIDER_META ist zentral definiert in src/ai/providerMeta.ts
 
 const MANAGER_API = 'https://webcontrol-hq-api.karol-paschek.workers.dev';
 
@@ -1585,6 +1546,24 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <p className="text-sm text-gray-400 max-w-md mx-auto">
           Trainiere Machine Learning Modelle lokal auf deinem Computer mit der Leistung von PyTorch.
         </p>
+      </div>
+
+      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+        <h3 className="text-lg font-semibold text-white mb-2">Unterstützte Modelle (Training)</h3>
+        <p className="text-sm text-gray-400 mb-4">
+          Aktuell unterstützt die Train Engine <span className="font-mono">seq_classification</span> für diese HuggingFace <span className="font-mono">model_type</span>-Familien:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {HF_ENCODER_SUPPORTED_MODEL_TYPES.map((t) => (
+            <span
+              key={t}
+              className="px-2.5 py-1 rounded-full text-xs font-mono bg-white/5 border border-white/10 text-gray-200"
+              title={`HuggingFace model_type: ${t}`}
+            >
+              {t}
+            </span>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">

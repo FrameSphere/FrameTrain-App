@@ -1,0 +1,10 @@
+{
+  "task_type": "seq_classification",
+  "name": "Sequence Classification (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz für trainierte encoder-basierte Textklassifikations-Modelle.",
+  "input_type": "text",
+  "output_format": "classification"
+}

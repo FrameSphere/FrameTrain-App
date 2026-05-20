@@ -1,5 +1,7 @@
 """
-core/config.py – TrainingConfig für Sequenzklassifikation
+core/config.py – TrainingConfig
+================================
+Gemeinsame Trainingsparameter + plugin_config für plugin-spezifische Einstellungen.
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
@@ -12,6 +14,14 @@ class TrainingConfig:
     dataset_path: str = ""
     output_path: str = ""
     checkpoint_dir: str = ""
+
+    # Plugin-Routing (wird vom Frontend gesetzt, nicht von Rust überschrieben)
+    task_type: str = "seq_classification"
+
+    # Plugin-spezifische Parameter (frei befüllbar je nach Plugin)
+    # z.B. für seq_classification: max_seq_length
+    # z.B. für zukünftige Plugins: image_size, num_classes, sample_rate, ...
+    plugin_config: Dict[str, Any] = field(default_factory=dict)
 
     # Training-Grundlagen
     epochs: int = 3
@@ -43,7 +53,7 @@ class TrainingConfig:
     fp16: bool = False
     bf16: bool = False
 
-    # Sequenzklassifikation spezifisch
+    # Sequenzklassifikation spezifisch (bleibt für Rückwärtskompatibilität)
     max_seq_length: int = 128
 
     # DataLoader
@@ -64,12 +74,8 @@ class TrainingConfig:
     seed: int = 42
     gradient_checkpointing: bool = False
     training_type: str = "fine_tuning"
-    task_type: str = "seq_classification"
 
-    # Extra-Felder (werden ignoriert, aber nicht verworfen)
-    extra: Dict[str, Any] = field(default_factory=dict)
-
-    # Felder aus desktop-app2 die vorkommen können (werden ignoriert)
+    # LoRA (für zukünftige Nutzung durch Plugins)
     use_lora: bool = False
     lora_r: int = 8
     lora_alpha: int = 32
@@ -77,11 +83,15 @@ class TrainingConfig:
     lora_target_modules: List[str] = field(default_factory=list)
     load_in_8bit: bool = False
     load_in_4bit: bool = False
+
+    # Sonstige Felder (Rückwärtskompatibilität)
     sgd_momentum: float = 0.9
     scheduler_step_size: int = 1
     scheduler_gamma: float = 0.1
     cosine_min_lr: float = 0.0
-    num_workers: int = 0  # noqa: F811
+
+    # Extra-Felder die nicht bekannt sind (werden gesammelt, nicht verworfen)
+    extra: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TrainingConfig":
@@ -94,3 +104,7 @@ class TrainingConfig:
 
     def effective_output_dir(self) -> str:
         return self.checkpoint_dir or self.output_path
+
+    def get_plugin_value(self, key: str, default: Any = None) -> Any:
+        """Hilfsmethode: Plugin-spezifischen Wert aus plugin_config holen."""
+        return self.plugin_config.get(key, default)

@@ -1,0 +1,15 @@
+{
+  "task_type": "seq_classification",
+  "name": "Sequence Classification (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert encoder-basierte Transformer-Modelle (BERT, XLM-RoBERTa, DeBERTa, ...) für Textklassifikation.",
+  "supported_architectures": [
+    "xlm-roberta", "roberta", "bert", "deberta", "deberta-v2",
+    "distilbert", "albert", "camembert", "electra", "rembert",
+    "xlm", "ernie", "funnel", "mpnet", "squeezebert", "layoutlm"
+  ],
+  "dataset_formats": ["csv", "jsonl", "json", "parquet"],
+  "metrics": ["train_loss", "val_loss", "accuracy", "f1", "precision", "recall"]
+}

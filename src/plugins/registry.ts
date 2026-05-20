@@ -7,10 +7,12 @@
 
 import type { ModelPlugin, ModelConfig } from './types';
 import xlmRobertaPlugin from './xlm-roberta';
+import hfEncoderPlugin from './hf-encoder';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
   xlmRobertaPlugin,
+  hfEncoderPlugin,
   // Zukünftige Plugins hier eintragen:
   // bertPlugin,
   // whisperPlugin,

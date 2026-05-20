@@ -1,5 +1,5 @@
-// XLM-RoBERTa Dataset-Kompatibilitäts-Plugin
-// Erkannte Formate: .json, .jsonl, .csv, .parquet, .tsv, .txt
+// HF Encoder Dataset-Kompatibilitäts-Plugin
+// Basierend auf denselben Formaten wie das Backend-seq_classification Plugin.
 
 import type { DatasetCompatPlugin, DatasetCompatResult, FileCompatResult, CompatLevel } from '../datasetCompatHelpers';
 import { worstLevel } from '../datasetCompatHelpers';
@@ -14,8 +14,8 @@ const FORMAT_RULES: Record<string, { level: CompatLevel; reason: string }> = {
   '.arrow': { level: 'ok', reason: 'Arrow-Format wird von HuggingFace datasets unterstützt.' },
 };
 
-export const xlmRobertaCompatPlugin: DatasetCompatPlugin = {
-  modelPluginId: 'xlm-roberta',
+export const hfEncoderCompatPlugin: DatasetCompatPlugin = {
+  modelPluginId: 'hf-encoder',
 
   checkExtensions(extensions: string[]): DatasetCompatResult {
     if (!extensions || extensions.length === 0) {
@@ -38,7 +38,7 @@ export const xlmRobertaCompatPlugin: DatasetCompatPlugin = {
 
     const perfectCount = fileResults.filter(r => r.level === 'perfect').length;
     const summary = perfectCount > 0
-      ? `${perfectCount} von ${fileResults.length} Formaten sind ideal für XLM-RoBERTa.`
+      ? `${perfectCount} von ${fileResults.length} Formaten sind ideal für Encoder-Modelle.`
       : overallLevel === 'ok'
         ? 'Nutzbar, aber nicht optimale Formate vorhanden.'
         : 'Einige Formate benötigen Aufbereitung.';

@@ -1,4 +1,4 @@
-"""core/config.py – TestConfig für die Test-Engine"""
+"""core/config.py – TestConfig"""
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -15,8 +15,15 @@ class TestConfig:
     single_input:       str = ""
     single_input_type:  str = "text"
 
+    # Plugin-spezifische Parameter (gleiche Konvention wie train_engine)
+    plugin_config: Dict[str, Any] = field(default_factory=dict)
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TestConfig":
         known = set(cls.__dataclass_fields__)
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)
+
+    def get_plugin_value(self, key: str, default: Any = None) -> Any:
+        """Hilfsmethode: Plugin-spezifischen Wert aus plugin_config holen."""
+        return self.plugin_config.get(key, default)

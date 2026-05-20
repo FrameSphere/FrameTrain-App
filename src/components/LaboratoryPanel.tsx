@@ -744,7 +744,10 @@ export default function LaboratoryPanel() {
 
   const detectedPlugin = useMemo(() => {
     if (!selectedModel) return null;
-    const r = detectPlugin(selectedModel.source_path ?? selectedModel.name);
+    const r = detectPlugin(
+      selectedModel.source_path ?? selectedModel.name,
+      selectedModel.model_type ? { model_type: selectedModel.model_type } : undefined,
+    );
     return r.supported ? r.plugin : null;
   }, [selectedModel]);
 

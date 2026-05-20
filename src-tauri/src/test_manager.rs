@@ -88,6 +88,7 @@ pub struct TestConfig {
     pub batch_size: usize,
     pub max_samples: Option<usize>,
     pub task_type: String,
+    #[serde(default)] pub plugin_config: serde_json::Value,
     pub mode: String,
     pub single_input: String,
     pub single_input_type: String,
@@ -210,6 +211,8 @@ pub async fn start_test(
     dataset_name: String,
     batch_size: Option<usize>,
     max_samples: Option<usize>,
+    task_type: Option<String>,
+    plugin_config: Option<serde_json::Value>,
     state: tauri::State<'_, Arc<Mutex<TestState>>>,
 ) -> Result<TestJob, String> {
     let mut sl = state.lock().map_err(|e| format!("Lock: {}", e))?;
@@ -232,13 +235,25 @@ pub async fn start_test(
     };
 
     let output_dir = get_test_output_dir(&app_handle, &test_id)?;
+
+    let final_task_type = task_type
+        .unwrap_or_else(|| "seq_classification".to_string())
+        .trim()
+        .to_string();
+    let final_task_type = if final_task_type.is_empty() { "seq_classification".to_string() } else { final_task_type };
+
+    let final_plugin_config = plugin_config.unwrap_or_else(|| {
+        serde_json::Value::Object(serde_json::Map::new())
+    });
+
     let config = TestConfig {
         model_path,
         dataset_path: dataset_path.to_string_lossy().to_string(),
         output_path:  output_dir.to_string_lossy().to_string(),
         batch_size:   batch_size.unwrap_or(16),
         max_samples,
-        task_type:    "seq_classification".to_string(),
+        task_type:    final_task_type.clone(),
+        plugin_config: final_plugin_config,
         mode:         "dataset".to_string(),
         single_input: String::new(),
         single_input_type: "text".to_string(),
@@ -254,7 +269,7 @@ pub async fn start_test(
         status: TestStatus::Pending, created_at: chrono::Utc::now().to_rfc3339(),
         started_at: None, completed_at: None, progress: TestProgress::default(),
         results: None, error: None,
-        task_type: "seq_classification".to_string(), mode: "dataset".to_string(),
+        task_type: final_task_type, mode: "dataset".to_string(),
     };
 
     sl.current_job = Some(job.clone());
@@ -275,18 +290,31 @@ pub async fn test_single_input(
     version_id: String,
     single_input: String,
     single_input_type: String,
+    task_type: Option<String>,
+    plugin_config: Option<serde_json::Value>,
     state: tauri::State<'_, Arc<Mutex<TestState>>>,
 ) -> Result<String, String> {
     let test_id = format!("single_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..8]);
     let model_path = get_version_path(&app_handle, &version_id)?;
     let output_dir = get_test_output_dir(&app_handle, &test_id)?;
 
+    let final_task_type = task_type
+        .unwrap_or_else(|| "seq_classification".to_string())
+        .trim()
+        .to_string();
+    let final_task_type = if final_task_type.is_empty() { "seq_classification".to_string() } else { final_task_type };
+
+    let final_plugin_config = plugin_config.unwrap_or_else(|| {
+        serde_json::Value::Object(serde_json::Map::new())
+    });
+
     let config = TestConfig {
         model_path,
         dataset_path: String::new(),
         output_path:  output_dir.to_string_lossy().to_string(),
         batch_size:   1, max_samples: Some(1),
-        task_type:    "seq_classification".to_string(),
+        task_type:    final_task_type,
+        plugin_config: final_plugin_config,
         mode:         "single".to_string(),
         single_input: single_input.clone(),
         single_input_type: single_input_type.clone(),
@@ -310,6 +338,12 @@ fn run_test(
     app_handle: tauri::AppHandle, test_id: String, config_path: String,
     version_id: String, state: Arc<Mutex<TestState>>, is_single: bool,
 ) {
+    let task_type_for_results = fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("task_type").and_then(|t| t.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "seq_classification".to_string());
+
     let python = get_python_path();
     let engine_path = match get_test_engine_path(&app_handle) {
         Ok(p) => p,
@@ -385,7 +419,7 @@ fn run_test(
                                         average_inference_time: avg_time, predictions: preds,
                                         metrics: mm, total_time: metrics.get("total_time").and_then(|v| v.as_f64()),
                                         samples_per_second: sps,
-                                        task_type: "seq_classification".to_string(),
+                                        task_type: task_type_for_results.clone(),
                                         hard_examples_file: d.get("hard_examples_file").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                     };
                                     if let Err(e) = save_test_results(&ah, &vid, &full) {

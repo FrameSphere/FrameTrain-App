@@ -41,6 +41,10 @@ export interface ModelPlugin {
   name: string;
   /** Kurzbeschreibung, wofür das Plugin gedacht ist */
   description: string;
+  /** Backend task_type für Python-Plugin-Routing (z.B. "seq_classification") */
+  taskType: string;
+  /** Optional: Default plugin_config, wird 1:1 an Python weitergereicht */
+  defaultPluginConfig?: Record<string, unknown>;
   /**
    * Erkennt ob ein Modell von diesem Plugin unterstützt wird.
    * @param modelPathOrId  Lokaler Pfad oder HuggingFace Model-ID

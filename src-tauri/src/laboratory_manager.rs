@@ -247,7 +247,7 @@ pub async fn lab_start_model_server(
 
         // Auf "ready" warten (max. 120 Sekunden – grosse Modelle auf CPU brauchen Zeit)
         let deadline = Instant::now() + Duration::from_secs(120);
-        let mut ready = false;
+        let mut server_ready = false;
 
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -265,7 +265,7 @@ pub async fn lab_start_model_server(
                     println!("[LabServer] Startup-Zeile: {}", line);
                     if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
                         match msg.get("type").and_then(|t| t.as_str()) {
-                            Some("ready") => { ready = true; break; }
+                            Some("ready") => { server_ready = true; break; }
                             Some("error") => {
                                 let m = msg.get("message").and_then(|m| m.as_str())
                                     .unwrap_or("Unbekannter Fehler").to_string();
@@ -292,7 +292,7 @@ pub async fn lab_start_model_server(
             }
         }
 
-        if ready {
+        if server_ready {
             if let Ok(mut s) = state_arc.lock() {
                 s.server = Some(LabServer {
                     child,

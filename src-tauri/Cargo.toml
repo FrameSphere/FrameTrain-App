@@ -1,6 +1,6 @@
 [package]
 name = "frametrain-desktop"
-version = "1.2.3"
+version = "1.2.4"
 description = "FrameTrain Desktop App"
 authors = ["FrameTrain Team"]
 edition = "2021"
@@ -27,7 +27,8 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 rand = "0.8"
 dirs = "5.0"
 
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 
 urlencoding = "2.1"

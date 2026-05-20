@@ -6,9 +6,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   Play, Square, Loader2, Terminal, FolderOpen, FileCode,
-  FolderClosed, Bot, Send, Maximize2, Minimize2, X, Minus,
+  FolderClosed, Bot, Send, Maximize2, Minimize2, X, Minus, Plus,
   AlertCircle, CheckCircle, TrendingDown, BarChart3, Zap,
-  Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy, Package,
+  Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy,
+  History, MessageSquarePlus,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -16,6 +17,9 @@ import { useAISettings } from '../contexts/AISettingsContext';
 import type { TrainingJob, TrainingProgress, LossPoint, ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI, LossChart } from './TrainingPanel';
 import TrainingDashboard from './TrainingDashboard';
+import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
+import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
+import DiffViewer from './DiffViewer';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -28,126 +32,37 @@ const deleteScript = (id: string) => localStorage.setItem(SCRIPTS_KEY, JSON.stri
 const updateScript = (id: string, script: string) => { const all = loadScripts(); const idx = all.findIndex(s => s.id === id); if (idx >= 0) { all[idx] = { ...all[idx], script, savedAt: new Date().toISOString() }; localStorage.setItem(SCRIPTS_KEY, JSON.stringify(all)); } };
 
 // ── Edit Parsing ──────────────────────────────────────────────────────────
+// Zentralisiert in src/ai/codeEdits.ts
 
-interface CodeEdit { id: string; find: string; replace: string; applied?: boolean; failed?: boolean; }
+// ── Line Highlighting Utilities ────────────────────────────────────────────
 
-function parseEdits(text: string): CodeEdit[] {
-  const edits: CodeEdit[] = [];
-  
-  // Format 1: ##EDIT_START##...##EDIT_END##
-  const regex = /##EDIT_START##\s*FIND:\s*([\s\S]*?)\s*REPLACE:\s*([\s\S]*?)\s*##EDIT_END##/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    // Nur trimmen von außen, aber Whitespace-Struktur beibehalten
-    let find = match[1].trim();
-    let replace = match[2].trim();
-    
-    // WICHTIG: Entferne ```python und ``` Marker falls vorhanden
-    find = find.replace(/^```python\n?/, '').replace(/\n?```$/, '');
-    replace = replace.replace(/^```python\n?/, '').replace(/\n?```$/, '');
-    
-    edits.push({ id: `edit_${Date.now()}_${edits.length}`, find, replace });
-    
-    console.log(`📌 Parsed Edit #${edits.length}:`, {
-      findLines: find.split('\n').length,
-      replaceLines: replace.split('\n').length,
-      findPreview: find.substring(0, 60).replace(/\n/g, '⏎'),
-      replacePreview: replace.substring(0, 60).replace(/\n/g, '⏎'),
-    });
-  }
-  
-  if (edits.length === 0) {
-    console.warn('⚠️  Keine Edits gefunden in KI-Response!');
-    console.log('Response Länge:', text.length);
-    console.log('Enthält ##EDIT_START##?', text.includes('##EDIT_START##'));
-    console.log('Enthält ##EDIT_END##?', text.includes('##EDIT_END##'));
-  }
-  
-  return edits;
-}
+interface HighlightedLine { lineNum: number; type: 'added' | 'removed' | 'modified'; }
 
-function normalizeWhitespace(str: string): string {
-  // Normalisiere Tabs zu Spaces
-  return str.replace(/\t/g, '  ');
-}
-
-function applyEdit(script: string, edit: CodeEdit): { result: string; success: boolean } {
-  // Versuch 1: Exaktes Match (mit allen Whitespaces wie gegeben)
-  if (script.includes(edit.find)) {
-    console.log('✅ Tier 1: Exaktes Match gefunden!');
-    return { result: script.replace(edit.find, edit.replace), success: true };
-  }
-  console.log('❌ Tier 1: Kein exaktes Match');
-  
-  // Detailliertes Debugging: Zeige die ersten 3 Zeilen des FIND-Textes
-  const findFirstLines = edit.find.split('\n').slice(0, 3);
-  console.log('🔍 FIND Text (erste 3 Zeilen):');
-  findFirstLines.forEach((line, i) => {
-    console.log(`  Zeile ${i}: "${line}" (Length: ${line.length})`);
-  });
-  
-  // Suche nach partiellen Matches
-  console.log('🔎 Suche nach partiellen Matches im Script...');
-  const scriptLines = script.split('\n');
+function calculateAffectedLines(script: string, edit: CodeEdit): HighlightedLine[] {
   const findLines = edit.find.split('\n');
-  let partialMatches: number[] = [];
-  
-  for (let i = 0; i < scriptLines.length; i++) {
-    // Prüfe ob irgendeine der Zeile ähnlich ist
-    const scriptLine = scriptLines[i];
-    const firstFindLine = findLines[0];
-    
-    if (firstFindLine && scriptLine.includes(firstFindLine.trim().substring(0, 20))) {
-      partialMatches.push(i);
-      console.log(`  📍 Potentieller Match bei Zeile ${i}: "${scriptLine.substring(0, 60)}..."`);
-    }
-  }
-  
-  if (partialMatches.length === 0) {
-    console.log('  ❌ Keine partiellen Matches gefunden!');
-  }
-  
-  // Versuch 2: Line-by-Line mit Whitespace-Normalisierung (Tabs → Spaces)
-  console.log(`\nTier 2: Versuche Line-by-Line Matching mit ${findLines.length} Zeilen gegen ${scriptLines.length} Skript-Zeilen`);
-  
   const replaceLines = edit.replace.split('\n');
+  const affected: HighlightedLine[] = [];
+
+  // Find where the edit text appears in the script (case-sensitive exact match)
+  const findStart = script.indexOf(edit.find);
+  if (findStart === -1) return affected; // Not found
+
+  // Calculate the starting line number (1-indexed)
+  // Count all newlines before the findStart position
+  const linesBeforeFindCount = (script.slice(0, findStart).match(/\n/g) || []).length;
+  const startLineNum = linesBeforeFindCount + 1;
   
-  // Versuche zu matchen mit normalisiertem Whitespace
-  for (let i = 0; i <= scriptLines.length - findLines.length; i++) {
-    const segment = scriptLines.slice(i, i + findLines.length);
-    
-    // Vergleiche mit Whitespace-Normalisierung
-    const segmentNormalized = segment.map(normalizeWhitespace);
-    const findNormalized = findLines.map(normalizeWhitespace);
-    
-    // Exakter Line-by-Line Vergleich nach Normalisierung
-    if (segmentNormalized.every((line, idx) => line === findNormalized[idx])) {
-      console.log(`✅ Tier 2: Match gefunden bei Zeile ${i}!`);
-      const before = scriptLines.slice(0, i).join('\n');
-      const after = scriptLines.slice(i + findLines.length).join('\n');
-      const newContent = [...(before ? [before] : []), ...replaceLines, ...(after ? [after] : [])].join('\n');
-      return { result: newContent, success: true };
-    }
+  // Lines being REMOVED (show in RED) - the find block
+  for (let i = 0; i < findLines.length; i++) {
+    affected.push({ lineNum: startLineNum + i, type: 'removed' });
   }
-  console.log('❌ Tier 2: Kein normalisiertes Match');
-  
-  // Versuch 3: Noch aggressivere Matching (trimEnd jede Zeile)
-  console.log('Tier 3: Versuche aggressive trimEnd Matching...');
-  for (let i = 0; i <= scriptLines.length - findLines.length; i++) {
-    const segmentTrimmed = scriptLines.slice(i, i + findLines.length).map(l => l.trimEnd());
-    const findTrimmed = findLines.map(l => l.trimEnd());
-    
-    if (segmentTrimmed.every((line, idx) => line === findTrimmed[idx])) {
-      console.log(`✅ Tier 3: Match gefunden bei Zeile ${i}!`);
-      const before = scriptLines.slice(0, i).join('\n');
-      const after = scriptLines.slice(i + findLines.length).join('\n');
-      const newContent = [...(before ? [before] : []), ...replaceLines, ...(after ? [after] : [])].join('\n');
-      return { result: newContent, success: true };
-    }
+
+  // Lines being ADDED (show in GREEN) - the replace block, appears right after removed lines
+  for (let i = 0; i < replaceLines.length; i++) {
+    affected.push({ lineNum: startLineNum + findLines.length + i, type: 'added' });
   }
-  console.log('❌ Tier 3: Kein trimEnd Match gefunden');
-  
-  return { result: script, success: false };
+
+  return affected;
 }
 
 // ── Error Categorization ──────────────────────────────────────────────────
@@ -444,7 +359,38 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript:
 
 // ── Code AI Sidebar (mit Edit-Skill) ─────────────────────────────────────
 
-interface AiMessage { role: 'user' | 'assistant'; content: string; edits?: CodeEdit[]; }
+interface AiMessage { role: 'user' | 'assistant'; content: string; edits?: CodeEdit[]; action?: AutoAction | null; }
+interface AppliedEditInfo { messageId: number; editId: string; originalScript: string; }
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: AiMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const DEVTRAIN_SESSIONS_KEY = 'ft_devtrain_sessions';
+const MAX_DEVTRAIN_SESSIONS = 15;
+const MAX_SESSION_MESSAGES  = 30;
+const SESSION_MAX_AGE_MS    = 12 * 60 * 60 * 1000; // 12h
+
+function loadChatSessions(): ChatSession[] {
+  try { return JSON.parse(localStorage.getItem(DEVTRAIN_SESSIONS_KEY) ?? '[]'); } catch { return []; }
+}
+function saveChatSessions(sessions: ChatSession[]) {
+  localStorage.setItem(DEVTRAIN_SESSIONS_KEY, JSON.stringify(sessions.slice(0, MAX_DEVTRAIN_SESSIONS)));
+}
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000)          return 'gerade eben';
+  if (diff < 3_600_000)       return `vor ${Math.floor(diff / 60_000)} Min`;
+  if (diff < 86_400_000)      return `vor ${Math.floor(diff / 3_600_000)} Std`;
+  if (diff < 7 * 86_400_000)  return `vor ${Math.floor(diff / 86_400_000)} Tagen`;
+  return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+}
+function makeSessionTitle(firstUserMsg: string): string {
+  return firstUserMsg.trim().slice(0, 42) + (firstUserMsg.trim().length > 42 ? '…' : '');
+}
 
 function escapeHtml(s: string) {
   return s
@@ -574,7 +520,7 @@ function highlightPythonToHtml(code: string) {
   return html.endsWith('\n') ? html + ' ' : html;
 }
 
-function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, onReplaceScript, onClose, initialInput, forceEditMode }: {
+function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, onReplaceScript, onClose, initialInput, onHighlightLines, onClearHighlights }: {
   script: string;
   modelInfo: ModelInfo | null;
   datasets: DatasetInfo[];
@@ -583,20 +529,121 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   onReplaceScript: (code: string) => void;
   onClose: () => void;
   initialInput?: string;
-  forceEditMode?: boolean;
+  onHighlightLines?: (edits: CodeEdit[]) => void;
+  onClearHighlights?: () => void;
 }) {
   const { settings: aiSettings } = useAISettings();
   const [messages, setMessages]  = useState<AiMessage[]>([]);
   const [input, setInput]        = useState('');
   const [loading, setLoading]    = useState(false);
-  const [editMode, setEditMode]  = useState(false); // false = Chat, true = Code bearbeiten
+  const [showDiffModal, setShowDiffModal] = useState(false);
+  const [currentMessageWithEdits, setCurrentMessageWithEdits] = useState<AiMessage | null>(null);
+  const [isApplyingEdits, setIsApplyingEdits] = useState(false);
+  const [appliedEdits, setAppliedEdits] = useState<AppliedEditInfo[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
   const lastPrefillRef = useRef<string>('');
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  // ── Session State ──────────────────────────────────────────────
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [showHistory, setShowHistory]           = useState(false);
+  const [isReadonly, setIsReadonly]             = useState(false);
+  const [sessionTitle, setSessionTitle]         = useState('');
+  const currentSessionIdRef = useRef<string | null>(null);
+  currentSessionIdRef.current = currentSessionId;
+
+  // Init: lade oder erstelle Session beim Mount
   useEffect(() => {
-    if (forceEditMode && !editMode) setEditMode(true);
-  }, [forceEditMode, editMode]);
+    const sessions = loadChatSessions();
+    const last = sessions[0];
+    const tooOld  = last ? (Date.now() - new Date(last.updatedAt).getTime()) > SESSION_MAX_AGE_MS : false;
+    const tooLong = last ? last.messages.length >= MAX_SESSION_MESSAGES : false;
+    if (!last || tooOld || tooLong) {
+      // Neue Session starten
+      const id = `s_${Date.now()}`;
+      const newSession: ChatSession = { id, title: 'Neuer Chat', messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      saveChatSessions([newSession, ...sessions]);
+      setCurrentSessionId(id);
+      setSessionTitle('Neuer Chat');
+      setMessages([]);
+    } else {
+      setCurrentSessionId(last.id);
+      setSessionTitle(last.title);
+      setMessages(last.messages);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync: messages → aktuelle Session speichern
+  useEffect(() => {
+    const id = currentSessionIdRef.current;
+    if (!id) return;
+    const sessions = loadChatSessions();
+    const idx = sessions.findIndex(s => s.id === id);
+    if (idx < 0) return;
+    if (messages.length === 0) {
+      // Leere Session nicht im Verlauf behalten
+      saveChatSessions(sessions.filter(s => s.id !== id));
+      return;
+    }
+    sessions[idx] = { ...sessions[idx], messages, updatedAt: new Date().toISOString() };
+    saveChatSessions(sessions);
+  }, [messages]);
+
+  const startNewSession = () => {
+    const id = `s_${Date.now()}`;
+    const newSession: ChatSession = { id, title: 'Neuer Chat', messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    // Leere Sessions aufräumen bevor neue hinzugefügt wird
+    const sessions = loadChatSessions().filter(s => s.messages.length > 0);
+    saveChatSessions([newSession, ...sessions]);
+    setCurrentSessionId(id);
+    setSessionTitle('Neuer Chat');
+    setMessages([]);
+    setAppliedEdits([]);
+    setCurrentMessageWithEdits(null);
+    setIsReadonly(false);
+    setShowHistory(false);
+    onClearHighlights?.();
+  };
+
+  const switchToSession = (session: ChatSession) => {
+    setCurrentSessionId(session.id);
+    setSessionTitle(session.title);
+    setMessages(session.messages);
+    setAppliedEdits([]);
+    setCurrentMessageWithEdits(null);
+    setIsReadonly(true);
+    setShowHistory(false);
+    onClearHighlights?.();
+  };
+
+  const continueFromSession = (session: ChatSession) => {
+    const id = `s_${Date.now()}`;
+    const title = session.title + ' (Fortgesetzt)';
+    const newSession: ChatSession = { id, title, messages: session.messages, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const sessions = loadChatSessions();
+    saveChatSessions([newSession, ...sessions]);
+    setCurrentSessionId(id);
+    setSessionTitle(title);
+    setMessages(session.messages);
+    setAppliedEdits([]);
+    setCurrentMessageWithEdits(null);
+    setIsReadonly(false);
+    setShowHistory(false);
+    onClearHighlights?.();
+  };
+
+  const deleteSession = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const sessions = loadChatSessions().filter(s => s.id !== id);
+    saveChatSessions(sessions);
+    // Wenn aktuelle Session gelöscht wird → neue starten
+    if (id === currentSessionIdRef.current) startNewSession();
+    // History-Panel neu rendern durch force-update trick
+    setShowHistory(false);
+    setTimeout(() => setShowHistory(true), 0);
+  };
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => {
     if (!initialInput) return;
     if (initialInput === lastPrefillRef.current) return;
@@ -604,86 +651,58 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
     setInput(initialInput);
   }, [initialInput]);
 
+  // Highlight lines when a message with edits is added
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === 'assistant' && lastMsg?.edits && lastMsg.edits.length > 0) {
+      onHighlightLines?.(lastMsg.edits);
+    }
+  }, [messages, onHighlightLines]);
+
   const modelPath   = modelInfo?.local_path || modelInfo?.source_path || modelInfo?.name || 'MODELL_PFAD';
   const dsRefs      = datasets.map((d, i) => `${i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`} = "${d.storage_path || d.name}" (${d.name})`);
 
-  const systemPrompt = editMode
-    ? `Du bist ein Code-Assistent für FrameTrain (Desktop-App für KI-Training).
+  const baseSystemPrompt = `Du bist ein professioneller Code-Side-Assistant in FrameTrain (Dev Train).
 
-VERFÜGBARE PFADE (lokal auf dem System):
+ZIEL: Hilf dem User, das Skript schnell, korrekt und robust zu fixen/verbessern.
+
+KONTEXT (lokal):
 - MODEL_PATH = "${modelPath}"
 ${dsRefs.map(r => `- ${r}`).join('\n')}
 - OUTPUT_PATH = "${outputPath}"
 
-MODELL: ${modelInfo?.name ?? '?'} | DATASETS: ${datasets.map(d => d.name).join(', ')}
 INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, bitsandbytes
-
-VERFÜGBARE TRAININGS-METRIKEN & PARAMETER (zum Anpassen):
-- epochs: Anzahl der Trainingsdurchläufe
-- batch_size: Trainings-Batch Größe
-- learning_rate: Lernrate (z.B. 2e-5)
-- warmup_ratio: Anteil Warmup-Schritte (0-1)
-- weight_decay: L2-Regularisierung
-- gradient_accumulation_steps: Gradient Akkumulation
-- max_grad_norm: Gradient Clipping
-- max_seq_length: Maximale Sequenzlänge
-- fp16/bf16: Mixed Precision (FP16 oder BF16)
-- gradient_checkpointing: RAM-sparend
-- use_lora: LoRA aktivieren
-- lora_r, lora_alpha, lora_dropout: LoRA Parameter
-- load_in_4bit/load_in_8bit: QLoRA
-
-EDIT-MODUS AKTIV: Du siehst unten den aktuellen Code im Editor.
-Du kannst den Code direkt bearbeiten. Nutze IMMER dieses Format für jede Änderung:
-
-##EDIT_START##
-FIND:
-# Der exakte Text (mehrere Zeilen möglich) den du ERSETZEN willst
-torch.save(model.state_dict(), "xlm_roberta_large_trained.pth")
-REPLACE:
-# Der neue Text als Ersatz
-torch.save(model.state_dict(), OUTPUT_PATH + "/xlm_roberta_large_trained.pth")
-##EDIT_END##
-
-WICHTIG:
-- Nutze ##EDIT_START## und ##EDIT_END## - NICHT \`\`\`python Blöcke!
-- Du darfst mehrere Edits hintereinander schreiben
-- Das System ignoriert automatisch Unterschiede in Tabs/Spaces/Einrückungen
-- Wenn der genaue Text nicht zu finden ist, versuche weniger Kontext zu nutzen
-
-Wenn du den GESAMTEN Code neu schreiben willst, schreib ihn in einem \`\`\`python Block aus.
 
 AKTUELLER SCRIPT-INHALT:
 \`\`\`python
 ${script}
 \`\`\`
 
-Antworte immer auf Deutsch. Sei präzise und hilfreich.`
-    : `Du bist ein Code-Assistent für FrameTrain (Desktop-App für KI-Training).
+ANFORDERUNGEN:
+- Antworte kurz, technisch präzise, ohne Floskeln.
+- Wenn möglich: nutze mode="edit" mit ##EDIT_START## Blöcken.
+- Wenn ein kompletter Rewrite klar besser ist: mode="rewrite" + kompletter \`\`\`python\`\`\` Block.
+- Stelle Rückfragen nur wenn absolut nötig.`;
 
-VERFÜGBARE PFADE (lokal auf dem System):
-- MODEL_PATH = "${modelPath}"
-${dsRefs.map(r => `- ${r}`).join('\n')}
-- OUTPUT_PATH = "${outputPath}"
+  const systemPrompt = buildAutoSystemPrompt(baseSystemPrompt);
 
-MODELL: ${modelInfo?.name ?? '?'} | DATASETS: ${datasets.map(d => d.name).join(', ')}
-INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, bitsandbytes
-
-TRAININGS-PARAMETER die der User evtl. anpassen möchte:
-epochs, batch_size, learning_rate, warmup_ratio, weight_decay, gradient_accumulation_steps, max_grad_norm, 
-max_seq_length, fp16, bf16, gradient_checkpointing, use_lora, lora_r, lora_alpha, lora_dropout, load_in_4bit, load_in_8bit
-
-CHAT-MODUS: Beantworte Fragen und schreibe Python-Code. Code in \`\`\`python Blöcken.
-
-Antworte immer auf Deutsch. Sei präzise und hilfreich.`;
-
-  const suggestions = editMode
-    ? ['Metriken anpassen (LR, Batch Size)', 'Pfade korrekt einsetzen', 'Fehlerbehandlung hinzufügen', 'Metriken (F1, Precision) ergänzen', 'Trainings-Logging verbessern', 'LoRA aktivieren für RAM-Ersparnis']
-    : ['Trainings-Skript für Textklassifikation', 'Dataset als JSONL laden', 'Wie nutze ich den OUTPUT_PATH?', 'Komplettes XLM-RoBERTa Fine-Tuning', 'Welche Parameter sind wichtig?'];
+  const suggestions = [
+    'Fehler beheben (Stacktrace)',
+    'Pfade korrekt nutzen (DATASET_PATH/OUTPUT_PATH)',
+    'Performance / Stabilität verbessern',
+  ];
 
   const send = async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || isReadonly) return;
     const userMsg: AiMessage = { role: 'user', content: input.trim() };
+    // Session-Titel beim ersten User-Message setzen
+    if (messages.length === 0) {
+      const title = makeSessionTitle(input.trim());
+      setSessionTitle(title);
+      const sessions = loadChatSessions();
+      const idx = sessions.findIndex(s => s.id === currentSessionIdRef.current);
+      if (idx >= 0) { sessions[idx].title = title; saveChatSessions(sessions); }
+    }
     setMessages(m => [...m, userMsg]); setInput(''); setLoading(true);
 
     try {
@@ -691,261 +710,448 @@ Antworte immer auf Deutsch. Sei präzise und hilfreich.`;
       const last = history.pop()!;
       const response = await callAI(aiSettings, systemPrompt, last.content, history);
 
-      // Edits parsen wenn im Edit-Modus
-      let edits = editMode ? parseEdits(response) : [];
-      
-      console.log(`🎯 Parse result: Found ${edits.length} edits in response`);
-      
-      // Fallback: Wenn keine Edits gefunden wurden, aber es gibt ```python Blöcke,
-      // könnte das System versuchen diese zu interpretieren (optional - nur loggen für jetzt)
-      if (editMode && edits.length === 0 && response.includes('```python')) {
-        console.warn('⚠️  KI hat möglicherweise das falsche Format verwendet (```python statt ##EDIT_START##). Bitte das Format korrigieren.');
-      }
-      
-      setMessages(m => [...m, { role: 'assistant', content: response, edits }]);
+      const { action, cleaned } = parseAutoAction(response);
+      const inferredEdit = (action?.mode === 'edit') || cleaned.includes('##EDIT_START##');
+      const edits = inferredEdit ? parseEdits(response) : [];
+      const code = action?.mode === 'rewrite' ? (extractFullPythonCode(response) ?? null) : null;
+      const finalContent = code ? [cleaned, '```python', code, '```'].join('\n') : cleaned;
+      setMessages(m => [...m, { role: 'assistant', content: finalContent, edits, action }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', content: `Fehler: ${String(err)}` }]);
     } finally { setLoading(false); }
   };
 
-  const handleApplyEdit = (msg: AiMessage, edit: CodeEdit, idx: number) => {
-    // DEBUG: Detailliertes Logging
-    console.log('🔍 Attempting edit:', {
-      id: edit.id,
-      findLength: edit.find.length,
-      replaceLength: edit.replace.length,
-      findPreview: edit.find.substring(0, 50),
-      findLines: edit.find.split('\n').length,
-    });
+  const handleApplyEdit = (editId: string, updatedEdits: CodeEdit[]) => {
+    if (!currentMessageWithEdits?.edits) return;
+    const editIdx = currentMessageWithEdits.edits.findIndex(e => e.id === editId);
+    if (editIdx < 0) return;
     
-    console.log('📝 Full FIND text:');
-    console.log(JSON.stringify(edit.find));
-    console.log('📝 Full REPLACE text:');
-    console.log(JSON.stringify(edit.replace));
-    
-    console.log('🔎 Searching in script with', script.split('\n').length, 'lines');
-    
-    const { result, success } = applyEdit(script, edit);
-    
-    console.log('✅ Edit result:', { success, resultPreview: result.substring(0, 100) });
+    const edit = updatedEdits[editIdx];
+    const { result, success, strategy, confidence } = applyEdit(script, edit);
     
     if (success) {
       onApplyEdit(result);
-      setMessages(m => m.map(mm => mm === msg ? {
-        ...mm,
-        edits: mm.edits?.map((e, i) => i === idx ? { ...e, applied: true } : e),
-      } : mm));
+      onClearHighlights?.();
+      const messageIdx = messages.findIndex(m => m === currentMessageWithEdits);
+      setAppliedEdits(prev => [...prev, { messageId: messageIdx, editId, originalScript: script }]);
+      setMessages(m => m.map(mm => 
+        mm === currentMessageWithEdits 
+          ? { 
+              ...mm,
+              edits: updatedEdits.map((e, i) => 
+                i === editIdx ? { ...e, applied: true, failed: false, strategy, confidence } : e
+              ),
+            } 
+          : mm
+      ));
+      setCurrentMessageWithEdits(m => m ? { ...m, edits: updatedEdits } : null);
+      
+      // Close modal after 500ms if all edits applied
+      setTimeout(() => {
+        if (updatedEdits.every(e => e.applied || e.failed)) {
+          setShowDiffModal(false);
+          setCurrentMessageWithEdits(null);
+          onClearHighlights?.();
+        }
+      }, 500);
     } else {
-      setMessages(m => m.map(mm => mm === msg ? {
-        ...mm,
-        edits: mm.edits?.map((e, i) => i === idx ? { ...e, failed: true } : e),
-      } : mm));
+      setMessages(m => m.map(mm => 
+        mm === currentMessageWithEdits 
+          ? {
+              ...mm,
+              edits: updatedEdits.map((e, i) => i === editIdx ? { ...e, failed: true } : e),
+            } 
+          : mm
+      ));
+      setCurrentMessageWithEdits(m => m ? { ...m, edits: updatedEdits } : null);
     }
   };
 
-  const handleApplyAllEdits = (msg: AiMessage) => {
-    let current = script;
-    const results = (msg.edits ?? []).map(edit => {
-      const { result, success } = applyEdit(current, edit);
-      if (success) current = result;
-      return success;
-    });
-    onApplyEdit(current);
-    setMessages(m => m.map(mm => mm === msg ? {
-      ...mm,
-      edits: mm.edits?.map((e, i) => ({ ...e, applied: results[i], failed: !results[i] })),
-    } : mm));
+  const handleApplyAllEdits = (updatedEdits: CodeEdit[], msgOverride?: AiMessage) => {
+    const targetMsg = msgOverride ?? currentMessageWithEdits;
+    if (!targetMsg?.edits) return;
+    if (msgOverride) setCurrentMessageWithEdits(msgOverride);
+    setIsApplyingEdits(true);
+    try {
+      const applied = applyAllEdits(script, updatedEdits);
+      onApplyEdit(applied.result);
+      onClearHighlights?.();
+      const messageIdx = messages.findIndex(m => m === targetMsg);
+      setAppliedEdits(prev => [...prev, ...updatedEdits.map(e => ({ messageId: messageIdx, editId: e.id, originalScript: script }))]);
+      setMessages(m => m.map(mm =>
+        mm === targetMsg
+          ? {
+              ...mm,
+              edits: updatedEdits.map((e, i) => ({
+                ...e,
+                applied: applied.results[i]?.success,
+                failed: !applied.results[i]?.success,
+                strategy: applied.results[i]?.strategy,
+                confidence: applied.results[i]?.confidence
+              }))
+            }
+          : mm
+      ));
+      setCurrentMessageWithEdits(m => m ? { ...m, edits: updatedEdits } : null);
+
+      setTimeout(() => {
+        setShowDiffModal(false);
+        setCurrentMessageWithEdits(null);
+        onClearHighlights?.();
+      }, 500);
+    } finally {
+      setIsApplyingEdits(false);
+    }
   };
 
-  const extractFullCode = (text: string) => text.match(/```python\n([\s\S]*?)```/)?.[1] ?? null;
+  const handleUndoEdit = (messageId: number, editId: string) => {
+    const appliedEdit = appliedEdits.find(ae => ae.messageId === messageId && ae.editId === editId);
+    if (appliedEdit) {
+      onApplyEdit(appliedEdit.originalScript);
+      onClearHighlights?.();
+      setAppliedEdits(prev => prev.filter(ae => !(ae.messageId === messageId && ae.editId === editId)));
+
+      setMessages(m => m.map((mm, idx) => 
+        idx === messageId && mm.edits
+          ? { ...mm, edits: mm.edits.map(e => e.id === editId ? { ...e, applied: false } : e) }
+          : mm
+      ));
+    }
+  };
 
   return (
-      <div className="flex flex-col h-full bg-slate-950 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-violet-400" />
-          <span className="text-sm font-medium text-white">KI-Assistent</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {/* Mode Toggle */}
-          <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-white/5 border border-white/10">
+    <>
+      <div className="flex flex-col h-full bg-slate-950 overflow-hidden relative">
+        {/* Header */}
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Bot className="w-4 h-4 text-violet-400 flex-shrink-0" />
+            <span className="text-sm font-medium text-white">Code Assistant</span>
+            <span className="ml-1 px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/25 text-purple-200 text-[10px] font-medium flex-shrink-0">Auto</span>
+          </div>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
-              onClick={() => setEditMode(false)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${!editMode ? 'bg-violet-500/20 text-violet-300' : 'text-gray-500 hover:text-gray-300'}`}
+              onClick={() => setShowHistory(v => !v)}
+              title="Chat-Verlauf"
+              className={`p-1.5 rounded-lg transition-all ${
+                showHistory
+                  ? 'bg-violet-500/20 text-violet-300'
+                  : 'hover:bg-white/5 text-gray-500 hover:text-white'
+              }`}
             >
-              <Bot className="w-3 h-3" /> Chat
+              <History className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => setEditMode(true)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${editMode ? 'bg-amber-500/20 text-amber-300' : 'text-gray-500 hover:text-gray-300'}`}
+              onClick={startNewSession}
+              title="Neuer Chat"
+              className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all"
             >
-              <Pencil className="w-3 h-3" /> Edit
+              <MessageSquarePlus className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all ml-0.5">
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all ml-1">
-            <X className="w-3.5 h-3.5" />
-          </button>
         </div>
-      </div>
 
-      {/* Edit-Mode Banner */}
-      {editMode && (
-        <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex-shrink-0">
-          <div className="flex items-center gap-1.5">
-            <Pencil className="w-3 h-3 text-amber-400" />
-            <p className="text-amber-300 text-[10px] font-medium">Edit-Modus: KI sieht deinen Code und kann ihn direkt bearbeiten</p>
-          </div>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.length === 0 && (
-          <div className="py-6 space-y-3">
-            {editMode ? <Wand2 className="w-7 h-7 text-amber-400 mx-auto" /> : <Bot className="w-7 h-7 text-violet-400 mx-auto" />}
-            <p className="text-gray-400 text-xs">
-              {editMode ? 'Beschreibe was du am Code ändern möchtest.' : 'Stell eine Frage oder lass Code generieren.'}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {suggestions.map(s => (
-                <button key={s} onClick={() => setInput(s)}
-                  className={`px-2.5 py-1 rounded-lg border text-[10px] transition-all ${
-                    editMode
-                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/15'
-                      : 'bg-violet-500/10 border-violet-500/20 text-violet-300 hover:bg-violet-500/15'
-                  }`}>
-                  {s}
-                </button>
-              ))}
-            </div>
+        {/* Session-Titel Chip */}
+        {sessionTitle && sessionTitle !== 'Neuer Chat' && (
+          <div className="px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.01] flex items-center gap-1.5">
+            <span className="text-[9px] text-gray-600">↳</span>
+            <span className="text-[10px] text-gray-500 truncate">{sessionTitle}</span>
+            {isReadonly && (
+              <span className="ml-auto flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80">Lesemodus</span>
+            )}
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${m.role === 'user' ? 'bg-emerald-500/20 text-emerald-400' : editMode ? 'bg-amber-500/20 text-amber-400' : 'bg-violet-500/20 text-violet-400'}`}>
-              {m.role === 'user' ? 'U' : (editMode ? <Wand2 className="w-3 h-3" /> : <Bot className="w-3 h-3" />)}
+        {/* History Panel */}
+        {showHistory && (
+          <div className="absolute inset-x-0 top-[41px] z-10 bg-slate-950 border-b border-white/10 flex flex-col shadow-xl" style={{ maxHeight: '60%', overflowY: 'auto' }}>
+            <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
+              <span className="text-[10px] font-medium text-gray-400">Chat-Verlauf</span>
+              <button onClick={startNewSession} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-300 text-[10px] transition-all">
+                <MessageSquarePlus className="w-3 h-3" /> Neuer Chat
+              </button>
             </div>
-            <div className={`flex-1 max-w-[90%] flex flex-col gap-1.5 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-              {/* Render message parts */}
-              {m.content.replace(/##EDIT_START##[\s\S]*?##EDIT_END##/g, '').split(/(```python[\s\S]*?```)/g).map((part, pi) => {
-                if (part.startsWith('```python')) {
-                  const code = extractFullCode(part) ?? part;
-                  return (
-                    <div key={pi} className="w-full rounded-xl overflow-hidden border border-white/10">
-                      <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.03] border-b border-white/10">
-                        <span className="text-[10px] text-gray-500 font-mono">Python</span>
-                        <button onClick={() => onReplaceScript(code)} className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all">
-                          Ersetzen
-                        </button>
-                      </div>
-                      <pre className="p-3 text-[10px] font-mono text-gray-300 overflow-x-auto max-h-48 leading-relaxed">{code}</pre>
-                    </div>
-                  );
-                }
-                return part.trim() ? (
+            <div className="overflow-y-auto flex-1">
+              {loadChatSessions().length === 0 ? (
+                <p className="text-center text-gray-600 text-[10px] py-6">Noch keine gespeicherten Chats.</p>
+              ) : loadChatSessions().map(session => {
+                const isActive = session.id === currentSessionId;
+                return (
                   <div
-                    key={pi}
-                    className={`px-3 py-2 rounded-xl text-[11px] leading-relaxed ${
-                      m.role === 'user'
-                        ? 'bg-emerald-500/10 text-gray-200 border border-emerald-500/20'
-                        : editMode
-                          ? 'bg-amber-500/[0.06] text-gray-300 border border-amber-500/15'
-                          : 'bg-white/[0.05] text-gray-300 border border-white/10'
+                    key={session.id}
+                    onClick={() => switchToSession(session)}
+                    className={`group flex items-start gap-2 px-3 py-2.5 border-b border-white/[0.04] cursor-pointer transition-all ${
+                      isActive ? 'bg-violet-500/10' : 'hover:bg-white/[0.04]'
                     }`}
                   >
-                    {part.trim()}
-                  </div>
-                ) : null;
-              })}
-
-              {/* Edit blocks */}
-              {m.edits && m.edits.length > 0 && (
-                <div className="w-full space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-amber-400 font-medium flex items-center gap-1">
-                      <Pencil className="w-3 h-3" /> {m.edits.length} Änderung{m.edits.length !== 1 ? 'en' : ''} vorgeschlagen
-                    </p>
-                    {m.edits.length > 1 && (
-                      <button onClick={() => handleApplyAllEdits(m)}
-                        className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30 transition-all">
-                        Alle übernehmen
-                      </button>
-                    )}
-                  </div>
-                  {m.edits.map((edit, ei) => (
-                    <div key={edit.id} className="rounded-xl border border-white/10 overflow-hidden">
-                      {/* Find */}
-                      <div className="bg-red-500/10 border-b border-white/10 px-3 py-2">
-                        <p className="text-[9px] text-red-400 font-medium mb-1">ENTFERNEN:</p>
-                        <pre className="text-[10px] font-mono text-red-300/80 overflow-x-auto leading-relaxed line-through max-h-20">{edit.find}</pre>
-                      </div>
-                      {/* Replace */}
-                      <div className="bg-emerald-500/10 border-b border-white/10 px-3 py-2">
-                        <p className="text-[9px] text-emerald-400 font-medium mb-1">EINFÜGEN:</p>
-                        <pre className="text-[10px] font-mono text-emerald-300/80 overflow-x-auto leading-relaxed max-h-20">{edit.replace}</pre>
-                      </div>
-                      {/* Action */}
-                      <div className="px-3 py-2 bg-white/[0.02] flex items-center justify-between">
-                        {edit.applied ? (
-                          <span className="text-[10px] text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" /> Übernommen</span>
-                        ) : edit.failed ? (
-                          <span className="text-[10px] text-red-400 flex items-center gap-1"><X className="w-3 h-3" /> Text nicht gefunden</span>
-                        ) : (
-                          <button onClick={() => handleApplyEdit(m, edit, ei)}
-                            className="text-[10px] px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 font-medium transition-all">
-                            Übernehmen
-                          </button>
-                        )}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[11px] truncate font-medium ${
+                        isActive ? 'text-violet-200' : 'text-gray-300'
+                      }`}>
+                        {session.title}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[9px] text-gray-600">{relativeTime(session.updatedAt)}</span>
+                        <span className="text-[9px] text-gray-700">· {session.messages.length} Nachrichten</span>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex gap-2">
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${editMode ? 'bg-amber-500/20' : 'bg-violet-500/20'}`}>
-              {editMode ? <Wand2 className="w-3 h-3 text-amber-400" /> : <Bot className="w-3 h-3 text-violet-400" />}
-            </div>
-            <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10">
-              <Loader2 className="w-4 h-4 text-violet-400 animate-spin" />
+                    <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
+                      {!isActive && session.messages.length > 0 && (
+                        <button
+                          onClick={e => { e.stopPropagation(); continueFromSession(session); }}
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-all"
+                        >
+                          Fortsetzen
+                        </button>
+                      )}
+                      <button
+                        onClick={e => deleteSession(session.id, e)}
+                        className="p-0.5 rounded hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
-        <div ref={endRef} />
-      </div>
 
-      {/* Input */}
-      <div className="p-3 border-t border-white/10 flex-shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[10px] text-gray-600">
-            {editMode ? 'Enter = senden · Shift+Enter = neue Zeile' : 'Enter = senden · Shift+Enter = neue Zeile'}
-          </span>
-          {editMode && (
-            <span className="text-[10px] text-amber-400/70">Edit-Modus aktiv</span>
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {messages.length === 0 && (
+            <div className="py-6 space-y-3">
+              <p className="text-gray-400 text-xs">
+                Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.map(s => (
+                  <button key={s} onClick={() => setInput(s)}
+                    className={`px-2.5 py-1 rounded-lg border text-[10px] transition-all ${
+                      'bg-purple-500/10 border-purple-500/20 text-purple-200 hover:bg-purple-500/15'
+                    }`}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((m, i) => (
+            <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${
+                m.role === 'user'
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : (m.action?.mode === 'edit')
+                    ? 'bg-amber-500/20 text-amber-400'
+                    : (m.action?.mode === 'rewrite')
+                      ? 'bg-purple-500/20 text-purple-300'
+                      : 'bg-violet-500/20 text-violet-400'
+              }`}>
+                {m.role === 'user'
+                  ? 'U'
+                  : (m.action?.mode === 'edit')
+                    ? <Wand2 className="w-3 h-3" />
+                    : (m.action?.mode === 'rewrite')
+                      ? <Sparkles className="w-3 h-3" />
+                      : <Bot className="w-3 h-3" />
+                }
+              </div>
+              <div className={`flex-1 max-w-[90%] flex flex-col gap-1.5 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                {/* Render message parts */}
+                {removeEditBlocks(m.content).split(/(```python[\s\S]*?```)/g).map((part, pi) => {
+                  if (part.startsWith('```python')) {
+                    const code = extractFullPythonCode(part) ?? part;
+                    return (
+                      <div key={pi} className="w-full rounded-xl overflow-hidden border border-white/10">
+                        <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.03] border-b border-white/10">
+                          <span className="text-[10px] text-gray-500 font-mono">Python</span>
+                          <button onClick={() => onReplaceScript(code)} className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all">
+                            Ersetzen
+                          </button>
+                        </div>
+                        <pre className="p-3 text-[10px] font-mono text-gray-300 overflow-x-auto max-h-48 leading-relaxed">{code}</pre>
+                      </div>
+                    );
+                  }
+                  return part.trim() ? (
+                    <div
+                      key={pi}
+                      className={`px-3 py-2 rounded-xl text-[11px] leading-relaxed whitespace-pre-wrap break-words ${
+                        m.role === 'user'
+                          ? 'bg-emerald-500/10 text-gray-200 border border-emerald-500/20'
+                          : (m.action?.mode === 'edit')
+                            ? 'bg-amber-500/[0.06] text-gray-300 border border-amber-500/15'
+                            : (m.action?.mode === 'rewrite')
+                              ? 'bg-purple-500/[0.08] text-gray-200 border border-purple-500/20'
+                              : 'bg-white/[0.05] text-gray-300 border border-white/10'
+                      }`}
+                    >
+                      {part.trim()}
+                    </div>
+                  ) : null;
+                })}
+
+                {/* Simplified Edit Indicator with Undo Support */}
+                {m.edits && m.edits.length > 0 && (
+                  <div className="w-full space-y-1.5">
+                    {m.edits.map((edit, editIdx) => {
+                      const messageIdx = messages.indexOf(m);
+                      const isApplied = appliedEdits.some(ae => ae.messageId === messageIdx && ae.editId === edit.id);
+                      return (
+                        <button
+                          key={edit.id}
+                          onClick={() => {
+                            if (!isApplied) {
+                              setCurrentMessageWithEdits(m);
+                              setShowDiffModal(true);
+                            }
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl transition-all text-[11px] ${
+                            isApplied
+                              ? 'bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/15'
+                              : 'bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className={`font-medium flex items-center gap-2 ${isApplied ? 'text-emerald-300' : 'text-amber-300'}`}>
+                              {isApplied ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                              Änderung {editIdx + 1}
+                            </span>
+                            {isApplied ? (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUndoEdit(messageIdx, edit.id);
+                                }}
+                                className="text-emerald-400/70 hover:text-emerald-300 text-xs flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/[0.15] hover:bg-emerald-500/25 transition-all"
+                              >
+                                <span>Rückgängig</span>
+                              </button>
+                            ) : (
+                              <span className="text-amber-400/70 text-xs">→ Diff ansehen</span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex gap-2">
+              <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-300">
+                <Sparkles className="w-3 h-3" />
+              </div>
+              <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10">
+                <Loader2 className="w-4 h-4 text-violet-400 animate-spin" />
+              </div>
+            </div>
+          )}
+          <div ref={endRef} />
+        </div>
+
+        {/* Input */}
+        <div className="p-3 border-t border-white/10 flex-shrink-0">
+          {/* Edit Summary Bar */}
+          {(() => {
+            const latestEditMsg = [...messages].reverse().find(m => m.edits && m.edits.length > 0);
+            const hasUnapplied = latestEditMsg?.edits?.some(e => !e.applied && !e.failed);
+            if (!hasUnapplied) return null;
+            const addedLines = latestEditMsg.edits.reduce((sum, e) => sum + (!e.applied && !e.failed ? e.replace.split('\n').length : 0), 0);
+            const removedLines = latestEditMsg.edits.reduce((sum, e) => sum + (!e.applied && !e.failed ? e.find.split('\n').length : 0), 0);
+            return (
+              <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/20 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
+                  <span className="text-[10px] text-gray-500 shrink-0">Bereit:</span>
+                  <span className="text-[10px] font-medium text-emerald-400 flex items-center gap-0.5">
+                    <Plus className="w-3 h-3" />{addedLines}
+                  </span>
+                  <span className="text-[10px] text-gray-600">/</span>
+                  <span className="text-[10px] font-medium text-red-400 flex items-center gap-0.5">
+                    <Minus className="w-3 h-3" />{removedLines}
+                  </span>
+                </div>
+                <div className="flex gap-1.5 px-3 pb-2">
+                  <button
+                    onClick={() => handleApplyAllEdits(latestEditMsg.edits, latestEditMsg)}
+                    className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-[10px] font-medium transition-all"
+                  >
+                    <Check className="w-3 h-3" /> Übernehmen
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCurrentMessageWithEdits(latestEditMsg);
+                      setShowDiffModal(true);
+                    }}
+                    className="flex items-center justify-center px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-[10px] font-medium transition-all"
+                  >
+                    Details
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+          
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] text-gray-600">
+              {isReadonly ? 'Lesemodus – Chat nicht aktiv' : 'Enter = senden · Shift+Enter = neue Zeile'}
+            </span>
+            <span className="text-[10px] text-purple-300/70">Auto</span>
+          </div>
+          <div className="flex gap-2 items-end">
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+              placeholder={isReadonly ? 'Zum Schreiben neuen Chat starten → □ oben rechts' : 'Ziel / Problem / gewünschte Änderung…'}
+              rows={2}
+              disabled={isReadonly}
+              className={`flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-white/20 resize-none transition-opacity ${
+                isReadonly ? 'opacity-40 cursor-not-allowed' : ''
+              }`}
+            />
+            <button onClick={send} disabled={!input.trim() || loading || isReadonly}
+              className="p-2.5 rounded-xl border transition-all disabled:opacity-40 bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/30 text-purple-200">
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          {isReadonly && (
+            <button
+              onClick={startNewSession}
+              className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-300 text-[10px] font-medium transition-all"
+            >
+              <MessageSquarePlus className="w-3 h-3" /> Neuen Chat starten
+            </button>
           )}
         </div>
-        <div className="flex gap-2 items-end">
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder={editMode ? 'Was soll geändert werden?' : 'Frage oder Aufgabe…'}
-            rows={2}
-            className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-white/20 resize-none"
-          />
-          <button onClick={send} disabled={!input.trim() || loading}
-            className={`p-2.5 rounded-xl border transition-all disabled:opacity-40 ${editMode ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/30 text-amber-300' : 'bg-violet-500/20 hover:bg-violet-500/30 border-violet-500/30 text-violet-300'}`}>
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
       </div>
-    </div>
+
+      {/* Diff Viewer Modal */}
+      {showDiffModal && currentMessageWithEdits?.edits && (
+        <DiffViewer
+          edits={currentMessageWithEdits.edits}
+          onApply={handleApplyEdit}
+          onApplyAll={handleApplyAllEdits}
+          onClose={() => {
+            setShowDiffModal(false);
+            setCurrentMessageWithEdits(null);
+            onClearHighlights?.();
+          }}
+          isApplying={isApplyingEdits}
+          onEditChange={(updatedEdits) => {
+            setCurrentMessageWithEdits(m => m ? { ...m, edits: updatedEdits } : null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -985,7 +1191,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const [expanded, setExpanded]   = useState(false);
   const [dismissed, setDismissed] = useState(() => {
     try {
-      return sessionStorage.getItem('devTrainBannerDismissed') === 'true';
+      return localStorage.getItem('devTrainBannerDismissed') === 'true';
     } catch {
       return false;
     }
@@ -1011,6 +1217,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const [findStatus, setFindStatus] = useState<{ current: number; total: number } | null>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
 
+  const [highlightedLines, setHighlightedLines] = useState<HighlightedLine[]>([]);
+
   // Error Modal States
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorTitle, setErrorTitle] = useState('');
@@ -1018,7 +1226,6 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const [errorDetails, setErrorDetails] = useState('');
   const [isSendingError, setIsSendingError] = useState(false);
   const [aiPrefill, setAiPrefill] = useState('');
-  const [aiForceEditMode, setAiForceEditMode] = useState(false);
 
   const lineCount = useMemo(() => Math.max(1, (script || '').split('\n').length), [script]);
   const highlightedHtml = useMemo(() => highlightPythonToHtml(script || ''), [script]);
@@ -1434,14 +1641,13 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const handleSendToAI = (errorContext: string) => {
     setShowErrorModal(false);
     setShowAI(true);
-    setAiForceEditMode(true);
     setAiPrefill(
       `[Dev Train Fehler]\n\n` +
-      `Bitte repariere mein Dev-Train Skript.\n\n` +
+      `Bitte hilf mir, meinen Dev-Train Run zu reparieren.\n\n` +
       `FEHLER:\n${errorContext}\n\n` +
       `WICHTIG: DATASET_PATH ist ein lokaler Ordner von FrameTrain. ` +
       `Falls ich fälschlich load_dataset(DATASET_PATH) benutze, schlage eine robuste Alternative vor (z.B. load_from_disk oder passende load_dataset(..., data_files=...)).\n\n` +
-      `Gib mir konkrete ##EDIT_START## Blöcke, damit ich die Änderungen direkt übernehmen kann.`
+      `Du darfst Edits vorschlagen oder den Code neu schreiben – wähle selbst die beste Vorgehensweise.`
     );
   };
 
@@ -1460,7 +1666,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
           <div className="p-4 rounded-2xl border border-blue-500/30 bg-blue-500/10">
             <div className="flex items-start justify-between gap-2 mb-1">
               <div className="flex items-center gap-2"><Terminal className="w-4 h-4 text-blue-400" /><span className="text-blue-300 font-semibold text-sm">Dev Train Mode</span></div>
-              <button onClick={() => setDismissed(true)} className="p-1 rounded-lg hover:bg-white/10 text-blue-400/60 hover:text-white transition-all"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={() => { setDismissed(true); localStorage.setItem('devTrainBannerDismissed', 'true'); }} className="p-1 rounded-lg hover:bg-white/10 text-blue-400/60 hover:text-white transition-all"><X className="w-3.5 h-3.5" /></button>
             </div>
             <p className="text-gray-400 text-xs">Eigenes Python-Skript mit vollem Zugriff auf alle Pfade. Gleiche Live-Loss-Kurven wie beim Standard-Training.</p>
           </div>
@@ -1758,6 +1964,37 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   </div>
 
                   <div className="relative flex-1 min-w-0">
+                    {/* Line highlights for edits */}
+                    {highlightedLines.map((hl) => (
+                      <div
+                        key={`hl-${hl.lineNum}`}
+                        aria-hidden
+                        className="absolute left-0 right-0 pointer-events-none"
+                        style={{
+                          top: Math.round(editorPadTopPx + (hl.lineNum - 1) * editorLineHeightPx - editorScrollTop),
+                          height: Math.ceil(editorLineHeightPx),
+                          background:
+                            hl.type === 'added'
+                              ? 'rgba(34,197,94,0.25)'
+                              : hl.type === 'removed'
+                                ? 'rgba(239,68,68,0.25)'
+                                : 'rgba(234,179,8,0.20)',
+                          borderLeft:
+                            hl.type === 'added'
+                              ? '3px solid rgba(34,197,94,0.8)'
+                              : hl.type === 'removed'
+                                ? '3px solid rgba(239,68,68,0.8)'
+                                : '3px solid rgba(234,179,8,0.8)',
+                          borderRight:
+                            hl.type === 'added'
+                              ? '1px solid rgba(34,197,94,0.3)'
+                              : hl.type === 'removed'
+                                ? '1px solid rgba(239,68,68,0.3)'
+                                : '1px solid rgba(234,179,8,0.3)',
+                        }}
+                      />
+                    ))}
+
                     {/* Active line highlight */}
                     <div
                       aria-hidden
@@ -1849,11 +2086,24 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                       modelInfo={modelInfo}
                       datasets={datasets}
                       outputPath={outputPath.replace('<job_id>', 'dev_XXX')}
-                      onApplyEdit={setScript}
-                      onReplaceScript={setScript}
+                      onApplyEdit={(newScript) => {
+                        setScript(newScript);
+                        setIsDirty(true);
+                      }}
+                      onReplaceScript={(newScript) => {
+                        setScript(newScript);
+                        setIsDirty(true);
+                      }}
                       onClose={() => setShowAI(false)}
                       initialInput={aiPrefill}
-                      forceEditMode={aiForceEditMode}
+                      onHighlightLines={(edits) => {
+                        const highlighted: HighlightedLine[] = [];
+                        edits.forEach(edit => {
+                          highlighted.push(...calculateAffectedLines(script, edit));
+                        });
+                        setHighlightedLines(highlighted);
+                      }}
+                      onClearHighlights={() => setHighlightedLines([])}
                     />
                   </div>
                 )}
@@ -1999,10 +2249,9 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         devScript={script}
         onSendCodeToKI={(s, err) => {
           setShowAI(true);
-          setAiForceEditMode(true);
           setAiPrefill(
             `[Dev Train Fehler]\n\n` +
-            `Bitte korrigiere mein Skript (Edit-Modus).\n\n` +
+            `Bitte korrigiere mein Skript.\n\n` +
             `FEHLER:\n${err}\n\n` +
             `SCRIPT:\n${s}\n`
           );
@@ -2086,12 +2335,12 @@ from datasets import load_from_disk, load_dataset
 
 # ── Dataset laden ─────────────────────────────────────────────────────────
 def load_frametrain_dataset(path: str):
-	    """
-	    FrameTrain liefert DATASET_PATH meistens als lokalen Ordner.
-	    - Wenn das Dataset via datasets.Dataset(Dict).save_to_disk() gespeichert wurde:
-	      => load_from_disk(path) benutzen.
-	    - Sonst versuchen wir JSON/JSONL/CSV/TSV Dateien im Ordner zu finden und mit load_dataset(...) zu laden.
-	    """
+    """
+    FrameTrain liefert DATASET_PATH meistens als lokalen Ordner.
+    - Wenn das Dataset via datasets.Dataset(Dict).save_to_disk() gespeichert wurde:
+      => load_from_disk(path) benutzen.
+    - Sonst versuchen wir JSON/JSONL/CSV/TSV Dateien im Ordner zu finden und mit load_dataset(...) zu laden.
+    """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"DATASET_PATH existiert nicht: {path}")
@@ -2175,22 +2424,30 @@ def load_frametrain_dataset(path: str):
 
     raise RuntimeError(f"Unbekanntes Dataset-Format: {path}")
 
-dataset = load_frametrain_dataset(DATASET_PATH)
-print("✅ Dataset geladen:", dataset)
+try:
+    dataset = load_frametrain_dataset(DATASET_PATH)
+    print("✅ Dataset geladen:", dataset)
+except Exception as e:
+    print(f"❌ Fehler beim Laden des Datasets: {e}")
+    exit(1)
 
 # ── Modell & Tokenizer ────────────────────────────────────────────────────
-# TODO: Lade Modell und Tokenizer
-# tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-# model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=2)
+try:
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=2)
+    print(f"✅ Modell und Tokenizer geladen von {MODEL_PATH}")
+except Exception as e:
+    print(f"❌ Fehler beim Laden des Modells oder Tokenizers: {e}")
+    exit(1)
 
 # ── Training ──────────────────────────────────────────────────────────────
-# TODO: Implementiere Trainings-Loop
-# for epoch in range(num_epochs):
-#     for batch in dataset:
-#         # forward pass
-#         # loss berechnen
-#         # backward pass
-#         # optimizer step
+num_epochs = 5  # Definiere die Anzahl der Epochen
+for epoch in range(num_epochs):
+    for batch in dataset:
+        # forward pass
+        # loss berechnen
+        # backward pass
+        # optimizer step
 
 # ── Metriken ──────────────────────────────────────────────────────────────
 # TODO: Berechne Metriken (Loss, Accuracy, etc.)

@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
 
 // ============ Typen ============
 
@@ -17,6 +18,21 @@ pub struct ModelInfo {
     pub file_count: usize,
     pub created_at: DateTime<Utc>,
     pub model_type: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModelDownloadProgress {
+    pub status: String,               // "connecting", "downloading", "saving", "complete", "error"
+    pub current_file: String,         // Aktueller Dateiname
+    pub current_file_index: usize,    // Aktuelle Datei-Nummer
+    pub total_files: usize,           // Gesamtanzahl Dateien
+    pub downloaded_bytes: u64,        // Bisher heruntergeladene Bytes
+    pub total_bytes: u64,             // Geschätzte Gesamtgröße
+    pub progress_percent: i32,        // 0-100%
+    pub speed_mbs: f32,               // MB/s
+    pub elapsed_secs: u64,            // Verstrichene Zeit in Sekunden
+    pub eta_secs: u64,                // Geschätzte verbleibende Zeit
+    pub message: String,              // Benutzerfreundliche Nachricht
 }
 
 // ============ Interne Helfer ============
@@ -99,6 +115,19 @@ fn save_metadata(models_dir: &Path, info: &ModelInfo) -> Result<(), String> {
     models.push(info.clone());
     fs::write(&path, serde_json::to_string_pretty(&models).map_err(|e| format!("JSON: {}", e))?)
         .map_err(|e| format!("Metadata schreiben: {}", e))
+}
+
+// Berechnet Speed und ETA aus akkumulierten Werten
+fn calc_speed_and_eta(downloaded: u64, total: u64, elapsed_secs: u64) -> (f32, u64) {
+    if elapsed_secs == 0 || downloaded == 0 {
+        return (0.0, 0);
+    }
+    let speed_mbs = (downloaded as f32 / 1_048_576.0) / elapsed_secs as f32;
+    let remaining = total.saturating_sub(downloaded);
+    let eta = if speed_mbs > 0.0 {
+        (remaining as f32 / (speed_mbs * 1_048_576.0)) as u64
+    } else { 0 };
+    (speed_mbs, eta)
 }
 
 // ============ Tauri Commands ============
@@ -352,6 +381,10 @@ pub async fn get_huggingface_model_files(
 }
 
 /// Frontend ruft auf: invoke('download_huggingface_model', { repoId, modelName })
+///
+/// FIX: Verwendet bytes_stream() + chunk-weise Verarbeitung statt resp.bytes().await,
+/// damit große Dateien (z.B. 400 MB safetensors) Live-Progress emittieren und die UI
+/// nicht einfriert. Events werden maximal alle 200 ms gefeuert (Throttle).
 #[tauri::command]
 pub async fn download_huggingface_model(
     app_handle: tauri::AppHandle,
@@ -359,12 +392,30 @@ pub async fn download_huggingface_model(
     model_name: String,    // Frontend: modelName
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<ModelInfo, String> {
+    use std::time::Instant;
+    use tokio::io::AsyncWriteExt;
+
     let models_dir = get_models_dir(&app_handle)?;
     let model_id   = format!("hf_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
     let target     = models_dir.join(&model_id);
     fs::create_dir_all(&target).map_err(|e| format!("mkdir: {}", e))?;
 
     println!("[HF Download] {} → {}", repo_id, target.display());
+
+    // Emit: Verbindungsaufbau
+    let _ = app_handle.emit("model-download-progress", ModelDownloadProgress {
+        status: "connecting".to_string(),
+        current_file: String::new(),
+        current_file_index: 0,
+        total_files: 0,
+        downloaded_bytes: 0,
+        total_bytes: 0,
+        progress_percent: 0,
+        speed_mbs: 0.0,
+        elapsed_secs: 0,
+        eta_secs: 0,
+        message: "Verbinde mit Hugging Face…".to_string(),
+    });
 
     let files = get_huggingface_model_files(repo_id.clone()).await?;
     let client = reqwest::Client::builder()
@@ -379,33 +430,166 @@ pub async fn download_huggingface_model(
     let relevant: Vec<&HuggingFaceFile> = files.iter().filter(|f| {
         if let Some(ref t) = f.file_type { if t == "directory" { return false; } }
         let n = f.filename.to_lowercase();
-        // Für Klassifikationsmodelle: config, tokenizer, safetensors/bin
         n.ends_with(".json") || n.ends_with(".txt") || n.ends_with(".md")
             || n.ends_with(".safetensors") || n.ends_with(".bin")
             || n.ends_with(".model") || n.contains("config")
     }).collect();
 
-    println!("[HF Download] {} Dateien herunterladen", relevant.len());
+    // Gesamtgröße für ETA und Prozentanzeige
+    let total_size: u64 = relevant.iter().map(|f| f.size.unwrap_or(0)).sum();
+    println!("[HF Download] {} Dateien, ~{} MB", relevant.len(), total_size / (1024 * 1024));
 
-    for file in relevant {
+    let download_start = Instant::now();
+    let mut downloaded_so_far: u64 = 0;
+    let total_files = relevant.len();
+
+    // Throttle: letzter Emit-Zeitpunkt (max. 1 Event alle 200 ms)
+    const EMIT_INTERVAL_MS: u128 = 200;
+
+    for (idx, file) in relevant.iter().enumerate() {
         let url = format!(
             "https://huggingface.co/{}/resolve/main/{}",
             repo_id, urlencoding::encode(&file.filename)
         );
-        println!("[HF Download] ← {}", file.filename);
+        println!("[HF Download] [{}/{}] ← {}", idx + 1, total_files, file.filename);
+
+        // Emit: Datei-Download beginnt
+        {
+            let elapsed = download_start.elapsed().as_secs();
+            let (speed, eta) = calc_speed_and_eta(downloaded_so_far, total_size, elapsed);
+            let _ = app_handle.emit("model-download-progress", ModelDownloadProgress {
+                status: "downloading".to_string(),
+                current_file: file.filename.clone(),
+                current_file_index: idx + 1,
+                total_files,
+                downloaded_bytes: downloaded_so_far,
+                total_bytes: total_size,
+                progress_percent: if total_size > 0 {
+                    ((downloaded_so_far as f64 / total_size as f64) * 100.0) as i32
+                } else { 0 },
+                speed_mbs: speed,
+                elapsed_secs: elapsed,
+                eta_secs: eta,
+                message: format!("Starte {} ({}/{})", file.filename, idx + 1, total_files),
+            });
+        }
 
         let resp = client.get(&url)
             .header("User-Agent", "FrameTrain-Desktop/1.0")
-            .send().await.map_err(|e| format!("GET {}: {}", file.filename, e))?;
+            .send().await.map_err(|e| {
+                let _ = fs::remove_dir_all(&target);
+                format!("GET {}: {}", file.filename, e)
+            })?;
 
         if resp.status().is_success() {
-            let bytes = resp.bytes().await.map_err(|e| format!("Bytes {}: {}", file.filename, e))?;
             let dest = target.join(&file.filename);
-            if let Some(p) = dest.parent() { fs::create_dir_all(p).ok(); }
-            fs::write(&dest, &bytes).map_err(|e| format!("Write {}: {}", file.filename, e))?;
-            total += bytes.len() as u64;
+            if let Some(p) = dest.parent() {
+                fs::create_dir_all(p).map_err(|e| {
+                    let _ = fs::remove_dir_all(&target);
+                    format!("mkdir: {}", e)
+                })?;
+            }
+
+            // ── Chunk-Streaming statt resp.bytes().await ──────────────────────────────
+            // bytes_stream() liefert die Antwort in kleinen Häppchen (~8–64 KB),
+            // sodass wir nach jedem Chunk den Fortschritt updaten können.
+            let mut stream = resp.bytes_stream();
+            let mut tok_file = tokio::fs::File::create(&dest).await.map_err(|e| {
+                let _ = fs::remove_dir_all(&target);
+                format!("Datei erstellen {}: {}", file.filename, e)
+            })?;
+
+            let mut file_bytes: u64 = 0;
+            let mut last_emit = Instant::now();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result.map_err(|e| {
+                    let _ = fs::remove_dir_all(&target);
+                    format!("Stream {}: {}", file.filename, e)
+                })?;
+
+                tok_file.write_all(&chunk).await.map_err(|e| {
+                    let _ = fs::remove_dir_all(&target);
+                    format!("Schreiben {}: {}", file.filename, e)
+                })?;
+
+                let chunk_len = chunk.len() as u64;
+                file_bytes        += chunk_len;
+                downloaded_so_far += chunk_len;
+
+                // Throttle: Event nur alle EMIT_INTERVAL_MS ms
+                if last_emit.elapsed().as_millis() >= EMIT_INTERVAL_MS {
+                    last_emit = Instant::now();
+                    let elapsed = download_start.elapsed().as_secs();
+                    let (speed, eta) = calc_speed_and_eta(downloaded_so_far, total_size, elapsed);
+                    let _ = app_handle.emit("model-download-progress", ModelDownloadProgress {
+                        status: "downloading".to_string(),
+                        current_file: file.filename.clone(),
+                        current_file_index: idx + 1,
+                        total_files,
+                        downloaded_bytes: downloaded_so_far,
+                        total_bytes: total_size,
+                        progress_percent: if total_size > 0 {
+                            ((downloaded_so_far as f64 / total_size as f64) * 100.0) as i32
+                        } else { 0 },
+                        speed_mbs: speed,
+                        elapsed_secs: elapsed,
+                        eta_secs: eta,
+                        message: format!("Lade {} … ({} MB / {} MB)",
+                            file.filename,
+                            file_bytes / 1_048_576,
+                            file.size.unwrap_or(0) / 1_048_576,
+                        ),
+                    });
+                }
+            }
+
+            tok_file.flush().await.map_err(|e| format!("Flush {}: {}", file.filename, e))?;
+            // ─────────────────────────────────────────────────────────────────────────
+
+            total += file_bytes;
             count += 1;
+
+            // Emit: Datei abgeschlossen (finale Meldung für diese Datei)
+            {
+                let elapsed = download_start.elapsed().as_secs();
+                let (speed, eta) = calc_speed_and_eta(downloaded_so_far, total_size, elapsed);
+                let _ = app_handle.emit("model-download-progress", ModelDownloadProgress {
+                    status: "downloading".to_string(),
+                    current_file: file.filename.clone(),
+                    current_file_index: idx + 1,
+                    total_files,
+                    downloaded_bytes: downloaded_so_far,
+                    total_bytes: total_size,
+                    progress_percent: if total_size > 0 {
+                        ((downloaded_so_far as f64 / total_size as f64) * 100.0) as i32
+                    } else { 0 },
+                    speed_mbs: speed,
+                    elapsed_secs: elapsed,
+                    eta_secs: eta,
+                    message: format!("{} ✓ ({} MB)", file.filename, file_bytes / 1_048_576),
+                });
+            }
         }
+    }
+
+    // Emit: Gesamter Download abgeschlossen
+    {
+        let elapsed = download_start.elapsed().as_secs();
+        let speed = if elapsed > 0 { (total_size as f32 / 1_048_576.0) / elapsed as f32 } else { 0.0 };
+        let _ = app_handle.emit("model-download-progress", ModelDownloadProgress {
+            status: "complete".to_string(),
+            current_file: String::new(),
+            current_file_index: total_files,
+            total_files,
+            downloaded_bytes: total_size,
+            total_bytes: total_size,
+            progress_percent: 100,
+            speed_mbs: speed,
+            elapsed_secs: elapsed,
+            eta_secs: 0,
+            message: "Download abgeschlossen!".to_string(),
+        });
     }
 
     let mtype = detect_model_type(&target);
@@ -434,4 +618,21 @@ pub async fn download_huggingface_model(
 
     println!("[HF Download] ✅ {} Dateien, {} bytes", count, total);
     Ok(info)
+}
+
+/// Löscht einen unvollständigen Download (bei Abbruch)
+#[tauri::command]
+pub fn cleanup_incomplete_download(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+) -> Result<(), String> {
+    let models_dir = get_models_dir(&app_handle)?;
+    let target = models_dir.join(&model_id);
+
+    if target.exists() {
+        fs::remove_dir_all(&target).map_err(|e| format!("Cleanup fehlgeschlagen: {}", e))?;
+        println!("[HF Download] Gelöscht: {}", target.display());
+    }
+
+    Ok(())
 }

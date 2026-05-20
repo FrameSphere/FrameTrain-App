@@ -1,10 +1,14 @@
 // dataset_manager.rs – vollständige Implementierung
 
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 use chrono::Utc;
+use serde_json;
+use futures_util::StreamExt;
+use tokio::io::AsyncWriteExt;
 
 // ============ Typen ============
 
@@ -26,7 +30,7 @@ pub struct DatasetInfo {
     pub source:         String,
     pub source_path:    Option<String>,
     #[serde(default)]
-    pub storage_path:   String,          // lokaler Speicherpfad
+    pub storage_path:   String,
     pub size_bytes:     u64,
     pub file_count:     usize,
     pub created_at:     String,
@@ -35,7 +39,23 @@ pub struct DatasetInfo {
     pub training_count: i64,
     pub last_used_at:   Option<String>,
     #[serde(default)]
-    pub extensions:     Vec<String>,     // Dateiendungen im Dataset
+    pub extensions:     Vec<String>,
+}
+
+/// Progress-Event für HuggingFace Dataset-Downloads (analog zu ModelDownloadProgress)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DatasetDownloadProgress {
+    pub status:               String,   // "connecting" | "downloading" | "complete" | "error"
+    pub current_file:         String,
+    pub current_file_index:   usize,
+    pub total_files:          usize,
+    pub downloaded_bytes:     u64,
+    pub total_bytes:          u64,
+    pub progress_percent:     i32,
+    pub speed_mbs:            f32,
+    pub elapsed_secs:         u64,
+    pub eta_secs:             u64,
+    pub message:              String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,15 +65,6 @@ pub struct HuggingFaceDataset {
     pub downloads: Option<u64>,
     pub likes:     Option<u64>,
     pub tags:      Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct HFTreeEntry {
-    #[serde(alias = "rfilename", alias = "path")]
-    path: String,
-    size: Option<u64>,
-    #[serde(rename = "type")]
-    entry_type: Option<String>,
 }
 
 // ============ Interne Helfer ============
@@ -117,7 +128,6 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Einzigartige Dateiendungen (lowercase, mit Punkt) in einem Verzeichnis
 fn collect_extensions(dir: &Path) -> Vec<String> {
     let mut exts = std::collections::HashSet::new();
     fn walk(p: &Path, out: &mut std::collections::HashSet<String>) {
@@ -138,44 +148,30 @@ fn collect_extensions(dir: &Path) -> Vec<String> {
     v
 }
 
-// Sammelt nur Dateien im Root-Verzeichnis (nicht in train/val/test/unused)
-// Ignoriert Metadateien
 fn collect_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            
-            let file_name = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-            
-            // Ignoriere Metadateien
+            if !path.is_file() { continue; }
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if matches!(file_name, "dataset_infos.json" | "metadata.json" | ".gitkeep" | ".DS_Store") {
                 continue;
             }
-            
             files.push(path);
         }
     }
     files
 }
 
-// Hilfsfunktion: Sammelt Dateien rekursiv in einem Verzeichnis
 fn collect_files_recursive(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     fn walk(p: &Path, out: &mut Vec<PathBuf>) {
         if let Ok(entries) = fs::read_dir(p) {
             for e in entries.flatten() {
                 let ep = e.path();
-                if ep.is_file() {
-                    out.push(ep);
-                } else if ep.is_dir() {
-                    walk(&ep, out);
-                }
+                if ep.is_file() { out.push(ep); }
+                else if ep.is_dir() { walk(&ep, out); }
             }
         }
     }
@@ -183,7 +179,6 @@ fn collect_files_recursive(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-// Erstellt leeres DatasetInfo mit storage_path und extensions
 fn make_info(
     id: &str, name: &str, model_id: &str, source: &str,
     source_path: Option<String>, target: &Path,
@@ -226,13 +221,11 @@ pub async fn list_datasets_for_model(
         })
         .collect();
 
-    // Deduplizieren: bei gleichem Namen nur den neuesten behalten
     result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     let mut seen = std::collections::HashSet::new();
     result.retain(|d| seen.insert(d.name.clone()));
     result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
-    // training_count aus DB
     if let Ok(db_path) = app_handle.path().app_data_dir().map(|p| p.join("frametrain.db")) {
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
             for ds in &mut result {
@@ -340,10 +333,9 @@ pub async fn split_dataset(
     let ds = all.iter().find(|d| d.id == dataset_id && d.model_id == model_id)
         .ok_or("Dataset nicht gefunden")?.clone();
 
-    // Sammle Dateien nur aus Root (nicht aus Split-Ordnern)
     let files = collect_files(&base);
     let n = files.len();
-    if n == 0 { return Err("Keine Dateien im Dataset zum Splitten (nur Root-Dateien werden gesplittet)".to_string()); }
+    if n == 0 { return Err("Keine Dateien im Dataset zum Splitten".to_string()); }
 
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -372,7 +364,6 @@ pub async fn split_dataset(
         let dst_dir = if slot_idx < train_n { &train_dir }
             else if slot_idx < train_n + val_n { &val_dir }
             else { &test_dir };
-        // Verschiebe (nicht kopiere) die Datei
         fs::rename(src, dst_dir.join(fname))
             .or_else(|_| fs::copy(src, dst_dir.join(fname)).map(|_| ()))
             .ok();
@@ -442,7 +433,7 @@ pub async fn search_huggingface_datasets(
     limit:           Option<u32>,
     filter_task:     Option<String>,
     filter_language: Option<String>,
-    _filter_size:    Option<String>,  // reserviert für spätere Nutzung
+    _filter_size:    Option<String>,
 ) -> Result<Vec<HuggingFaceDataset>, String> {
     let limit = limit.unwrap_or(15);
     let mut url = format!(
@@ -474,91 +465,6 @@ pub async fn search_huggingface_datasets(
 }
 
 #[tauri::command]
-pub async fn get_huggingface_dataset_files(dataset_id: String) -> Result<Vec<serde_json::Value>, String> {
-    let url = format!("https://huggingface.co/api/datasets/{}/tree/main", dataset_id);
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build()
-        .map_err(|e| format!("HTTP: {}", e))?;
-    let resp = client.get(&url).header("User-Agent", "FrameTrain-Desktop/1.0").send().await
-        .map_err(|e| format!("HTTP: {}", e))?;
-    if !resp.status().is_success() { return Err(format!("HF API: {}", resp.status())); }
-    resp.json().await.map_err(|e| format!("JSON: {}", e))
-}
-
-#[tauri::command]
-pub async fn download_huggingface_dataset(
-    app_handle:   tauri::AppHandle,
-    repo_id:      String,
-    dataset_name: String,
-    model_id:     String,
-) -> Result<DatasetInfo, String> {
-    let datasets_dir = get_datasets_dir(&app_handle)?;
-    let dataset_id   = format!("ds_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
-    let target       = datasets_dir.join(&dataset_id);
-    fs::create_dir_all(&target).ok();
-
-    let url = format!("https://huggingface.co/api/datasets/{}/tree/main", repo_id);
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(600)).build()
-        .map_err(|e| format!("HTTP: {}", e))?;
-
-    let resp = client.get(&url).header("User-Agent", "FrameTrain-Desktop/1.0").send().await
-        .map_err(|e| format!("HTTP: {}", e))?;
-    let files: Vec<HFTreeEntry> = if resp.status().is_success() {
-        resp.json().await.unwrap_or_default()
-    } else { vec![] };
-
-    let relevant: Vec<&HFTreeEntry> = files.iter().filter(|f| {
-        if let Some(ref t) = f.entry_type { if t == "directory" { return false; } }
-        let n = f.path.to_lowercase();
-        n.ends_with(".json") || n.ends_with(".jsonl") || n.ends_with(".csv")
-            || n.ends_with(".parquet") || n.ends_with(".txt") || n.ends_with(".arrow")
-            || n.contains("train") || n.contains("test")
-    }).collect();
-
-    let mut total = 0u64; let mut count = 0usize;
-
-    if relevant.is_empty() {
-        for split in &["train", "validation", "test"] {
-            for ext in &["csv", "jsonl", "parquet"] {
-                let fname = format!("{}.{}", split, ext);
-                let dl_url = format!("https://huggingface.co/datasets/{}/resolve/main/{}", repo_id, fname);
-                if let Ok(r) = client.get(&dl_url).header("User-Agent", "FrameTrain-Desktop/1.0").send().await {
-                    if r.status().is_success() {
-                        if let Ok(bytes) = r.bytes().await {
-                            fs::write(target.join(&fname), &bytes).ok();
-                            total += bytes.len() as u64; count += 1; break;
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        for f in &relevant {
-            let dl_url = format!("https://huggingface.co/datasets/{}/resolve/main/{}", repo_id, urlencoding::encode(&f.path));
-            if let Ok(r) = client.get(&dl_url).header("User-Agent", "FrameTrain-Desktop/1.0").send().await {
-                if r.status().is_success() {
-                    if let Ok(bytes) = r.bytes().await {
-                        let dest = target.join(&f.path);
-                        if let Some(p) = dest.parent() { fs::create_dir_all(p).ok(); }
-                        fs::write(&dest, &bytes).ok();
-                        total += bytes.len() as u64; count += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    if count == 0 {
-        fs::remove_dir_all(&target).ok();
-        return Err(format!("Keine Dateien von '{}' heruntergeladen. Versuche lokalen Import.", repo_id));
-    }
-
-    let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
-        Some(repo_id), &target, total, count, "unused", None);
-    upsert_metadata(&datasets_dir, &info)?;
-    Ok(info)
-}
-
-#[tauri::command]
 pub async fn get_dataset_filter_options() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "tasks": ["text-classification","token-classification","question-answering",
@@ -569,20 +475,475 @@ pub async fn get_dataset_filter_options() -> Result<serde_json::Value, String> {
     }))
 }
 
-fn detect_file_split(file_path: &Path, dataset_dir: &Path) -> &'static str {
-    if let Ok(rel) = file_path.strip_prefix(dataset_dir) {
-        let comps: Vec<_> = rel.components().collect();
-        if comps.len() >= 2 {
-            let f = comps[0].as_os_str().to_string_lossy().to_lowercase();
-            match f.as_str() {
-                "train" | "training"             => return "train",
-                "val" | "valid" | "validation"   => return "val",
-                "test" | "testing" | "eval"      => return "test",
-                _ => {}
+/// Parquet-Eintrag aus dem HuggingFace Datasets Server
+#[derive(Debug, Deserialize)]
+struct HfParquetFile {
+    url:      String,
+    filename: String,
+    size:     Option<u64>,
+    split:    Option<String>,
+}
+
+/// Dataset-Download von HuggingFace.
+/// Strategie:
+///   1. Datasets-Server API → direkte Parquet-URLs → echtes Byte-Streaming mit echter Progress Bar
+///   2. Fallback: Python `load_dataset()` → Parquet schreiben (bei nicht indizierten Datasets)
+#[tauri::command]
+pub async fn download_huggingface_dataset(
+    app_handle:   tauri::AppHandle,
+    repo_id:      String,
+    dataset_name: String,
+    model_id:     String,
+) -> Result<DatasetInfo, String> {
+    use std::time::Instant;
+
+    let datasets_dir = get_datasets_dir(&app_handle)?;
+    let dataset_id   = format!("ds_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
+    let target       = datasets_dir.join(&dataset_id);
+    fs::create_dir_all(&target).map_err(|e| format!("mkdir: {}", e))?;
+
+    println!("[HF Dataset] {} → {}", repo_id, target.display());
+
+    // Sofortiges "Verbinde…"-Event
+    let _ = app_handle.emit("dataset-download-progress", DatasetDownloadProgress {
+        status: "connecting".to_string(),
+        current_file: String::new(),
+        current_file_index: 0, total_files: 0,
+        downloaded_bytes: 0, total_bytes: 0, progress_percent: 0,
+        speed_mbs: 0.0, elapsed_secs: 0, eta_secs: 0,
+        message: "Verbinde mit Hugging Face…".to_string(),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("HTTP client: {}", e))?;
+
+    // ── Schritt 1: Datasets Server API abfragen ──
+    let api_url = format!(
+        "https://datasets-server.huggingface.co/parquet?dataset={}",
+        urlencoding::encode(&repo_id)
+    );
+    println!("[HF Dataset] Datasets Server API: {}", api_url);
+
+    let api_result = client.get(&api_url)
+        .header("User-Agent", "FrameTrain-Desktop/1.0")
+        .send().await;
+
+    if let Ok(resp) = api_result {
+        if resp.status().is_success() {
+            if let Ok(api_json) = resp.json::<serde_json::Value>().await {
+                let parquet_files: Vec<HfParquetFile> = api_json
+                    .get("parquet_files")
+                    .and_then(|f| f.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect())
+                    .unwrap_or_default();
+
+                if !parquet_files.is_empty() {
+                    println!("[HF Dataset] Datasets Server: {} Parquet-Dateien gefunden", parquet_files.len());
+                    return download_parquet_direct(
+                        app_handle, client, parquet_files, target,
+                        dataset_id, dataset_name, model_id, datasets_dir, repo_id,
+                    ).await;
+                }
             }
         }
     }
-    "unsplit"
+
+    // ── Schritt 2: Fallback → Python ──
+    println!("[HF Dataset] Datasets Server nicht verfügbar – Fallback auf Python");
+    download_via_python(
+        app_handle, repo_id, target,
+        dataset_id, dataset_name, model_id, datasets_dir,
+    ).await
+}
+
+/// Lädt Parquet-Dateien direkt von HuggingFace mit echtem Byte-Streaming und Progress-Events.
+async fn download_parquet_direct(
+    app_handle:   tauri::AppHandle,
+    client:       reqwest::Client,
+    files:        Vec<HfParquetFile>,
+    target:       PathBuf,
+    dataset_id:   String,
+    dataset_name: String,
+    model_id:     String,
+    datasets_dir: PathBuf,
+    repo_id:      String,
+) -> Result<DatasetInfo, String> {
+    use std::time::Instant;
+
+    let total_files  = files.len();
+    let total_bytes: u64 = files.iter().filter_map(|f| f.size).sum();
+    let download_start = Instant::now();
+    let mut global_downloaded: u64 = 0;
+
+    for (file_idx, hf_file) in files.iter().enumerate() {
+        let file_name = if hf_file.filename.is_empty() {
+            format!("file_{}.parquet", file_idx)
+        } else {
+            hf_file.filename.clone()
+        };
+        let output_path = target.join(&file_name);
+
+        println!("[HF Dataset] Lade Datei {}/{}: {}", file_idx + 1, total_files, file_name);
+
+        // Datei-Download mit Chunk-Streaming
+        let response = client.get(&hf_file.url)
+            .header("User-Agent", "FrameTrain-Desktop/1.0")
+            .send().await
+            .map_err(|e| format!("HTTP GET '{}': {}", file_name, e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} für Datei '{}'", response.status(), file_name));
+        }
+
+        // Content-Length für diese Datei ermitteln (falls nicht in API)
+        let file_total = hf_file.size
+            .or_else(|| response.content_length())
+            .unwrap_or(0);
+
+        let mut output_file = tokio::fs::File::create(&output_path).await
+            .map_err(|e| format!("Datei erstellen '{}': {}", file_name, e))?;
+
+        let mut file_downloaded: u64 = 0;
+        let mut stream = response.bytes_stream();
+        let mut last_emit = Instant::now();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| format!("Chunk-Fehler: {}", e))?;
+            output_file.write_all(&chunk).await
+                .map_err(|e| format!("Schreiben '{}': {}", file_name, e))?;
+
+            file_downloaded  += chunk.len() as u64;
+            global_downloaded += chunk.len() as u64;
+
+            // Nicht jeden Chunk emitten – max. ~30 mal pro Sekunde
+            if last_emit.elapsed().as_millis() >= 33 {
+                last_emit = Instant::now();
+                let elapsed      = download_start.elapsed().as_secs();
+                let global_pct   = if total_bytes > 0 {
+                    ((global_downloaded as f64 / total_bytes as f64) * 100.0) as i32
+                } else {
+                    let file_pct = if file_total > 0 { (file_downloaded as f64 / file_total as f64) * 100.0 } else { 0.0 };
+                    (((file_idx as f64 + file_pct / 100.0) / total_files as f64) * 100.0) as i32
+                };
+                let speed = if elapsed > 0 {
+                    (global_downloaded as f32 / 1_048_576.0) / elapsed as f32
+                } else { 0.0 };
+                let eta = if speed > 0.0 && total_bytes > global_downloaded {
+                    ((total_bytes - global_downloaded) as f32 / (speed * 1_048_576.0)) as u64
+                } else { 0 };
+
+                let split_label = hf_file.split.as_deref().unwrap_or("?");
+                let _ = app_handle.emit("dataset-download-progress", DatasetDownloadProgress {
+                    status: "downloading".to_string(),
+                    current_file: format!("{} ({})", file_name, split_label),
+                    current_file_index: file_idx + 1,
+                    total_files,
+                    downloaded_bytes: global_downloaded,
+                    total_bytes,
+                    progress_percent: global_pct.clamp(0, 99),
+                    speed_mbs: speed,
+                    elapsed_secs: elapsed,
+                    eta_secs: eta,
+                    message: format!("Datei {}/{}: {}", file_idx + 1, total_files, file_name),
+                });
+            }
+        }
+
+        // Datei-Handle schließen
+        drop(output_file);
+
+        let actual_size = fs::metadata(&output_path).map(|m| m.len()).unwrap_or(file_downloaded);
+        let elapsed = download_start.elapsed().as_secs();
+        let speed = if elapsed > 0 { (global_downloaded as f32 / 1_048_576.0) / elapsed as f32 } else { 0.0 };
+
+        let global_pct = if total_bytes > 0 {
+            ((global_downloaded as f64 / total_bytes as f64) * 100.0) as i32
+        } else {
+            (((file_idx + 1) as f64 / total_files as f64) * 100.0) as i32
+        };
+        let eta = if speed > 0.0 && total_bytes > global_downloaded {
+            ((total_bytes - global_downloaded) as f32 / (speed * 1_048_576.0)) as u64
+        } else { 0 };
+
+        let split_label = hf_file.split.as_deref().unwrap_or("?");
+        let _ = app_handle.emit("dataset-download-progress", DatasetDownloadProgress {
+            status: "downloading".to_string(),
+            current_file: format!("{} ({})", file_name, split_label),
+            current_file_index: file_idx + 1,
+            total_files,
+            downloaded_bytes: global_downloaded,
+            total_bytes,
+            progress_percent: global_pct.clamp(0, 99),
+            speed_mbs: speed,
+            elapsed_secs: elapsed,
+            eta_secs: eta,
+            message: format!("{} ✓ ({:.1} MB)", file_name, actual_size as f64 / 1_048_576.0),
+        });
+
+        println!("[HF Dataset] ✓ {} ({} bytes)", file_name, actual_size);
+    }
+
+    // Abschluss-Event
+    let elapsed = download_start.elapsed().as_secs();
+    let (total_size, file_count) = dir_size(&target);
+    let speed = if elapsed > 0 { (total_size as f32 / 1_048_576.0) / elapsed as f32 } else { 0.0 };
+
+    let _ = app_handle.emit("dataset-download-progress", DatasetDownloadProgress {
+        status: "complete".to_string(),
+        current_file: String::new(),
+        current_file_index: file_count,
+        total_files: file_count,
+        downloaded_bytes: total_size,
+        total_bytes: total_size,
+        progress_percent: 100,
+        speed_mbs: speed,
+        elapsed_secs: elapsed,
+        eta_secs: 0,
+        message: format!("Fertig! ({} Dateien, {:.1} MB)", file_count, total_size as f64 / 1_048_576.0),
+    });
+
+    let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
+        Some(repo_id), &target, total_size, file_count, "unused", None);
+    upsert_metadata(&datasets_dir, &info)?;
+
+    println!("[HF Dataset] ✅ {} Dateien, {} bytes", file_count, total_size);
+    Ok(info)
+}
+
+/// Fallback: Download via Python `datasets`-Library (für nicht-indexierte Datasets).
+/// Fortschritt kann nur grob per Split-Event gemeldet werden.
+async fn download_via_python(
+    app_handle:   tauri::AppHandle,
+    repo_id:      String,
+    target:       PathBuf,
+    dataset_id:   String,
+    dataset_name: String,
+    model_id:     String,
+    datasets_dir: PathBuf,
+) -> Result<DatasetInfo, String> {
+    use std::time::Instant;
+    use std::process::{Command, Stdio};
+
+    let _ = app_handle.emit("dataset-download-progress", DatasetDownloadProgress {
+        status: "preparing".to_string(),
+        current_file: String::new(),
+        current_file_index: 0, total_files: 0,
+        downloaded_bytes: 0, total_bytes: 0, progress_percent: 0,
+        speed_mbs: 0.0, elapsed_secs: 0, eta_secs: 0,
+        message: format!("Lade '{}' via Python datasets…", repo_id),
+    });
+
+    let python_script = r#"
+import sys
+import json
+from datasets import load_dataset, get_dataset_config_names
+from pathlib import Path
+
+repo_id = sys.argv[1]
+target = Path(sys.argv[2])
+target.mkdir(parents=True, exist_ok=True)
+
+def emit(obj):
+    print(json.dumps(obj), flush=True)
+
+try:
+    dataset = None
+    config_name = None
+
+    emit({"type": "status", "phase": "loading", "message": f"Lade '{repo_id}' von Hugging Face..."})
+
+    try:
+        dataset = load_dataset(repo_id)
+    except Exception as e:
+        error_msg = str(e)
+        if "Config name is missing" in error_msg or "Please pick one among" in error_msg:
+            emit({"type": "status", "phase": "config", "message": "Dataset benötigt eine Config – lade verfügbare Configs..."})
+            configs = get_dataset_config_names(repo_id)
+            if not configs:
+                raise Exception(f"Keine Configs für '{repo_id}' gefunden.")
+            config_name = configs[0]
+            emit({"type": "status", "phase": "config", "message": f"Verwende Config '{config_name}' (verfügbar: {configs})"})
+            emit({"type": "status", "phase": "loading", "message": f"Lade '{repo_id}' mit Config '{config_name}'..."})
+            dataset = load_dataset(repo_id, config_name)
+        else:
+            raise
+
+    splits = dataset if isinstance(dataset, dict) else {"default": dataset}
+    total_splits = len(splits)
+    emit({"type": "status", "phase": "saving", "message": f"Dataset geladen! Speichere {total_splits} Split(s) als Parquet..."})
+
+    file_count = 0
+    total_size = 0
+    for split_name, split_data in splits.items():
+        emit({"type": "status", "phase": "saving", "message": f"Schreibe Split '{split_name}' ({len(split_data)} Zeilen)..."})
+        output_file = target / f"{split_name}.parquet"
+        split_data.to_parquet(str(output_file))
+        file_size = output_file.stat().st_size
+        total_size += file_size
+        file_count += 1
+        emit({"type": "file_done", "split": split_name, "size": file_size, "total_files": total_splits, "file_index": file_count})
+
+    emit({"type": "complete", "files": file_count, "total_size": total_size, "config": config_name or "default"})
+
+except Exception as e:
+    print(json.dumps({"type": "error", "message": str(e)}), file=sys.stderr, flush=True)
+    sys.exit(1)
+"#;
+
+    let script_file = std::env::temp_dir().join("hf_dataset_download.py");
+    fs::write(&script_file, python_script)
+        .map_err(|e| format!("Script schreiben: {}", e))?;
+
+    let python_cmd = if Command::new("python3").arg("--version").output().is_ok() { "python3" }
+                     else if Command::new("python").arg("--version").output().is_ok() { "python" }
+                     else { return Err("Python nicht gefunden".to_string()); };
+
+    let mut child = Command::new(python_cmd)
+        .arg(&script_file)
+        .arg(&repo_id)
+        .arg(target.to_string_lossy().to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Python spawn: {}", e))?;
+
+    let stdout_pipe = child.stdout.take().expect("stdout pipe");
+    let stderr_pipe = child.stderr.take().expect("stderr pipe");
+
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = String::new();
+        BufReader::new(stderr_pipe).read_to_string(&mut buf).ok();
+        buf
+    });
+
+    let download_start = Instant::now();
+    let mut count = 0usize;
+    let mut total_written = 0u64;
+    let mut total_splits_known = 0usize;
+
+    // stdout-Loop in spawn_blocking, damit der tokio-Thread nicht blockiert wird
+    let app_clone = app_handle.clone();
+    let stdout_result: Result<(), String> = tokio::task::spawn_blocking(move || {
+        for line in BufReader::new(stdout_pipe).lines().flatten() {
+            println!("[HF Dataset] py> {}", line);
+
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&line) {
+                let elapsed = download_start.elapsed().as_secs();
+
+                match json_val.get("type").and_then(|t| t.as_str()).unwrap_or("") {
+                    "status" => {
+                        let msg = json_val.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                        let _ = app_clone.emit("dataset-download-progress", DatasetDownloadProgress {
+                            status: "preparing".to_string(),
+                            current_file: String::new(),
+                            current_file_index: 0,
+                            total_files: total_splits_known,
+                            downloaded_bytes: 0,
+                            total_bytes: 0,
+                            progress_percent: 0,
+                            speed_mbs: 0.0,
+                            elapsed_secs: elapsed,
+                            eta_secs: 0,
+                            message: msg,
+                        });
+                    }
+                    "file_done" => {
+                        if let Some(size) = json_val.get("size").and_then(|s| s.as_u64()) {
+                            let split = json_val.get("split").and_then(|s| s.as_str()).unwrap_or("split").to_string();
+                            total_splits_known = json_val.get("total_files").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
+                            let file_index = json_val.get("file_index").and_then(|i| i.as_u64()).unwrap_or(1) as usize;
+                            count += 1;
+                            total_written += size;
+                            let pct = if total_splits_known > 0 {
+                                ((file_index as f32 / total_splits_known as f32) * 100.0) as i32
+                            } else { 0 };
+                            let speed = if elapsed > 0 { (total_written as f32 / 1_048_576.0) / elapsed as f32 } else { 0.0 };
+                            let _ = app_clone.emit("dataset-download-progress", DatasetDownloadProgress {
+                                status: "downloading".to_string(),
+                                current_file: format!("{}.parquet", split),
+                                current_file_index: file_index,
+                                total_files: total_splits_known,
+                                downloaded_bytes: total_written,
+                                total_bytes: total_written,
+                                progress_percent: pct,
+                                speed_mbs: speed,
+                                elapsed_secs: elapsed,
+                                eta_secs: 0,
+                                message: format!("{} ✓ ({:.1} MB)", split, size as f64 / 1_048_576.0),
+                            });
+                        }
+                    }
+                    "complete" => {
+                        if let (Some(files), Some(size)) = (
+                            json_val.get("files").and_then(|f| f.as_u64()),
+                            json_val.get("total_size").and_then(|s| s.as_u64()),
+                        ) {
+                            let speed = if elapsed > 0 { (size as f32 / 1_048_576.0) / elapsed as f32 } else { 0.0 };
+                            let _ = app_clone.emit("dataset-download-progress", DatasetDownloadProgress {
+                                status: "complete".to_string(),
+                                current_file: String::new(),
+                                current_file_index: files as usize,
+                                total_files: files as usize,
+                                downloaded_bytes: size,
+                                total_bytes: size,
+                                progress_percent: 100,
+                                speed_mbs: speed,
+                                elapsed_secs: elapsed,
+                                eta_secs: 0,
+                                message: format!("Fertig! ({} Splits, {:.1} MB)", files, size as f64 / 1_048_576.0),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }).await.map_err(|e| format!("spawn_blocking: {}", e))?;
+
+    stdout_result?;
+
+    let exit_status = child.wait().map_err(|e| format!("Wait: {}", e))?;
+    let stderr = stderr_handle.join().unwrap_or_default();
+    fs::remove_file(&script_file).ok();
+
+    if !exit_status.success() {
+        fs::remove_dir_all(&target).ok();
+        let user_error = stderr.lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("error"))
+            .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
+            .unwrap_or_else(|| stderr.trim().to_string());
+        return Err(format!("Dataset download fehlgeschlagen: {}", user_error));
+    }
+
+    // Fallback: Ordner scannen wenn keine Events ankamen
+    if count == 0 {
+        if let Ok(entries) = fs::read_dir(&target) {
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    if meta.is_file() { count += 1; total_written += meta.len(); }
+                }
+            }
+        }
+    }
+
+    if count == 0 {
+        fs::remove_dir_all(&target).ok();
+        return Err(format!(
+            "Keine Dateien von '{}' heruntergeladen. Das Dataset könnte nicht zugänglich sein.",
+            repo_id
+        ));
+    }
+
+    let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
+        Some(repo_id), &target, total_written, count, "unused", None);
+    upsert_metadata(&datasets_dir, &info)?;
+
+    println!("[HF Dataset] ✅ {} Dateien, {} bytes", count, total_written);
+    Ok(info)
 }
 
 #[tauri::command]
@@ -593,15 +954,13 @@ pub async fn get_dataset_files(
     let datasets_dir = get_datasets_dir(&app_handle)?;
     let dataset_dir  = datasets_dir.join(&dataset_id);
     if !dataset_dir.exists() { return Ok(vec![]); }
-    
+
     let mut files: Vec<serde_json::Value> = Vec::new();
-    
-    // 1. Sammle Dateien aus Split-Ordnern (train / val / test) mit rekursiver Suche
+
     for split in &["train", "val", "test"] {
         let split_dir = dataset_dir.join(split);
         if split_dir.exists() {
-            let split_files = collect_files_recursive(&split_dir);
-            for file in split_files {
+            for file in collect_files_recursive(&split_dir) {
                 if let Ok(meta) = fs::metadata(&file) {
                     files.push(serde_json::json!({
                         "name":   file.file_name().unwrap_or_default().to_string_lossy(),
@@ -614,12 +973,10 @@ pub async fn get_dataset_files(
             }
         }
     }
-    
-    // 2. Sammle Dateien aus "unused/" (noch nicht gesplittet)
+
     let unused_dir = dataset_dir.join("unused");
     if unused_dir.exists() {
-        let unused_files = collect_files_recursive(&unused_dir);
-        for file in unused_files {
+        for file in collect_files_recursive(&unused_dir) {
             if let Ok(meta) = fs::metadata(&file) {
                 files.push(serde_json::json!({
                     "name":   file.file_name().unwrap_or_default().to_string_lossy(),
@@ -631,29 +988,17 @@ pub async fn get_dataset_files(
             }
         }
     }
-    
-    // 3. Sammle Dateien direkt im Root (überspringen wir bekannte Unterordner)
+
     if let Ok(entries) = fs::read_dir(&dataset_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let file_name = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-            
-            // Überspringe bekannte Unterordner
-            if matches!(file_name, "train" | "val" | "test" | "unused" | "images" | "labels") {
-                continue;
-            }
-            
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if matches!(file_name, "train" | "val" | "test" | "unused" | "images" | "labels") { continue; }
             if path.is_file() {
                 if let Ok(meta) = fs::metadata(&path) {
-                    // Bestimme das Tag basierend auf Dateiname
                     let tag = if matches!(file_name, "dataset_infos.json" | "metadata.json" | ".gitkeep" | ".DS_Store") {
                         "info"
-                    } else {
-                        "unsplit"
-                    };
-                    
+                    } else { "unsplit" };
                     files.push(serde_json::json!({
                         "name":   file_name,
                         "path":   path.to_string_lossy(),
@@ -665,7 +1010,7 @@ pub async fn get_dataset_files(
             }
         }
     }
-    
+
     Ok(files)
 }
 
@@ -700,25 +1045,20 @@ pub async fn move_dataset_files(
 ) -> Result<(), String> {
     let datasets_dir = get_datasets_dir(&app_handle)?;
     let dataset_dir = datasets_dir.join(&dataset_id);
-    
-    // Erstelle das Ziel-Split-Verzeichnis falls nötig
     let target_dir = dataset_dir.join(&target_split);
-    fs::create_dir_all(&target_dir).map_err(|e| format!("Konnte Verzeichnis nicht erstellen: {}", e))?;
-    
+    fs::create_dir_all(&target_dir).map_err(|e| format!("mkdir: {}", e))?;
+
     for fp in &file_paths {
         let src = Path::new(fp);
         if src.exists() && src.is_file() {
             let fname = src.file_name().unwrap_or_default();
             let dst = target_dir.join(fname);
-            
-            // Versuche zu verschieben, bei Fehler kopieren und original löschen
             if let Err(_) = fs::rename(src, &dst) {
                 fs::copy(src, &dst).map_err(|e| format!("Copy: {}", e))?;
                 fs::remove_file(src).map_err(|e| format!("Delete original: {}", e))?;
             }
         }
     }
-    
     Ok(())
 }
 

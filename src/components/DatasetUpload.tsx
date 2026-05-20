@@ -53,6 +53,15 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function formatTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 function formatDate(ds: string): string {
   return new Date(ds).toLocaleDateString('de-DE', {
     day: '2-digit', month: '2-digit', year: 'numeric',
@@ -130,8 +139,19 @@ export default function DatasetUpload() {
   const [selectedHfDataset, setSelectedHfDataset] = useState<HuggingFaceDataset | null>(null);
   const [hfDatasetName, setHfDatasetName] = useState('');
   const [downloading, setDownloading] = useState(false);
-  const [downloadStatus, setDownloadStatus] = useState('');
-  const downloadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    status: string;
+    currentFile: string;
+    currentFileIndex: number;
+    totalFiles: number;
+    downloadedBytes: number;
+    totalBytes: number;
+    progressPercent: number;
+    speedMbs: number;
+    elapsedSecs: number;
+    etaSecs: number;
+    message: string;
+  } | null>(null);
 
   // HF Filters
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
@@ -155,7 +175,6 @@ export default function DatasetUpload() {
 
   // File manager
   const [fileManagerDataset, setFileManagerDataset] = useState<DatasetInfo | null>(null);
-
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Init ──
@@ -175,6 +194,61 @@ export default function DatasetUpload() {
       ),
     ].join('\n'));
   }, [models, selectedModelId, datasets, setCurrentPageContent]);
+
+  // ── Download Progress Listener ──
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupListener = async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<{
+          status: string;
+          current_file: string;
+          current_file_index: number;
+          total_files: number;
+          downloaded_bytes: number;
+          total_bytes: number;
+          progress_percent: number;
+          speed_mbs: number;
+          elapsed_secs: number;
+          eta_secs: number;
+          message: string;
+        }>('dataset-download-progress', (event) => {
+          const progress = event.payload;
+          setDownloadProgress({
+            status: progress.status,
+            currentFile: progress.current_file,
+            currentFileIndex: progress.current_file_index,
+            totalFiles: progress.total_files,
+            downloadedBytes: progress.downloaded_bytes,
+            totalBytes: progress.total_bytes,
+            progressPercent: progress.progress_percent,
+            speedMbs: progress.speed_mbs,
+            elapsedSecs: progress.elapsed_secs,
+            etaSecs: progress.eta_secs,
+            message: progress.message,
+          });
+
+          if (progress.status === 'complete') {
+            setDownloading(false);
+          } else if (progress.status === 'error') {
+            setDownloading(false);
+          }
+        });
+      } catch {
+        // Fallback: keine Events verfügbar
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
 
   // Debounced HF search
   useEffect(() => {
@@ -287,36 +361,28 @@ export default function DatasetUpload() {
       return;
     }
     setDownloading(true);
-    setDownloadStatus('Verbinde mit Hugging Face…');
-    const steps = ['Lade Konfiguration…', 'Lade Trainingsdaten…', 'Lade Validierungsdaten…', 'Speichere Dateien…', 'Fast fertig…'];
-    let si = 0;
-    downloadIntervalRef.current = setInterval(() => {
-      si = (si + 1) % steps.length;
-      setDownloadStatus(steps[si]);
-    }, 2000);
+    setDownloadProgress(null);
 
     try {
       const ds = await invoke<DatasetInfo>('download_huggingface_dataset', {
         repoId: selectedHfDataset.id, datasetName: hfDatasetName.trim(), modelId: selectedModelId,
       });
-      clearInterval(downloadIntervalRef.current!);
       success('Download abgeschlossen!', `„${ds.name}" wurde heruntergeladen.`);
-      closeModal();
+      setSelectedHfDataset(null); setHfDatasetName(''); setHfQuery(''); setHfResults([]);
+      setShowImportModal(false);
+      setDownloadProgress(null);
       await loadDatasets();
     } catch (err: unknown) {
-      clearInterval(downloadIntervalRef.current!);
       error('Download fehlgeschlagen', String(err));
-      setDownloadStatus('');
     } finally {
       setDownloading(false);
     }
   };
 
-  const handleCancelDownload = () => {
+  const handleCancelDownload = async () => {
     setDownloading(false);
-    setDownloadStatus('');
-    if (downloadIntervalRef.current) clearInterval(downloadIntervalRef.current);
-    info('Abgebrochen', 'Der Download wurde abgebrochen.');
+    setDownloadProgress(null);
+    info('Abgebrochen', 'Der Download wurde abgebrochen. Unvollständige Dateien werden gelöscht.');
   };
 
   // ── Split ──
@@ -387,7 +453,7 @@ export default function DatasetUpload() {
     setShowImportModal(false);
     setSelectedPath(null); setDatasetName(''); setDirInfo(null);
     setSelectedHfDataset(null); setHfDatasetName('');
-    setHfQuery(''); setHfResults([]); setDownloadStatus('');
+    setHfQuery(''); setHfResults([]); setDownloadProgress(null);
     setFilterTask(''); setFilterLanguage(''); setFilterSize('');
   };
 
@@ -829,34 +895,111 @@ export default function DatasetUpload() {
                         />
                       </div>
 
-                      <button
-                        onClick={handleHfDownload} disabled={downloading || !hfDatasetName.trim()}
-                        className={`w-full relative overflow-hidden rounded-xl text-white text-sm font-medium transition-all disabled:cursor-not-allowed ${
-                          downloading ? 'bg-white/10' : `bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90`
-                        }`}
-                      >
-                        {downloading && (
-                          <div className="absolute inset-0">
-                            <div className={`absolute inset-0 bg-gradient-to-r ${currentTheme.colors.gradient} opacity-25`} />
-                            <div className={`absolute inset-y-0 w-1/3 bg-gradient-to-r ${currentTheme.colors.gradient} opacity-50 animate-[progress-slide_1.5s_ease-in-out_infinite]`} />
-                          </div>
-                        )}
-                        <div className="relative flex flex-col items-center py-3">
-                          {downloading ? (
-                            <><div className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Lade herunter…</div>
-                            {downloadStatus && <span className="text-xs text-white/60 mt-0.5">{downloadStatus}</span>}</>
-                          ) : (
-                            <div className="flex items-center gap-2"><Download className="w-4 h-4" /> Dataset herunterladen</div>
-                          )}
-                        </div>
-                      </button>
+                      {/* Download Progress Display */}
+                      {downloading && downloadProgress ? (
+                      <div className="space-y-3 p-3 rounded-xl bg-black/30 border border-white/5">
 
-                      {downloading ? (
-                        <button onClick={handleCancelDownload} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 text-sm transition-all">
-                          <X className="w-4 h-4" /> Abbrechen
-                        </button>
+                      {/* ── Phase 1: Vorbereitung / Python-Loading (kein echter Byte-Progress) ── */}
+                      {(downloadProgress.status === 'connecting' || downloadProgress.status === 'preparing' || (downloadProgress.status === 'downloading' && downloadProgress.totalFiles === 0)) ? (
+                      <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                          <Loader2 className="w-5 h-5 text-white animate-spin flex-shrink-0" />
+                          <div className="min-w-0">
+                              <p className="text-white text-sm font-medium truncate" title={downloadProgress.message}>
+                                    {downloadProgress.message || 'Verbinde…'}
+                              </p>
+                              <p className="text-gray-500 text-xs mt-0.5">
+                              Verstrichene Zeit: {formatTime(downloadProgress.elapsedSecs)}
+                          </p>
+                        </div>
+                        </div>
+                          {/* Indeterminate Progress Bar */}
+                              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full bg-gradient-to-r ${currentTheme.colors.gradient} rounded-full animate-pulse`}
+                            style={{ width: '60%' }}
+                        />
+                      </div>
+                      <p className="text-gray-600 text-xs text-center">
+                        Das Dataset wird geladen und konvertiert – dies kann einige Minuten dauern…
+                      </p>
+                                    </div>
+
                       ) : (
-                        <p className="text-xs text-gray-600 text-center">Download-Dauer hängt von der Datenmenge ab</p>
+                            /* ── Phase 2: Echter Download (Bytes bekannt) ── */
+                        <div className="space-y-3">
+                          {/* Status & Percentage */}
+                        <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 text-white animate-spin" />
+                            <span className="text-white text-sm font-medium">{downloadProgress.progressPercent}%</span>
+                          </div>
+                        <span className="text-xs text-gray-400">
+                          {formatBytes(downloadProgress.downloadedBytes)} / {formatBytes(downloadProgress.totalBytes)}
+                          </span>
+                        </div>
+
+                      {/* Progress Bar */}
+                        <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                                  className={`h-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all duration-300`}
+                              style={{ width: `${downloadProgress.progressPercent}%` }}
+                            />
+                        </div>
+
+                          {/* File Info */}
+                        <div className="flex items-center justify-between">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-white text-xs truncate" title={downloadProgress.currentFile}>
+                                    {downloadProgress.currentFile || downloadProgress.message || 'Wird vorbereitet…'}
+                                  </p>
+                                  <p className="text-gray-500 text-xs">
+                                    Datei {downloadProgress.currentFileIndex} von {downloadProgress.totalFiles}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Speed & ETA */}
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="text-center">
+                                  <p className="text-gray-500 text-xs">Geschwindigkeit</p>
+                                  <p className="text-white text-sm font-medium">{downloadProgress.speedMbs.toFixed(1)} MB/s</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-gray-500 text-xs">Verstrichene Zeit</p>
+                                  <p className="text-white text-sm font-medium">{formatTime(downloadProgress.elapsedSecs)}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-gray-500 text-xs">Verbleibend</p>
+                                  <p className="text-white text-sm font-medium">{downloadProgress.etaSecs > 0 ? formatTime(downloadProgress.etaSecs) : '—'}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Cancel Button – immer sichtbar */}
+                          <button
+                            onClick={handleCancelDownload}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 text-sm transition-all"
+                          >
+                            <X className="w-4 h-4" /> Download abbrechen
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={handleHfDownload} disabled={!hfDatasetName.trim()}
+                            className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-white text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                              !hfDatasetName.trim() ? 'bg-white/5' : `bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90`
+                            }`}
+                          >
+                            <Download className="w-4 h-4" /> Dataset herunterladen
+                          </button>
+
+                          <p className="text-xs text-gray-600 text-center">
+                            Download-Dauer hängt von der Datenmenge ab
+                          </p>
+                        </>
                       )}
                     </div>
                   )}

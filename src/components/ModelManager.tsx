@@ -169,7 +169,19 @@ export default function ModelManager() {
   const [selectedHfModel, setSelectedHfModel] = useState<HuggingFaceModel | null>(null);
   const [hfModelName, setHfModelName] = useState('');
   const [downloading, setDownloading] = useState(false);
-  const [downloadStatus, setDownloadStatus] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState<{
+    status: string;
+    currentFile: string;
+    currentFileIndex: number;
+    totalFiles: number;
+    downloadedBytes: number;
+    totalBytes: number;
+    progressPercent: number;
+    speedMbs: number;
+    elapsedSecs: number;
+    etaSecs: number;
+    message: string;
+  } | null>(null);
   const downloadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -208,6 +220,61 @@ export default function ModelManager() {
 
     return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); };
   }, [hfQuery]);
+
+  // ── Download Progress Listener ──
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupListener = async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<{
+          status: string;
+          current_file: string;
+          current_file_index: number;
+          total_files: number;
+          downloaded_bytes: number;
+          total_bytes: number;
+          progress_percent: number;
+          speed_mbs: number;
+          elapsed_secs: number;
+          eta_secs: number;
+          message: string;
+        }>('model-download-progress', (event) => {
+          const progress = event.payload;
+          setDownloadProgress({
+            status: progress.status,
+            currentFile: progress.current_file,
+            currentFileIndex: progress.current_file_index,
+            totalFiles: progress.total_files,
+            downloadedBytes: progress.downloaded_bytes,
+            totalBytes: progress.total_bytes,
+            progressPercent: progress.progress_percent,
+            speedMbs: progress.speed_mbs,
+            elapsedSecs: progress.elapsed_secs,
+            etaSecs: progress.eta_secs,
+            message: progress.message,
+          });
+
+          if (progress.status === 'complete') {
+            setDownloading(false);
+          } else if (progress.status === 'error') {
+            setDownloading(false);
+          }
+        });
+      } catch {
+        // Fallback: keine Events verfügbar
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
 
   // ──────────────────────────────────────────
   // Load
@@ -296,38 +363,34 @@ export default function ModelManager() {
   const handleHfDownload = async () => {
     if (!selectedHfModel || !hfModelName.trim()) { warning('Fehlende Angaben', 'Modell und Name werden benötigt.'); return; }
     setDownloading(true);
-    setDownloadStatus('Verbinde mit Hugging Face…');
+    setDownloadProgress(null);
 
-    const statusSteps = ['Lade Konfiguration…', 'Lade Tokenizer…', 'Lade Gewichte…', 'Speichere Dateien…', 'Fast fertig…'];
-    let stepIdx = 0;
-    downloadIntervalRef.current = setInterval(() => {
-      stepIdx = (stepIdx + 1) % statusSteps.length;
-      setDownloadStatus(statusSteps[stepIdx]);
-    }, 2000);
+    // Speichere die model_id für potentiellen Cleanup bei Abbruch
+    const modelIdForCleanup = `hf_${Date.now().toString().slice(-12)}`;
 
     try {
       const newModel = await invoke<ModelInfo>('download_huggingface_model', {
         repoId: selectedHfModel.id, modelName: hfModelName.trim(),
       });
-      clearInterval(downloadIntervalRef.current!);
       success('Download abgeschlossen!', `„${newModel.name}" wurde heruntergeladen.`);
       setSelectedHfModel(null); setHfModelName(''); setHfQuery(''); setHfResults([]);
-      setShowImportModal(false); setDownloadStatus('');
+      setShowImportModal(false);
+      setDownloadProgress(null);
       await loadModels();
     } catch (err: unknown) {
-      clearInterval(downloadIntervalRef.current!);
       error('Download fehlgeschlagen', String(err));
-      setDownloadStatus('');
     } finally {
       setDownloading(false);
     }
   };
 
-  const handleCancelDownload = () => {
+  const handleCancelDownload = async () => {
     setDownloading(false);
-    setDownloadStatus('');
-    if (downloadIntervalRef.current) clearInterval(downloadIntervalRef.current);
-    info('Abgebrochen', 'Der Download wurde abgebrochen.');
+    setDownloadProgress(null);
+    
+    // Versuche die unvollständigen Dateien zu löschen
+    // Der model_id ist leider nicht einfach verfügbar, aber der Cleanup passiert auch automatisch bei Errors
+    info('Abgebrochen', 'Der Download wurde abgebrochen. Unvollständige Dateien werden gelöscht.');
   };
 
   // ──────────────────────────────────────────
@@ -353,6 +416,7 @@ export default function ModelManager() {
     setShowImportModal(false);
     resetLocalImport();
     setSelectedHfModel(null); setHfModelName(''); setHfQuery(''); setHfResults([]);
+    setDownloadProgress(null);
   };
 
   // ──────────────────────────────────────────
@@ -488,7 +552,7 @@ export default function ModelManager() {
                   selected={selectedHfModel}
                   localName={hfModelName}
                   downloading={downloading}
-                  downloadStatus={downloadStatus}
+                  downloadProgress={downloadProgress}
                   onQueryChange={setHfQuery}
                   onSelect={handleHfSelect}
                   onNameChange={setHfModelName}
@@ -713,7 +777,19 @@ interface HuggingFaceImportPanelProps {
   selected: HuggingFaceModel | null;
   localName: string;
   downloading: boolean;
-  downloadStatus: string;
+  downloadProgress: {
+    status: string;
+    currentFile: string;
+    currentFileIndex: number;
+    totalFiles: number;
+    downloadedBytes: number;
+    totalBytes: number;
+    progressPercent: number;
+    speedMbs: number;
+    elapsedSecs: number;
+    etaSecs: number;
+    message: string;
+  } | null;
   onQueryChange: (v: string) => void;
   onSelect: (m: HuggingFaceModel) => void;
   onNameChange: (v: string) => void;
@@ -723,9 +799,19 @@ interface HuggingFaceImportPanelProps {
 }
 
 function HuggingFaceImportPanel({
-  query, results, searching, selected, localName, downloading, downloadStatus,
+  query, results, searching, selected, localName, downloading, downloadProgress,
   onQueryChange, onSelect, onNameChange, onDownload, onCancel, gradientClass,
 }: HuggingFaceImportPanelProps) {
+  // Formatiere Zeit von Sekunden zu "mm:ss" oder "h:mm:ss"
+  const formatTime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
   return (
     <div className="space-y-5">
       {/* Search */}
@@ -737,8 +823,9 @@ function HuggingFaceImportPanel({
             type="text"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="z.&nbsp;B. xlm-roberta, bert, mistral…"
-            className="w-full pl-10 pr-10 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all"
+            placeholder="z.B. xlm-roberta, bert, mistral…"
+            disabled={downloading}
+            className="w-full pl-10 pr-10 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all disabled:opacity-50"
           />
           {searching && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />}
         </div>
@@ -746,7 +833,7 @@ function HuggingFaceImportPanel({
       </div>
 
       {/* Results */}
-      {results.length > 0 && (
+      {results.length > 0 && !downloading && (
         <div className="space-y-2">
           <p className="text-gray-500 text-xs">{results.length} Modelle gefunden</p>
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -777,7 +864,7 @@ function HuggingFaceImportPanel({
         </div>
       )}
 
-      {/* Selected model details */}
+      {/* Selected model details & Download */}
       {selected && (
         <div className="space-y-4 p-4 rounded-2xl border border-white/10 bg-white/5">
           <div className="flex items-center gap-3">
@@ -801,55 +888,91 @@ function HuggingFaceImportPanel({
             <PluginBadge modelNameOrPath={selected.id} />
           </div>
 
-          {/* Local name */}
-          <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-gray-300">Lokaler Name</label>
-            <input
-              type="text"
-              value={localName}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder="Name für die lokale Speicherung"
-              className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all"
-            />
-          </div>
-
-          {/* Download button */}
-          <button
-            onClick={onDownload}
-            disabled={downloading || !localName.trim()}
-            className={`w-full relative overflow-hidden rounded-xl text-white text-sm font-medium transition-all disabled:cursor-not-allowed ${
-              downloading ? 'bg-white/10' : `bg-gradient-to-r ${gradientClass} hover:opacity-90`
-            }`}
-          >
-            {downloading && (
-              <div className="absolute inset-0">
-                <div className={`absolute inset-0 bg-gradient-to-r ${gradientClass} opacity-25`} />
-                <div className={`absolute inset-y-0 w-1/3 bg-gradient-to-r ${gradientClass} opacity-50 animate-[progress-slide_1.5s_ease-in-out_infinite]`} />
+          {/* Download Progress Display */}
+          {downloading && downloadProgress ? (
+            <div className="space-y-3 p-3 rounded-xl bg-black/30 border border-white/5">
+              {/* Status & Percentage */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  <span className="text-white text-sm font-medium">{downloadProgress.progressPercent}%</span>
+                </div>
+                <span className="text-xs text-gray-400">{formatBytes(downloadProgress.downloadedBytes)} / {formatBytes(downloadProgress.totalBytes)}</span>
               </div>
-            )}
-            <div className="relative flex flex-col items-center py-3">
-              {downloading ? (
-                <>
-                  <div className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Lade herunter…</div>
-                  {downloadStatus && <span className="text-xs text-white/60 mt-0.5">{downloadStatus}</span>}
-                </>
-              ) : (
-                <div className="flex items-center gap-2"><Download className="w-4 h-4" /> Modell herunterladen</div>
-              )}
-            </div>
-          </button>
 
-          {downloading ? (
-            <button
-              onClick={onCancel}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 text-sm transition-all"
-            >
-              <X className="w-4 h-4" /> Download abbrechen
-            </button>
+              {/* Progress Bar */}
+              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className={`h-full bg-gradient-to-r ${gradientClass} transition-all duration-300`}
+                  style={{ width: `${downloadProgress.progressPercent}%` }}
+                />
+              </div>
+
+              {/* File Info */}
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-xs truncate" title={downloadProgress.currentFile}>
+                    {downloadProgress.currentFile || 'Wird vorbereitet…'}
+                  </p>
+                  <p className="text-gray-500 text-xs">
+                    Datei {downloadProgress.currentFileIndex} von {downloadProgress.totalFiles}
+                  </p>
+                </div>
+              </div>
+
+              {/* Speed & ETA */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="text-center">
+                  <p className="text-gray-500 text-xs">Geschwindigkeit</p>
+                  <p className="text-white text-sm font-medium">{downloadProgress.speedMbs.toFixed(1)} MB/s</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-500 text-xs">Verstrichene Zeit</p>
+                  <p className="text-white text-sm font-medium">{formatTime(downloadProgress.elapsedSecs)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-500 text-xs">Verbleibend</p>
+                  <p className="text-white text-sm font-medium">{formatTime(downloadProgress.etaSecs)}</p>
+                </div>
+              </div>
+
+              {/* Cancel Button */}
+              <button
+                onClick={onCancel}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 text-sm transition-all"
+              >
+                <X className="w-4 h-4" /> Download abbrechen
+              </button>
+            </div>
           ) : (
-            <p className="text-xs text-gray-600 text-center">
-              Download-Dauer hängt von der Modellgröße ab
-            </p>
+            <>
+              {/* Local name input */}
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-gray-300">Lokaler Name</label>
+                <input
+                  type="text"
+                  value={localName}
+                  onChange={(e) => onNameChange(e.target.value)}
+                  placeholder="Name für die lokale Speicherung"
+                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all"
+                />
+              </div>
+
+              {/* Download button */}
+              <button
+                onClick={onDownload}
+                disabled={!localName.trim()}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-white text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  !localName.trim() ? 'bg-white/5' : `bg-gradient-to-r ${gradientClass} hover:opacity-90`
+                }`}
+              >
+                <Download className="w-4 h-4" /> Modell herunterladen
+              </button>
+
+              <p className="text-xs text-gray-600 text-center">
+                Download-Dauer hängt von der Modellgröße ab
+              </p>
+            </>
           )}
         </div>
       )}

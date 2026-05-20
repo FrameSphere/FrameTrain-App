@@ -1,14 +1,13 @@
 """
 FrameTrain – Test Engine
 =========================
-Orchestrator für Sequenzklassifikations-Inferenz.
+Plugin-basierter Orchestrator für Modell-Inferenz.
 
 Aufruf durch Rust:
   python3 test_engine.py --config /path/to/test_config.json
 
-Unterstützte Modi:
-  mode=dataset  → Batch-Inferenz auf einem Dataset
-  mode=single   → Einzelner Text-Input
+Das aktive Test-Plugin wird über config.task_type ausgewählt.
+Verfügbare Plugins werden automatisch aus dem plugins/-Verzeichnis geladen.
 """
 
 import argparse
@@ -27,19 +26,72 @@ from core.protocol import TestProtocol
 # ─── Plugin-Loader ────────────────────────────────────────────────────────────
 
 def load_plugin(config: TestConfig):
-    plugin_file = Path(__file__).parent / "plugins" / "seq_classification" / "plugin.py"
-    if not plugin_file.exists():
-        raise FileNotFoundError(f"Test-Plugin nicht gefunden: {plugin_file}")
-
+    """
+    Dynamischer Plugin-Loader (identisch zu train_engine).
+    Scannt plugins/-Verzeichnis und lädt Plugin für config.task_type.
+    """
     import importlib.util
-    spec   = importlib.util.spec_from_file_location("test_plugins.seq_classification.plugin", plugin_file)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
 
-    if not hasattr(module, "Plugin"):
-        raise AttributeError("Plugin-Datei enthält keine Klasse 'Plugin'")
+    plugins_dir = Path(__file__).parent / "plugins"
 
-    return module.Plugin(config)
+    if not plugins_dir.exists():
+        raise FileNotFoundError(f"plugins/-Verzeichnis nicht gefunden: {plugins_dir}")
+
+    available = []
+
+    for plugin_dir in sorted(plugins_dir.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+
+        manifest_path = plugin_dir / "manifest.json"
+        if not manifest_path.exists():
+            continue
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            TestProtocol.warning(f"manifest.json in '{plugin_dir.name}' konnte nicht gelesen werden: {e}")
+            continue
+
+        plugin_task = manifest.get("task_type", "")
+        available.append(plugin_task)
+
+        if plugin_task != config.task_type:
+            continue
+
+        # Passendes Plugin gefunden
+        entry = manifest.get("entry", "plugin.py")
+        plugin_file = plugin_dir / entry
+
+        if not plugin_file.exists():
+            raise FileNotFoundError(
+                f"Plugin-Datei nicht gefunden: {plugin_file}\n"
+                f"Prüfe 'entry' in {manifest_path}"
+            )
+
+        spec = importlib.util.spec_from_file_location(
+            f"test_plugins.{plugin_dir.name}.plugin", plugin_file
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class_name = manifest.get("class", "Plugin")
+        if not hasattr(module, class_name):
+            raise AttributeError(
+                f"Plugin '{plugin_dir.name}' hat keine Klasse '{class_name}'.\n"
+                f"Prüfe 'class' in {manifest_path}"
+            )
+
+        TestProtocol.status(
+            "init",
+            f"Test-Plugin geladen: {manifest.get('name', plugin_dir.name)} (task_type='{config.task_type}')"
+        )
+        return getattr(module, class_name)(config)
+
+    raise ValueError(
+        f"Kein Test-Plugin für task_type='{config.task_type}' gefunden.\n"
+        f"Verfügbare task_types: {available}"
+    )
 
 
 # ─── Fehlerbehandlung ─────────────────────────────────────────────────────────
@@ -77,8 +129,11 @@ def handle_exception(exc: Exception) -> None:
         TestProtocol.error("Datei nicht gefunden", str(exc))
         return
 
-    if isinstance(exc, ValueError) and "nicht unterstützt" in str(exc):
-        TestProtocol.error("Modell nicht unterstützt", str(exc))
+    if isinstance(exc, ValueError) and (
+        "nicht unterstützt" in str(exc) or
+        "Kein Test-Plugin" in str(exc)
+    ):
+        TestProtocol.error("Konfigurationsfehler", str(exc))
         return
 
     TestProtocol.error(f"{type(exc).__name__}: {exc}", tb)
@@ -101,7 +156,10 @@ class TestOrchestrator:
 
     def run(self):
         try:
-            TestProtocol.status("init", f"Test-Engine gestartet | Modus: {self.config.mode}")
+            TestProtocol.status(
+                "init",
+                f"Test Engine gestartet | task_type='{self.config.task_type}' | modus='{self.config.mode}'"
+            )
 
             self.plugin = load_plugin(self.config)
             self.plugin.setup()
