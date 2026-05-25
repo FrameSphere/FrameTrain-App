@@ -32,6 +32,9 @@ pub struct TrainingJob {
     pub progress: TrainingProgress,
     pub output_path: Option<String>,
     pub error: Option<String>,
+    /// FIX: user_id für Isolation zwischen Accounts
+    #[serde(default)]
+    pub user_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -620,6 +623,7 @@ pub async fn start_training(
         created_at: Utc::now(), started_at: None, completed_at: None,
         progress: TrainingProgress::default(),
         output_path: Some(output_dir.to_string_lossy().to_string()), error: None,
+        user_id: user_id.clone(),
     };
 
     sl.current_job = Some(job.clone());
@@ -976,14 +980,54 @@ pub fn get_current_training(state: tauri::State<'_, Arc<Mutex<TrainingState>>>) 
 }
 
 #[tauri::command]
-pub fn get_training_history(app_handle: tauri::AppHandle) -> Result<Vec<TrainingJob>, String> {
-    load_jobs(&app_handle)
+pub fn get_training_history(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<TrainingJob>, String> {
+    let current_user_id = {
+        let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+        db.get_current_user_id()
+    };
+    let mut jobs = load_jobs(&app_handle)?;
+    match current_user_id {
+        Some(uid) => {
+            // Migration: alte Jobs ohne user_id beim ersten Zugriff dem aktuellen User zuweisen
+            let mut changed = false;
+            for job in jobs.iter_mut() {
+                if job.user_id.is_empty() {
+                    job.user_id = uid.clone();
+                    changed = true;
+                }
+            }
+            if changed {
+                let _ = write_jobs(&app_handle, &jobs);
+            }
+            Ok(jobs.into_iter().filter(|j| j.user_id == uid).collect())
+        }
+        None => Ok(vec![]),
+    }
 }
 
 #[tauri::command]
-pub fn delete_training_job(app_handle: tauri::AppHandle, job_id: String) -> Result<(), String> {
+pub fn delete_training_job(
+    app_handle: tauri::AppHandle,
+    job_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    // FIX: Nur eigene Jobs löschen dürfen
+    let current_user_id = {
+        let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+        db.get_current_user_id()
+    };
     let mut jobs = load_jobs(&app_handle)?;
-    jobs.retain(|j| j.id != job_id);
+    jobs.retain(|j| {
+        if j.id != job_id { return true; }
+        // Job gehört dem User (oder ist ein alter Job ohne user_id)
+        match &current_user_id {
+            Some(uid) => j.user_id != *uid && !j.user_id.is_empty(),
+            None => true,
+        }
+    });
     write_jobs(&app_handle, &jobs)?;
     let out = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?
         .join("training_outputs").join(&job_id);
@@ -1099,13 +1143,24 @@ pub struct MetricsTemplate {
     pub config: TrainingConfig, pub created_at: String, pub source: String,
 }
 
-fn templates_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e)).map(|d| d.join("metrics_templates.json"))
+fn templates_path(app_handle: &tauri::AppHandle, user_id: &str) -> Result<PathBuf, String> {
+    app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e)).map(|d| d.join(format!("metrics_templates_{}.json", user_id)))
 }
 
 #[tauri::command]
-pub fn save_metrics_template(app_handle: tauri::AppHandle, name: String, description: String, config: TrainingConfig, source: String) -> Result<MetricsTemplate, String> {
-    let path = templates_path(&app_handle)?;
+pub fn save_metrics_template(
+    app_handle: tauri::AppHandle,
+    name: String,
+    description: String,
+    config: TrainingConfig,
+    source: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<MetricsTemplate, String> {
+    let user_id = {
+        let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+        db.get_current_user_id().unwrap_or_else(|| "default".to_string())
+    };
+    let path = templates_path(&app_handle, &user_id)?;
     let mut templates: Vec<MetricsTemplate> = if path.exists() {
         serde_json::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default()
     } else { vec![] };
@@ -1119,15 +1174,30 @@ pub fn save_metrics_template(app_handle: tauri::AppHandle, name: String, descrip
 }
 
 #[tauri::command]
-pub fn get_metrics_templates(app_handle: tauri::AppHandle) -> Result<Vec<MetricsTemplate>, String> {
-    let path = templates_path(&app_handle)?;
+pub fn get_metrics_templates(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<MetricsTemplate>, String> {
+    let user_id = {
+        let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+        db.get_current_user_id().unwrap_or_else(|| "default".to_string())
+    };
+    let path = templates_path(&app_handle, &user_id)?;
     if !path.exists() { return Ok(vec![]); }
     serde_json::from_str(&fs::read_to_string(&path).map_err(|e| format!("Read: {}", e))?).map_err(|e| format!("JSON: {}", e))
 }
 
 #[tauri::command]
-pub fn delete_metrics_template(app_handle: tauri::AppHandle, template_id: String) -> Result<(), String> {
-    let path = templates_path(&app_handle)?;
+pub fn delete_metrics_template(
+    app_handle: tauri::AppHandle,
+    template_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let user_id = {
+        let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+        db.get_current_user_id().unwrap_or_else(|| "default".to_string())
+    };
+    let path = templates_path(&app_handle, &user_id)?;
     if !path.exists() { return Ok(()); }
     let mut templates: Vec<MetricsTemplate> = serde_json::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default();
     templates.retain(|t| t.id != template_id);

@@ -71,21 +71,23 @@ interface LabSession {
 
 // ── LocalStorage ──────────────────────────────────────────────────────────
 
-const SESSIONS_KEY = 'ft_lab_sessions';
+// FIX: Key pro User – verhindert Cross-Account-Leakage
+const sessionsKey = (userId?: string) =>
+  userId ? `ft_lab_sessions_${userId}` : 'ft_lab_sessions';
 
-const loadSessions = (): LabSession[] => {
-  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) ?? '[]'); } catch { return []; }
+const loadSessions = (userId?: string): LabSession[] => {
+  try { return JSON.parse(localStorage.getItem(sessionsKey(userId)) ?? '[]'); } catch { return []; }
 };
 
-const saveSession = (s: LabSession) => {
-  const all = loadSessions();
+const saveSession = (s: LabSession, userId?: string) => {
+  const all = loadSessions(userId);
   const idx = all.findIndex(x => x.id === s.id);
   if (idx >= 0) all[idx] = s; else all.unshift(s);
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(all.slice(0, 20)));
+  localStorage.setItem(sessionsKey(userId), JSON.stringify(all.slice(0, 20)));
 };
 
-const deleteSession = (id: string) => {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(loadSessions().filter(s => s.id !== id)));
+const deleteSession = (id: string, userId?: string) => {
+  localStorage.setItem(sessionsKey(userId), JSON.stringify(loadSessions(userId).filter(s => s.id !== id)));
 };
 
 // ── Sample Parser ─────────────────────────────────────────────────────────
@@ -296,15 +298,15 @@ function AccuracyDonut({ correct, wrong, skipped }: { correct: number; wrong: nu
 
 // ── Sessions Modal ────────────────────────────────────────────────────────
 
-function SessionsModal({ onLoad, onClose }: { onLoad: (s: LabSession) => void; onClose: () => void }) {
+function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) => void; onClose: () => void; userId?: string }) {
   const [sessions, setSessions] = useState<LabSession[]>([]);
   const { success } = useNotification();
 
-  useEffect(() => { setSessions(loadSessions()); }, []);
+  useEffect(() => { setSessions(loadSessions(userId)); }, [userId]);
 
   const handleDelete = (id: string) => {
-    deleteSession(id);
-    setSessions(loadSessions());
+    deleteSession(id, userId);
+    setSessions(loadSessions(userId));
     success('Session gelöscht', '');
   };
 
@@ -687,7 +689,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 
 type LabPhase = 'setup' | 'testing' | 'analysis';
 
-export default function LaboratoryPanel() {
+export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const { success, error, warning } = useNotification();
 
   // Models
@@ -1031,7 +1033,7 @@ export default function LaboratoryPanel() {
       updatedAt: new Date().toISOString(),
     };
     setSession(updatedSession);
-    saveSession(updatedSession);
+    saveSession(updatedSession, userId);
 
     // Nächstes Sample
     const nextIdx = currentSampleIdx + 1;
@@ -1066,7 +1068,7 @@ export default function LaboratoryPanel() {
       updatedAt: new Date().toISOString(),
     };
     setSession(updatedSession);
-    saveSession(updatedSession);
+    saveSession(updatedSession, userId);
     const nextIdx = currentSampleIdx + 1;
     if (nextIdx < samples.length) {
       setCurrentSampleIdx(nextIdx);
@@ -1572,7 +1574,7 @@ export default function LaboratoryPanel() {
       )}
 
       {/* Sessions Modal */}
-      {showSessions && <SessionsModal onLoad={handleLoadSession} onClose={() => setShowSessions(false)} />}
+      {showSessions && <SessionsModal onLoad={handleLoadSession} onClose={() => setShowSessions(false)} userId={userId} />}
     </div>
   );
 }

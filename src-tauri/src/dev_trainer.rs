@@ -87,6 +87,7 @@ pub async fn start_dev_training(
         progress: TrainingProgress::default(),
         output_path: Some(output_path.clone()),
         error: None,
+        user_id: String::new(), // Dev-Training läuft lokal, kein Account-Kontext nötig
     };
 
     let ah       = app_handle.clone();

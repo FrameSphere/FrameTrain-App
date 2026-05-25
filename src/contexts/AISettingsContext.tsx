@@ -32,32 +32,48 @@ const DEFAULT_SETTINGS: AISettings = {
   ollamaModel: 'llama3.2',
 };
 
-export function AISettingsProvider({ children }: { children: ReactNode }) {
+export function AISettingsProvider({ children, userId }: { children: ReactNode; userId?: string }) {
   const [settings, setSettings] = useState<AISettings>(DEFAULT_SETTINGS);
+
+  // FIX: Key pro User, damit AI-Keys nicht zwischen Accounts geteilt werden
+  const storageKey = userId ? `ft_ai_settings_${userId}` : 'ft_ai_settings';
 
   // Load from localStorage on mount
   useEffect(() => {
-    const stored = localStorage.getItem('ft_ai_settings');
+    const stored = localStorage.getItem(storageKey);
     if (stored) {
       try {
         setSettings(JSON.parse(stored));
       } catch {
         setSettings(DEFAULT_SETTINGS);
       }
+    } else {
+      // Fallback: legacy key ohne userId migrieren
+      const legacy = localStorage.getItem('ft_ai_settings');
+      if (legacy && userId) {
+        try {
+          const parsed = JSON.parse(legacy);
+          setSettings(parsed);
+          localStorage.setItem(storageKey, legacy);
+          localStorage.removeItem('ft_ai_settings');
+        } catch { /* ignore */ }
+      } else {
+        setSettings(DEFAULT_SETTINGS);
+      }
     }
-  }, []);
+  }, [storageKey]);
 
   const updateSettings = (updates: Partial<AISettings>) => {
     setSettings(prev => {
       const updated = { ...prev, ...updates };
-      localStorage.setItem('ft_ai_settings', JSON.stringify(updated));
+      localStorage.setItem(storageKey, JSON.stringify(updated));
       return updated;
     });
   };
 
   const resetSettings = () => {
     setSettings(DEFAULT_SETTINGS);
-    localStorage.setItem('ft_ai_settings', JSON.stringify(DEFAULT_SETTINGS));
+    localStorage.setItem(storageKey, JSON.stringify(DEFAULT_SETTINGS));
   };
 
   return (

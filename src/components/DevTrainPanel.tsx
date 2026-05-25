@@ -9,8 +9,9 @@ import {
   FolderClosed, Bot, Send, Maximize2, Minimize2, X, Minus, Plus,
   AlertCircle, CheckCircle, TrendingDown, BarChart3, Zap,
   Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy,
-  History, MessageSquarePlus,
+  History, MessageSquarePlus, Globe,
 } from 'lucide-react';
+import OpenLibraryModal from './OpenLibraryModal';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
@@ -25,11 +26,11 @@ import DiffViewer from './DiffViewer';
 
 interface SavedScript { id: string; name: string; script: string; savedAt: string; }
 
-const SCRIPTS_KEY = 'ft_saved_scripts';
-const loadScripts  = (): SavedScript[] => { try { return JSON.parse(localStorage.getItem(SCRIPTS_KEY) ?? '[]'); } catch { return []; } };
-const saveScript   = (name: string, script: string) => { const all = loadScripts(); all.unshift({ id: `sc_${Date.now()}`, name, script, savedAt: new Date().toISOString() }); localStorage.setItem(SCRIPTS_KEY, JSON.stringify(all.slice(0, 50))); };
-const deleteScript = (id: string) => localStorage.setItem(SCRIPTS_KEY, JSON.stringify(loadScripts().filter(s => s.id !== id)));
-const updateScript = (id: string, script: string) => { const all = loadScripts(); const idx = all.findIndex(s => s.id === id); if (idx >= 0) { all[idx] = { ...all[idx], script, savedAt: new Date().toISOString() }; localStorage.setItem(SCRIPTS_KEY, JSON.stringify(all)); } };
+const getScriptsKey = (userId?: string) => userId ? `ft_saved_scripts_${userId}` : 'ft_saved_scripts';
+const loadScripts  = (userId?: string): SavedScript[] => { try { return JSON.parse(localStorage.getItem(getScriptsKey(userId)) ?? '[]'); } catch { return []; } };
+const saveScript   = (name: string, script: string, userId?: string) => { const key = getScriptsKey(userId); const all = loadScripts(userId); all.unshift({ id: `sc_${Date.now()}`, name, script, savedAt: new Date().toISOString() }); localStorage.setItem(key, JSON.stringify(all.slice(0, 50))); };
+const deleteScript = (id: string, userId?: string) => { const key = getScriptsKey(userId); localStorage.setItem(key, JSON.stringify(loadScripts(userId).filter(s => s.id !== id))); };
+const updateScript = (id: string, script: string, userId?: string) => { const key = getScriptsKey(userId); const all = loadScripts(userId); const idx = all.findIndex(s => s.id === id); if (idx >= 0) { all[idx] = { ...all[idx], script, savedAt: new Date().toISOString() }; localStorage.setItem(key, JSON.stringify(all)); } };
 
 // ── Edit Parsing ──────────────────────────────────────────────────────────
 // Zentralisiert in src/ai/codeEdits.ts
@@ -293,18 +294,18 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
 
 // ── Script Library Modal ──────────────────────────────────────────────────
 
-function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; }) {
+function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; userId?: string; }) {
   const [scripts, setScripts]       = useState<SavedScript[]>([]);
   const [saveName, setSaveName]     = useState('');
   const [showSaveForm, setShowForm] = useState(false);
   const { success } = useNotification();
 
-  useEffect(() => { setScripts(loadScripts()); }, []);
+  useEffect(() => { setScripts(loadScripts(userId)); }, [userId]);
 
   const handleSave = () => {
     if (!saveName.trim()) return;
-    saveScript(saveName.trim(), currentScript);
-    setScripts(loadScripts());
+    saveScript(saveName.trim(), currentScript, userId);
+    setScripts(loadScripts(userId));
     setSaveName(''); setShowForm(false);
     success('Gespeichert', `Skript "${saveName}" gespeichert.`);
   };
@@ -331,7 +332,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript:
                   <pre className="text-gray-600 text-[10px] mt-1.5 font-mono truncate">{s.script.split('\n').slice(0, 2).join(' · ')}</pre>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
-                  <button onClick={() => { deleteScript(s.id); setScripts(loadScripts()); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => { deleteScript(s.id, userId); setScripts(loadScripts(userId)); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
                   <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all">Laden</button>
                 </div>
               </div>
@@ -1162,9 +1163,10 @@ interface DevTrainPanelProps {
   selectedVersionPath: string;
   datasets: DatasetInfo[];
   onNavigateToAnalysis: (vid: string) => void;
+  userData?: { userId: string; email: string; apiKey: string; password: string };
 }
 
-export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets, onNavigateToAnalysis }: DevTrainPanelProps) {
+export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets, onNavigateToAnalysis, userData }: DevTrainPanelProps) {
   const { currentTheme } = useTheme();
   const { success, error }      = useNotification();
   const { settings: aiSettings } = useAISettings();
@@ -1179,6 +1181,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const [saveName, setSaveName]   = useState('');
   const [showAI, setShowAI]       = useState(false);
   const [showLibrary, setShowLib] = useState(false);
+  const [showOpenLib, setShowOpenLib] = useState(false);
   const [running, setRunning]     = useState(false);
   const [output, setOutput]       = useState('');
   const [lossPoints, setLoss]     = useState<LossPoint[]>([]);
@@ -1197,7 +1200,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
     }
   });
   const [showPathsModal, setShowPathsModal] = useState(false);
-  const [outputPath, setOutputPath] = useState('');
+  const [outputPath, setOutputPath] = useState('[AppData]/training_outputs/dev_<job_id>');
   const outputRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const editorPreRef = useRef<HTMLPreElement>(null);
@@ -1399,7 +1402,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const handleSave = () => {
     if (currentScriptId) {
       // Skript existiert bereits in der Bibliothek → Update
-      updateScript(currentScriptId, script);
+      updateScript(currentScriptId, script, userData?.userId);
       setSavedScript(script);
       setIsDirty(false);
       success('Aktualisiert', 'Skript in der Bibliothek aktualisiert!');
@@ -1412,8 +1415,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
   const handleSaveWithName = (name: string) => {
     if (!name.trim()) return;
-    saveScript(name.trim(), script);
-    const allScripts = loadScripts();
+    saveScript(name.trim(), script, userData?.userId);
+    const allScripts = loadScripts(userData?.userId);
     const newScript = allScripts[0];
     if (newScript) {
       setCurrentScriptId(newScript.id);
@@ -1737,7 +1740,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         <div className={`rounded-2xl border border-white/10 overflow-hidden ${expanded ? 'flex-1 flex flex-col' : ''}`}>
           {/* Toolbar — always visible */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-slate-900">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0 shrink">
               <div
                 className="flex gap-1.5"
                 onMouseEnter={() => setTlHovered(true)}
@@ -1789,7 +1792,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
               </div>
               <div className="flex items-center gap-2">
                 <FileCode className={`w-4 h-4 ${fileOpen ? 'text-emerald-400' : 'text-gray-600'}`} />
-                <span className={`text-sm font-medium ${fileOpen ? 'text-gray-300' : 'text-gray-600'}`}>
+                <span className={`text-sm font-medium truncate max-w-[160px] ${fileOpen ? 'text-gray-300' : 'text-gray-600'}`}>
                   {fileOpen ? 'train.py' : 'Kein Dokument'}
                 </span>
               </div>
@@ -1845,7 +1848,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 </button>
               </div>
             )}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               {!fileOpen ? (
                 // Welcome-Modus: nur Neue Datei + Datei laden
                 <>
@@ -1856,6 +1859,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   <button onClick={() => setShowLib(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 text-xs font-medium transition-all">
                     <FolderClosed className="w-3.5 h-3.5" /> Datei laden
+                  </button>
+                  <button onClick={() => setShowOpenLib(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/25 text-violet-400 text-xs font-medium transition-all">
+                    <Globe className="w-3.5 h-3.5" /> Open Library
                   </button>
                 </>
               ) : (
@@ -1871,12 +1878,22 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium transition-all">
                     <FolderClosed className="w-3.5 h-3.5" /> Bibliothek
                   </button>
-                  {aiSettings.enabled && (
-                    <button onClick={() => setShowAI(v => !v)}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : 'bg-white/5 text-gray-400 hover:text-white border-white/10'}`}>
-                      <Bot className="w-3.5 h-3.5" /> KI
-                    </button>
-                  )}
+                  <button onClick={() => setShowOpenLib(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-400 text-xs font-medium transition-all">
+                    <Globe className="w-3.5 h-3.5" /> Open Library
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!aiSettings.enabled) {
+                        error('KI nicht aktiviert', 'Bitte aktiviere die KI zuerst in den Einstellungen.');
+                        return;
+                      }
+                      setShowAI(v => !v);
+                    }}
+                    title={!aiSettings.enabled ? 'KI nicht konfiguriert – in den Einstellungen aktivieren' : ''}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : !aiSettings.enabled ? 'bg-white/5 text-gray-500 border-white/10 opacity-60' : 'bg-white/5 text-gray-400 hover:text-white border-white/10'}`}>
+                    <Bot className="w-3.5 h-3.5" /> KI
+                  </button>
                   <button
                     onClick={() => {
                       setFindOpen(true);
@@ -1936,6 +1953,16 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   <div>
                     <p className="font-semibold text-white text-sm">Datei laden</p>
                     <p className="text-xs text-gray-500 mt-1">Aus deiner Bibliothek</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setShowOpenLib(true)}
+                  className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl border border-violet-500/20 bg-violet-500/8 hover:bg-violet-500/15 hover:border-violet-500/40 transition-all group"
+                >
+                  <Globe className="w-7 h-7 text-violet-500 group-hover:text-violet-400" />
+                  <div>
+                    <p className="font-semibold text-white text-sm">Open Library</p>
+                    <p className="text-xs text-gray-500 mt-1">Community-Skripte</p>
                   </div>
                 </button>
               </div>
@@ -2028,6 +2055,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                       onChange={e => {
                         const newVal = e.target.value;
                         if (newVal === '! ') {
+                          if (!modelInfo) {
+                            error('Kein Modell', 'Bitte wähle erst ein Modell aus, um ein Template zu generieren.');
+                            return;
+                          }
                           generateTemplate();
                           return;
                         }
@@ -2208,7 +2239,23 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             setIsDirty(false);
             setFileOpen(true);
           }} 
-          onClose={() => setShowLib(false)} 
+          onClose={() => setShowLib(false)}
+          userId={userData?.userId} 
+        />
+      )}
+
+      {showOpenLib && (
+        <OpenLibraryModal
+          userData={userData}
+          onClose={() => setShowOpenLib(false)}
+          onLoadScript={(scriptContent, scriptName) => {
+            setScript(scriptContent);
+            setSavedScript('');
+            setCurrentScriptId(null);
+            setIsDirty(true);
+            setFileOpen(true);
+            setShowOpenLib(false);
+          }}
         />
       )}
 

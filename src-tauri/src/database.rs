@@ -345,15 +345,17 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
     }
     
     pub fn update_model_status(&self, id: &str, status: &str) -> Result<()> {
+        let user_id = self.require_user_id().map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))))?;
         self.conn.execute(
-            "UPDATE models SET status = ?1 WHERE id = ?2",
-            params![status, id],
+            "UPDATE models SET status = ?1 WHERE id = ?2 AND user_id = ?3",
+            params![status, id, user_id],
         )?;
         Ok(())
     }
     
     pub fn delete_model(&self, id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM models WHERE id = ?1", params![id])?;
+        let user_id = self.require_user_id().map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))))?;
+        self.conn.execute("DELETE FROM models WHERE id = ?1 AND user_id = ?2", params![id, user_id])?;
         Ok(())
     }
     

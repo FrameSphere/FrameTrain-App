@@ -26,6 +26,30 @@ pub fn analysis_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// FIX: Prüft ob version_id dem aktuellen User gehört
+fn check_version_ownership(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    state: &tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let user_id = {
+        let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+        db.get_current_user_id().ok_or_else(|| "Kein Nutzer eingeloggt".to_string())?
+    };
+    let db_file = db_path(app)?;
+    if !db_file.exists() { return Ok(()); }
+    let conn = Connection::open(&db_file).map_err(|e| format!("DB: {}", e))?;
+    let count: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM model_versions_new WHERE id = ?1 AND user_id = ?2",
+        rusqlite::params![version_id, &user_id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    if count == 0 {
+        return Err(format!("Zugriff verweigert: Version gehört nicht dem aktuellen Nutzer"));
+    }
+    Ok(())
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Training Metriken – aus training_metrics_new DB-Tabelle
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,7 +58,11 @@ pub fn analysis_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 pub async fn get_training_metrics(
     app_handle: tauri::AppHandle,
     version_id: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<Value, String> {
+    // FIX: Ownership prüfen
+    check_version_ownership(&app_handle, &version_id, &state)?;
+
     let db = db_path(&app_handle)?;
     if !db.exists() { return Ok(json!(null)); }
 
@@ -75,7 +103,11 @@ pub async fn get_training_metrics(
 pub async fn get_version_details(
     app_handle: tauri::AppHandle,
     version_id: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<Value, String> {
+    // FIX: Ownership prüfen
+    check_version_ownership(&app_handle, &version_id, &state)?;
+
     let db = db_path(&app_handle)?;
     if !db.exists() { return Err("Datenbank nicht gefunden".to_string()); }
 
@@ -117,7 +149,10 @@ pub async fn get_version_details(
 pub async fn get_training_logs(
     app_handle: tauri::AppHandle,
     version_id: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<Value>, String> {
+    // FIX: Ownership prüfen
+    check_version_ownership(&app_handle, &version_id, &state)?;
     let dir = analysis_dir(&app_handle)?;
     let path = dir.join(format!("logs_{}.json", version_id));
     if !path.exists() { return Ok(vec![]); }
@@ -145,7 +180,10 @@ pub async fn save_training_logs(
 pub async fn get_training_full_data(
     app_handle: tauri::AppHandle,
     version_id: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<Value, String> {
+    // FIX: Ownership prüfen
+    check_version_ownership(&app_handle, &version_id, &state)?;
     let dir = analysis_dir(&app_handle)?;
     let path = dir.join(format!("full_{}.json", version_id));
     if !path.exists() { return Ok(json!(null)); }
@@ -208,7 +246,10 @@ pub async fn save_ai_analysis_report(
 pub async fn get_ai_analysis_report(
     app_handle: tauri::AppHandle,
     version_id: String,
+    state: tauri::State<'_, crate::AppState>,
 ) -> Result<Value, String> {
+    // FIX: Ownership prüfen
+    check_version_ownership(&app_handle, &version_id, &state)?;
     let dir = analysis_dir(&app_handle)?;
     let path = dir.join(format!("ai_report_{}.json", version_id));
     if !path.exists() { return Ok(json!(null)); }

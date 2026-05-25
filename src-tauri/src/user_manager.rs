@@ -59,14 +59,11 @@ pub fn logout_user(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 /// Check if a user is currently logged in
+/// FIX: Direkt current_user_id prüfen statt indirekter list_models()-Abfrage
 #[tauri::command]
 pub fn is_user_logged_in(state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.lock()
         .map_err(|e| format!("Database lock error: {}", e))?;
     
-    // Check if current_user_id is set (via a dummy operation)
-    match db.list_models() {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
+    Ok(db.get_current_user_id().is_some())
 }

@@ -50,6 +50,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
       case 'training':
         return (
           <TrainingPanel
+            userData={userData}
             onNavigateToAnalysis={(versionId) => {
               setInitialAnalysisVersionId(versionId);
               setCurrentView('analysis');
@@ -61,9 +62,9 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
       case 'analysis':
         return <AnalysisPanel initialVersionId={initialAnalysisVersionId} />;
       case 'tests':
-        return <TestPanel />;
+        return <TestPanel userData={userData} />;
       case 'laboratory':
-        return <LaboratoryPanel />;
+        return <LaboratoryPanel userId={userData.userId} />;
       case 'versions':
         return <VersionManager />;
       case 'settings':

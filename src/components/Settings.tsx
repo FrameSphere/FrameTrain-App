@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, X } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
@@ -9,6 +9,7 @@ import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { PROVIDER_META } from '../ai/providerMeta';
+import { getStoredAuthorName, saveAuthorName } from './OpenLibraryModal';
 
 interface UserData {
   apiKey: string;
@@ -92,6 +93,45 @@ function useStoredTickets(userId: string) {
   return { getAll, add };
 }
 
+// ── Duplicate Community Name Error Modal ──────────────────────────────────
+
+function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-red-500/20 max-w-sm w-full p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center">
+            <AlertTriangle className="w-6 h-6 text-red-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-white">Name bereits vergeben</h3>
+            <p className="text-sm text-gray-400 mt-1">Dieser Community-Name ist schon in Verwendung.</p>
+          </div>
+        </div>
+        
+        <div className="bg-red-500/8 border border-red-500/20 rounded-lg p-3">
+          <p className="text-sm text-red-200">
+            Der Name <strong className="text-red-300">@{name}</strong> wird bereits von jemandem anderem verwendet.
+          </p>
+        </div>
+
+        <div className="bg-violet-500/8 border border-violet-500/20 rounded-lg p-3">
+          <p className="text-xs text-violet-200">
+            💡 <strong>Tipp:</strong> Versuche einen anderen Community-Namen, z. B. mit Zahlen oder Unterstrichen.
+          </p>
+        </div>
+
+        <button
+          onClick={onClose}
+          className="w-full py-2.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 text-violet-300 font-medium transition-all"
+        >
+          Einen anderen Namen versuchen
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings({ userData, onLogout }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('account');
   const [showApiKey, setShowApiKey] = useState(false);
@@ -103,6 +143,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<'checking' | 'up-to-date' | 'update-available' | 'error'>('checking');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+  // Community-Name
+  const [communityName, setCommunityName]         = useState(() => getStoredAuthorName(userData.userId) || '');
+  const [communityNameInput, setCommunityNameInput] = useState(() => getStoredAuthorName(userData.userId) || '');
+  const [editingCommunity, setEditingCommunity]   = useState(false);
+  const [communitySaved, setCommunitySaved]       = useState(false);
+  const [savingCommunity, setSavingCommunity]     = useState(false);
+  const [duplicateNameError, setDuplicateNameError] = useState<string | null>(null);
 
   // Support state
   const [supportOpen, setSupportOpen] = useState(false);
@@ -289,6 +336,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     }, 10000);
     return () => clearInterval(id);
   }, [activeTab, loadSystemInfo, systemInstalling, systemLoading]);
+
+  // Support-Tab: Immer ausgeklappt halten wenn auf Support-Sektion
+  useEffect(() => {
+    if (activeTab === 'support') {
+      setSupportOpen(true);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (!systemInstalling) return;
@@ -582,6 +636,137 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Community Name Card */}
+      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <Globe className="w-5 h-5 text-violet-400" />
+            <h3 className="text-lg font-semibold text-white">Community-Name</h3>
+          </div>
+          {communityName && !editingCommunity && (
+            <button onClick={() => { setEditingCommunity(true); setCommunitySaved(false); }} className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-violet-400 transition-colors">
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        <p className="text-sm text-gray-400 mb-4">Dein öffentlicher Name in der Open Script Library</p>
+
+        {communitySaved && (
+          <div className="flex items-center gap-2 p-3 mb-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <p className="text-sm text-emerald-300">Community-Name gespeichert. Künftige Uploads werden als <strong>@{communityName}</strong> veröffentlicht.</p>
+          </div>
+        )}
+
+        {!communityName || editingCommunity ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 p-3 bg-violet-500/8 border border-violet-500/20 rounded-lg">
+              <Globe className="w-4 h-4 text-violet-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-violet-300">{!communityName ? 'Lege einmalig deinen Community-Namen fest, um Skripte in die Open Library hochzuladen.' : 'Ändere deinen Community-Namen — alle künftigen Uploads verwenden den neuen Namen.'}</p>
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={communityNameInput}
+                onChange={e => setCommunityNameInput(e.target.value.replace(/[^a-z0-9_\-. ]/gi, ''))}
+                placeholder="z. B. ai_enthusiast"
+                maxLength={40}
+                className="flex-1 px-4 py-2.5 bg-white/5 border border-violet-500/30 rounded-lg text-white placeholder:text-gray-600 focus:outline-none focus:border-violet-500/60"
+              />
+              <button
+                onClick={async () => {
+                  if (!communityNameInput.trim() || savingCommunity) return;
+                  
+                  setSavingCommunity(true);
+                  console.log('[Settings] Saving community name:', communityNameInput.trim());
+                  
+                  try {
+                    // Prüfe auf Duplikate
+                    try {
+                      const res = await fetch(`https://frame-train.vercel.app/api/library/authors/${encodeURIComponent(communityNameInput.trim())}/exists`);
+                      const data = await res.json();
+                      if (data.exists && communityNameInput.trim() !== communityName) {
+                        console.warn('[Settings] Community name already exists');
+                        setDuplicateNameError(communityNameInput.trim());
+                        setSavingCommunity(false);
+                        return;
+                      }
+                    } catch (err) {
+                      console.error('[Settings] Duplicate check failed:', err);
+                    }
+                    
+                    // Update User.communityName in DB
+                    const response = await fetch(`https://frame-train.vercel.app/api/user/community-name`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        userId: userData.userId, 
+                        communityName: communityNameInput.trim() 
+                      }),
+                    });
+                    
+                    if (!response.ok) {
+                      const error = await response.json();
+                      console.error('[Settings] PATCH failed:', error);
+                      alert('Fehler beim Speichern: ' + error.error);
+                      setSavingCommunity(false);
+                      return;
+                    }
+                    
+                    const result = await response.json();
+                    console.log('[Settings] PATCH succeeded:', result);
+                    
+                    // Speichere auch lokal
+                    saveAuthorName(userData.userId, communityNameInput);
+                    setCommunityName(communityNameInput.trim());
+                    setEditingCommunity(false);
+                    setCommunitySaved(true);
+                    
+                    // Show success message für 3 Sekunden
+                    setTimeout(() => setCommunitySaved(false), 3000);
+                  } catch (err) {
+                    console.error('[Settings] Error saving community name:', err);
+                    alert('Ein Fehler ist aufgetreten: ' + String(err));
+                  } finally {
+                    setSavingCommunity(false);
+                  }
+                }}
+                disabled={!communityNameInput.trim() || savingCommunity}
+                className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg transition-colors flex items-center gap-1.5 text-sm"
+              >
+                {savingCommunity ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Wird gespeichert...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" /> Speichern
+                  </>
+                )}
+              </button>
+              {editingCommunity && (
+                <button
+                  onClick={() => { setEditingCommunity(false); setCommunityNameInput(communityName); }}
+                  className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-600">Nur Buchstaben, Zahlen, Unterstriche, Bindestriche und Punkte erlaubt (max. 40 Zeichen).</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-lg">
+            <div className="w-8 h-8 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
+              <User className="w-4 h-4 text-violet-300" />
+            </div>
+            <div>
+              <p className="text-white font-medium">@{communityName}</p>
+              <p className="text-gray-500 text-xs">Dein öffentlicher Name in der Open Library</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Account Management */}
@@ -1160,6 +1345,15 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         {/* Header */}
         <button
           onClick={() => {
+            // Wenn im Support-Tab: nicht zuklappbar, nur öffnen wenn tickets geladen
+            if (activeTab === 'support') {
+              getAll().forEach((t) => {
+                localStorage.setItem(`ft_ticket_seen_${t.ticket_id}`, Date.now().toString());
+              });
+              setSupportBadge(0);
+              return;
+            }
+            // Sonst: normales Toggle
             const opening = !supportOpen;
             setSupportOpen(opening);
             if (opening) {
@@ -1591,7 +1785,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </a>
 
           <a
-            href="https://github.com/KarolP-tech/FrameTrain/releases"
+            href="https://github.com/FrameSphere/FrameTrain/releases"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
@@ -1675,6 +1869,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'about' && renderAboutTab()}
         </div>
       </div>
+
+      {/* Community Name Error Modal */}
+      {duplicateNameError && (
+        <CommunityNameErrorModal 
+          name={duplicateNameError} 
+          onClose={() => setDuplicateNameError(null)} 
+        />
+      )}
     </div>
   );
 }

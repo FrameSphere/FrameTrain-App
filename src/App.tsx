@@ -244,6 +244,14 @@ function App() {
       
       // Lösche gespeicherte Config
       await invoke('clear_config');
+
+      // FIX: localStorage beim Logout leeren (AI-Keys + Lab-Sessions)
+      if (userData) {
+        localStorage.removeItem(`ft_ai_settings_${userData.userId}`);
+        localStorage.removeItem(`ft_lab_sessions_${userData.userId}`);
+      }
+      // Legacy-Keys ohne userId ebenfalls entfernen
+      localStorage.removeItem('ft_ai_settings');
       
       console.log('✅ User logged out');
     } catch (error) {
@@ -274,7 +282,7 @@ function App() {
     return (
       <ThemeProvider>
         <NotificationProvider>
-          <AISettingsProvider>
+          <AISettingsProvider userId={userData?.userId}>
             <PageContextProvider>
               <TrainingContextProvider>
                 <FirstLaunchSetup onComplete={handleFirstLaunchComplete} />
@@ -288,14 +296,15 @@ function App() {
 
   return (
     <ThemeProvider>
-      <NotificationProvider>
-        <AISettingsProvider>
-          <PageContextProvider>
-            <TrainingContextProvider>
-              <div className="app">
+        <NotificationProvider>
+          <AISettingsProvider userId={userData?.userId}>
+            <PageContextProvider>
+              <TrainingContextProvider>
+                <div className="app">
               {isAuthenticated && userData ? (
                 <>
                   <Dashboard 
+                    key={userData.userId}
                     userData={userData}
                     onLogout={handleLogout} 
                   />

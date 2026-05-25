@@ -10,7 +10,7 @@ import {
   AlertCircle, CheckCircle,
   Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy,
   FlaskConical, ClipboardList,
-  History, MessageSquarePlus,
+  History, MessageSquarePlus, Globe,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -20,6 +20,7 @@ import { callAI } from './TrainingPanel';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import DiffViewer from './DiffViewer';
+import OpenLibraryModal from './OpenLibraryModal';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -953,9 +954,10 @@ interface DevTestPanelProps {
   modelInfo: ModelInfo | null;
   selectedVersionPath?: string;
   datasets: DatasetInfo[];
+  userData?: { userId: string; email: string; apiKey: string; password: string };
 }
 
-export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets }: DevTestPanelProps) {
+export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets, userData }: DevTestPanelProps) {
   const { currentTheme } = useTheme();
   const { success, error } = useNotification();
   const { settings: aiSettings } = useAISettings();
@@ -970,6 +972,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets 
   const [saveName, setSaveName]               = useState('');
   const [showAI, setShowAI]                   = useState(false);
   const [showLibrary, setShowLib]             = useState(false);
+  const [showOpenLib, setShowOpenLib]         = useState(false);
   const [running, setRunning]                 = useState(false);
   const [output, setOutput]                   = useState('');
   const [exitCode, setExitCode]               = useState<number | null>(null);
@@ -1459,6 +1462,9 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets 
                   <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs font-medium transition-all">
                     <FolderClosed className="w-3.5 h-3.5" /> Datei laden
                   </button>
+                  <button onClick={() => setShowOpenLib(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs font-medium transition-all">
+                    <Globe className="w-3.5 h-3.5" /> Open Library
+                  </button>
                 </>
               ) : (
                 <>
@@ -1470,11 +1476,24 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets 
                   <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium transition-all">
                     <FolderClosed className="w-3.5 h-3.5" /> Bibliothek
                   </button>
-                  {aiSettings.enabled && (
-                    <button onClick={() => setShowAI(v => !v)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : 'bg-white/5 text-gray-400 hover:text-white border-white/10'}`}>
-                      <Bot className="w-3.5 h-3.5" /> KI
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setShowOpenLib(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-xs font-medium transition-all"
+                  >
+                    <Globe className="w-3.5 h-3.5" /> Open Library
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!aiSettings.enabled) {
+                        error('KI nicht aktiviert', 'Bitte aktiviere die KI zuerst in den Einstellungen.');
+                        return;
+                      }
+                      setShowAI(v => !v);
+                    }}
+                    title={!aiSettings.enabled ? 'KI nicht konfiguriert – in den Einstellungen aktivieren' : ''}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : !aiSettings.enabled ? 'bg-white/5 text-gray-500 border-white/10 opacity-60' : 'bg-white/5 text-gray-400 hover:text-white border-white/10'}`}>
+                    <Bot className="w-3.5 h-3.5" /> KI
+                  </button>
                   <button
                     onClick={() => {
                       setFindOpen(true);
@@ -1518,6 +1537,10 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets 
                 <button onClick={() => setShowLib(true)} className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all group">
                   <FolderClosed className="w-7 h-7 text-gray-500 group-hover:text-gray-300" />
                   <div><p className="font-semibold text-white text-sm">Datei laden</p><p className="text-xs text-gray-500 mt-1">Aus deiner Bibliothek</p></div>
+                </button>
+                <button onClick={() => setShowOpenLib(true)} className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl border border-violet-500/20 bg-violet-500/8 hover:bg-violet-500/15 hover:border-violet-500/40 transition-all group">
+                  <Globe className="w-7 h-7 text-violet-500 group-hover:text-violet-400" />
+                  <div><p className="font-semibold text-white text-sm">Open Library</p><p className="text-xs text-gray-500 mt-1">Community Test-Skripte</p></div>
                 </button>
               </div>
             </div>
@@ -1744,6 +1767,23 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets 
         errorDetails={errorDetails} script={script} output={output}
         onClose={() => setShowErrorModal(false)} onSendToAI={handleSendToAI}
       />
+
+      {showOpenLib && (
+        <OpenLibraryModal
+          userData={userData}
+          mode="test"
+          onClose={() => setShowOpenLib(false)}
+          onLoadScript={(scriptContent, scriptName) => {
+            setScript(scriptContent);
+            setSavedScript(scriptContent);
+            setCurrentScriptId(null);
+            setIsDirty(true);
+            setFileOpen(true);
+            setShowOpenLib(false);
+            success('Geladen!', `„${scriptName}“ wurde in den Editor geladen.`);
+          }}
+        />
+      )}
     </div>
   );
 }

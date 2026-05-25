@@ -32,7 +32,7 @@ type ReadyState =
 
 // ── Hauptkomponente ────────────────────────────────────────────────────────
 
-export default function TestPanel() {
+export default function TestPanel({ userData }: { userData?: { userId: string; email: string; apiKey: string; password: string } }) {
   const [loadingData, setLoadingData] = useState(true);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
@@ -263,6 +263,7 @@ export default function TestPanel() {
           {/* ── Dev Test Mode ── */}
           {mode === 'dev' && (
             <DevTestPanel
+              userData={userData}
               modelInfo={selectedModel ?? null}
               selectedVersionPath={selectedVersionPath}
               datasets={datasets}

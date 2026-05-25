@@ -103,7 +103,10 @@ interface RequirementsCheck {
 }
 
 export interface LossPoint { step: number; epoch: number; train_loss: number; val_loss?: number; }
-interface TrainingPanelProps { onNavigateToAnalysis: (versionId: string) => void; }
+interface TrainingPanelProps { 
+  userData?: { userId: string; email: string; apiKey: string; password: string };
+  onNavigateToAnalysis: (versionId: string) => void; 
+}
 
 // ── AI Helper ─────────────────────────────────────────────────────────────
 
@@ -613,7 +616,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export default function TrainingPanel({ onNavigateToAnalysis }: TrainingPanelProps) {
+export default function TrainingPanel({ userData, onNavigateToAnalysis }: TrainingPanelProps) {
   const { currentTheme } = useTheme();
   const { success, error, warning } = useNotification();
   const { setCurrentPageContent } = usePageContext();
@@ -1030,7 +1033,7 @@ export default function TrainingPanel({ onNavigateToAnalysis }: TrainingPanelPro
 
       {/* Dev Train */}
       {mode === 'dev' && (
-        <DevTrainPanel modelInfo={selectedModel ?? null} selectedVersionPath={selectedVersionPath} datasets={datasets} onNavigateToAnalysis={onNavigateToAnalysis} />
+        <DevTrainPanel modelInfo={selectedModel ?? null} selectedVersionPath={selectedVersionPath} datasets={datasets} onNavigateToAnalysis={onNavigateToAnalysis} userData={userData} />
       )}
 
       {/* Standard Training */}
