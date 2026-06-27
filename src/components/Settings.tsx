@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, X } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
+import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
@@ -52,15 +53,7 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system';
-
-// Status helpers for Support tickets
-const STATUS_LABEL: Record<string, string> = {
-  open: 'Offen',
-  in_progress: 'In Bearbeitung',
-  resolved: 'Gelöst',
-  closed: 'Geschlossen',
-};
+type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system';
 
 const STATUS_COLOR: Record<string, string> = {
   open: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
@@ -96,6 +89,7 @@ function useStoredTickets(userId: string) {
 // ── Duplicate Community Name Error Modal ──────────────────────────────────
 
 function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () => void }) {
+  const { t } = useLanguage();
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-red-500/20 max-w-sm w-full p-6 space-y-4">
@@ -104,20 +98,23 @@ function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () 
             <AlertTriangle className="w-6 h-6 text-red-400" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Name bereits vergeben</h3>
-            <p className="text-sm text-gray-400 mt-1">Dieser Community-Name ist schon in Verwendung.</p>
+            <h3 className="text-lg font-semibold text-white">{t('settings.account.duplicateName.title')}</h3>
+            <p className="text-sm text-gray-400 mt-1">{t('settings.account.duplicateName.subtitle')}</p>
           </div>
         </div>
         
         <div className="bg-red-500/8 border border-red-500/20 rounded-lg p-3">
           <p className="text-sm text-red-200">
-            Der Name <strong className="text-red-300">@{name}</strong> wird bereits von jemandem anderem verwendet.
+            {t('settings.account.duplicateName.message').replace('{name}', name)}
           </p>
         </div>
 
         <div className="bg-violet-500/8 border border-violet-500/20 rounded-lg p-3">
           <p className="text-xs text-violet-200">
-            💡 <strong>Tipp:</strong> Versuche einen anderen Community-Namen, z. B. mit Zahlen oder Unterstrichen.
+            <span className="inline-flex items-center gap-2">
+              <Lightbulb className="w-3.5 h-3.5" />
+              <span>{t('settings.account.duplicateName.tip')}</span>
+            </span>
           </p>
         </div>
 
@@ -125,7 +122,7 @@ function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () 
           onClick={onClose}
           className="w-full py-2.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 text-violet-300 font-medium transition-all"
         >
-          Einen anderen Namen versuchen
+          {t('settings.account.duplicateName.retry')}
         </button>
       </div>
     </div>
@@ -137,6 +134,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const { currentTheme, setTheme, themes: allThemes } = useTheme();
+  const { language, setLanguage, t } = useLanguage();
+  // Status helpers for Support tickets
+  const STATUS_LABEL: Record<string, string> = {
+    open: t('settings.support.statusOpen'),
+    in_progress: t('settings.support.statusInProgress'),
+    resolved: t('settings.support.statusResolved'),
+    closed: t('settings.support.statusClosed'),
+  };
   const { settings: aiSettings, updateSettings: updateAISettings } = useAISettings();
   const { setCurrentPageContent } = usePageContext();
   const [appVersion, setAppVersion] = useState<string>('Loading...');
@@ -355,14 +360,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         const progress = event.payload;
         setSystemInstallProgress(prev => new Map(prev).set(progress.plugin_id, progress));
         if (progress.status === 'failed') {
-          setSystemInstallError(progress.message || 'Installation fehlgeschlagen');
+          setSystemInstallError(progress.message || t('settings.system.installFailed'));
           setSystemInstalling(false);
         }
       });
 
       unlistenComplete = await listen('plugin-install-complete', async () => {
         setSystemInstalling(false);
-        setNotification({ type: 'success', message: 'Dependencies installiert ✓' });
+        setNotification({ type: 'success', message: t('settings.system.depsInstalled') });
         setTimeout(() => setNotification(null), 3000);
         await loadSystemInfo();
       });
@@ -468,7 +473,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   // Support API functions
   const submitTicket = async () => {
     if (!newSubject.trim() || !newMessage.trim()) {
-      setNotification({ type: 'error', message: 'Bitte Betreff und Nachricht ausfüllen' });
+      setNotification({ type: 'error', message: t('settings.support.fillRequired') });
       return;
     }
     setSubmitting(true);
@@ -497,10 +502,10 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       setNewSubject('');
       setNewMessage('');
       openThread(stored);
-      setNotification({ type: 'success', message: 'Ticket erfolgreich eingereicht!' });
+      setNotification({ type: 'success', message: t('settings.support.submitSuccess') });
       setTimeout(() => setNotification(null), 3000);
     } catch {
-      setNotification({ type: 'error', message: 'Fehler beim Einreichen des Tickets' });
+      setNotification({ type: 'error', message: t('settings.support.submitError') });
     } finally {
       setSubmitting(false);
     }
@@ -539,7 +544,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       setMessages(prev => [...prev, { id: Date.now(), sender: 'user', message: text, created_at: new Date().toISOString() }]);
       if (ticketInfo) setTicketInfo({ ...ticketInfo, status: 'in_progress' });
     } catch {
-      setNotification({ type: 'error', message: 'Senden fehlgeschlagen' });
+      setNotification({ type: 'error', message: t('settings.support.sendFailed') });
       setReplyText(text);
     } finally {
       setSendingReply(false);
@@ -547,24 +552,25 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   };
 
   const tabs = [
-    { id: 'account' as SettingsTab, label: 'Konto', icon: User },
-    { id: 'appearance' as SettingsTab, label: 'Darstellung', icon: Palette },
-    { id: 'notifications' as SettingsTab, label: 'Benachrichtigungen', icon: Bell },
-    { id: 'ai-assistant' as SettingsTab, label: 'KI-Assistent', icon: Brain },
-    { id: 'system' as SettingsTab, label: 'System', icon: Monitor },
-    { id: 'updates' as SettingsTab, label: 'Updates', icon: Download },
-    { id: 'docs' as SettingsTab, label: 'Dokumentation', icon: BookOpen },
-    { id: 'support' as SettingsTab, label: 'Support', icon: MessageCircle },
-    { id: 'about' as SettingsTab, label: 'Über', icon: Info },
+    { id: 'account'      as SettingsTab, label: t('settings.tabs.account'),              icon: User },
+    { id: 'appearance'   as SettingsTab, label: t('settings.tabs.appearance'),         icon: Palette },
+    { id: 'language'     as SettingsTab, label: t('settings.tabs.language'),             icon: Globe },
+    { id: 'notifications'as SettingsTab, label: t('settings.tabs.notifications'),  icon: Bell },
+    { id: 'ai-assistant' as SettingsTab, label: t('settings.tabs.aiAssistant'),        icon: Brain },
+    { id: 'system'       as SettingsTab, label: t('settings.tabs.system'),              icon: Monitor },
+    { id: 'updates'      as SettingsTab, label: t('settings.tabs.updates'),             icon: Download },
+    { id: 'docs'         as SettingsTab, label: t('settings.tabs.docs'),       icon: BookOpen },
+    { id: 'support'      as SettingsTab, label: t('settings.tabs.support'),             icon: MessageCircle },
+    { id: 'about'        as SettingsTab, label: t('settings.tabs.about'),               icon: Info },
   ];
 
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setNotification({ type: 'success', message: 'In Zwischenablage kopiert!' });
+      setNotification({ type: 'success', message: t('settings.account.copied') });
       setTimeout(() => setNotification(null), 3000);
     } catch (error) {
-      setNotification({ type: 'error', message: 'Kopieren fehlgeschlagen' });
+      setNotification({ type: 'error', message: t('settings.account.copyFailed') });
       setTimeout(() => setNotification(null), 3000);
     }
   };
@@ -573,18 +579,18 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     <div className="space-y-6">
       {/* User Info Card */}
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Benutzerinformationen</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.account.title')}</h3>
         
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1">E-Mail</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1">{t('settings.account.email')}</label>
             <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white">
               {userData.email}
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1">User ID</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1">{t('settings.account.userId')}</label>
             <div className="flex items-center space-x-2">
               <div className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm truncate">
                 {userData.userId}
@@ -593,7 +599,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 onClick={() => copyToClipboard(userData.userId)}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
               >
-                Kopieren
+                {t('settings.account.copy')}
               </button>
             </div>
           </div>
@@ -603,13 +609,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       {/* API Key Card */}
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">API-Key</h3>
+          <h3 className="text-lg font-semibold text-white">{t('settings.account.apiKeySection.title')}</h3>
           <Key className="w-5 h-5 text-purple-400" />
         </div>
         
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1">Dein API-Key</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1">{t('settings.account.apiKeySection.label')}</label>
             <div className="flex items-center space-x-2">
               <div className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm">
                 {showApiKey ? userData.apiKey : '••••••••••••••••••••'}
@@ -618,13 +624,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 onClick={() => setShowApiKey(!showApiKey)}
                 className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-colors border border-white/10"
               >
-                {showApiKey ? 'Verbergen' : 'Anzeigen'}
+                {showApiKey ? t('settings.account.apiKeySection.hide') : t('settings.account.apiKeySection.show')}
               </button>
               <button
                 onClick={() => copyToClipboard(userData.apiKey)}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
               >
-                Kopieren
+                {t('settings.account.copy')}
               </button>
             </div>
           </div>
@@ -632,7 +638,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           <div className="flex items-start space-x-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
             <Shield className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
             <p className="text-sm text-yellow-300">
-              Teile deinen API-Key niemals mit anderen. Er gewährt vollen Zugriff auf deinen Account.
+              {t('settings.account.apiKeySection.warning')}
             </p>
           </div>
         </div>
@@ -643,7 +649,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <Globe className="w-5 h-5 text-violet-400" />
-            <h3 className="text-lg font-semibold text-white">Community-Name</h3>
+            <h3 className="text-lg font-semibold text-white">{t('settings.account.communityName.title')}</h3>
           </div>
           {communityName && !editingCommunity && (
             <button onClick={() => { setEditingCommunity(true); setCommunitySaved(false); }} className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-violet-400 transition-colors">
@@ -651,12 +657,12 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             </button>
           )}
         </div>
-        <p className="text-sm text-gray-400 mb-4">Dein öffentlicher Name in der Open Script Library</p>
+        <p className="text-sm text-gray-400 mb-4">{t('settings.account.communityName.subtitle')}</p>
 
         {communitySaved && (
           <div className="flex items-center gap-2 p-3 mb-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
             <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <p className="text-sm text-emerald-300">Community-Name gespeichert. Künftige Uploads werden als <strong>@{communityName}</strong> veröffentlicht.</p>
+            <p className="text-sm text-emerald-300">{t('settings.account.communityName.savedMsg').replace('{name}', communityName)}</p>
           </div>
         )}
 
@@ -664,13 +670,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           <div className="space-y-3">
             <div className="flex items-start gap-2 p-3 bg-violet-500/8 border border-violet-500/20 rounded-lg">
               <Globe className="w-4 h-4 text-violet-400 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-violet-300">{!communityName ? 'Lege einmalig deinen Community-Namen fest, um Skripte in die Open Library hochzuladen.' : 'Ändere deinen Community-Namen — alle künftigen Uploads verwenden den neuen Namen.'}</p>
+              <p className="text-sm text-violet-300">{!communityName ? t('settings.account.communityName.firstTime') : t('settings.account.communityName.change')}</p>
             </div>
             <div className="flex gap-2">
               <input
                 value={communityNameInput}
                 onChange={e => setCommunityNameInput(e.target.value.replace(/[^a-z0-9_\-. ]/gi, ''))}
-                placeholder="z. B. ai_enthusiast"
+                placeholder={t('settings.account.communityName.placeholder')}
                 maxLength={40}
                 className="flex-1 px-4 py-2.5 bg-white/5 border border-violet-500/30 rounded-lg text-white placeholder:text-gray-600 focus:outline-none focus:border-violet-500/60"
               />
@@ -709,7 +715,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     if (!response.ok) {
                       const error = await response.json();
                       console.error('[Settings] PATCH failed:', error);
-                      alert('Fehler beim Speichern: ' + error.error);
+                      alert(t('settings.account.communityName.saveError').replace('{error}', error.error));
                       setSavingCommunity(false);
                       return;
                     }
@@ -727,7 +733,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     setTimeout(() => setCommunitySaved(false), 3000);
                   } catch (err) {
                     console.error('[Settings] Error saving community name:', err);
-                    alert('Ein Fehler ist aufgetreten: ' + String(err));
+                    alert(t('settings.account.communityName.saveError').replace('{error}', String(err)));
                   } finally {
                     setSavingCommunity(false);
                   }
@@ -737,11 +743,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               >
                 {savingCommunity ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Wird gespeichert...
+                    <Loader2 className="w-4 h-4 animate-spin" /> {t('settings.account.communityName.saving')}
                   </>
                 ) : (
                   <>
-                    <Check className="w-4 h-4" /> Speichern
+                    <Check className="w-4 h-4" /> {t('settings.account.communityName.save')}
                   </>
                 )}
               </button>
@@ -754,7 +760,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-gray-600">Nur Buchstaben, Zahlen, Unterstriche, Bindestriche und Punkte erlaubt (max. 40 Zeichen).</p>
+            <p className="text-[11px] text-gray-600">{t('settings.account.communityName.hint')}</p>
           </div>
         ) : (
           <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-lg">
@@ -763,7 +769,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             </div>
             <div>
               <p className="text-white font-medium">@{communityName}</p>
-              <p className="text-gray-500 text-xs">Dein öffentlicher Name in der Open Library</p>
+              <p className="text-gray-500 text-xs">{t('settings.account.communityName.publicLabel')}</p>
             </div>
           </div>
         )}
@@ -771,7 +777,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* Account Management */}
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Kontoverwaltung</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.account.management.title')}</h3>
         
         <div className="space-y-3">
           <a
@@ -780,7 +786,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
           >
-            <span>Dashboard öffnen</span>
+            <span>{t('settings.account.management.openDashboard')}</span>
             <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
           </a>
 
@@ -790,7 +796,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
           >
-            <span>Passwort ändern</span>
+            <span>{t('settings.account.management.changePassword')}</span>
             <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
           </a>
 
@@ -798,7 +804,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             onClick={onLogout}
             className="w-full flex items-center justify-between px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-300 hover:text-red-200 transition-colors"
           >
-            <span>Abmelden</span>
+            <span>{t('settings.account.management.logout')}</span>
             <LogOut className="w-5 h-5" />
           </button>
         </div>
@@ -807,6 +813,22 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   );
 
   const renderAIAssistantTab = () => {
+    const providerIcon = (provider: AIProvider) => {
+      const common = 'w-7 h-7';
+      switch (provider) {
+        case 'anthropic':
+          return <Brain className={`${common} text-purple-300`} />;
+        case 'openai':
+          return <Sparkles className={`${common} text-emerald-300`} />;
+        case 'groq':
+          return <Zap className={`${common} text-amber-300`} />;
+        case 'ollama':
+          return <Monitor className={`${common} text-blue-300`} />;
+        default:
+          return <Sparkles className={`${common} text-gray-300`} />;
+      }
+    };
+
     const meta = PROVIDER_META[aiSettings.provider];
     return (
       <div className="space-y-6">
@@ -814,8 +836,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="bg-white/5 rounded-xl p-6 border border-white/10">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-lg font-semibold text-white">KI-Assistent aktivieren</h3>
-              <p className="text-sm text-gray-400 mt-1">Globale Einstellung für den KI-Coach in der App</p>
+              <h3 className="text-lg font-semibold text-white">{t('settings.ai.title')}</h3>
+              <p className="text-sm text-gray-400 mt-1">{t('settings.ai.subtitle')}</p>
             </div>
             <button
               onClick={() => updateAISettings({ enabled: !aiSettings.enabled })}
@@ -833,13 +855,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {aiSettings.enabled && (
             <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 flex items-center gap-2">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
-              KI-Assistent ist aktiv und verfügbar
+              {t('settings.ai.active')}
             </div>
           )}
           {!aiSettings.enabled && (
             <div className="p-3 bg-gray-500/10 border border-gray-500/20 rounded-lg text-sm text-gray-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              KI-Assistent ist deaktiviert
+              {t('settings.ai.inactive')}
             </div>
           )}
         </div>
@@ -848,7 +870,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           <>
             {/* Provider Selection */}
             <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-              <h3 className="text-lg font-semibold text-white mb-4">KI-ANBIETER WÄHLEN</h3>
+              <h3 className="text-lg font-semibold text-white mb-4">{t('settings.ai.providerTitle')}</h3>
               <div className="grid grid-cols-2 gap-3">
                 {(Object.entries(PROVIDER_META) as [AIProvider, typeof PROVIDER_META[AIProvider]][]).map(([key, m]) => (
                   <button
@@ -860,10 +882,19 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                         : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
                     }`}
                   >
-                    <span className="text-3xl flex-shrink-0">{m.emoji}</span>
+                    <span className="flex-shrink-0">{providerIcon(key)}</span>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold">{m.label}</div>
-                      <div className="text-xs opacity-60 mt-0.5">{m.needsKey ? 'API-Key nötig' : '✅ Kein Key'}</div>
+                      <div className="text-xs opacity-60 mt-0.5 flex items-center gap-1.5">
+                        {m.needsKey ? (
+                          <>{t('settings.ai.keyNeeded')}</>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                            {t('settings.ai.noKeyNeeded')}
+                          </>
+                        )}
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -874,14 +905,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             {meta.needsKey ? (
               <div className="bg-white/5 rounded-xl p-6 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">API-Key</h3>
+                  <h3 className="text-lg font-semibold text-white">{t('settings.ai.apiKeyTitle')}</h3>
                   <a
                     href={meta.keyLink}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
                   >
-                    Key holen ↗
+                    {t('settings.ai.getKey')}
                   </a>
                 </div>
                 
@@ -899,16 +930,16 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                       onClick={() => setShowApiKeyField(!showApiKeyField)}
                       className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white transition-all text-sm"
                     >
-                      {showApiKeyField ? 'Verbergen' : 'Anzeigen'}
+                      {showApiKeyField ? t('settings.ai.hide') : t('settings.ai.show')}
                     </button>
                   </div>
                 </div>
 
-                <p className="text-xs text-gray-500">Key wird nur lokal gespeichert, nie an FrameTrain übertragen.</p>
+                <p className="text-xs text-gray-500">{t('settings.ai.keyLocalOnly')}</p>
 
                 {/* Model Selection */}
                 <div>
-                  <label className="block text-sm font-semibold text-white mb-2">Modell</label>
+                  <label className="block text-sm font-semibold text-white mb-2">{t('settings.ai.model')}</label>
                   <div className="flex flex-wrap gap-2">
                     {meta.models.map(m => (
                       <button
@@ -930,11 +961,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               /* Ollama Configuration */
               <div className="bg-white/5 rounded-xl p-6 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">Ollama-Konfiguration</h3>
+                  <h3 className="text-lg font-semibold text-white">{t('settings.ai.ollamaTitle')}</h3>
                 </div>
 
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">Modell-Name (muss lokal installiert sein)</label>
+                  <label className="block text-sm text-gray-400 mb-2">{t('settings.ai.ollamaModelLabel')}</label>
                   <input
                     type="text"
                     value={aiSettings.ollamaModel}
@@ -945,7 +976,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-white mb-2">Beliebte Modelle</label>
+                  <label className="block text-sm font-semibold text-white mb-2">{t('settings.ai.ollamaPopular')}</label>
                   <div className="flex flex-wrap gap-2">
                     {PROVIDER_META.ollama.models.map(m => (
                       <button
@@ -964,10 +995,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 </div>
 
                 <div className="p-4 bg-white/[0.03] rounded-lg border border-white/10 text-xs text-gray-400 space-y-2">
-                  <div className="font-semibold text-gray-300">🦙 Ollama noch nicht installiert?</div>
-                  <div>1. <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">ollama.com</a> — kostenlos herunterladen</div>
-                  <div>2. Im Terminal: <code className="bg-black/30 px-1 py-0.5 rounded font-mono text-xs">ollama pull llama3.2</code></div>
-                  <div>3. Ollama läuft dann im Hintergrund</div>
+                  <div className="font-semibold text-gray-300 flex items-center gap-2">
+                    <Download className="w-4 h-4 text-blue-300" />
+                    {t('settings.ai.ollamaInstallTitle')}
+                  </div>
+                  <div>{t('settings.ai.ollamaInstallStep1')} <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">ollama.com</a>{t('settings.ai.ollamaInstallStep1Suffix')}</div>
+                  <div>{t('settings.ai.ollamaInstallStep2')} <code className="bg-black/30 px-1 py-0.5 rounded font-mono text-xs">{t('settings.ai.ollamaInstallCommand')}</code></div>
+                  <div>{t('settings.ai.ollamaInstallStep3')}</div>
                 </div>
               </div>
             )}
@@ -976,8 +1010,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-300 flex items-start gap-3">
               <Info className="w-5 h-5 flex-shrink-0 mt-0.5" />
               <div>
-                <div className="font-semibold mb-1">Diese Einstellungen gelten global</div>
-                <p className="text-xs text-blue-200">Der KI-Anbieter und das Modell werden für alle KI-Funktionen verwendet: Quick Chat, Training-Analysen und Labor-Assistenz.</p>
+                <div className="font-semibold mb-1">{t('settings.ai.globalNote')}</div>
+                <p className="text-xs text-blue-200">{t('settings.ai.globalNoteDesc')}</p>
               </div>
             </div>
           </>
@@ -988,7 +1022,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
   const handleThemeChange = async (themeId: ThemeId) => {
     setTheme(themeId);
-    setNotification({ type: 'success', message: 'Theme erfolgreich geändert!' });
+    setNotification({ type: 'success', message: t('settings.appearance.themeChanged') });
     setTimeout(() => setNotification(null), 3000);
   };
 
@@ -1001,8 +1035,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     return (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Farbschema</h3>
-        <p className="text-gray-400 mb-6">Wähle dein bevorzugtes Farbschema für die Desktop-App</p>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.appearance.title')}</h3>
+        <p className="text-gray-400 mb-6">{t('settings.appearance.subtitle')}</p>
         
         <div className="grid grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-2">
           {Object.values(allThemes).map((theme) => {
@@ -1046,19 +1080,19 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* Preview Section */}
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Vorschau</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.appearance.preview')}</h3>
         <div className={`p-6 bg-gradient-to-br ${currentTheme.colors.background} rounded-xl border border-white/10`}>
           <div className="flex items-center space-x-4 mb-4">
             <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${currentTheme.colors.gradient} flex items-center justify-center`}>
               <Palette className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="text-white font-semibold">Beispiel Button</div>
-              <div className="text-gray-400 text-sm">So sieht dein Theme aus</div>
+              <div className="text-white font-semibold">{t('settings.appearance.exampleButton')}</div>
+              <div className="text-gray-400 text-sm">{t('settings.appearance.exampleSubtitle')}</div>
             </div>
           </div>
           <button className={`w-full py-3 px-4 bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold rounded-lg hover:opacity-90 transition-opacity`}>
-            Beispiel Button
+            {t('settings.appearance.exampleButton')}
           </button>
         </div>
       </div>
@@ -1066,32 +1100,92 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     );
   };
 
+  const renderLanguageTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+        <div className="flex items-center gap-3 mb-2">
+          <Globe className="w-5 h-5 text-purple-400" />
+          <h3 className="text-lg font-semibold text-white">{t('settings.language.title')}</h3>
+        </div>
+        <p className="text-sm text-gray-400 mb-6">
+          {t('settings.language.subtitle')}
+        </p>
+
+        <div className="space-y-3 max-w-sm">
+          {(Object.entries(LANGUAGE_META) as [Language, typeof LANGUAGE_META[Language]][]).map(
+            ([lang, meta]) => {
+              const active = language === lang;
+              return (
+                <button
+                  key={lang}
+                  onClick={() => {
+                    setLanguage(lang);
+                    setNotification({ type: 'success', message: t('settings.language.changed').replace('{lang}', meta.nativeLabel) });
+                    setTimeout(() => setNotification(null), 2500);
+                  }}
+                  className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 transition-all duration-200 ${
+                    active
+                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} border-transparent shadow-lg scale-[1.01]`
+                      : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <span className="text-3xl">{meta.flag}</span>
+                  <div className="flex-1 text-left">
+                    <div className="text-white font-semibold">{meta.nativeLabel}</div>
+                    <div className={`text-xs mt-0.5 ${active ? 'text-white/70' : 'text-gray-500'}`}>
+                      {lang === 'de' ? 'Deutsch' : 'English'}
+                    </div>
+                  </div>
+                  {active && (
+                    <div className="w-6 h-6 rounded-full bg-white/25 flex items-center justify-center flex-shrink-0">
+                      <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                    </div>
+                  )}
+                </button>
+              );
+            },
+          )}
+        </div>
+      </div>
+
+      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-5 flex items-start gap-3">
+        <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-blue-300 mb-1">{t('settings.language.moreComingSoon')}</p>
+          <p className="text-xs text-blue-200/70">
+            {t('settings.language.moreComingSoonDesc')}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderNotificationsTab = () => (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Desktop-Benachrichtigungen</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.notifications.title')}</h3>
         
         <div className="space-y-4">
           <label className="flex items-center justify-between cursor-pointer">
             <div>
-              <div className="text-white font-medium">Training abgeschlossen</div>
-              <div className="text-sm text-gray-400">Benachrichtigung wenn Training fertig ist</div>
+              <div className="text-white font-medium">{t('settings.notifications.trainingComplete')}</div>
+              <div className="text-sm text-gray-400">{t('settings.notifications.trainingCompleteDesc')}</div>
             </div>
             <input type="checkbox" className="w-5 h-5 rounded bg-white/5 border-white/10" defaultChecked />
           </label>
 
           <label className="flex items-center justify-between cursor-pointer">
             <div>
-              <div className="text-white font-medium">Fehler und Warnungen</div>
-              <div className="text-sm text-gray-400">Benachrichtigung bei Problemen</div>
+              <div className="text-white font-medium">{t('settings.notifications.errors')}</div>
+              <div className="text-sm text-gray-400">{t('settings.notifications.errorsDesc')}</div>
             </div>
             <input type="checkbox" className="w-5 h-5 rounded bg-white/5 border-white/10" defaultChecked />
           </label>
 
           <label className="flex items-center justify-between cursor-pointer">
             <div>
-              <div className="text-white font-medium">Updates verfügbar</div>
-              <div className="text-sm text-gray-400">Benachrichtigung über neue Versionen</div>
+              <div className="text-white font-medium">{t('settings.notifications.updates')}</div>
+              <div className="text-sm text-gray-400">{t('settings.notifications.updatesDesc')}</div>
             </div>
             <input type="checkbox" className="w-5 h-5 rounded bg-white/5 border-white/10" defaultChecked />
           </label>
@@ -1131,10 +1225,10 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 ? 'text-green-300'
                 : 'text-white'
             }`}>
-              {updateStatus === 'checking' && 'Auf Updates prüfen...'}
-              {updateStatus === 'up-to-date' && 'Du bist auf dem neuesten Stand!'}
-              {updateStatus === 'update-available' && 'Neues Update verfügbar'}
-              {updateStatus === 'error' && 'Update-Prüfung fehlgeschlagen'}
+              {updateStatus === 'checking' && t('settings.updates.checking')}
+              {updateStatus === 'up-to-date' && t('settings.updates.upToDate')}
+              {updateStatus === 'update-available' && t('settings.updates.updateAvailable')}
+              {updateStatus === 'error' && t('settings.updates.error')}
             </h3>
           </div>
           <button
@@ -1142,14 +1236,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             disabled={checkingUpdates}
             className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white rounded-lg text-sm font-semibold transition-all"
           >
-            {checkingUpdates ? 'Wird geprüft...' : 'Neu prüfen'}
+            {checkingUpdates ? t('settings.updates.rechecking') : t('settings.updates.recheck')}
           </button>
         </div>
 
         {/* Version Comparison */}
         <div className="grid grid-cols-3 gap-4 mb-4">
           <div className="bg-black/20 rounded-lg p-4">
-            <p className="text-gray-400 text-xs mb-1">Installiert</p>
+            <p className="text-gray-400 text-xs mb-1">{t('settings.updates.installed')}</p>
             <p className="text-white font-mono font-semibold text-lg">v{appVersion}</p>
           </div>
           <div className="flex items-center justify-center">
@@ -1160,7 +1254,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               ? 'bg-red-500/20 border-red-500/30'
               : 'bg-black/20'
           } rounded-lg p-4 border`}>
-            <p className="text-gray-400 text-xs mb-1">Verfügbar</p>
+            <p className="text-gray-400 text-xs mb-1">{t('settings.updates.available')}</p>
             <p className={`font-mono font-semibold text-lg ${
               latestVersion ? 'text-white' : 'text-gray-500'
             }`}>
@@ -1173,7 +1267,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         {updateStatus === 'update-available' && (
           <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-4 mb-4">
             <p className="text-red-300 text-sm">
-              Eine neuere Version ist verfügbar! Klick auf "Zu GitHub Releases" um die neue Version herunterzuladen.
+              {t('settings.updates.updateMsg')}
             </p>
           </div>
         )}
@@ -1181,7 +1275,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         {updateStatus === 'error' && (
           <div className="bg-gray-500/20 border border-gray-500/30 rounded-lg p-4 mb-4">
             <p className="text-gray-300 text-sm">
-              Konnte nicht auf Updates prüfen. Prüfe deine Internetverbindung oder klick "Neu prüfen".
+              {t('settings.updates.errorMsg')}
             </p>
           </div>
         )}
@@ -1194,9 +1288,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             <Download className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="text-xl font-bold text-white mb-2">Neue Version herunterladen</h3>
+            <h3 className="text-xl font-bold text-white mb-2">{t('settings.updates.downloadTitle')}</h3>
             <p className="text-gray-300 mb-4">
-              Besuche die GitHub Releases-Seite, um die neueste Version von FrameTrain herunterzuladen.
+              {t('settings.updates.downloadDesc')}
             </p>
             
             <button
@@ -1204,7 +1298,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all"
             >
               <Download className="w-5 h-5" />
-              <span>Zu GitHub Releases</span>
+              <span>{t('settings.updates.githubReleases')}</span>
               <ExternalLink className="w-4 h-4" />
             </button>
           </div>
@@ -1215,25 +1309,25 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
         <div className="flex items-center gap-2 mb-4">
           <FileText className="w-5 h-5 text-gray-400" />
-          <h3 className="text-lg font-semibold text-white">Update-Installation</h3>
+          <h3 className="text-lg font-semibold text-white">{t('settings.updates.installTitle')}</h3>
         </div>
         <div className="space-y-3 text-gray-400 text-sm">
           <p>
-            <span className="font-semibold text-white">1.</span> Lade die neue Version herunter
+            <span className="font-semibold text-white">1.</span> {t('settings.updates.step1')}
           </p>
           <p>
-            <span className="font-semibold text-white">2.</span> Deinstalliere die alte FrameTrain App komplett:
+            <span className="font-semibold text-white">2.</span> {t('settings.updates.step2')}
           </p>
           <ul className="ml-6 space-y-1 list-disc">
-            <li>macOS: <span className="text-white">Applications</span> → FrameTrain → <span className="text-white">Move to Trash</span></li>
-            <li>Windows: <span className="text-white">Control Panel</span> → <span className="text-white">Uninstall</span></li>
-            <li>Linux: <span className="text-white">sudo apt remove frametrain</span> oder entsprechend für deine Distribution</li>
+            <li>{t('settings.updates.uninstallMac').replace('{app}', 'FrameTrain')}</li>
+            <li>{t('settings.updates.uninstallWindows')}</li>
+            <li>{t('settings.updates.uninstallLinux')}</li>
           </ul>
           <p>
-            <span className="font-semibold text-white">3.</span> Installiere die neue Version
+            <span className="font-semibold text-white">3.</span> {t('settings.updates.step3')}
           </p>
           <p>
-            <span className="font-semibold text-white">4.</span> Starte FrameTrain neu (alle Einstellungen und Daten bleiben erhalten)
+            <span className="font-semibold text-white">4.</span> {t('settings.updates.step4')}
           </p>
         </div>
       </div>
@@ -1243,11 +1337,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="flex items-start gap-3">
           <Lightbulb className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-white font-semibold mb-1">Automatische Update-Benachrichtigung</h3>
+            <h3 className="text-white font-semibold mb-1">{t('settings.updates.autoUpdateTitle')}</h3>
             <p className="text-blue-300 text-sm">
-              FrameTrain prüft automatisch beim Start auf neue Versionen. 
-              Wenn ein Update verfügbar ist, wird dir ein Modal angezeigt. 
-              Du kannst auch hier jederzeit manuell prüfen.
+              {t('settings.updates.autoUpdateDesc')}
             </p>
           </div>
         </div>
@@ -1261,10 +1353,10 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/20 rounded-xl p-6">
         <div className="flex items-center gap-3 mb-3">
           <BookOpen className="w-6 h-6 text-blue-400" />
-          <h3 className="text-lg font-semibold text-white">FrameTrain Dokumentation</h3>
+          <h3 className="text-lg font-semibold text-white">{t('settings.docs.title')}</h3>
         </div>
         <p className="text-sm text-gray-300">
-          Lerne alles über FrameTrain – von den Grundlagen bis zu erweiterten Funktionen.
+          {t('settings.docs.subtitle')}
         </p>
       </div>
 
@@ -1277,9 +1369,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       >
         <div className="flex items-start justify-between">
           <div>
-            <h4 className="text-base font-semibold text-white mb-2">Komplette Dokumentation</h4>
+            <h4 className="text-base font-semibold text-white mb-2">{t('settings.docs.fullDocsTitle')}</h4>
             <p className="text-sm text-gray-400">
-              Vollständige Anleitung mit allen Features, Tutorials und Best Practices
+              {t('settings.docs.fullDocsDesc')}
             </p>
           </div>
           <ExternalLink className="w-5 h-5 text-blue-400 flex-shrink-0 mt-1" />
@@ -1295,9 +1387,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       >
         <div className="flex items-start justify-between">
           <div>
-            <h4 className="text-base font-semibold text-white mb-2">KI-Training Guide</h4>
+            <h4 className="text-base font-semibold text-white mb-2">{t('settings.docs.guideTitle')}</h4>
             <p className="text-sm text-gray-400">
-              Schritt-für-Schritt Anleitung zum Training deines eigenen KI-Modells
+              {t('settings.docs.guideDesc')}
             </p>
           </div>
           <ExternalLink className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-1" />
@@ -1306,19 +1398,19 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* Quick Tips Card */}
       <div className="bg-white/5 rounded-xl border border-white/10 p-6">
-        <h4 className="text-base font-semibold text-white mb-4">Schnelle Tipps</h4>
+        <h4 className="text-base font-semibold text-white mb-4">{t('settings.docs.tipsTitle')}</h4>
         <ul className="space-y-3">
           <li className="flex items-start gap-3">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 flex-shrink-0" />
-            <span className="text-sm text-gray-300">Starte mit dem Training Guide um ein neues Modell zu trainieren</span>
+            <span className="text-sm text-gray-300">{t('settings.docs.tip1')}</span>
           </li>
           <li className="flex items-start gap-3">
             <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-            <span className="text-sm text-gray-300">Nutze die Dokumentation zum Troubleshooting von Fehlern</span>
+            <span className="text-sm text-gray-300">{t('settings.docs.tip2')}</span>
           </li>
           <li className="flex items-start gap-3">
             <div className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-2 flex-shrink-0" />
-            <span className="text-sm text-gray-300">In den Docs findest du Video-Tutorials und Code-Beispiele</span>
+            <span className="text-sm text-gray-300">{t('settings.docs.tip3')}</span>
           </li>
         </ul>
       </div>
@@ -1328,11 +1420,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="flex items-center justify-center gap-2 mb-2">
           <BookOpen className="w-4 h-4 text-blue-400" />
           <p className="text-sm text-gray-400 text-center">
-            Die Dokumentation wird regelmäßig aktualisiert.
+            {t('settings.docs.footerNote')}
           </p>
         </div>
         <p className="text-sm text-gray-400 text-center">
-          Haben Sie Fragen? Schau in den Docs vorbei!
+          {t('settings.docs.footerQuestion')}
         </p>
       </div>
     </div>
@@ -1374,10 +1466,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           )}
           <div className="flex items-center gap-3">
             <MessageCircle className="w-6 h-6 text-purple-400" />
-            <h2 className="text-2xl font-bold text-white">Support</h2>
+            <h2 className="text-2xl font-bold text-white">{t('settings.support.title')}</h2>
             {storedTickets.length > 0 && (
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                {storedTickets.length} Ticket{storedTickets.length !== 1 ? 's' : ''}
+                {storedTickets.length === 1
+                  ? t('settings.support.ticketCount').replace('{count}', String(storedTickets.length))
+                  : t('settings.support.ticketCountPlural').replace('{count}', String(storedTickets.length))
+                }
               </span>
             )}
           </div>
@@ -1389,8 +1484,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             {/* Sub-nav */}
             <div className="flex border-b border-white/10">
               {[
-                { id: 'list' as const, label: 'Meine Tickets', icon: Inbox },
-                { id: 'new' as const, label: 'Neues Ticket', icon: Edit },
+                { id: 'list' as const, label: t('settings.support.myTickets'), icon: Inbox },
+                { id: 'new' as const, label: t('settings.support.newTicket'), icon: Edit },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -1414,23 +1509,23 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               {/* New ticket form */}
               {supportView === 'new' && (
                 <div className="max-w-2xl">
-                  <h3 className="text-lg font-bold text-white mb-6">Neues Support-Ticket</h3>
+                  <h3 className="text-lg font-bold text-white mb-6">{t('settings.support.newTicketTitle')}</h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Betreff</label>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">{t('settings.support.subject')}</label>
                       <input
                         value={newSubject}
                         onChange={(e) => setNewSubject(e.target.value)}
-                        placeholder="Kurze Beschreibung deines Problems..."
+                        placeholder={t('settings.support.subjectPlaceholder')}
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Nachricht</label>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">{t('settings.support.message')}</label>
                       <textarea
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
-                        placeholder="Beschreibe dein Anliegen so detailliert wie möglich..."
+                        placeholder={t('settings.support.messagePlaceholder')}
                         rows={5}
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors resize-none"
                       />
@@ -1446,7 +1541,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        {submitting ? 'Wird gesendet...' : 'Ticket einreichen'}
+                        {submitting ? t('settings.support.submitting') : t('settings.support.submit')}
                       </button>
                     </div>
                   </div>
@@ -1461,24 +1556,24 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                       <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
                         <MailX className="w-8 h-8 text-gray-500" />
                       </div>
-                      <p className="text-gray-400 mb-2">Du hast noch keine Support-Tickets.</p>
-                      <p className="text-gray-500 text-sm mb-6">Hast du ein Problem oder eine Frage? Wir helfen gerne.</p>
+                      <p className="text-gray-400 mb-2">{t('settings.support.noTickets')}</p>
+                      <p className="text-gray-500 text-sm mb-6">{t('settings.support.noTicketsHint')}</p>
                       <button
                         onClick={() => setSupportView('new')}
                         className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors mx-auto text-sm font-semibold"
                       >
-                        <Plus className="w-4 h-4" /> Erstes Ticket erstellen
+                        <Plus className="w-4 h-4" /> {t('settings.support.createFirst')}
                       </button>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-white">Deine Tickets</h3>
+                        <h3 className="text-lg font-bold text-white">{t('settings.support.yourTickets')}</h3>
                         <button
                           onClick={() => setSupportView('new')}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm transition-colors border border-purple-500/20"
                         >
-                          <Plus className="w-3.5 h-3.5" /> Neues Ticket
+                          <Plus className="w-3.5 h-3.5" /> {t('settings.support.newTicket')}
                         </button>
                       </div>
                       {storedTickets.map((t) => (
@@ -1510,7 +1605,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     }}
                     className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm mb-5 transition-colors"
                   >
-                    ← Zurück zur Übersicht
+                    {t('settings.support.back')}
                   </button>
 
                   {threadLoading ? (
@@ -1536,7 +1631,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
                       {/* Messages */}
                       <div className="space-y-4 mb-5 max-h-96 overflow-y-auto pr-1">
-                        {messages.length === 0 && <p className="text-center text-gray-500 text-sm py-8">Noch keine Nachrichten</p>}
+                        {messages.length === 0 && <p className="text-center text-gray-500 text-sm py-8">{t('settings.support.noMessages')}</p>}
                         {messages.map((m) => (
                           <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div
@@ -1548,9 +1643,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                             >
                               <p style={{ whiteSpace: 'pre-wrap' }}>{m.message}</p>
                               <p className={`text-xs mt-1.5 flex items-center gap-1 ${m.sender === 'user' ? 'text-purple-200' : 'text-gray-500'}`}>
-                                {m.sender === 'user' ? 'Du' : <>
+                                {m.sender === 'user' ? t('settings.support.sender') : <>
                                   <Wrench className="w-3 h-3" />
-                                  Support
+                                  {t('settings.support.senderSupport')}
                                 </>} · {new Date(m.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             </div>
@@ -1568,7 +1663,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendReply();
                             }}
-                            placeholder="Nachricht schreiben... (Strg+Enter zum Senden)"
+                            placeholder={t('settings.support.sendPlaceholder')}
                             rows={3}
                             className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 transition-colors resize-none text-sm"
                           />
@@ -1582,7 +1677,16 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                         </div>
                       ) : (
                         <div className="glass rounded-xl px-4 py-3 border border-white/10 text-center text-gray-500 text-sm">
-                          Dieses Ticket ist {STATUS_LABEL[ticketInfo.status]?.toLowerCase()} – du kannst keine weitere Nachricht schreiben.
+                            {t('settings.support.ticketClosed').replace(
+                              '{status}',
+                              ({
+                                open: t('settings.support.statusOpen'),
+                                in_progress: t('settings.support.statusInProgress'),
+                                resolved: t('settings.support.statusResolved'),
+                                closed: t('settings.support.statusClosed'),
+                              }[ticketInfo.status] ?? '').toLowerCase()
+                            )
+                          }
                         </div>
                       )}
                     </>
@@ -1600,16 +1704,16 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Python-Pakete (Training)</h3>
+          <h3 className="text-lg font-semibold text-white">{t('settings.system.packagesTitle')}</h3>
           <div className="flex items-center gap-2">
             <button
               onClick={installMissingDeps}
               disabled={systemLoading || systemInstalling || !(systemDeps?.some(d => !d.installed))}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-emerald-300 hover:text-emerald-200 text-sm transition-all disabled:opacity-50 disabled:hover:bg-emerald-500/10"
-              title="Installiert fehlende Python-Pakete via pip"
+              title={t('settings.system.installMissingTooltip')}
             >
               {systemInstalling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              Fehlende installieren
+              {t('settings.system.installMissing')}
             </button>
             <button
               onClick={loadSystemInfo}
@@ -1617,13 +1721,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-all disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${systemLoading ? 'animate-spin' : ''}`} />
-              Neu prüfen
+              {t('settings.system.recheck')}
             </button>
           </div>
         </div>
 
         {!systemDeps ? (
-          <div className="text-gray-500 text-sm">Status noch nicht geladen.</div>
+          <div className="text-gray-500 text-sm">{t('settings.system.statusNotLoaded')}</div>
         ) : (
           <div className="space-y-2">
             {systemDeps.map(dep => (
@@ -1635,7 +1739,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   <span className="text-white font-mono text-sm">{dep.package}</span>
                 </div>
                 <span className={`text-xs font-mono ${dep.installed ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {dep.installed ? (dep.version ?? 'installiert') : 'fehlt'}
+                  {dep.installed ? (dep.version ?? t('settings.system.installed')) : t('settings.system.missing')}
                 </span>
               </div>
             ))}
@@ -1654,7 +1758,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             <div className="flex items-center justify-between text-xs text-gray-400">
               <span className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                Installation läuft…
+                {t('settings.system.installRunning')}
               </span>
               <span className="font-mono">
                 {(systemInstallProgress.get('seq_classification')?.progress ?? 0)}%
@@ -1667,7 +1771,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               />
             </div>
             <div className="text-[11px] text-gray-500 font-mono break-words">
-              {systemInstallProgress.get('seq_classification')?.message ?? 'pip wird gestartet…'}
+              {systemInstallProgress.get('seq_classification')?.message ?? t('settings.system.pipStarting')}
             </div>
           </div>
         )}
@@ -1675,15 +1779,15 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {systemReqs && (
         <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-          <h3 className="text-lg font-semibold text-white mb-4">Hardware & Beschleunigung</h3>
+          <h3 className="text-lg font-semibold text-white mb-4">{t('settings.system.hardwareTitle')}</h3>
           <div className="space-y-2">
             {[
               { label: 'Python', value: systemReqs.python_version, ok: systemReqs.python_installed },
               { label: 'PyTorch', value: systemReqs.torch_version, ok: systemReqs.torch_installed },
               { label: 'Transformers', value: systemReqs.transformers_version, ok: systemReqs.transformers_installed },
               { label: 'PEFT (LoRA)', value: systemReqs.peft_version, ok: systemReqs.peft_installed },
-              { label: 'CUDA (GPU)', value: systemReqs.cuda_available ? 'Verfügbar ✓' : 'Nicht verfügbar', ok: systemReqs.cuda_available },
-              { label: 'Apple MPS', value: systemReqs.mps_available ? 'Verfügbar ✓' : 'Nicht verfügbar', ok: systemReqs.mps_available },
+              { label: 'CUDA (GPU)', value: systemReqs.cuda_available ? t('settings.system.cudaAvailable') : t('settings.system.cudaUnavailable'), ok: systemReqs.cuda_available },
+              { label: 'Apple MPS', value: systemReqs.mps_available ? t('settings.system.cudaAvailable') : t('settings.system.cudaUnavailable'), ok: systemReqs.mps_available },
             ].map(row => (
               <div key={row.label} className="flex items-center justify-between px-4 py-3 bg-white/[0.03] rounded-xl border border-white/10">
                 <span className="text-gray-400 text-sm">{row.label}</span>
@@ -1693,17 +1797,17 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </div>
           <div className={`mt-4 p-3 rounded-xl border text-sm flex items-center gap-2 ${systemReqs.ready ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
             {systemReqs.ready ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            {systemReqs.ready ? 'System ist bereit für KI-Trainings' : 'System nicht bereit — Pakete fehlen'}
+            {systemReqs.ready ? t('settings.system.systemReady') : t('settings.system.systemNotReady')}
           </div>
         </div>
       )}
 
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Anti-Sleep Status</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.system.antiSleepTitle')}</h3>
         <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${preventSleepActive ? 'bg-blue-500/10 border-blue-500/20' : 'bg-white/[0.03] border-white/10'}`}>
           <div className={`w-2.5 h-2.5 rounded-full ${preventSleepActive ? 'bg-blue-400 animate-pulse' : 'bg-gray-600'}`} />
           <span className={`text-sm ${preventSleepActive ? 'text-blue-300' : 'text-gray-500'}`}>
-            {preventSleepActive ? 'Aktiv — Gerät bleibt während Training wach' : 'Inaktiv — kein Training läuft'}
+            {preventSleepActive ? t('settings.system.antiSleepActive') : t('settings.system.antiSleepInactive')}
           </span>
         </div>
       </div>
@@ -1735,17 +1839,17 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             F
           </span>
         </div>
-        <h3 className="text-2xl font-bold text-white mb-2">FrameTrain Desktop</h3>
-        <p className="text-gray-400 mb-4">Version {appVersion}</p>
+        <h3 className="text-2xl font-bold text-white mb-2">{t('settings.about.desktopTitle')}</h3>
+        <p className="text-gray-400 mb-4">{t('settings.about.versionLabel').replace('{version}', appVersion)}</p>
         <p className="text-sm text-gray-400 max-w-md mx-auto">
-          Trainiere Machine Learning Modelle lokal auf deinem Computer mit der Leistung von PyTorch.
+          {t('settings.about.subtitle')}
         </p>
       </div>
 
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-2">Unterstützte Modelle (Training)</h3>
+        <h3 className="text-lg font-semibold text-white mb-2">{t('settings.about.supportedModels')}</h3>
         <p className="text-sm text-gray-400 mb-4">
-          Aktuell unterstützt die Train Engine <span className="font-mono">seq_classification</span> für diese HuggingFace <span className="font-mono">model_type</span>-Familien:
+          {t('settings.about.supportedModelsDesc')}
         </p>
         <div className="flex flex-wrap gap-2">
           {HF_ENCODER_SUPPORTED_MODEL_TYPES.map((t) => (
@@ -1761,7 +1865,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       </div>
 
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">Links</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.about.links')}</h3>
         
         <div className="space-y-3">
           <a
@@ -1770,7 +1874,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
           >
-            <span>Website</span>
+            <span>{t('settings.about.website')}</span>
             <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
           </a>
 
@@ -1780,7 +1884,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
           >
-            <span>Dokumentation</span>
+            <span>{t('settings.about.docs')}</span>
             <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
           </a>
 
@@ -1790,7 +1894,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
           >
-            <span>GitHub</span>
+            <span>{t('settings.about.github')}</span>
             <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
           </a>
         </div>
@@ -1798,7 +1902,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
         <p className="text-sm text-gray-400 text-center">
-          © 2025 FrameTrain. Alle Rechte vorbehalten.
+          {t('settings.about.copyright')}
         </p>
       </div>
     </div>
@@ -1808,8 +1912,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     <div>
       {/* Header */}
       <div className="mb-8">
-        <h2 className="text-3xl font-bold text-white mb-2">Einstellungen</h2>
-        <p className="text-gray-400">Verwalte dein Konto und App-Einstellungen</p>
+        <h2 className="text-3xl font-bold text-white mb-2">{t('settings.title')}</h2>
+        <p className="text-gray-400">{t('settings.subtitle')}</p>
       </div>
 
       {/* Notification */}
@@ -1858,15 +1962,16 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
         {/* Content Area */}
         <div className="col-span-3">
-          {activeTab === 'account' && renderAccountTab()}
-          {activeTab === 'appearance' && renderAppearanceTab()}
-          {activeTab === 'notifications' && renderNotificationsTab()}
-          {activeTab === 'ai-assistant' && renderAIAssistantTab()}
-          {activeTab === 'system' && renderSystemTab()}
-          {activeTab === 'updates' && renderUpdatesTab()}
-          {activeTab === 'docs' && renderDocsTab()}
-          {activeTab === 'support' && renderSupportTab()}
-          {activeTab === 'about' && renderAboutTab()}
+          {activeTab === 'account'       && renderAccountTab()}
+          {activeTab === 'appearance'     && renderAppearanceTab()}
+          {activeTab === 'language'       && renderLanguageTab()}
+          {activeTab === 'notifications'  && renderNotificationsTab()}
+          {activeTab === 'ai-assistant'   && renderAIAssistantTab()}
+          {activeTab === 'system'         && renderSystemTab()}
+          {activeTab === 'updates'        && renderUpdatesTab()}
+          {activeTab === 'docs'           && renderDocsTab()}
+          {activeTab === 'support'        && renderSupportTab()}
+          {activeTab === 'about'          && renderAboutTab()}
         </div>
       </div>
 

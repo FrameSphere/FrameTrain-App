@@ -86,6 +86,16 @@ fn force_quit_app(app_handle: tauri::AppHandle) {
     app_handle.exit(0);
 }
 
+#[tauri::command]
+fn open_path_in_finder(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+    // macOS → Finder, Windows → Explorer, Linux → xdg-open
+    app_handle
+        .shell()
+        .open(&path, None)
+        .map_err(|e| format!("open_path_in_finder: {}", e))
+}
+
 fn main() {
     #[cfg(debug_assertions)]
     {
@@ -137,6 +147,7 @@ fn main() {
             get_app_data_dir,
             clear_config,
             force_quit_app,
+            open_path_in_finder,
             auth::validate_credentials,
             user_manager::login_user,
             user_manager::logout_user,
@@ -152,9 +163,11 @@ fn main() {
             model_manager::get_huggingface_model_files,
             model_manager::download_huggingface_model,
             model_manager::cleanup_incomplete_download,
+            dataset_manager::analyze_dataset_path,
             dataset_manager::list_datasets_for_model,
             dataset_manager::list_test_datasets_for_model,
             dataset_manager::list_all_datasets,
+            dataset_manager::list_datasets,
             dataset_manager::import_local_dataset,
             dataset_manager::delete_dataset,
             dataset_manager::split_dataset,
@@ -169,11 +182,21 @@ fn main() {
             dataset_manager::split_dataset_in_half,
             dataset_manager::validate_image_label_folders,
             dataset_manager::import_structured_dataset,
+            dataset_manager::get_dataset_path,
+            dataset_manager::get_dataset_yaml,
+            dataset_manager::save_dataset_yaml,
             training_manager::get_training_presets,
             training_manager::rate_training_config,
             training_manager::start_training,
             training_manager::stop_training,
             dev_trainer::start_dev_training,
+            training_manager::register_synapse_training_version,
+            training_manager::create_canvas_network_model,
+            training_manager::update_canvas_network_model,
+            training_manager::is_canvas_network_model,
+            training_manager::get_canvas_network_code,
+            training_manager::list_canvas_models_with_pt,
+            training_manager::run_canvas_inference,
             training_manager::get_current_training,
             training_manager::get_training_history,
             training_manager::delete_training_job,
@@ -214,6 +237,8 @@ fn main() {
             plugin_commands::check_first_launch,
             plugin_commands::install_plugins,
             plugin_commands::handle_plugin_approval,
+            plugin_commands::run_preflight_check,
+            plugin_commands::run_yolo_inference,
             power_manager::enable_prevent_sleep,
             power_manager::disable_prevent_sleep,
             power_manager::get_prevent_sleep_status,
@@ -229,6 +254,9 @@ fn main() {
             laboratory_manager::lab_stop_model_server,
             laboratory_manager::lab_get_server_status,
             laboratory_manager::run_lab_script_sample,
+            db_commands::save_canvas_model_design,
+            db_commands::load_canvas_model_design,
+            db_commands::delete_canvas_model_design,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

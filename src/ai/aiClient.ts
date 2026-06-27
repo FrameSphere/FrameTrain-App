@@ -9,6 +9,7 @@ export type CallAIOptions = {
   messages: ChatMessage[];
   maxTokens?: number;
   temperature?: number;
+  responseLanguage?: string;
 };
 
 function requireEnabled(settings: AISettings) {
@@ -77,13 +78,19 @@ async function callOllama(model: string, system: string, messages: ChatMessage[]
   return data?.message?.content || '';
 }
 
+function withResponseLanguage(system: string, responseLanguage?: string) {
+  const lang = responseLanguage?.trim();
+  if (!lang) return system;
+  return `${system}\n\nANTWORTSPRACHE:\n- Antworte ausschließlich auf ${lang}.`;
+}
+
 export async function callAI(settings: AISettings, options: CallAIOptions): Promise<string> {
   requireEnabled(settings);
   const provider: AIProvider = settings.provider;
   const model = resolveModel(provider, settings.selectedModel, settings.ollamaModel);
   const maxTokens = options.maxTokens ?? 2000;
   const temperature = options.temperature ?? 0.7;
-  const system = options.system;
+  const system = withResponseLanguage(options.system, options.responseLanguage);
   const messages = options.messages;
 
   if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature);
@@ -91,4 +98,3 @@ export async function callAI(settings: AISettings, options: CallAIOptions): Prom
   if (provider === 'groq') return callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
   return callOllama(model, system, messages, temperature);
 }
-

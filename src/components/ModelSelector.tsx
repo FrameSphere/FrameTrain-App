@@ -5,8 +5,10 @@
 
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Loader2, CheckCircle, Ban } from 'lucide-react';
 import { detectPlugin, type DetectionResult } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ModelSelectorProps {
   onDetected: (result: DetectionResult, modelPath: string) => void;
@@ -21,6 +23,7 @@ type State =
 export default function ModelSelector({ onDetected, accentColor = 'emerald' }: ModelSelectorProps) {
   const [inputValue, setInputValue] = useState('');
   const [state, setState] = useState<State>({ status: 'idle' });
+  const { t } = useLanguage();
 
   const accent = accentColor === 'amber'
     ? { border: 'border-amber-500/30', bg: 'bg-amber-500/10', text: 'text-amber-300', focusBorder: 'focus:border-amber-500/50', btn: 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/40 text-amber-300' }
@@ -57,9 +60,9 @@ export default function ModelSelector({ onDetected, accentColor = 'emerald' }: M
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
       <div className="space-y-1">
-        <label className="block text-white text-sm font-medium">Modell</label>
+        <label className="block text-white text-sm font-medium">{t('common.edit')}</label>
         <p className="text-gray-500 text-xs">
-          HuggingFace Model-ID (z.&nbsp;B.&nbsp;<code className="text-gray-400">xlm-roberta-base</code>) oder lokaler Pfad
+          {t('common.modelInputHint')} {t('common.optional')}
         </p>
       </div>
 
@@ -69,7 +72,7 @@ export default function ModelSelector({ onDetected, accentColor = 'emerald' }: M
           value={inputValue}
           onChange={(e) => { setInputValue(e.target.value); setState({ status: 'idle' }); }}
           onKeyDown={(e) => { if (e.key === 'Enter') handleCheck(); }}
-          placeholder="xlm-roberta-base  oder  /pfad/zum/modell"
+          placeholder={t('common.modelInputPlaceholder')}
           disabled={state.status === 'checking'}
           className={`flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-gray-600 focus:outline-none ${accent.focusBorder} disabled:opacity-50`}
         />
@@ -78,15 +81,15 @@ export default function ModelSelector({ onDetected, accentColor = 'emerald' }: M
             onClick={handleReset}
             className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all"
           >
-            Ändern
-          </button>
-        ) : (
-          <button
+            {t('common.edit')}
+            </button>
+            ) : (
+            <button
             onClick={handleCheck}
             disabled={!inputValue.trim() || state.status === 'checking'}
             className={`px-4 py-2.5 rounded-xl border ${accent.btn} text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed`}
-          >
-            {state.status === 'checking' ? '⏳' : 'Prüfen →'}
+            >
+            {state.status === 'checking' ? <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{t('common.loading')}</span> : `${t('common.confirm')} →`}
           </button>
         )}
       </div>
@@ -97,10 +100,10 @@ export default function ModelSelector({ onDetected, accentColor = 'emerald' }: M
         if (result.supported) {
           return (
             <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${accent.border} ${accent.bg}`}>
-              <span className="text-lg">✅</span>
+              <CheckCircle className={`w-5 h-5 ${accent.text}`} />
               <div>
                 <p className={`text-sm font-medium ${accent.text}`}>
-                  {result.plugin.name} erkannt
+                  {result.plugin.name}
                 </p>
                 <p className="text-gray-400 text-xs">{result.plugin.description}</p>
               </div>
@@ -110,9 +113,9 @@ export default function ModelSelector({ onDetected, accentColor = 'emerald' }: M
           const unsupported = result as { supported: false; reason: string };
           return (
             <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10">
-              <span className="text-lg mt-0.5">🚫</span>
+              <Ban className="w-5 h-5 text-red-300 mt-0.5" />
               <div>
-                <p className="text-red-300 text-sm font-medium">Modell wird nicht unterstützt</p>
+                <p className="text-red-300 text-sm font-medium">{t('modelManager.noPlugin')}</p>
                 <p className="text-gray-400 text-xs mt-0.5">{unsupported.reason}</p>
               </div>
             </div>

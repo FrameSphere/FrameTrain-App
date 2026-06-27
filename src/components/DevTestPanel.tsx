@@ -15,6 +15,8 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
+import { usePageContext } from '../contexts/PageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import type { ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI } from './TrainingPanel';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
@@ -127,6 +129,7 @@ function highlightPythonToHtml(code: string) {
 // ── Save Name Dialog ───────────────────────────────────────────────────────
 
 function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: boolean; defaultName: string; onSave: (name: string) => void; onClose: () => void; }) {
+  const { t } = useLanguage();
   const [name, setName] = useState(defaultName);
   useEffect(() => { setName(defaultName); }, [defaultName]);
   if (!isOpen) return null;
@@ -134,20 +137,20 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
-          <div className="flex items-center gap-2"><Save className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">Skript speichern</h2></div>
+          <div className="flex items-center gap-2"><Save className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">{t('devTestPanel.saveDialog.title')}</h2></div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <p className="text-gray-300 text-sm">Gib einen Namen für dein Test-Skript ein.</p>
-          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && name.trim() && onSave(name.trim())} placeholder="z.B. Mein Test-Skript" autoFocus
+          <p className="text-gray-300 text-sm">{t('devTestPanel.saveDialog.description')}</p>
+          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && name.trim() && onSave(name.trim())} placeholder={t('devTestPanel.saveDialog.placeholder')} autoFocus
             className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40" />
         </div>
         <div className="px-6 pb-6 flex gap-2">
           <button onClick={() => name.trim() && onSave(name.trim())} disabled={!name.trim()}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-40 transition-all">
-            <Save className="w-4 h-4" /> Speichern
+            <Save className="w-4 h-4" /> {t('devTestPanel.saveDialog.saveButton')}
           </button>
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white text-sm font-medium transition-all">Abbrechen</button>
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white text-sm font-medium transition-all">{t('devTestPanel.saveDialog.cancelButton')}</button>
         </div>
       </div>
     </div>
@@ -157,6 +160,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
 // ── Script Library Modal ──────────────────────────────────────────────────
 
 function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; }) {
+  const { t } = useLanguage();
   const [scripts, setScripts] = useState<SavedScript[]>([]);
   const [saveName, setSaveName] = useState('');
   const [showSaveForm, setShowForm] = useState(false);
@@ -169,21 +173,21 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript:
     saveScript(saveName.trim(), currentScript);
     setScripts(loadScripts());
     setSaveName(''); setShowForm(false);
-    success('Gespeichert', `Test-Skript "${saveName}" gespeichert.`);
+    success(t('devTestPanel.notifications.savedNew'), t('devTestPanel.notifications.savedNewDetail').replace('{name}', saveName));
   };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2"><FolderClosed className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">Test-Skript Bibliothek</h2></div>
+          <div className="flex items-center gap-2"><FolderClosed className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">{t('devTestPanel.library.title')}</h2></div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {scripts.length === 0 ? (
             <div className="text-center py-12 space-y-2">
               <FileText className="w-10 h-10 text-gray-600 mx-auto" />
-              <p className="text-gray-500 text-sm">Noch keine Test-Skripte gespeichert.</p>
+              <p className="text-gray-500 text-sm">{t('devTestPanel.library.empty')}</p>
             </div>
           ) : scripts.map(s => (
             <div key={s.id} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/[0.07] transition-all group">
@@ -195,7 +199,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript:
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
                   <button onClick={() => { deleteScript(s.id); setScripts(loadScripts()); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all">Laden</button>
+                  <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all">{t('devTestPanel.library.loadButton')}</button>
                 </div>
               </div>
             </div>
@@ -204,14 +208,14 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript:
         <div className="px-5 pb-5 border-t border-white/10 pt-4 flex-shrink-0">
           {showSaveForm ? (
             <div className="flex gap-2">
-              <input value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSave()} placeholder="Skript-Name…" autoFocus
+              <input value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSave()} placeholder={t('devTestPanel.library.namePlaceholder')} autoFocus
                 className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40" />
               <button onClick={handleSave} disabled={!saveName.trim()} className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-40"><Save className="w-4 h-4" /></button>
               <button onClick={() => setShowForm(false)} className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 text-sm"><X className="w-4 h-4" /></button>
             </div>
           ) : (
             <button onClick={() => setShowForm(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-300 text-sm font-medium transition-all">
-              <Save className="w-4 h-4" /> Aktuelles Skript speichern
+              <Save className="w-4 h-4" /> {t('devTestPanel.library.saveCurrentButton')}
             </button>
           )}
         </div>
@@ -261,6 +265,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   initialInput?: string; modelPathOverride?: string; onHighlightLines?: (edits: CodeEdit[]) => void; onClearHighlights?: () => void;
 }) {
   const { settings: aiSettings } = useAISettings();
+  const { t, language } = useLanguage();
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -286,9 +291,9 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
     const tooLong = last ? last.messages.length >= MAX_SESSION_MESSAGES : false;
     if (!last || tooOld || tooLong) {
       const id = `s_${Date.now()}`;
-      const ns: ChatSession = { id, title: 'Neuer Chat', messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const ns: ChatSession = { id, title: t('devTestPanel.chat.newChatTitle'), messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       saveChatSessions([ns, ...sessions]);
-      setCurrentSessionId(id); setSessionTitle('Neuer Chat'); setMessages([]);
+      setCurrentSessionId(id); setSessionTitle(t('devTestPanel.chat.newChatTitle')); setMessages([]);
     } else {
       setCurrentSessionId(last.id); setSessionTitle(last.title); setMessages(last.messages);
     }
@@ -308,10 +313,10 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
 
   const startNewSession = () => {
     const id = `s_${Date.now()}`;
-    const ns: ChatSession = { id, title: 'Neuer Chat', messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const ns: ChatSession = { id, title: t('devTestPanel.chat.newChatTitle'), messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const sessions = loadChatSessions().filter(s => s.messages.length > 0);
     saveChatSessions([ns, ...sessions]);
-    setCurrentSessionId(id); setSessionTitle('Neuer Chat'); setMessages([]);
+    setCurrentSessionId(id); setSessionTitle(t('devTestPanel.chat.newChatTitle')); setMessages([]);
     setAppliedEdits([]); setCurrentMessageWithEdits(null); setIsReadonly(false); setShowHistory(false);
     onClearHighlights?.();
   };
@@ -324,7 +329,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
 
   const continueFromSession = (session: ChatSession) => {
     const id = `s_${Date.now()}`;
-    const title = session.title + ' (Fortgesetzt)';
+    const title = session.title + t('devTestPanel.chat.continuedSuffix');
     const ns: ChatSession = { id, title, messages: session.messages, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const sessions = loadChatSessions();
     saveChatSessions([ns, ...sessions]);
@@ -385,9 +390,9 @@ ANFORDERUNGEN:
   const systemPrompt = buildAutoSystemPrompt(baseSystemPrompt);
 
   const suggestions = [
-    'Fehler beheben (Stacktrace)',
-    'Eval/Metric hinzufügen (F1/Accuracy)',
-    'Batch-Inference robust machen',
+    t('devTestPanel.aiSidebar.suggestions.fixError'),
+    t('devTestPanel.aiSidebar.suggestions.addMetric'),
+    t('devTestPanel.aiSidebar.suggestions.batchInference'),
   ];
 
   const send = async () => {
@@ -404,7 +409,7 @@ ANFORDERUNGEN:
     try {
       const history = [...messages, userMsg].map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
       const last = history.pop()!;
-      const response = await callAI(aiSettings, systemPrompt, last.content, history);
+      const response = await callAI(aiSettings, systemPrompt, last.content, history, language);
       const { action, cleaned } = parseAutoAction(response);
       const inferredEdit = (action?.mode === 'edit') || cleaned.includes('##EDIT_START##');
       const edits = inferredEdit ? parseEdits(response) : [];
@@ -515,45 +520,45 @@ ANFORDERUNGEN:
         <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Bot className="w-4 h-4 text-violet-400 flex-shrink-0" />
-            <span className="text-sm font-medium text-white">KI-Assistent</span>
+            <span className="text-sm font-medium text-white">{t('devTestPanel.chat.title')}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            <span className="px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/25 text-purple-200 text-[10px] font-medium">Auto</span>
+            <span className="px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/25 text-purple-200 text-[10px] font-medium">{t('devTestPanel.chat.autoBadge')}</span>
             <button
               onClick={() => setShowHistory(v => !v)}
-              title="Chat-Verlauf"
+              title={t('devTestPanel.chat.historyTooltip')}
               className={`p-1.5 rounded-lg transition-all ${
                 showHistory ? 'bg-violet-500/20 text-violet-300' : 'hover:bg-white/5 text-gray-500 hover:text-white'
               }`}
             >
               <History className="w-3.5 h-3.5" />
             </button>
-            <button onClick={startNewSession} title="Neuer Chat" className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all">
+            <button onClick={startNewSession} title={t('devTestPanel.chat.newChatTooltip')} className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all">
               <MessageSquarePlus className="w-3.5 h-3.5" />
             </button>
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all ml-0.5"><X className="w-3.5 h-3.5" /></button>
           </div>
         </div>
 
-        {sessionTitle && sessionTitle !== 'Neuer Chat' && (
+        {sessionTitle && sessionTitle !== t('devTestPanel.chat.newChatTitle') && (
           <div className="px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.01] flex items-center gap-1.5">
             <span className="text-[9px] text-gray-600">↳</span>
             <span className="text-[10px] text-gray-500 truncate">{sessionTitle}</span>
-            {isReadonly && <span className="ml-auto flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80">Lesemodus</span>}
+            {isReadonly && <span className="ml-auto flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80">{t('devTestPanel.chat.readonlyBadge')}</span>}
           </div>
         )}
 
         {showHistory && (
           <div className="absolute inset-x-0 top-[41px] z-10 bg-slate-950 border-b border-white/10 flex flex-col shadow-xl" style={{ maxHeight: '60%', overflowY: 'auto' }}>
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
-              <span className="text-[10px] font-medium text-gray-400">Chat-Verlauf</span>
+              <span className="text-[10px] font-medium text-gray-400">{t('devTestPanel.chat.historyTitle')}</span>
               <button onClick={startNewSession} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-300 text-[10px] transition-all">
-                <MessageSquarePlus className="w-3 h-3" /> Neuer Chat
+                <MessageSquarePlus className="w-3 h-3" /> {t('devTestPanel.chat.newChatButton')}
               </button>
             </div>
             <div className="overflow-y-auto flex-1">
               {loadChatSessions().length === 0 ? (
-                <p className="text-center text-gray-600 text-[10px] py-6">Noch keine gespeicherten Chats.</p>
+                <p className="text-center text-gray-600 text-[10px] py-6">{t('devTestPanel.chat.emptyHistory')}</p>
               ) : loadChatSessions().map(session => {
                 const isActive = session.id === currentSessionId;
                 return (
@@ -568,14 +573,14 @@ ANFORDERUNGEN:
                       <p className={`text-[11px] truncate font-medium ${isActive ? 'text-violet-200' : 'text-gray-300'}`}>{session.title}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[9px] text-gray-600">{relativeTime(session.updatedAt)}</span>
-                        <span className="text-[9px] text-gray-700">· {session.messages.length} Nachrichten</span>
+                        <span className="text-[9px] text-gray-700">· {t('devTestPanel.chat.messagesCount').replace('{count}', String(session.messages.length))}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
                       {!isActive && session.messages.length > 0 && (
                         <button onClick={e => { e.stopPropagation(); continueFromSession(session); }}
                           className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-all">
-                          Fortsetzen
+                          {t('devTestPanel.chat.continueButton')}
                         </button>
                       )}
                       <button onClick={e => deleteSession(session.id, e)}
@@ -593,7 +598,7 @@ ANFORDERUNGEN:
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {messages.length === 0 && (
             <div className="py-6 space-y-3">
-              <p className="text-gray-400 text-xs">Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.</p>
+              <p className="text-gray-400 text-xs">{t('devTestPanel.chat.emptySidebarHint')}</p>
               <div className="flex flex-wrap gap-1.5">
                 {suggestions.map(s => (
                   <button key={s} onClick={() => setInput(s)} className="px-2.5 py-1 rounded-lg border text-[10px] transition-all bg-purple-500/10 border-purple-500/20 text-purple-200 hover:bg-purple-500/15">{s}</button>
@@ -629,8 +634,8 @@ ANFORDERUNGEN:
                     return (
                       <div key={pi} className="w-full rounded-xl overflow-hidden border border-white/10">
                         <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.03] border-b border-white/10">
-                          <span className="text-[10px] text-gray-500 font-mono">Python</span>
-                          <button onClick={() => onReplaceScript(code)} className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all">Ersetzen</button>
+                          <span className="text-[10px] text-gray-500 font-mono">{t('trainingPanel.requirements.python')}</span>
+                          <button onClick={() => onReplaceScript(code)} className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all">{t('devTestPanel.aiSidebar.replaceCodeButton')}</button>
                         </div>
                         <pre className="p-3 text-[10px] font-mono text-gray-300 overflow-x-auto max-h-48 leading-relaxed">{code}</pre>
                       </div>
@@ -671,9 +676,9 @@ ANFORDERUNGEN:
                           }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className={`font-medium flex items-center gap-2 ${isApplied ? 'text-emerald-300' : 'text-amber-300'}`}>
+                      <span className={`font-medium flex items-center gap-2 ${isApplied ? 'text-emerald-300' : 'text-amber-300'}`}>
                               {isApplied ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
-                              Änderung {editIdx + 1}
+                              {t('devTestPanel.chat.changeLabel').replace('{n}', String(editIdx + 1))}
                             </span>
                             {isApplied ? (
                               <button
@@ -683,10 +688,10 @@ ANFORDERUNGEN:
                                 }}
                                 className="text-emerald-400/70 hover:text-emerald-300 text-xs flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/[0.15] hover:bg-emerald-500/25 transition-all"
                               >
-                                <span>Rückgängig</span>
+                                <span>{t('devTestPanel.chat.undoButton')}</span>
                               </button>
                             ) : (
-                              <span className="text-amber-400/70 text-xs">→ Diff ansehen</span>
+                              <span className="text-amber-400/70 text-xs">{t('devTestPanel.chat.viewDiffLink')}</span>
                             )}
                           </div>
                         </button>
@@ -720,7 +725,7 @@ ANFORDERUNGEN:
             return (
               <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/20 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-                  <span className="text-[10px] text-gray-500 shrink-0">Bereit:</span>
+                  <span className="text-[10px] text-gray-500 shrink-0">{t('devTestPanel.chat.editSummaryReady')}</span>
                   <span className="text-[10px] font-medium text-emerald-400 flex items-center gap-0.5">
                     <Plus className="w-3 h-3" />{addedLines}
                   </span>
@@ -734,7 +739,7 @@ ANFORDERUNGEN:
                     onClick={() => handleApplyAllEdits(latestEditMsg.edits, latestEditMsg)}
                     className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-[10px] font-medium transition-all"
                   >
-                    <Check className="w-3 h-3" /> Übernehmen
+                    <Check className="w-3 h-3" /> {t('devTestPanel.chat.applyButton')}
                   </button>
                   <button
                     onClick={() => {
@@ -743,7 +748,7 @@ ANFORDERUNGEN:
                     }}
                     className="flex items-center justify-center px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-[10px] font-medium transition-all"
                   >
-                    Details
+                    {t('devTestPanel.chat.detailsButton')}
                   </button>
                 </div>
               </div>
@@ -752,13 +757,13 @@ ANFORDERUNGEN:
           
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] text-gray-600">
-              {isReadonly ? 'Lesemodus – Chat nicht aktiv' : 'Enter = senden · Shift+Enter = neue Zeile'}
+              {isReadonly ? t('devTestPanel.chat.readonlyHint') : t('devTestPanel.chat.sendHint')}
             </span>
-            <span className="text-[10px] text-purple-300/70">Auto</span>
+            <span className="text-[10px] text-purple-300/70">{t('devTestPanel.chat.autoBadgeLabel')}</span>
           </div>
           <div className="flex gap-2 items-end">
             <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder={isReadonly ? 'Zum Schreiben neuen Chat starten → □ oben rechts' : 'Ziel / Problem / gewünschte Änderung…'} rows={2}
+              placeholder={isReadonly ? t('devTestPanel.chat.readonlyPlaceholder') : t('devTestPanel.chat.inputPlaceholder')} rows={2}
               disabled={isReadonly}
               className={`flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-white/20 resize-none transition-opacity ${
                 isReadonly ? 'opacity-40 cursor-not-allowed' : ''
@@ -773,7 +778,7 @@ ANFORDERUNGEN:
               onClick={startNewSession}
               className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-300 text-[10px] font-medium transition-all"
             >
-              <MessageSquarePlus className="w-3 h-3" /> Neuen Chat starten
+              <MessageSquarePlus className="w-3 h-3" /> {t('devTestPanel.chat.startNewChatButton')}
             </button>
           )}
         </div>
@@ -806,6 +811,7 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
   isOpen: boolean; errorTitle: string; errorMessage: string; errorDetails: string;
   script: string; output: string; onClose: () => void; onSendToAI: (ctx: string) => void; isSending?: boolean;
 }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   if (!isOpen) return null;
   const ctx = `[Dev Test Fehler]\n\nTitel: ${errorTitle}\n\nFehler: ${errorMessage}\n\nDetails: ${errorDetails}\n\nSkript:\n${script}\n\nAusgabe:\n${output}`;
@@ -813,23 +819,23 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-red-500/10 flex-shrink-0">
-          <div className="flex items-center gap-3"><span className="text-3xl">❌</span><div><h2 className="text-lg font-bold text-white">Test fehlgeschlagen</h2><p className="text-sm text-red-300">{errorTitle}</p></div></div>
+          <div className="flex items-center gap-3"><span className="text-3xl">❌</span><div><h2 className="text-lg font-bold text-white">{t('devTestPanel.errorModal.title')}</h2><p className="text-sm text-red-300">{errorTitle}</p></div></div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {errorMessage && <div><p className="text-xs text-gray-500 font-medium mb-2">Fehler-Meldung:</p><div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg max-h-24 overflow-auto"><pre className="text-xs text-red-300 font-mono whitespace-pre-wrap">{errorMessage}</pre></div></div>}
-          {errorDetails && <div><p className="text-xs text-gray-500 font-medium mb-2">Details:</p><div className="p-3 bg-white/5 border border-white/10 rounded-lg max-h-24 overflow-auto"><pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap">{errorDetails}</pre></div></div>}
+          {errorMessage && <div><p className="text-xs text-gray-500 font-medium mb-2">{t('devTestPanel.errorModal.errorLabel')}</p><div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg max-h-24 overflow-auto"><pre className="text-xs text-red-300 font-mono whitespace-pre-wrap">{errorMessage}</pre></div></div>}
+          {errorDetails && <div><p className="text-xs text-gray-500 font-medium mb-2">{t('devTestPanel.errorModal.detailsLabel')}</p><div className="p-3 bg-white/5 border border-white/10 rounded-lg max-h-24 overflow-auto"><pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap">{errorDetails}</pre></div></div>}
         </div>
         <div className="px-6 py-4 border-t border-white/10 flex gap-3 flex-shrink-0">
           <button onClick={() => { navigator.clipboard.writeText(ctx); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
             className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-all">
-            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}{copied ? 'Kopiert!' : 'Fehler kopieren'}
+            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}{copied ? t('devTestPanel.errorModal.copied') : t('devTestPanel.errorModal.copyButton')}
           </button>
           <button onClick={() => onSendToAI(ctx)} disabled={isSending}
             className="flex items-center gap-2 px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-lg text-sm text-violet-300 transition-all disabled:opacity-50">
-            <Sparkles className="w-4 h-4" /> An KI schicken
+            <Sparkles className="w-4 h-4" /> {t('devTestPanel.errorModal.sendToAIButton')}
           </button>
-          <button onClick={onClose} className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-all">Schließen</button>
+          <button onClick={onClose} className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-all">{t('devTestPanel.errorModal.closeButton')}</button>
         </div>
       </div>
     </div>
@@ -839,6 +845,7 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
 // ── Helper Components ─────────────────────────────────────────────────────
 
 function RefRow({ color, label, value, hint }: { color: string; label: string; value: string; hint?: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -855,7 +862,7 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
     <div className="flex items-start gap-3 py-0.5 text-[11px] font-mono">
       <span className={`${color} min-w-[140px] flex-shrink-0`}>{label}</span>
       <div className="min-w-0 flex-1">
-        <span className={`break-all ${value ? 'text-gray-300' : 'text-gray-600 italic'}`}>{value || 'nicht gesetzt'}</span>
+        <span className={`break-all ${value ? 'text-gray-300' : 'text-gray-600 italic'}`}>{value || t('devTestPanel.paths.notSet')}</span>
         {hint && <span className="text-gray-600 ml-1.5 text-[10px]">({hint})</span>}
       </div>
       {value && (
@@ -866,7 +873,7 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
               ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-300'
               : 'bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10'
           }`}
-          title="Kopieren"
+          title={t('devTestPanel.paths.copyTooltip')}
         >
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
@@ -961,6 +968,8 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
   const { currentTheme } = useTheme();
   const { success, error } = useNotification();
   const { settings: aiSettings } = useAISettings();
+  const { setCurrentPageContent } = usePageContext();
+  const { t } = useLanguage();
 
   const [fileOpen, setFileOpen]       = useState(false);
   const [tlHovered, setTlHovered]     = useState(false);
@@ -1025,6 +1034,62 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
     value: d.storage_path || '',
     name:  d.name,
   }));
+
+  // ── AI Coach Page Context ──────────────────────────────────────────────────
+  useEffect(() => {
+    const lines: string[] = [
+      t('devTestPanel.pageContext.title'),
+      '',
+      t('devTestPanel.pageContext.purposeBody'),
+      '',
+      t('devTestPanel.pageContext.currentStateTitle'),
+      `Status: ${running ? '🔄 Skript läuft' : isDirty ? '✏️ Editor: Änderungen' : '✓ Bereit'}`,
+      `Modell: ${modelInfo?.name || '(nicht geladen)'}`,
+      `Skript-Größe: ${lineCount} Zeilen, ${script.length} Zeichen`,
+      running ? `Output: ${output.split('\n').length} Zeilen` : output ? `Letzter Output: ${output.split('\n').length} Zeilen` : 'Kein Output',
+      exitCode !== null ? `Exit Code: ${exitCode}` : '',
+      '',
+      t('devTestPanel.pageContext.scriptStateTitle'),
+      isDirty ? '⚠️ Unsaved changes in editor' : '✓ Script gespeichert',
+      currentScriptId ? `📂 Loaded: ${currentScriptId}` : '📋 Neu/Unsaved',
+      running ? '🔄 Execution läuft' : `⏸️ Idle${output ? ' (mit Output)' : ''}`,
+      '',
+      t('devTestPanel.pageContext.layoutTitle'),
+      '**OBEN:**',
+      `  • [Modell Badge] (${modelInfo?.name || 'keine'})`,
+      '  • [💾 Speichern Button] (grün wenn dirty)',
+      '  • [📁 Bibliothek] (Saved scripts)',
+      '  • [▼ Pfade] (DATASET_PATH, OUTPUT_PATH)',
+      '',
+      '**LINKS:**',
+      '  • Python-Editor mit Syntax-Highlighting',
+      '  • Zeilennummern + Gutter',
+      '  • [🧪 Ausführen Button] (Ctrl+Enter)',
+      '',
+      '**RECHTS:**',
+      '  • Output/Logs Panel mit Scrollbar',
+      `  • ${running ? 'Live Output' : 'Letzter Output'}`,
+      '  • [📋 Copy] [🗑️ Clear] Buttons',
+      '',
+      '**UNTEN:**',
+      '  • [💬 Chat mit KI] (Code + Output als Context)',
+      '',
+      t('devTestPanel.pageContext.availableActionsTitle'),
+      !script.trim() ? '1. Schreib Python-Code in Editor links' : '1. Passe Code an (optional)',
+      '2. Klick 🧪 [Ausführen] oder Ctrl+Enter',
+      '3. Überwache Output rechts',
+      output && !running ? '4. Bei Fehler: Klick 💬 [Chat mit KI] → AI liefert Fixes' : '',
+      '5. Speichere Skript: 💾 [Speichern] oder Neue Bibliothek anlegen',
+      '',
+      t('devTestPanel.pageContext.contextTitle'),
+      `Modell: ${modelInfo?.name || '(keine)'}`,
+      `Datasets: ${datasets.length} verfügbar (${datasets.length > 0 ? datasets.map(d => d.name).join(', ') : 'keine'})`,
+      `Output-Pfad: ${outputPath || '[AppData]/test_outputs'}`,
+      `Verfügbare Paths: ${dsRefs.map(d => d.key).join(', ')}`,
+    ];
+
+    setCurrentPageContent(lines.join('\n'));
+  }, [script, lineCount, running, isDirty, output, exitCode, modelInfo, datasets, currentScriptId, outputPath, dsRefs, setCurrentPageContent]);
 
   const syncEditorScroll = () => {
     const ta = editorRef.current;
@@ -1154,14 +1219,14 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
       const code = e.payload?.exit_code ?? 0;
       setExitCode(code);
       if (code === 0) {
-        setOutput(o => o + '\n✅ Test abgeschlossen!');
+        setOutput(o => o + `\n${t('devTestPanel.output.complete')}`);
         invoke('disable_prevent_sleep').catch(() => {});
       } else {
         const msg = e.payload?.data?.error ?? `Prozess beendet mit Exit-Code ${code}`;
         const details = e.payload?.data?.details ?? '';
-        setOutput(o => o + `\n❌ ${msg}${details ? '\n' + details : ''}`);
+        setOutput(o => o + `\n${t('devTestPanel.output.errorPrefix')} ${msg}${details ? '\n' + details : ''}`);
         invoke('disable_prevent_sleep').catch(() => {});
-        setErrorTitle('Test fehlgeschlagen');
+      setErrorTitle(t('devTestPanel.errorModal.title'));
         setErrorMessage(msg);
         setErrorDetails(details);
         setShowErrorModal(true);
@@ -1179,7 +1244,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
   };
 
   const handleCloseFile = () => {
-    if (isDirty) { error('Ungespeicherte Änderungen', 'Bitte erst speichern (⌘S).'); return; }
+    if (isDirty) { error(t('devTestPanel.notifications.unsavedTitle'), t('devTestPanel.notifications.unsavedDetail')); return; }
     setFileOpen(false); setScript(''); setSavedScript(''); setCurrentScriptId(null); setExpanded(false);
   };
 
@@ -1193,7 +1258,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
     if (currentScriptId) {
       updateScript(currentScriptId, script);
       setSavedScript(script); setIsDirty(false);
-      success('Aktualisiert', 'Test-Skript aktualisiert!');
+    success(t('devTestPanel.notifications.updatedTitle'), t('devTestPanel.notifications.updatedDetail'));
     } else {
       setSaveName('Mein Test-Skript');
       setShowSaveDialog(true);
@@ -1206,7 +1271,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
     const newScript = loadScripts()[0];
     if (newScript) setCurrentScriptId(newScript.id);
     setSavedScript(script); setIsDirty(false); setShowSaveDialog(false); setSaveName('');
-    success('Gespeichert', `Test-Skript "${name}" gespeichert!`);
+    success(t('devTestPanel.notifications.savedTitle'), t('devTestPanel.notifications.savedDetail').replace('{name}', name));
   };
 
   useEffect(() => {
@@ -1244,8 +1309,8 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
   // ── Test starten / stoppen ─────────────────────────────────────────────
 
   const handleStart = async () => {
-    if (isDirty) { error('Ungespeicherte Änderungen', 'Bitte erst speichern (⌘S).'); return; }
-    if (!script.trim() || !modelInfo) { error('Fehler', 'Kein Modell ausgewählt oder Skript leer.'); return; }
+    if (isDirty) { error(t('devTestPanel.notifications.unsavedTitle'), t('devTestPanel.notifications.unsavedDetail')); return; }
+    if (!script.trim() || !modelInfo) { error(t('devTestPanel.notifications.noModelOrScriptTitle'), t('devTestPanel.notifications.noModelOrScriptDetail')); return; }
 
     setRunning(true); setOutput(''); setExitCode(null);
 
@@ -1263,13 +1328,13 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
         datasetName: datasets[0]?.name ?? '',
         refs,
       });
-      setOutput(`🚀 Test gestartet…\n`);
+      setOutput(`${t('devTestPanel.output.started')}\n`);
       invoke('enable_prevent_sleep').catch(() => {});
-      success('Gestartet!', 'Dev Test läuft…');
+      success(t('devTestPanel.notifications.startedTitle'), t('devTestPanel.notifications.startedDetail'));
     } catch (err: unknown) {
-      setOutput(`❌ ${String(err)}`);
+      setOutput(`${t('devTestPanel.output.errorPrefix')} ${String(err)}`);
       setRunning(false);
-      error('Fehler', String(err));
+      error(t('common.error'), String(err));
     }
   };
 
@@ -1277,7 +1342,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
     try { await invoke('stop_dev_test'); } catch { /* ignore */ }
     invoke('disable_prevent_sleep').catch(() => {});
     setRunning(false);
-    setOutput(o => o + '\n⏹️  Test gestoppt.');
+    setOutput(o => o + `\n${t('devTestPanel.output.stopped')}`);
   };
 
   const handleSendToAI = (errorContext: string) => {
@@ -1300,7 +1365,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
             <div className="flex items-start justify-between gap-2 mb-1">
               <div className="flex items-center gap-2">
                 <FlaskConical className="w-4 h-4 text-amber-400" />
-                <span className="text-amber-300 font-semibold text-sm">Dev Test Mode</span>
+                <span className="text-amber-300 font-semibold text-sm">{t('devTestPanel.banner.title')}</span>
               </div>
               <button
                 onClick={() => {
@@ -1312,7 +1377,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <p className="text-gray-400 text-xs">Eigenes Python-Skript für Inference, Evaluation und Testing. Voller Zugriff auf Modell- und Dataset-Pfade.</p>
+            <p className="text-gray-400 text-xs">{t('devTestPanel.banner.description')}</p>
           </div>
         )}
 
@@ -1323,7 +1388,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
         >
           <div className="flex items-center gap-2">
             <FolderOpen className="w-4 h-4 text-amber-400" />
-            <span className="text-sm font-medium text-amber-300">Pfade konfigurieren</span>
+            <span className="text-sm font-medium text-amber-300">{t('devTestPanel.paths.toggleLabel')}</span>
           </div>
           <div className={`transform transition-transform ${showPathsModal ? 'rotate-180' : ''}`}>
             <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1338,7 +1403,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
             <div className="space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <FolderOpen className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-medium text-white">Modell</span>
+                <span className="text-sm font-medium text-white">{t('devTestPanel.paths.modelTitle')}</span>
               </div>
               <RefRow color="text-emerald-400" label="MODEL_PATH" value={modelPath} hint={modelInfo?.name} />
             </div>
@@ -1349,7 +1414,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
             <div className="space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <FolderOpen className="w-4 h-4 text-blue-400" />
-                <span className="text-sm font-medium text-white">Dataset</span>
+                <span className="text-sm font-medium text-white">{t('devTestPanel.paths.datasetTitle')}</span>
               </div>
               {dsRefs.map(r => <RefRow key={r.key} color="text-blue-400" label={r.key} value={r.value} hint={r.name} />)}
             </div>
@@ -1360,7 +1425,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-purple-400" />
-                <span className="text-sm font-medium text-white">Output</span>
+                <span className="text-sm font-medium text-white">{t('devTestPanel.paths.outputTitle')}</span>
               </div>
               <RefRow color="text-purple-400" label="OUTPUT_PATH" value={outputPath.replace('<job_id>', '{wird beim Start gesetzt}')} />
             </div>
@@ -1376,27 +1441,27 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                 {/* Rot: Schließen */}
                 <button onClick={fileOpen ? handleCloseFile : undefined}
                   className={`relative w-3 h-3 rounded-full flex items-center justify-center transition-all ${fileOpen ? 'bg-red-500 cursor-pointer hover:bg-red-400' : 'bg-red-500/40 cursor-default'}`}
-                  title={fileOpen ? (isDirty ? 'Ungespeicherte Änderungen' : 'Datei schließen') : ''}>
+                  title={fileOpen ? (isDirty ? t('devTestPanel.toolbar.unsavedChangesTooltip') : t('devTestPanel.toolbar.closeFileTooltip')) : ''}>
                   {tlHovered && fileOpen && <X className="w-[7px] h-[7px] text-red-900 stroke-[3]" />}
                   {!tlHovered && isDirty && fileOpen && <div className="w-[5px] h-[5px] rounded-full bg-red-900" />}
                 </button>
                 {/* Gelb: Speichern */}
                 <button onClick={fileOpen && isDirty ? handleSave : undefined}
                   className={`relative w-3 h-3 rounded-full flex items-center justify-center transition-all ${fileOpen && isDirty ? 'bg-amber-400 cursor-pointer hover:bg-amber-300' : 'bg-amber-500/40 cursor-default'}`}
-                  title={fileOpen && isDirty ? 'Speichern' : ''}>
+                  title={fileOpen && isDirty ? t('devTestPanel.toolbar.saveTooltip') : ''}>
                   {tlHovered && fileOpen && isDirty && <Minus className="w-[7px] h-[7px] text-amber-900 stroke-[3]" />}
                 </button>
                 {/* Grün: Vollbild */}
                 <button onClick={fileOpen ? () => setExpanded(v => !v) : undefined}
                   className={`relative w-3 h-3 rounded-full flex items-center justify-center transition-all ${fileOpen ? 'bg-emerald-500 cursor-pointer hover:bg-emerald-400' : 'bg-emerald-500/40 cursor-default'}`}
-                  title={fileOpen ? (expanded ? 'Verkleinern' : 'Vollbild') : ''}>
+                  title={fileOpen ? (expanded ? t('devTestPanel.toolbar.minimizeTooltip') : t('devTestPanel.toolbar.maximizeTooltip')) : ''}>
                   {tlHovered && fileOpen && (expanded ? <Minimize2 className="w-[7px] h-[7px] text-emerald-900 stroke-[3]" /> : <Maximize2 className="w-[7px] h-[7px] text-emerald-900 stroke-[3]" />)}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <FileCode className={`w-4 h-4 ${fileOpen ? 'text-amber-400' : 'text-gray-600'}`} />
                 <span className={`text-sm font-medium ${fileOpen ? 'text-gray-300' : 'text-gray-600'}`}>
-                  {fileOpen ? 'test.py' : 'Kein Dokument'}
+                  {fileOpen ? t('devTestPanel.editor.fileName') : t('devTestPanel.toolbar.noDocument')}
                 </span>
               </div>
             </div>
@@ -1423,7 +1488,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                       editorRef.current?.focus();
                     }
                   }}
-                  placeholder="Suchen…"
+                  placeholder={t('devTestPanel.toolbar.searchPlaceholder')}
                   className="w-44 px-2 py-1 bg-transparent text-gray-200 text-xs focus:outline-none placeholder:text-gray-600"
                 />
                 <span className="text-[10px] text-gray-500 font-mono w-12 text-right">
@@ -1432,21 +1497,21 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                 <button
                   onClick={() => findNext(-1)}
                   className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[10px] transition-all"
-                  title="Vorheriges (Shift+Enter)"
+                  title={t('devTestPanel.toolbar.prevSearchTooltip')}
                 >
                   ↑
                 </button>
                 <button
                   onClick={() => findNext(1)}
                   className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[10px] transition-all"
-                  title="Nächstes (Enter)"
+                  title={t('devTestPanel.toolbar.nextSearchTooltip')}
                 >
                   ↓
                 </button>
                 <button
                   onClick={() => { setFindOpen(false); setFindStatus(null); editorRef.current?.focus(); }}
                   className="p-1 rounded-lg hover:bg-white/10 text-gray-500 hover:text-white transition-all"
-                  title="Schließen (Esc)"
+                  title={t('devTestPanel.toolbar.closeSearchTooltip')}
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1457,42 +1522,42 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
               {!fileOpen ? (
                 <>
                   <button onClick={handleNewFile} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 text-xs font-medium transition-all">
-                    <FileCode className="w-3.5 h-3.5" /> Neue Datei
+                    <FileCode className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.newFileButton')}
                   </button>
                   <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs font-medium transition-all">
-                    <FolderClosed className="w-3.5 h-3.5" /> Datei laden
+                    <FolderClosed className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.loadFileButton')}
                   </button>
                   <button onClick={() => setShowOpenLib(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs font-medium transition-all">
-                    <Globe className="w-3.5 h-3.5" /> Open Library
+                    <Globe className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.openLibraryButton')}
                   </button>
                 </>
               ) : (
                 <>
                   {isDirty && (
                     <button onClick={handleSave} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-medium transition-all">
-                      <Save className="w-3.5 h-3.5" /> Speichern (⌘S)
+                      <Save className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.saveButton')}
                     </button>
                   )}
                   <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium transition-all">
-                    <FolderClosed className="w-3.5 h-3.5" /> Bibliothek
+                    <FolderClosed className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.libraryButton')}
                   </button>
                   <button
                     onClick={() => setShowOpenLib(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-xs font-medium transition-all"
                   >
-                    <Globe className="w-3.5 h-3.5" /> Open Library
+                    <Globe className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.openLibraryButton')}
                   </button>
                   <button
                     onClick={() => {
                       if (!aiSettings.enabled) {
-                        error('KI nicht aktiviert', 'Bitte aktiviere die KI zuerst in den Einstellungen.');
+                        error(t('devTestPanel.toolbar.aiDisabledTitle'), t('devTestPanel.toolbar.aiDisabledDetail'));
                         return;
                       }
                       setShowAI(v => !v);
                     }}
-                    title={!aiSettings.enabled ? 'KI nicht konfiguriert – in den Einstellungen aktivieren' : ''}
+                    title={!aiSettings.enabled ? t('devTestPanel.toolbar.aiDisabledTooltip') : ''}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : !aiSettings.enabled ? 'bg-white/5 text-gray-500 border-white/10 opacity-60' : 'bg-white/5 text-gray-400 hover:text-white border-white/10'}`}>
-                    <Bot className="w-3.5 h-3.5" /> KI
+                    <Bot className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.aiButton')}
                   </button>
                   <button
                     onClick={() => {
@@ -1502,7 +1567,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                       updateFindStatus(findQuery, ta?.selectionStart ?? 0);
                     }}
                     className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-xs font-medium transition-all"
-                    title="Suchen (Cmd/Ctrl+F)"
+                    title={t('devTestPanel.toolbar.findTooltip')}
                   >
                     ⌘F
                   </button>
@@ -1511,12 +1576,12 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                   </button>
                   {isRunning ? (
                     <button onClick={handleStop} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-medium transition-all">
-                      <Square className="w-3.5 h-3.5" /> Stopp
+                      <Square className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.stopButton')}
                     </button>
                   ) : (
                     <button onClick={handleStart} disabled={!script.trim() || !modelInfo}
                       className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed`}>
-                      <Play className="w-3.5 h-3.5" /> Test starten
+                      <Play className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.startButton')}
                     </button>
                   )}
                 </>
@@ -1528,19 +1593,19 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
           {!fileOpen ? (
             <div className="flex flex-col items-center justify-center bg-slate-950 text-center" style={{ height: `${editorH}px` }}>
               <FlaskConical className="w-12 h-12 text-gray-700 mb-6" />
-              <p className="text-gray-500 text-sm mb-8">Öffne oder erstelle eine Datei um zu starten</p>
+              <p className="text-gray-500 text-sm mb-8">{t('devTestPanel.emptyState.description')}</p>
               <div className="flex gap-4">
                 <button onClick={handleNewFile} className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl border border-amber-500/20 bg-amber-500/8 hover:bg-amber-500/15 hover:border-amber-500/40 transition-all group">
                   <FileCode className="w-7 h-7 text-amber-500 group-hover:text-amber-400" />
-                  <div><p className="font-semibold text-white text-sm">Neue Datei</p><p className="text-xs text-gray-500 mt-1">Tippe <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-gray-400 font-mono text-[10px]">!</kbd> + Leertaste für Template</p></div>
+                  <div><p className="font-semibold text-white text-sm">{t('devTestPanel.emptyState.newFileTitle')}</p><p className="text-xs text-gray-500 mt-1">{t('devTestPanel.emptyState.newFileHint')}</p></div>
                 </button>
                 <button onClick={() => setShowLib(true)} className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all group">
                   <FolderClosed className="w-7 h-7 text-gray-500 group-hover:text-gray-300" />
-                  <div><p className="font-semibold text-white text-sm">Datei laden</p><p className="text-xs text-gray-500 mt-1">Aus deiner Bibliothek</p></div>
+                  <div><p className="font-semibold text-white text-sm">{t('devTestPanel.emptyState.loadFileTitle')}</p><p className="text-xs text-gray-500 mt-1">{t('devTestPanel.emptyState.loadFileHint')}</p></div>
                 </button>
                 <button onClick={() => setShowOpenLib(true)} className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl border border-violet-500/20 bg-violet-500/8 hover:bg-violet-500/15 hover:border-violet-500/40 transition-all group">
                   <Globe className="w-7 h-7 text-violet-500 group-hover:text-violet-400" />
-                  <div><p className="font-semibold text-white text-sm">Open Library</p><p className="text-xs text-gray-500 mt-1">Community Test-Skripte</p></div>
+                  <div><p className="font-semibold text-white text-sm">{t('devTestPanel.emptyState.openLibraryTitle')}</p><p className="text-xs text-gray-500 mt-1">{t('devTestPanel.emptyState.openLibraryHint')}</p></div>
                 </button>
               </div>
             </div>
@@ -1621,7 +1686,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                       }}
                       dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
                     <textarea ref={editorRef} autoFocus value={script} wrap="off"
-                      placeholder={"# Fange an zu tippen…\n# Tippe '! ' + Leertaste um das Template zu laden"}
+                      placeholder={t('devTestPanel.editor.placeholder')}
                       onChange={e => {
                         const v = e.target.value;
                         if (v === '! ') { generateTemplate(); return; }
@@ -1731,21 +1796,21 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                       ? <AlertCircle className="w-4 h-4 text-red-400" />
                       : <ClipboardList className="w-4 h-4 text-gray-400" />}
                 <span className="text-white font-medium text-sm">
-                  {isRunning ? 'Test läuft…' : exitCode === 0 ? 'Test erfolgreich' : exitCode !== null ? 'Test fehlgeschlagen' : 'Ausgabe'}
+                  {isRunning ? t('devTestPanel.output.running') : exitCode === 0 ? t('devTestPanel.output.success') : exitCode !== null ? t('devTestPanel.output.failed') : t('devTestPanel.output.label')}
                 </span>
               </div>
               {!isRunning && output && (
-                <button onClick={() => setOutput('')} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded-lg bg-white/5 transition-all">Löschen</button>
+                <button onClick={() => setOutput('')} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded-lg bg-white/5 transition-all">{t('devTestPanel.output.clearButton')}</button>
               )}
             </div>
 
             <div className="rounded-xl border border-white/10 bg-black/30 overflow-hidden">
               <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
                 <Terminal className="w-3.5 h-3.5 text-gray-500" />
-                <span className="text-[10px] text-gray-500">Ausgabe</span>
+                <span className="text-[10px] text-gray-500">{t('devTestPanel.output.panelLabel')}</span>
               </div>
               <div ref={outputRef} className="p-3 max-h-64 overflow-y-auto">
-                {isRunning && !output && <p className="text-gray-600 text-[10px] animate-pulse">Warte auf Python-Output…</p>}
+                {isRunning && !output && <p className="text-gray-600 text-[10px] animate-pulse">{t('devTestPanel.output.waiting')}</p>}
                 <pre className="text-[10px] font-mono text-gray-300 whitespace-pre-wrap leading-relaxed">{output}</pre>
               </div>
             </div>

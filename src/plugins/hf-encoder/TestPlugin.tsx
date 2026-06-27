@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Loader2, Play, Square, RefreshCw } from 'lucide-react';
+import { Loader2, Play, Square, RefreshCw, FlaskConical, AlertTriangle } from 'lucide-react';
 import type { TestPluginProps } from '../types';
 
 type TopPred = { label?: string; score?: number };
@@ -195,8 +195,8 @@ export default function HFEncoderTestPlugin({
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3 p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10">
-        <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-xl">
-          🧪
+        <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center">
+          <FlaskConical className="w-5 h-5 text-amber-300" />
         </div>
         <div className="min-w-0">
           <p className="text-amber-300 text-sm font-medium truncate">{headerModel}</p>
@@ -232,7 +232,12 @@ export default function HFEncoderTestPlugin({
           </button>
         </div>
 
-        {singleError && <div className="text-red-300 text-sm">⚠️ {singleError}</div>}
+        {singleError && (
+          <div className="text-red-300 text-sm inline-flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            <span>{singleError}</span>
+          </div>
+        )}
         {singleResult && (
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-2">
             <div className="flex items-center justify-between">
@@ -333,7 +338,12 @@ export default function HFEncoderTestPlugin({
             Fortschritt: {Math.round(datasetProgress.progress_percent ?? 0)}% ({datasetProgress.current_sample ?? 0}/{datasetProgress.total_samples ?? 0})
           </div>
         )}
-        {datasetError && <div className="text-red-300 text-sm">⚠️ {datasetError}</div>}
+        {datasetError && (
+          <div className="text-red-300 text-sm inline-flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            <span>{datasetError}</span>
+          </div>
+        )}
         {datasetResults && (
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-2">
             <p className="text-white text-sm font-medium">Ergebnisse</p>
@@ -380,4 +390,3 @@ export default function HFEncoderTestPlugin({
     </div>
   );
 }
-

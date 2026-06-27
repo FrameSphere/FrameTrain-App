@@ -1,0 +1,20 @@
+{
+  "name": "Canvas Model Training",
+  "description": "Trainiert dynamisch generierte Canvas-Modelle mit beliebigen Graphen-Topologien",
+  "version": "1.0.0",
+  "task_type": "canvas",
+  "entry": "plugin.py",
+  "class": "CanvasPlugin",
+  "requirements": [
+    "torch>=2.0.0",
+    "numpy>=1.24.0"
+  ],
+  "supports_features": {
+    "amp": true,
+    "gradient_accumulation": false,
+    "lora": false,
+    "checkpoint": true,
+    "multi_gpu": false
+  },
+  "notes": "Phase 4: Ermöglicht Training von Canvas-generierten nn.Module Modellen mit echten Backprop und Shape-Validierung"
+}

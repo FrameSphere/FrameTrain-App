@@ -7,7 +7,7 @@ import {
   Play, Square, Settings2, Loader2, ChevronDown, ChevronRight,
   Gauge, TrendingDown, Zap, AlertCircle, CheckCircle, Sparkles,
   Trash2, X, HelpCircle, BarChart3, MemoryStick, SlidersHorizontal,
-  BookOpen, Code2, RefreshCw,
+  BookOpen, Code2, RefreshCw, Folder, XCircle, Clock, Lightbulb,
   AlertTriangle, Layers, Save, Plus, ChevronRight as ChevronRightIcon,
   ClipboardList, History, Check,
 } from 'lucide-react';
@@ -16,6 +16,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
+import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { openAICoach } from '../ai/aiCoachEvents';
 import { detectPlugin } from '../plugins/registry';
 import { checkDatasetCompat } from '../plugins/datasetCompat';
@@ -38,6 +39,10 @@ export interface DatasetInfo {
   id: string; name: string; model_id: string;
   status: 'unused' | 'split'; file_count: number;
   size_bytes: number; extensions?: string[]; storage_path?: string;
+  // v2: Typ-System
+  dataset_type?: import('../plugins/datasetCompatHelpers').DatasetType;
+  pairing_status?: import('../plugins/datasetCompatHelpers').PairingStatus | null;
+  warnings?: string[];
 }
 
 export interface TrainingConfig {
@@ -113,9 +118,9 @@ interface TrainingPanelProps {
 import type { AISettings } from '../contexts/AISettingsContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 
-export async function callAI(settings: AISettings, systemPrompt: string, userPrompt: string, history?: { role: 'user' | 'assistant'; content: string }[]): Promise<string> {
+export async function callAI(settings: AISettings, systemPrompt: string, userPrompt: string, history?: { role: 'user' | 'assistant'; content: string }[], responseLanguage?: Language): Promise<string> {
   const messages = [...(history ?? []), { role: 'user' as const, content: userPrompt }];
-  return callAIClient(settings, { system: systemPrompt, messages, maxTokens: 2000, temperature: 0.7 });
+  return callAIClient(settings, { system: systemPrompt, messages, maxTokens: 2000, temperature: 0.7, responseLanguage });
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────
@@ -137,14 +142,16 @@ export const DEFAULT_CONFIG: TrainingConfig = {
   load_in_4bit: false, load_in_8bit: false,
 };
 
-const BUILTIN_TEMPLATES: MetricsTemplate[] = [
-  { id: 'standard', name: '📘 Standard', description: 'Balance für die meisten Aufgaben.', config: { epochs: 3, batch_size: 8, learning_rate: 2e-5, warmup_ratio: 0.06, max_seq_length: 128 }, source: 'builtin' },
-  { id: 'small', name: '⚡ Kleines Dataset (<5k)', description: 'Mehr Epochen, höhere LR.', config: { epochs: 5, batch_size: 8, learning_rate: 3e-5, warmup_ratio: 0.1, max_seq_length: 64 }, source: 'builtin' },
-  { id: 'large', name: '🎯 Großes Dataset (>50k)', description: 'Weniger Epochen, größere Batch.', config: { epochs: 2, batch_size: 32, learning_rate: 1e-5, warmup_ratio: 0.04, max_seq_length: 256 }, source: 'builtin' },
-  { id: 'lowram', name: '💾 Low RAM', description: 'Grad Accumulation + FP16.', config: { epochs: 4, batch_size: 2, learning_rate: 2e-5, gradient_accumulation_steps: 8, max_seq_length: 64, fp16: true, gradient_checkpointing: true }, source: 'builtin' },
-  { id: 'lora', name: '🔬 LoRA (RAM-sparend)', description: 'LoRA r=8, ideal für große Modelle.', config: { use_lora: true, lora_r: 8, lora_alpha: 16, lora_dropout: 0.05, gradient_checkpointing: true, batch_size: 4 }, source: 'builtin' },
-  { id: 'qlora', name: '⚡ QLoRA 4-bit', description: 'QLoRA für maximale RAM-Ersparnis.', config: { use_lora: true, load_in_4bit: true, lora_r: 16, lora_alpha: 32, lora_dropout: 0.05, gradient_checkpointing: true, batch_size: 2, gradient_accumulation_steps: 8 }, source: 'builtin' },
-];
+function getBuiltinTemplates(t: (key: string) => string): MetricsTemplate[] {
+  return [
+    { id: 'standard', name: t('trainingPanel.templates.builtinTemplates.standard.name'), description: t('trainingPanel.templates.builtinTemplates.standard.description'), config: { epochs: 3, batch_size: 8, learning_rate: 2e-5, warmup_ratio: 0.06, max_seq_length: 128 }, source: 'builtin' },
+    { id: 'small', name: t('trainingPanel.templates.builtinTemplates.small.name'), description: t('trainingPanel.templates.builtinTemplates.small.description'), config: { epochs: 5, batch_size: 8, learning_rate: 3e-5, warmup_ratio: 0.1, max_seq_length: 64 }, source: 'builtin' },
+    { id: 'large', name: t('trainingPanel.templates.builtinTemplates.large.name'), description: t('trainingPanel.templates.builtinTemplates.large.description'), config: { epochs: 2, batch_size: 32, learning_rate: 1e-5, warmup_ratio: 0.04, max_seq_length: 256 }, source: 'builtin' },
+    { id: 'lowram', name: t('trainingPanel.templates.builtinTemplates.lowram.name'), description: t('trainingPanel.templates.builtinTemplates.lowram.description'), config: { epochs: 4, batch_size: 2, learning_rate: 2e-5, gradient_accumulation_steps: 8, max_seq_length: 64, fp16: true, gradient_checkpointing: true }, source: 'builtin' },
+    { id: 'lora', name: t('trainingPanel.templates.builtinTemplates.lora.name'), description: t('trainingPanel.templates.builtinTemplates.lora.description'), config: { use_lora: true, lora_r: 8, lora_alpha: 16, lora_dropout: 0.05, gradient_checkpointing: true, batch_size: 4 }, source: 'builtin' },
+    { id: 'qlora', name: t('trainingPanel.templates.builtinTemplates.qlora.name'), description: t('trainingPanel.templates.builtinTemplates.qlora.description'), config: { use_lora: true, load_in_4bit: true, lora_r: 16, lora_alpha: 32, lora_dropout: 0.05, gradient_checkpointing: true, batch_size: 2, gradient_accumulation_steps: 8 }, source: 'builtin' },
+  ];
+}
 
 // ── UI Atoms ──────────────────────────────────────────────────────────────
 
@@ -203,6 +210,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 // ── RAM Calculator ─────────────────────────────────────────────────────────
 
 function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelSizeGb: number }) {
+  const { t } = useLanguage();
   const isFp16 = config.fp16 || config.bf16;
   const isQuantized = config.load_in_4bit || config.load_in_8bit;
   const quantFactor = config.load_in_4bit ? 0.25 : config.load_in_8bit ? 0.5 : 1.0;
@@ -218,24 +226,34 @@ function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelS
     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
       <div className="flex items-center gap-2">
         <MemoryStick className="w-4 h-4 text-blue-400" />
-        <span className="text-sm font-medium text-white">RAM-Schätzung</span>
-        <span className="text-xs text-gray-500">({modelSizeGb.toFixed(2)} GB Modell{config.use_lora ? ' · LoRA' : ''}{isQuantized ? ` · ${config.load_in_4bit ? '4bit' : '8bit'}` : ''})</span>
+        <span className="text-sm font-medium text-white">{t('trainingPanel.ramCalculator.title')}</span>
+        <span className="text-xs text-gray-500">{t('trainingPanel.ramCalculator.subtitle').replace('{sizeGb}', modelSizeGb.toFixed(2)).replace('{lora}', config.use_lora ? t('trainingPanel.ramCalculator.loraLabel') : '').replace('{quant}', isQuantized ? t('trainingPanel.ramCalculator.quantLabel').replace('{bits}', config.load_in_4bit ? '4' : '8') : '')}</span>
       </div>
       <div className="space-y-1.5 text-xs">
         {[
-          ['Modell-Gewichte', weightRam],
-          [config.use_lora ? 'LoRA-Gradienten (~5%)' : 'Gradienten', gradRam],
-          [config.use_lora ? 'LoRA-Optimizer (~10%)' : 'Optimizer (Adam)', optimizerRam],
-          [`Aktivierungen (Batch ${config.batch_size}${config.gradient_checkpointing ? ' · GradCkpt' : ''})`, activationRam],
-          ['Misc', 0.4],
+          [t('trainingPanel.ramCalculator.weights'), weightRam],
+          [config.use_lora ? t('trainingPanel.ramCalculator.gradientsLora') : t('trainingPanel.ramCalculator.gradients'), gradRam],
+          [config.use_lora ? t('trainingPanel.ramCalculator.optimizerLora') : t('trainingPanel.ramCalculator.optimizer'), optimizerRam],
+          [t('trainingPanel.ramCalculator.activations').replace('{batch}', String(config.batch_size)).replace('{gradCkpt}', config.gradient_checkpointing ? t('trainingPanel.ramCalculator.gradCkptLabel') : ''), activationRam],
+          [t('trainingPanel.ramCalculator.misc'), 0.4],
         ].map(([l, v]) => (
           <div key={l as string} className="flex justify-between"><span className="text-gray-400">{l as string}</span><span className="text-gray-300 tabular-nums">{(v as number).toFixed(2)} GB</span></div>
         ))}
-        <div className="flex justify-between pt-2 border-t border-white/10 font-semibold"><span className="text-gray-300">Gesamt</span><span className={`${color} tabular-nums`}>~{total.toFixed(1)} GB</span></div>
+        <div className="flex justify-between pt-2 border-t border-white/10 font-semibold"><span className="text-gray-300">{t('trainingPanel.ramCalculator.total')}</span><span className={`${color} tabular-nums`}>~{total.toFixed(1)} GB</span></div>
       </div>
-      {!isFp16 && !config.use_lora && total > 8 && <p className="text-amber-400 text-xs bg-amber-500/10 rounded-lg px-3 py-2">💡 FP16 aktivieren spart ~{(gradRam * 0.5 + activationRam * 0.5).toFixed(1)} GB RAM</p>}
-      {!config.use_lora && total > 12 && <p className="text-violet-300 text-xs bg-violet-500/10 rounded-lg px-3 py-2">💡 LoRA aktivieren reduziert den Bedarf auf ~{(total * 0.15).toFixed(1)} GB</p>}
-      {total > 20 && <div className="text-red-300 text-xs bg-red-500/10 rounded-lg px-3 py-2 space-y-1"><p className="font-medium">RAM senken:</p><p>• LoRA r=8, 4-bit QLoRA, Batch 2–4, FP16 + Grad Checkpointing</p></div>}
+      {!isFp16 && !config.use_lora && total > 8 && (
+        <p className="text-amber-400 text-xs bg-amber-500/10 rounded-lg px-3 py-2 flex items-center gap-2">
+          <Lightbulb className="w-3.5 h-3.5 flex-shrink-0" />
+          {t('trainingPanel.ramCalculator.fp16Tip').replace('{save}', (gradRam * 0.5 + activationRam * 0.5).toFixed(1))}
+        </p>
+      )}
+      {!config.use_lora && total > 12 && (
+        <p className="text-violet-300 text-xs bg-violet-500/10 rounded-lg px-3 py-2 flex items-center gap-2">
+          <Lightbulb className="w-3.5 h-3.5 flex-shrink-0" />
+          {t('trainingPanel.ramCalculator.loraTip').replace('{save}', (total * 0.15).toFixed(1))}
+        </p>
+      )}
+      {total > 20 && <div className="text-red-300 text-xs bg-red-500/10 rounded-lg px-3 py-2 space-y-1"><p className="font-medium">{t('trainingPanel.ramCalculator.highRamTitle')}</p><p>{t('trainingPanel.ramCalculator.highRamDesc')}</p></div>}
     </div>
   );
 }
@@ -243,7 +261,8 @@ function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelS
 // ── Loss Chart ─────────────────────────────────────────────────────────────
 
 export function LossChart({ points }: { points: LossPoint[] }) {
-  if (points.length < 2) return <div className="h-32 flex items-center justify-center text-gray-600 text-xs">Warte auf Trainings-Daten…</div>;
+  const { t } = useLanguage();
+  if (points.length < 2) return <div className="h-32 flex items-center justify-center text-gray-600 text-xs">{t('trainingPanel.lossChart.waitingForData')}</div>;
   const W = 500; const H = 120; const PAD = { l: 40, r: 12, t: 12, b: 28 };
   const iW = W - PAD.l - PAD.r; const iH = H - PAD.t - PAD.b;
   const trains = points.map(p => p.train_loss); const vals = points.map(p => p.val_loss).filter((v): v is number => v != null);
@@ -258,8 +277,8 @@ export function LossChart({ points }: { points: LossPoint[] }) {
       {[0, 0.5, 1].map(f => <text key={f} x={PAD.l - 4} y={PAD.t + iH * f + 4} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="9">{(maxV - f * (maxV - minV)).toFixed(3)}</text>)}
       <path d={trainPath} fill="none" stroke="#10b981" strokeWidth="2" strokeLinejoin="round" />
       {vals.length > 0 && <path d={valPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="4,2" strokeLinejoin="round" />}
-      <circle cx={PAD.l + 4} cy={H - 10} r="4" fill="#10b981" /><text x={PAD.l + 12} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">Train</text>
-      {vals.length > 0 && <><line x1={PAD.l + 70} y1={H - 10} x2={PAD.l + 84} y2={H - 10} stroke="#a855f7" strokeWidth="2" strokeDasharray="3,2" /><text x={PAD.l + 88} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">Val</text></>}
+      <circle cx={PAD.l + 4} cy={H - 10} r="4" fill="#10b981" /><text x={PAD.l + 12} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendTrain')}</text>
+      {vals.length > 0 && <><line x1={PAD.l + 70} y1={H - 10} x2={PAD.l + 84} y2={H - 10} stroke="#a855f7" strokeWidth="2" strokeDasharray="3,2" /><text x={PAD.l + 88} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendVal')}</text></>}
     </svg>
   );
 }
@@ -267,6 +286,7 @@ export function LossChart({ points }: { points: LossPoint[] }) {
 // ── Templates Modal ────────────────────────────────────────────────────────
 
 function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: (cfg: Partial<TrainingConfig>) => void; onClose: () => void; onSave: (name: string, desc: string) => void; currentConfig: TrainingConfig; }) {
+  const { t } = useLanguage();
   const [userTemplates, setUserTemplates] = useState<MetricsTemplate[]>([]);
   const [tab, setTab] = useState<'builtin' | 'user'>('builtin');
   const [saveName, setSaveName] = useState('');
@@ -277,8 +297,8 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
   useEffect(() => { invoke<MetricsTemplate[]>('get_metrics_templates').then(setUserTemplates).catch(() => {}); }, []);
 
   const handleDelete = async (id: string) => {
-    try { await invoke('delete_metrics_template', { templateId: id }); setUserTemplates(t => t.filter(x => x.id !== id)); success('Gelöscht', ''); }
-    catch (e) { error('Fehler', String(e)); }
+    try { await invoke('delete_metrics_template', { templateId: id }); setUserTemplates(t => t.filter(x => x.id !== id)); success(t('trainingPanel.templates.deleteSuccess'), ''); }
+    catch (e) { error(t('trainingPanel.templates.deleteError'), String(e)); }
   };
 
   const handleSave = () => {
@@ -289,42 +309,60 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
   };
 
   void currentConfig;
-  const all = tab === 'builtin' ? BUILTIN_TEMPLATES : userTemplates;
+  const all = tab === 'builtin' ? getBuiltinTemplates(t) : userTemplates;
+  const builtinIcon = (id: string) => {
+    const cls = 'w-4 h-4';
+    switch (id) {
+      case 'standard': return <BookOpen className={`${cls} text-blue-300`} />;
+      case 'small': return <Zap className={`${cls} text-amber-300`} />;
+      case 'large': return <BarChart3 className={`${cls} text-purple-300`} />;
+      case 'lowram': return <MemoryStick className={`${cls} text-cyan-300`} />;
+      case 'lora': return <Layers className={`${cls} text-violet-300`} />;
+      case 'qlora': return <Zap className={`${cls} text-fuchsia-300`} />;
+      default: return <BookOpen className={`${cls} text-gray-300`} />;
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2"><BookOpen className="w-5 h-5 text-blue-400" /><h2 className="text-lg font-bold text-white">Metriken-Templates</h2></div>
+          <div className="flex items-center gap-2"><BookOpen className="w-5 h-5 text-blue-400" /><h2 className="text-lg font-bold text-white">{t('trainingPanel.templates.title')}</h2></div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex border-b border-white/10 px-6 flex-shrink-0">
-          {(['builtin', 'user'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${tab === t ? 'text-blue-300 border-blue-400' : 'text-gray-400 hover:text-white border-transparent'}`}>
-              {t === 'builtin' ? '⚡ Vordefiniert' : `📁 Meine (${userTemplates.length})`}
+          {(['builtin', 'user'] as const).map(tabKey => (
+            <button key={tabKey} onClick={() => setTab(tabKey)} className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${tab === tabKey ? 'text-blue-300 border-blue-400' : 'text-gray-400 hover:text-white border-transparent'}`}>
+              <span className="inline-flex items-center gap-2">
+                {tabKey === 'builtin' ? <Zap className="w-4 h-4" /> : <Folder className="w-4 h-4" />}
+                {tabKey === 'builtin' ? t('trainingPanel.templates.tabBuiltin') : t('trainingPanel.templates.tabUser').replace('{count}', String(userTemplates.length))}
+              </span>
             </button>
           ))}
         </div>
         <div className="p-5 overflow-y-auto flex-1 space-y-3">
-          {all.length === 0 ? <p className="text-gray-500 text-sm text-center py-8">Keine Templates vorhanden.</p> : all.map(t => (
-            <div key={t.id} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/[0.07] transition-all group">
+          {all.length === 0 ? <p className="text-gray-500 text-sm text-center py-8">{t('trainingPanel.templates.noTemplates')}</p> : all.map(template => (
+            <div key={template.id} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/[0.07] transition-all group">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-white font-medium text-sm">{t.name}</p>
-                  {t.description && <p className="text-gray-500 text-xs mt-0.5">{t.description}</p>}
+                  <p className="text-white font-medium text-sm flex items-center gap-2">
+                    {tab === 'builtin' ? builtinIcon(template.id) : <BookOpen className="w-4 h-4 text-gray-500" />}
+                    <span>{template.name}</span>
+                  </p>
+                  {template.description && <p className="text-gray-500 text-xs mt-0.5">{template.description}</p>}
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {t.config.learning_rate != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">LR: {t.config.learning_rate}</span>}
-                    {t.config.batch_size     != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">Batch: {t.config.batch_size}</span>}
-                    {t.config.epochs         != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/20">Epochs: {t.config.epochs}</span>}
-                    {t.config.max_seq_length != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">Seq: {t.config.max_seq_length}</span>}
-                    {t.config.fp16           && <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">FP16</span>}
-                    {t.config.use_lora       && <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/20">LoRA r={t.config.lora_r}</span>}
-                    {t.config.load_in_4bit   && <span className="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/20">QLoRA 4bit</span>}
+                    {template.config.learning_rate != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">LR: {template.config.learning_rate}</span>}
+                    {template.config.batch_size     != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">Batch: {template.config.batch_size}</span>}
+                    {template.config.epochs         != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/20">Epochs: {template.config.epochs}</span>}
+                    {template.config.max_seq_length != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">Seq: {template.config.max_seq_length}</span>}
+                    {template.config.fp16           && <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">FP16</span>}
+                    {template.config.use_lora       && <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/20">LoRA r={template.config.lora_r}</span>}
+                    {template.config.load_in_4bit   && <span className="text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/20">{t('trainingPanel.templates.builtinTemplates.qlora.name')}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  {tab === 'user' && <button onClick={() => handleDelete(t.id)} className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>}
-                  <button onClick={() => { onApply(t.config); onClose(); }} className="px-3 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-xs font-medium transition-all">Laden</button>
+                  {tab === 'user' && <button onClick={() => handleDelete(template.id)} className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>}
+                  <button onClick={() => { onApply(template.config); onClose(); }} className="px-3 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-xs font-medium transition-all">{t('trainingPanel.templates.loadButton')}</button>
                 </div>
               </div>
             </div>
@@ -333,16 +371,16 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
         <div className="px-5 pb-5 flex-shrink-0 border-t border-white/10 pt-4">
           {showSaveForm ? (
             <div className="space-y-2">
-              <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Template-Name…" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20" />
-              <input value={saveDesc} onChange={e => setSaveDesc(e.target.value)} placeholder="Beschreibung (optional)…" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20" />
+              <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder={t('trainingPanel.templates.saveNamePlaceholder')} className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20" />
+              <input value={saveDesc} onChange={e => setSaveDesc(e.target.value)} placeholder={t('trainingPanel.templates.saveDescPlaceholder')} className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20" />
               <div className="flex gap-2">
-                <button onClick={handleSave} disabled={!saveName.trim()} className="flex-1 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-sm font-medium transition-all disabled:opacity-40"><Save className="w-3.5 h-3.5 inline mr-1.5" />Speichern</button>
-                <button onClick={() => setShowSaveForm(false)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">Abbrechen</button>
+                <button onClick={handleSave} disabled={!saveName.trim()} className="flex-1 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-sm font-medium transition-all disabled:opacity-40"><Save className="w-3.5 h-3.5 inline mr-1.5" />{t('trainingPanel.templates.saveButton')}</button>
+                <button onClick={() => setShowSaveForm(false)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">{t('trainingPanel.templates.cancelButton')}</button>
               </div>
             </div>
           ) : (
             <button onClick={() => { setTab('user'); setShowSaveForm(true); }} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all">
-              <Plus className="w-4 h-4" /> Aktuelle Config als Template speichern
+              <Plus className="w-4 h-4" /> {t('trainingPanel.templates.saveCurrentButton')}
             </button>
           )}
         </div>
@@ -415,7 +453,9 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
   onSaveAsTemplate: (cfg: Partial<TrainingConfig>) => void;
   initialGoal?: string;
 }) {
+  const { t } = useLanguage();
   const { settings: aiSettings } = useAISettings();
+  const { language } = useLanguage();
   const [goalText, setGoalText] = useState(initialGoal ?? '');
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -454,7 +494,7 @@ Nur Felder die sich ändern sollen. Beispiel: {"epochs":4,"learning_rate":0.0000
 Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
 
     try {
-      const text = await callAI(aiSettings, 'Du bist ein präziser ML-Experte. Antworte auf Deutsch. Gib am Ende exakt ein valides JSON-Objekt aus.', prompt);
+      const text = await callAI(aiSettings, 'Du bist ein präziser ML-Experte. Antworte auf Deutsch. Gib am Ende exakt ein valides JSON-Objekt aus.', prompt, undefined, language);
       setSuggestion(text);
       const matches = [...text.matchAll(/\{[^{}]*\}/g)];
       if (matches.length > 0) {
@@ -469,7 +509,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-violet-400" /><h2 className="text-lg font-bold text-white">KI-Metrik-Assistent</h2></div>
+          <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-violet-400" /><h2 className="text-lg font-bold text-white">{t('trainingPanel.aiAssistant.title')}</h2></div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
 
@@ -477,7 +517,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
           {phase === 'input' ? (
             <div className="p-6 space-y-5">
               <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Aktuelle Konfiguration</p>
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t('trainingPanel.aiAssistant.configTitle')}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
                   {[
                     ['Epochs', config.epochs], ['Batch', config.batch_size], ['LR', config.learning_rate],
@@ -496,26 +536,26 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
               <div className="p-4 rounded-xl border border-dashed border-white/15 bg-white/[0.02] space-y-2">
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-gray-500" />
-                  <p className="text-sm font-medium text-gray-400">Vorherige Trainings-Analysen</p>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/20">Bald</span>
+                  <p className="text-sm font-medium text-gray-400">{t('trainingPanel.aiAssistant.historyTitle')}</p>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/20">{t('trainingPanel.aiAssistant.historySoon')}</span>
                 </div>
-                <p className="text-xs text-gray-600">Sobald Trainings-Analysen verfügbar sind, kann die KI auf vorherige Loss-Kurven zugreifen.</p>
+                <p className="text-xs text-gray-600">{t('trainingPanel.aiAssistant.historyHint')}</p>
               </div>
 
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-white">Ziel / Problem</label>
-                <p className="text-xs text-gray-500">z. B. Training schlägt fehl, weniger Overfitting, geringerer RAM-Verbrauch, bessere Genauigkeit…</p>
+                <label className="block text-sm font-medium text-white">{t('trainingPanel.aiAssistant.goalLabel')}</label>
+                <p className="text-xs text-gray-500">{t('trainingPanel.aiAssistant.goalHint')}</p>
                 <textarea
                   value={goalText}
                   onChange={e => setGoalText(e.target.value)}
-                  placeholder="z. B. Ich bekomme einen Out-of-Memory Fehler mit 16 GB RAM. Modell ist 3B Parameter."
+                  placeholder={t('trainingPanel.aiAssistant.goalPlaceholder')}
                   rows={4}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/50 resize-none transition-all"
                 />
               </div>
 
               <button onClick={ask} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:opacity-90 text-white font-semibold text-sm transition-all">
-                <Sparkles className="w-4 h-4" /> KI-Analyse starten
+                <Sparkles className="w-4 h-4" /> {t('trainingPanel.aiAssistant.startButton')}
               </button>
             </div>
           ) : (
@@ -523,8 +563,8 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
               {loading ? (
                 <div className="flex flex-col items-center gap-3 py-12">
                   <Loader2 className="w-10 h-10 text-violet-400 animate-spin" />
-                  <p className="text-gray-400 text-sm">Analysiere Hyperparameter…</p>
-                  {goalText && <p className="text-gray-600 text-xs max-w-sm text-center">Berücksichtige: {goalText.slice(0, 80)}…</p>}
+                  <p className="text-gray-400 text-sm">{t('trainingPanel.aiAssistant.analysingText')}</p>
+                  {goalText && <p className="text-gray-600 text-xs max-w-sm text-center">{t('trainingPanel.aiAssistant.analysingGoal').replace('{goal}', goalText.slice(0, 80))}</p>}
                 </div>
               ) : (
                 <>
@@ -535,7 +575,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                     <div className="space-y-3">
                       <p className="text-white text-sm font-medium flex items-center gap-2">
                         <ClipboardList className="w-4 h-4 text-violet-400" />
-                        Vorgeschlagene Änderungen ({Object.keys(parsed).length} Metriken)
+                        {t('trainingPanel.aiAssistant.suggestionsTitle').replace('{count}', String(Object.keys(parsed).length))}
                       </p>
                       <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
                         {Object.entries(parsed).map(([k, v]) => (
@@ -551,26 +591,29 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                       <div className="space-y-2">
                         {applied ? (
                           <div className="flex items-center gap-2 justify-center py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm">
-                            <Check className="w-4 h-4" /> Übernommen!
+                        <Check className="w-4 h-4" /> {t('trainingPanel.aiAssistant.applyDoneLabel')}
                           </div>
                         ) : (
                           <div className="flex gap-2">
                             <button onClick={() => { onApply(parsed); setApplied(true); }} className="flex-1 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 text-sm font-medium transition-all">
-                              ✅ Alle {Object.keys(parsed).length} Metriken übernehmen
+                              <span className="inline-flex items-center gap-2">
+                                <Check className="w-4 h-4" />
+                                {t('trainingPanel.aiAssistant.applyButton').replace('{count}', String(Object.keys(parsed).length))}
+                              </span>
                             </button>
-                            <button onClick={onClose} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">Verwerfen</button>
+                            <button onClick={onClose} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">{t('trainingPanel.aiAssistant.discardButton')}</button>
                           </div>
                         )}
                         {applied && (
                           savedAsTemplate ? (
                             <div className="flex items-center gap-2 justify-center py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs">
-                              <Check className="w-3.5 h-3.5" /> Als Template gespeichert
+                              <Check className="w-3.5 h-3.5" /> {t('trainingPanel.aiAssistant.savedAsTemplateLabel')}
                             </div>
                           ) : (
                             <button onClick={() => { onSaveAsTemplate(parsed); setSavedAsTemplate(true); }}
                               className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"
                             >
-                              <BookOpen className="w-3.5 h-3.5" /> Als Metriken-Template speichern
+                              <BookOpen className="w-3.5 h-3.5" /> {t('trainingPanel.aiAssistant.saveAsTemplateButton')}
                             </button>
                           )
                         )}
@@ -587,7 +630,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                             }}
                             className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-200 text-xs font-medium transition-all"
                           >
-                            <Sparkles className="w-3.5 h-3.5" /> Im KI-Coach weiterplanen
+                            <Sparkles className="w-3.5 h-3.5" /> {t('trainingPanel.aiAssistant.continueInCoachButton')}
                           </button>
                         )}
                       </div>
@@ -601,11 +644,11 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
 
         <div className="px-6 pb-5 flex-shrink-0 border-t border-white/10 pt-4 flex gap-2">
           {phase === 'result' && (
-            <button onClick={() => setPhase('input')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs transition-all">← Zurück</button>
+            <button onClick={() => setPhase('input')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs transition-all">{t('trainingPanel.aiAssistant.backButton')}</button>
           )}
           {phase === 'result' && !loading && (
             <button onClick={ask} disabled={loading} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs transition-all">
-              <RefreshCw className="w-3.5 h-3.5" /> Neu analysieren
+              <RefreshCw className="w-3.5 h-3.5" /> {t('trainingPanel.aiAssistant.reanalyzeButton')}
             </button>
           )}
         </div>
@@ -617,6 +660,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function TrainingPanel({ userData, onNavigateToAnalysis }: TrainingPanelProps) {
+  const { t } = useLanguage();
   const { currentTheme } = useTheme();
   const { success, error, warning } = useNotification();
   const { setCurrentPageContent } = usePageContext();
@@ -760,7 +804,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     listen<{ new_version_id?: string }>('training-complete', e => {
       setCurrentJob(j => (j ? { ...j, status: 'completed' } : null));
       invoke('disable_prevent_sleep').catch(() => {});
-      successRef.current('Training abgeschlossen! 🎉', 'Das Modell wurde gespeichert.');
+      successRef.current(t('trainingPanel.notifications.trainingComplete'), t('trainingPanel.notifications.trainingCompleteDetail'));
       // Version-ID im Context speichern → TrainingDashboard zeigt "Analyse starten"-Button
       if (e.payload.new_version_id) {
         setCompletedVersionIdContextRef.current(e.payload.new_version_id);
@@ -768,15 +812,110 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       // Kein automatisches onNavigateToAnalysis mehr – User entscheidet selbst über Dashboard-Button
     }).then(fn => { u2 = fn; });
     listen<{ data?: { error?: string } }>('training-error', e => {
-      setCurrentJob(j => (j ? { ...j, status: 'failed', error: e.payload.data?.error ?? 'Fehler' } : null));
+      setCurrentJob(j => (j ? { ...j, status: 'failed', error: e.payload.data?.error ?? t('common.error') } : null));
       invoke('disable_prevent_sleep').catch(() => {});
     }).then(fn => { u3 = fn; });
     return () => { u1?.(); u2?.(); u3?.(); };
   }, []);
 
   useEffect(() => {
-    setCurrentPageContent(['=== FrameTrain Training ===', `Modell: ${selectedModel?.name ?? '—'}`, `Dataset: ${selectedDataset?.name ?? '—'}`, `Modus: ${mode}`].join('\n'));
-  }, [selectedModelId, selectedDatasetId, mode]);
+    const lines: string[] = [
+      t('trainingPanel.pageContext.title'),
+      '',
+      t('trainingPanel.pageContext.purposeTitle'),
+      t('trainingPanel.pageContext.purposeBody'),
+      t('trainingPanel.pageContext.purposeFlow'),
+      '',
+      t('trainingPanel.pageContext.currentSelection'),
+    ];
+
+    if (!selectedModel) {
+      lines.push(t('trainingPanel.pageContext.modelMissing'));
+    } else {
+      lines.push(t('trainingPanel.pageContext.modelSelected').replace('{name}', selectedModel.name).replace('{type}', selectedModel.model_type ?? '?'));
+      if (selectedVersionTree) {
+        lines.push(t('trainingPanel.pageContext.versionSelected').replace('{name}', selectedVersionTree.name).replace('{version}', String(selectedVersionTree.version_number)));
+      } else {
+        lines.push(t('trainingPanel.pageContext.versionMissing'));
+      }
+      if (detectionKey && detection?.supported) {
+        lines.push(t('trainingPanel.pageContext.pluginSelected').replace('{name}', detection.plugin.name).replace('{task}', detection.plugin.taskType));
+      } else {
+        lines.push(t('trainingPanel.pageContext.pluginUnsupported'));
+      }
+    }
+
+    if (!selectedDataset) {
+      lines.push(t('trainingPanel.pageContext.datasetMissing'));
+    } else {
+      lines.push(t('trainingPanel.pageContext.datasetSelected').replace('{name}', selectedDataset.name));
+      lines.push(t('trainingPanel.pageContext.datasetStatus').replace('{status}', selectedDataset.status === 'split' ? t('trainingPanel.pageContext.datasetSplit') : t('trainingPanel.pageContext.datasetUnsplit')));
+    }
+
+    lines.push('');
+    lines.push(t('trainingPanel.pageContext.trainingModeTitle'));
+    lines.push(t('trainingPanel.pageContext.trainingMode').replace('{mode}', mode === 'train' ? t('trainingPanel.header.modeTraining') : t('trainingPanel.header.modeDev')));
+
+    if (currentJob) {
+      lines.push('');
+      lines.push(t('trainingPanel.pageContext.trainingStatusTitle'));
+      lines.push(t('trainingPanel.pageContext.status').replace('{status}', currentJob.status));
+      if (currentJob.status === 'running') {
+        lines.push(t('trainingPanel.pageContext.epoch').replace('{epoch}', String(currentJob.progress.epoch)).replace('{total}', String(currentJob.progress.total_epochs)));
+        lines.push(t('trainingPanel.pageContext.step').replace('{step}', String(currentJob.progress.step)).replace('{total}', String(currentJob.progress.total_steps)));
+        lines.push(t('trainingPanel.pageContext.trainLoss').replace('{value}', currentJob.progress.train_loss.toFixed(4)));
+        if (currentJob.progress.val_loss) lines.push(t('trainingPanel.pageContext.valLoss').replace('{value}', currentJob.progress.val_loss.toFixed(4)));
+        lines.push(t('trainingPanel.pageContext.progress').replace('{value}', `${currentJob.progress.progress_percent}%`));
+      } else if (currentJob.status === 'failed' && currentJob.error) {
+        lines.push(t('trainingPanel.pageContext.error').replace('{error}', currentJob.error));
+      }
+    } else {
+      lines.push('');
+      lines.push(t('trainingPanel.pageContext.readyTitle'));
+      lines.push(t('trainingPanel.pageContext.readyBody'));
+    }
+
+    lines.push('');
+    lines.push(t('trainingPanel.pageContext.layoutTitle'));
+    lines.push(t('trainingPanel.pageContext.layoutTop'));
+    lines.push(t('trainingPanel.pageContext.layoutTopModel'));
+    lines.push(t('trainingPanel.pageContext.layoutTopDataset'));
+    lines.push(t('trainingPanel.pageContext.layoutTopMode'));
+    lines.push('');
+    lines.push(t('trainingPanel.pageContext.layoutMiddle'));
+    lines.push(t('trainingPanel.pageContext.layoutMiddleBasic'));
+    lines.push(t('trainingPanel.pageContext.layoutMiddleOptimizer'));
+    lines.push(t('trainingPanel.pageContext.layoutMiddleAdvanced'));
+    lines.push(t('trainingPanel.pageContext.layoutMiddleLora'));
+    lines.push(t('trainingPanel.pageContext.layoutMiddleInfo'));
+    lines.push('');
+    lines.push(t('trainingPanel.pageContext.layoutBottom'));
+    lines.push(t('trainingPanel.pageContext.layoutBottomStart'));
+    lines.push(t('trainingPanel.pageContext.layoutBottomDashboard'));
+    lines.push(t('trainingPanel.pageContext.layoutBottomHistory'));
+    lines.push('');
+    lines.push(t('trainingPanel.pageContext.availableActions'));
+    if (!selectedModel || !selectedDataset) {
+      lines.push(t('trainingPanel.pageContext.actionPickModel'));
+      lines.push(t('trainingPanel.pageContext.actionPickDataset'));
+    } else if (!isSupported) {
+      lines.push(t('trainingPanel.pageContext.actionDevMode'));
+      lines.push(t('trainingPanel.pageContext.actionDevScript'));
+    } else if (selectedDataset.status !== 'split') {
+      lines.push(t('trainingPanel.pageContext.actionOpenDatasets'));
+      lines.push(t('trainingPanel.pageContext.actionOpenDataset').replace('{name}', selectedDataset.name));
+      lines.push(t('trainingPanel.pageContext.actionSplitDataset'));
+    } else if (!currentJob || currentJob.status === 'completed' || currentJob.status === 'failed') {
+      lines.push(t('trainingPanel.pageContext.actionAdjustConfig'));
+      lines.push(t('trainingPanel.pageContext.actionStartTraining'));
+      lines.push(t('trainingPanel.pageContext.actionDashboardOpens'));
+    } else if (currentJob.status === 'running') {
+      lines.push(t('trainingPanel.pageContext.actionMonitor'));
+      lines.push(t('trainingPanel.pageContext.actionPauseStop'));
+    }
+
+    setCurrentPageContent(lines.join('\n'));
+  }, [selectedModelId, selectedDatasetId, mode, currentJob, setCurrentPageContent]);
 
   const selectedModel   = models.find(m => m.id === selectedModelId);
   const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
@@ -788,9 +927,10 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const pluginId        = detection?.supported ? detection.plugin.id : null;
 
   const handleStartTraining = async () => {
-    if (!selectedModelId || !selectedDatasetId) { warning('Fehlende Auswahl', 'Bitte Modell und Dataset wählen.'); return; }
-    if (!isSupported) { warning('Nicht unterstützt', 'Nutze den Dev Train Modus.'); return; }
-    if (selectedDataset?.status !== 'split') { warning('Kein Split', 'Das Dataset muss erst im Dataset-Manager aufgeteilt werden.'); return; }
+    if (!selectedModelId || !selectedDatasetId) { warning(t('trainingPanel.notifications.missingSelection'), t('trainingPanel.notifications.missingSelectionDetail')); return; }
+    if (!isSupported) { warning(t('trainingPanel.notifications.notSupported'), t('trainingPanel.notifications.notSupportedDetail')); return; }
+    const isCanvasModel = selectedModelId.startsWith('canvas_');
+    if (!isCanvasModel && selectedDataset?.status !== 'split') { warning(t('trainingPanel.notifications.noSplit'), t('trainingPanel.notifications.noSplitDetail')); return; }
 
     setLossPoints([]);
     setLossPointsContext([]);
@@ -823,21 +963,21 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       setTrainingInfoContext('standard', selectedModel?.name ?? '', selectedDataset?.name ?? '');
       setTrainingConfigContext(config);
       
-      success('Training gestartet!', 'Job läuft…');
-    } catch (err: unknown) { error('Start fehlgeschlagen', String(err)); }
+      success(t('trainingPanel.notifications.started'), t('trainingPanel.notifications.startedDetail'));
+    } catch (err: unknown) { error(t('trainingPanel.notifications.startFailed'), String(err)); }
   };
 
   const handleStopTraining = async () => {
-    try { await invoke('stop_training'); invoke('disable_prevent_sleep').catch(() => {}); success('Gestoppt', ''); } catch (err: unknown) { error('Fehler', String(err)); }
+    try { await invoke('stop_training'); invoke('disable_prevent_sleep').catch(() => {}); success(t('trainingPanel.notifications.stopped'), ''); } catch (err: unknown) { error(t('trainingPanel.notifications.stopFailed'), String(err)); }
   };
 
   const handleSaveTemplate = async (name: string, desc: string) => {
-    try { await invoke('save_metrics_template', { name, description: desc, config, source: 'user' }); success('Template gespeichert!', name); }
-    catch (err: unknown) { error('Fehler', String(err)); }
+    try { await invoke('save_metrics_template', { name, description: desc, config, source: 'user' }); success(t('trainingPanel.notifications.templateSaved'), name); }
+    catch (err: unknown) { error(t('common.error'), String(err)); }
   };
 
   const handleSaveAIAsTemplate = async (cfg: Partial<TrainingConfig>) => {
-    try { await invoke('save_metrics_template', { name: `KI-Vorschlag ${new Date().toLocaleDateString('de-DE')}`, description: 'Automatisch vom KI-Assistenten erstellt.', config: { ...DEFAULT_CONFIG, ...cfg }, source: 'ai' }); success('Template gespeichert!', 'KI-Vorschlag als Template hinterlegt.'); }
+    try { await invoke('save_metrics_template', { name: `KI-Vorschlag ${new Date().toLocaleDateString('de-DE')}`, description: 'Automatisch vom KI-Assistenten erstellt.', config: { ...DEFAULT_CONFIG, ...cfg }, source: 'ai' }); success(t('trainingPanel.notifications.aiTemplateSaved'), t('trainingPanel.notifications.aiTemplateSavedDetail')); }
     catch { /* ignore */ }
   };
 
@@ -873,7 +1013,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <div className="flex items-center gap-3">
                 <History className="w-5 h-5 text-purple-400" />
-                <h2 className="text-lg font-bold text-white">Trainings-Verlauf</h2>
+                <h2 className="text-lg font-bold text-white">{t('trainingPanel.history.title')}</h2>
               </div>
               <button onClick={() => setShowHistory(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all">
                 <X className="w-5 h-5" />
@@ -882,19 +1022,29 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             {/* Filter */}
             <div className="flex gap-2 px-6 py-3 border-b border-white/10 flex-wrap">
               {(['all', 'running', 'completed', 'failed', 'stopped'] as const).map(f => {
-                const labels: Record<string, string> = { all: 'Alle', running: '▶ Läuft', completed: '✅ Erfolgreich', failed: '❌ Fehlgeschlagen', stopped: '⏹ Gestoppt' };
+                const labels: Record<string, string> = { all: t('trainingPanel.history.filterAll'), running: t('trainingPanel.history.filterRunning'), completed: t('trainingPanel.history.filterCompleted'), failed: t('trainingPanel.history.filterFailed'), stopped: t('trainingPanel.history.filterStopped') };
                 const colors: Record<string, string> = { all: 'bg-white/10 text-white', running: 'bg-blue-500/20 text-blue-300 border-blue-500/30', completed: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', failed: 'bg-red-500/20 text-red-300 border-red-500/30', stopped: 'bg-gray-500/20 text-gray-300 border-gray-500/30' };
+                const icon: Record<string, React.ReactNode> = {
+                  all: <ClipboardList className="w-3.5 h-3.5" />,
+                  running: <Play className="w-3.5 h-3.5" />,
+                  completed: <CheckCircle className="w-3.5 h-3.5" />,
+                  failed: <XCircle className="w-3.5 h-3.5" />,
+                  stopped: <Square className="w-3.5 h-3.5" />,
+                };
                 return (
                   <button key={f} onClick={() => setHistoryFilter(f)}
                     className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${
                       historyFilter === f ? colors[f] : 'bg-white/5 border-white/10 text-gray-500 hover:text-gray-300'
                     }`}>
-                    {labels[f]}
+                    <span className="inline-flex items-center gap-1.5">
+                      {icon[f]}
+                      <span>{labels[f]}</span>
+                    </span>
                   </button>
                 );
               })}
               <div className="ml-auto text-xs text-gray-500 flex items-center">
-                {historyJobs.filter(j => historyFilter === 'all' || j.status === historyFilter).length} Einträge
+                {historyJobs.filter(j => historyFilter === 'all' || j.status === historyFilter).length} {t('trainingPanel.history.entries')}
               </div>
             </div>
             {/* List */}
@@ -906,11 +1056,18 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 if (filtered.length === 0) return (
                   <div className="text-center py-16 text-gray-500">
                     <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">Keine Trainings in dieser Kategorie</p>
+                    <p className="text-sm">{t('trainingPanel.history.noEntries')}</p>
                   </div>
                 );
                 return filtered.map(job => {
-                  const statusIcon: Record<string, string> = { completed: '✅', failed: '❌', stopped: '⏹', running: '▶', pending: '⏳' };
+                  const statusIcon: Record<string, React.ReactNode> = {
+                    completed: <CheckCircle className="w-3.5 h-3.5" />,
+                    failed: <XCircle className="w-3.5 h-3.5" />,
+                    stopped: <Square className="w-3.5 h-3.5" />,
+                    running: <Play className="w-3.5 h-3.5" />,
+                    pending: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+                  };
+                  const statusLabel: Record<string, string> = { completed: t('trainingPanel.history.statusCompleted'), failed: t('trainingPanel.history.statusFailed'), stopped: t('trainingPanel.history.statusStopped'), running: t('trainingPanel.history.statusRunning'), pending: t('trainingPanel.history.statusPending') };
                   const statusColor: Record<string, string> = { completed: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', failed: 'text-red-400 bg-red-500/10 border-red-500/20', stopped: 'text-gray-400 bg-gray-500/10 border-gray-500/20', running: 'text-blue-400 bg-blue-500/10 border-blue-500/20', pending: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20' };
                   const durMs = job.completed_at && job.started_at ? new Date(job.completed_at).getTime() - new Date(job.started_at).getTime() : null;
                   const durStr = durMs ? (durMs > 3600000 ? `${Math.floor(durMs/3600000)}h ${Math.floor((durMs%3600000)/60000)}m` : durMs > 60000 ? `${Math.floor(durMs/60000)}m ${Math.floor((durMs%60000)/1000)}s` : `${Math.floor(durMs/1000)}s`) : null;
@@ -920,27 +1077,27 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border ${statusColor[job.status] ?? statusColor.pending}`}>
-                              {statusIcon[job.status] ?? '⏳'} {job.status}
+                              {statusIcon[job.status] ?? statusIcon.pending} {statusLabel[job.status] ?? statusLabel.pending}
                             </span>
-                            {durStr && <span className="text-xs text-gray-500">⏱ {durStr}</span>}
+                            {durStr && <span className="text-xs text-gray-500 inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {durStr}</span>}
                           </div>
                           <p className="text-white font-medium text-sm truncate">{job.model_name}</p>
-                          <p className="text-gray-500 text-xs truncate">Dataset: {job.dataset_name}</p>
-                          {job.error && <p className="text-red-400 text-xs mt-1 truncate">Fehler: {job.error}</p>}
+                          <p className="text-gray-500 text-xs truncate">{t('trainingPanel.history.datasetLabel')} {job.dataset_name}</p>
+                          {job.error && <p className="text-red-400 text-xs mt-1 truncate">{t('trainingPanel.history.errorLabel')} {job.error}</p>}
                         </div>
                         <div className="text-right flex-shrink-0">
                           <p className="text-xs text-gray-500">{new Date(job.created_at).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' })}</p>
                           <p className="text-xs text-gray-600">{new Date(job.created_at).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })}</p>
                           {job.progress && job.progress.progress_percent > 0 && (
-                            <p className="text-xs text-gray-500 mt-1">{job.progress.progress_percent.toFixed(0)}% · Epoche {job.progress.epoch}/{job.progress.total_epochs}</p>
+                            <p className="text-xs text-gray-500 mt-1">{job.progress.progress_percent.toFixed(0)}% · {t('trainingPanel.history.epochLabel')} {job.progress.epoch}/{job.progress.total_epochs}</p>
                           )}
                         </div>
                       </div>
                       {job.progress && job.progress.train_loss > 0 && (
                         <div className="mt-2 pt-2 border-t border-white/10 flex gap-4 text-xs text-gray-500">
-                          <span>Loss: <span className="text-gray-300">{job.progress.train_loss.toFixed(4)}</span></span>
-                          {job.progress.val_loss && <span>Val: <span className="text-gray-300">{job.progress.val_loss.toFixed(4)}</span></span>}
-                          <span>Epoche {job.progress.epoch}/{job.progress.total_epochs}</span>
+                          <span>{t('trainingPanel.history.lossLabel')} <span className="text-gray-300">{job.progress.train_loss.toFixed(4)}</span></span>
+                          {job.progress.val_loss && <span>{t('trainingPanel.history.valLabel')} <span className="text-gray-300">{job.progress.val_loss.toFixed(4)}</span></span>}
+                          <span>{t('trainingPanel.history.epochLabel')} {job.progress.epoch}/{job.progress.total_epochs}</span>
                         </div>
                       )}
                     </div>
@@ -954,16 +1111,16 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-white">Training</h1><p className="text-gray-400 mt-1">Trainiere Sequenzklassifikations-Modelle</p></div>
+        <div><h1 className="text-2xl font-bold text-white">{t('trainingPanel.title')}</h1><p className="text-gray-400 mt-1">{t('trainingPanel.subtitle')}</p></div>
         <div className="flex items-center gap-2">
           <button onClick={handleOpenHistory} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 text-sm transition-all">
             <History className="w-4 h-4" />
-            Verlauf
+            {t('trainingPanel.history.title')}
           </button>
           <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
             {(['train', 'dev'] as const).map(m => (
               <button key={m} onClick={() => setMode(m)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${mode === m ? (m === 'train' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30') : 'text-gray-400 hover:text-white'}`}>
-                {m === 'train' ? <><Play className="w-3.5 h-3.5" /> Training</> : <><Code2 className="w-3.5 h-3.5" /> Dev Train</>}
+                {m === 'train' ? <><Play className="w-3.5 h-3.5" /> {t('trainingPanel.header.modeTraining')}</> : <><Code2 className="w-3.5 h-3.5" /> {t('trainingPanel.header.modeDev')}</>}
               </button>
             ))}
           </div>
@@ -974,8 +1131,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       {models.length === 0 ? (
         <div className="rounded-2xl border border-white/10 bg-white/5 p-12 text-center space-y-3">
           <Layers className="w-10 h-10 text-gray-500 mx-auto" />
-          <p className="text-white font-medium">Kein Modell vorhanden</p>
-          <p className="text-gray-500 text-sm">Füge zuerst ein Modell im Model-Manager hinzu.</p>
+          <p className="text-white font-medium">{t('trainingPanel.noModels.title')}</p>
+          <p className="text-gray-500 text-sm">{t('trainingPanel.noModels.description')}</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -985,7 +1142,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
               {/* Model Selection */}
               <div>
-                <label className="block text-sm font-medium text-white">Modell</label>
+                <label className="block text-sm font-medium text-white">{t('trainingPanel.modelBlock.modelLabel')}</label>
                 <select value={selectedModelId ?? ''} onChange={e => { setSelectedModelId(e.target.value); setSelectedDatasetId(null); }} className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none mt-1">
                   {modelsWithVersions.map(m => <option key={m.id} value={m.id} className="bg-slate-900">{m.name}</option>)}
                 </select>
@@ -993,38 +1150,62 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               
               {/* Version Selection */}
               <div>
-                <label className="block text-sm font-medium text-white">Version</label>
+                <label className="block text-sm font-medium text-white">{t('trainingPanel.modelBlock.versionLabel')}</label>
                 <select value={selectedVersionId ?? ''} onChange={e => setSelectedVersionId(e.target.value)} className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none mt-1">
                   {selectedModelTree?.versions?.length ? [...selectedModelTree.versions].sort((a, b) => b.version_number - a.version_number).map((v, idx) => (
                     <option key={v.id} value={v.id} className="bg-slate-900">
-                      {v.name} {idx === 0 ? '(neueste)' : ''}
+                      {v.name} {idx === 0 ? t('trainingPanel.modelBlock.versionLatest') : ''}
                     </option>
-                  )) : <option value="">Keine Versionen</option>}
+                  )) : <option value="">{t('trainingPanel.modelBlock.noVersions')}</option>}
                 </select>
               </div>
               
               {/* Support Info */}
               {selectedModel && (isSupported
-                ? <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mt-1"><CheckCircle className="w-4 h-4 text-emerald-400" /><span className="text-emerald-300 text-xs font-medium">{detection.plugin.name} – unterstützt</span></div>
+                ? <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mt-1"><CheckCircle className="w-4 h-4 text-emerald-400" /><span className="text-emerald-300 text-xs font-medium">{t('trainingPanel.modelBlock.pluginSupported').replace('{name}', detection.plugin.name)}</span></div>
                 : <div className="space-y-2 mt-1">
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20"><AlertTriangle className="w-4 h-4 text-amber-400" /><span className="text-amber-300 text-xs">Noch nicht unterstützt</span></div>
-                    <button onClick={() => setMode('dev')} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"><Code2 className="w-3.5 h-3.5" /> Dev Train Mode →</button>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20"><AlertTriangle className="w-4 h-4 text-amber-400" /><span className="text-amber-300 text-xs">{t('trainingPanel.modelBlock.pluginUnsupported')}</span></div>
+                    <button onClick={() => setMode('dev')} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"><Code2 className="w-3.5 h-3.5" /> {t('trainingPanel.modelBlock.devModeButton')}</button>
                   </div>
               )}
             </div>
 
             {/* Dataset Selection */}
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
-              <label className="block text-sm font-medium text-white">Dataset</label>
+              <label className="block text-sm font-medium text-white">{t('trainingPanel.datasetBlock.label')}</label>
               {datasets.length === 0
-                ? <p className="text-gray-500 text-sm">Kein Dataset für dieses Modell.</p>
+                ? <p className="text-gray-500 text-sm">{t('trainingPanel.datasetBlock.noDataset')}</p>
                 : <select value={selectedDatasetId ?? ''} onChange={e => setSelectedDatasetId(e.target.value)} className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none">
-                    {datasets.map(d => <option key={d.id} value={d.id} className="bg-slate-900">{d.name} {d.status === 'split' ? '✅' : '⚠️'}</option>)}
+                    {datasets.map(d => (
+                      <option key={d.id} value={d.id} className="bg-slate-900">
+                        {d.name}{d.status === 'split' ? t('trainingPanel.datasetBlock.statusSplit') : t('trainingPanel.datasetBlock.statusUnsplit')}
+                      </option>
+                    ))}
                   </select>
               }
-              {selectedDataset && pluginId && <DatasetCompatBadge modelPluginId={pluginId} extensions={selectedDataset.extensions ?? []} />}
+              {selectedDataset && pluginId && (
+                <DatasetCompatBadge
+                  modelPluginId={pluginId}
+                  extensions={selectedDataset.extensions ?? []}
+                  analysis={selectedDataset.dataset_type ? {
+                    detected_type: selectedDataset.dataset_type,
+                    confidence: 80,
+                    pairing_status: selectedDataset.pairing_status ?? null,
+                    warnings: selectedDataset.warnings ?? [],
+                    file_count: selectedDataset.file_count,
+                    dir_count: 0,
+                    extensions: selectedDataset.extensions ?? [],
+                    schema_hint: null,
+                  } : null}
+                />
+              )}
               {selectedDataset?.status === 'unused' && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20"><AlertCircle className="w-3.5 h-3.5 text-amber-400" /><span className="text-amber-300 text-xs">Kein Split – erst im Dataset-Manager aufteilen.</span></div>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20"><AlertCircle className="w-3.5 h-3.5 text-amber-400" /><span className="text-amber-300 text-xs">{t('trainingPanel.datasetBlock.noSplitWarning')}</span></div>
+              )}
+              {selectedModelId?.startsWith('canvas_') && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20 mt-1">
+                  <span className="text-violet-300 text-xs">{t('trainingPanel.datasetBlock.canvasBadge')}</span>
+                </div>
               )}
             </div>
           </div>
@@ -1041,9 +1222,9 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
         <>
           {reqs && !reqs.ready && (
             <div className="p-4 rounded-2xl border border-red-500/30 bg-red-500/10 space-y-2">
-              <div className="flex items-center gap-2"><AlertCircle className="w-4 h-4 text-red-400" /><span className="text-red-300 font-medium text-sm">Python-Umgebung nicht bereit</span></div>
+              <div className="flex items-center gap-2"><AlertCircle className="w-4 h-4 text-red-400" /><span className="text-red-300 font-medium text-sm">{t('trainingPanel.requirements.notReadyTitle')}</span></div>
               <div className="grid grid-cols-2 gap-2 text-xs">
-                {[{label:'Python',ok:reqs.python_installed,ver:reqs.python_version},{label:'PyTorch',ok:reqs.torch_installed,ver:reqs.torch_version},{label:'Transformers',ok:reqs.transformers_installed},{label:'CUDA/MPS',ok:reqs.cuda_available||reqs.mps_available}].map(r => (
+                {[{label:t('trainingPanel.requirements.python'),ok:reqs.python_installed,ver:reqs.python_version},{label:t('trainingPanel.requirements.pytorch'),ok:reqs.torch_installed,ver:reqs.torch_version},{label:t('trainingPanel.requirements.transformers'),ok:reqs.transformers_installed},{label:t('trainingPanel.requirements.cudaMps'),ok:reqs.cuda_available||reqs.mps_available}].map(r => (
                   <div key={r.label} className={`flex items-center gap-1.5 ${r.ok ? 'text-emerald-400' : 'text-red-400'}`}>{r.ok ? <CheckCircle className="w-3 h-3" /> : <X className="w-3 h-3" />}{r.label} {r.ver ? `(${r.ver})` : ''}</div>
                 ))}
               </div>
@@ -1052,98 +1233,101 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
           {/* Toolbar */}
           <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => setShowTemplates(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"><BookOpen className="w-3.5 h-3.5" /> Templates</button>
-            <button onClick={() => { setAiInitialGoal(''); setShowAIAssistant(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-300 text-xs font-medium transition-all"><Sparkles className="w-3.5 h-3.5" /> KI-Assistent</button>
-            <button onClick={() => { updateConfig(DEFAULT_CONFIG); setLossPoints([]); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs transition-all"><RefreshCw className="w-3.5 h-3.5" /> Reset</button>
+            <button onClick={() => setShowTemplates(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"><BookOpen className="w-3.5 h-3.5" /> {t('trainingPanel.toolbar.templatesButton')}</button>
+            <button onClick={() => { setAiInitialGoal(''); setShowAIAssistant(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-300 text-xs font-medium transition-all"><Sparkles className="w-3.5 h-3.5" /> {t('trainingPanel.toolbar.aiButton')}</button>
+            <button onClick={() => { updateConfig(DEFAULT_CONFIG); setLossPoints([]); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs transition-all"><RefreshCw className="w-3.5 h-3.5" /> {t('trainingPanel.toolbar.resetButton')}</button>
           </div>
 
           {/* Config Sections */}
           <div className="space-y-3">
-            <SectionCard title="Basis-Parameter" icon={<Settings2 className="w-4 h-4 text-emerald-400" />} expanded={sections.basic} onToggle={() => toggleSection('basic')}>
+            <SectionCard title={t('trainingPanel.sections.basic')} icon={<Settings2 className="w-4 h-4 text-emerald-400" />} expanded={sections.basic} onToggle={() => toggleSection('basic')}>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Epochs" tooltip="Anzahl Trainingsepochen."><NumInput value={config.epochs} onChange={v => updateConfig({ epochs: v })} min={1} max={100} step={1} /></Field>
-                <Field label="Batch Size"><NumInput value={config.batch_size} onChange={v => updateConfig({ batch_size: v })} min={1} step={1} /></Field>
-                <Field label="Learning Rate" tooltip="1e-5 bis 5e-5 für Encoder."><NumInput value={config.learning_rate} onChange={v => updateConfig({ learning_rate: v })} step={0.000001} /></Field>
-                <Field label="Max Seq Length" tooltip="Standard: 128, Max: 512"><NumInput value={config.max_seq_length} onChange={v => updateConfig({ max_seq_length: v })} min={16} max={512} step={16} /></Field>
-                <Field label="Warmup Ratio"><NumInput value={config.warmup_ratio} onChange={v => updateConfig({ warmup_ratio: v })} step={0.01} min={0} max={0.3} /></Field>
-                <Field label="Gradient Accumulation" tooltip="Effektive Batch-Vergrößerung."><NumInput value={config.gradient_accumulation_steps} onChange={v => updateConfig({ gradient_accumulation_steps: v })} min={1} step={1} /></Field>
+                <Field label={t('trainingPanel.fields.epochs')} tooltip={t('trainingPanel.fields.epochsTooltip')}><NumInput value={config.epochs} onChange={v => updateConfig({ epochs: v })} min={1} max={100} step={1} /></Field>
+                <Field label={t('trainingPanel.fields.batchSize')}><NumInput value={config.batch_size} onChange={v => updateConfig({ batch_size: v })} min={1} step={1} /></Field>
+                <Field label={t('trainingPanel.fields.learningRate')} tooltip={t('trainingPanel.fields.learningRateTooltip')}><NumInput value={config.learning_rate} onChange={v => updateConfig({ learning_rate: v })} step={0.000001} /></Field>
+                <Field label={t('trainingPanel.fields.maxSeqLength')} tooltip={t('trainingPanel.fields.maxSeqLengthTooltip')}><NumInput value={config.max_seq_length} onChange={v => updateConfig({ max_seq_length: v })} min={16} max={512} step={16} /></Field>
+                <Field label={t('trainingPanel.fields.warmupRatio')}><NumInput value={config.warmup_ratio} onChange={v => updateConfig({ warmup_ratio: v })} step={0.01} min={0} max={0.3} /></Field>
+                <Field label={t('trainingPanel.fields.gradientAccumulation')} tooltip={t('trainingPanel.fields.gradientAccumulationTooltip')}><NumInput value={config.gradient_accumulation_steps} onChange={v => updateConfig({ gradient_accumulation_steps: v })} min={1} step={1} /></Field>
               </div>
               <div className="grid grid-cols-2 gap-4 pt-1">
-                <Toggle checked={config.fp16} onChange={v => updateConfig({ fp16: v, bf16: v ? false : config.bf16 })} label="FP16 Mixed Precision" />
-                <Toggle checked={config.bf16} onChange={v => updateConfig({ bf16: v, fp16: v ? false : config.fp16 })} label="BF16 Mixed Precision" />
+                <Toggle checked={config.fp16} onChange={v => updateConfig({ fp16: v, bf16: v ? false : config.bf16 })} label={t('trainingPanel.fields.fp16')} />
+                <Toggle checked={config.bf16} onChange={v => updateConfig({ bf16: v, fp16: v ? false : config.fp16 })} label={t('trainingPanel.fields.bf16')} />
               </div>
             </SectionCard>
 
-            <SectionCard title="Optimizer & Scheduler" icon={<Gauge className="w-4 h-4 text-blue-400" />} expanded={sections.optimizer} onToggle={() => toggleSection('optimizer')}>
+            <SectionCard title={t('trainingPanel.sections.optimizer')} icon={<Gauge className="w-4 h-4 text-blue-400" />} expanded={sections.optimizer} onToggle={() => toggleSection('optimizer')}>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Optimizer"><SelectInput value={config.optimizer} onChange={v => updateConfig({ optimizer: v })} options={[{value:'adamw',label:'AdamW'},{value:'adam',label:'Adam'},{value:'sgd',label:'SGD'},{value:'adafactor',label:'Adafactor'}]} /></Field>
-                <Field label="Scheduler"><SelectInput value={config.scheduler} onChange={v => updateConfig({ scheduler: v })} options={[{value:'linear',label:'Linear'},{value:'cosine',label:'Cosine'},{value:'constant',label:'Constant'},{value:'polynomial',label:'Polynomial'}]} /></Field>
-                <Field label="Weight Decay"><NumInput value={config.weight_decay} onChange={v => updateConfig({ weight_decay: v })} step={0.001} min={0} /></Field>
-                <Field label="Max Grad Norm"><NumInput value={config.max_grad_norm} onChange={v => updateConfig({ max_grad_norm: v })} step={0.1} min={0} /></Field>
-                <Field label="Adam β1" tooltip="Erster Momentum-Koeffizient (Standard: 0.9)"><NumInput value={config.adam_beta1} onChange={v => updateConfig({ adam_beta1: v })} step={0.001} min={0} max={1} /></Field>
-                <Field label="Adam β2" tooltip="Zweiter Momentum-Koeffizient (Standard: 0.999)"><NumInput value={config.adam_beta2} onChange={v => updateConfig({ adam_beta2: v })} step={0.0001} min={0} max={1} /></Field>
-                <Field label="Adam ε" tooltip="Numerische Stabilität (Standard: 1e-8)" ><NumInput value={config.adam_epsilon} onChange={v => updateConfig({ adam_epsilon: v })} step={1e-9} min={0} /></Field>
+                <Field label={t('trainingPanel.fields.optimizer')}><SelectInput value={config.optimizer} onChange={v => updateConfig({ optimizer: v })} options={[{value:'adamw',label:'AdamW'},{value:'adam',label:'Adam'},{value:'sgd',label:'SGD'},{value:'adafactor',label:'Adafactor'}]} /></Field>
+                <Field label={t('trainingPanel.fields.scheduler')}><SelectInput value={config.scheduler} onChange={v => updateConfig({ scheduler: v })} options={[{value:'linear',label:'Linear'},{value:'cosine',label:'Cosine'},{value:'constant',label:'Constant'},{value:'polynomial',label:'Polynomial'}]} /></Field>
+                <Field label={t('trainingPanel.fields.weightDecay')}><NumInput value={config.weight_decay} onChange={v => updateConfig({ weight_decay: v })} step={0.001} min={0} /></Field>
+                <Field label={t('trainingPanel.fields.maxGradNorm')}><NumInput value={config.max_grad_norm} onChange={v => updateConfig({ max_grad_norm: v })} step={0.1} min={0} /></Field>
+                <Field label={t('trainingPanel.fields.adamBeta1')} tooltip={t('trainingPanel.fields.adamBeta1Tooltip')}><NumInput value={config.adam_beta1} onChange={v => updateConfig({ adam_beta1: v })} step={0.001} min={0} max={1} /></Field>
+                <Field label={t('trainingPanel.fields.adamBeta2')} tooltip={t('trainingPanel.fields.adamBeta2Tooltip')}><NumInput value={config.adam_beta2} onChange={v => updateConfig({ adam_beta2: v })} step={0.0001} min={0} max={1} /></Field>
+                <Field label={t('trainingPanel.fields.adamEpsilon')} tooltip={t('trainingPanel.fields.adamEpsilonTooltip')} ><NumInput value={config.adam_epsilon} onChange={v => updateConfig({ adam_epsilon: v })} step={1e-9} min={0} /></Field>
               </div>
             </SectionCard>
 
-            <SectionCard title="Erweitert & Evaluation" icon={<SlidersHorizontal className="w-4 h-4 text-purple-400" />} expanded={sections.advanced} onToggle={() => toggleSection('advanced')}>
+            <SectionCard title={t('trainingPanel.sections.advanced')} icon={<SlidersHorizontal className="w-4 h-4 text-purple-400" />} expanded={sections.advanced} onToggle={() => toggleSection('advanced')}>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Dropout"><NumInput value={config.dropout} onChange={v => updateConfig({ dropout: v })} step={0.01} min={0} max={0.5} /></Field>
-                <Field label="Label Smoothing"><NumInput value={config.label_smoothing} onChange={v => updateConfig({ label_smoothing: v })} step={0.01} min={0} max={0.3} /></Field>
-                <Field label="Warmup Steps" tooltip="Absolute Schritte (0 = warmup_ratio verwenden)"><NumInput value={config.warmup_steps} onChange={v => updateConfig({ warmup_steps: v })} min={0} step={10} /></Field>
-                <Field label="Max Steps" tooltip="-1 = alle Epochen durchlaufen"><NumInput value={config.max_steps} onChange={v => updateConfig({ max_steps: v })} min={-1} step={100} /></Field>
-                <Field label="Eval Strategy"><SelectInput value={config.eval_strategy} onChange={v => updateConfig({ eval_strategy: v })} options={[{value:'epoch',label:'Epoch'},{value:'steps',label:'Steps'},{value:'no',label:'Keine'}]} /></Field>
-                <Field label="Eval Steps" tooltip="Nur wenn eval_strategy='steps'"><NumInput value={config.eval_steps} onChange={v => updateConfig({ eval_steps: v })} min={1} step={100} /></Field>
-                <Field label="Save Steps"><NumInput value={config.save_steps} onChange={v => updateConfig({ save_steps: v })} min={1} step={100} /></Field>
-                <Field label="Save Total Limit" tooltip="Max. Checkpoints."><NumInput value={config.save_total_limit} onChange={v => updateConfig({ save_total_limit: v })} min={1} step={1} /></Field>
-                <Field label="Logging Steps"><NumInput value={config.logging_steps} onChange={v => updateConfig({ logging_steps: v })} min={1} step={5} /></Field>
-                <Field label="Seed"><NumInput value={config.seed} onChange={v => updateConfig({ seed: v })} min={0} step={1} /></Field>
-                <Field label="Num Workers" tooltip="DataLoader Worker-Threads (0–8)"><NumInput value={config.num_workers} onChange={v => updateConfig({ num_workers: v })} min={0} max={8} step={1} /></Field>
+                <Field label={t('trainingPanel.fields.dropout')}><NumInput value={config.dropout} onChange={v => updateConfig({ dropout: v })} step={0.01} min={0} max={0.5} /></Field>
+                <Field label={t('trainingPanel.fields.labelSmoothing')}><NumInput value={config.label_smoothing} onChange={v => updateConfig({ label_smoothing: v })} step={0.01} min={0} max={0.3} /></Field>
+                <Field label={t('trainingPanel.fields.warmupSteps')} tooltip={t('trainingPanel.fields.warmupStepsTooltip')}><NumInput value={config.warmup_steps} onChange={v => updateConfig({ warmup_steps: v })} min={0} step={10} /></Field>
+                <Field label={t('trainingPanel.fields.maxSteps')} tooltip={t('trainingPanel.fields.maxStepsTooltip')}><NumInput value={config.max_steps} onChange={v => updateConfig({ max_steps: v })} min={-1} step={100} /></Field>
+                <Field label={t('trainingPanel.fields.evalStrategy')}><SelectInput value={config.eval_strategy} onChange={v => updateConfig({ eval_strategy: v })} options={[{value:'epoch',label:t('trainingPanel.fields.evalStrategyEpoch')},{value:'steps',label:t('trainingPanel.fields.evalStrategySteps')},{value:'no',label:t('trainingPanel.fields.evalStrategyNone')}]} /></Field>
+                <Field label={t('trainingPanel.fields.evalSteps')} tooltip={t('trainingPanel.fields.evalStepsTooltip')}><NumInput value={config.eval_steps} onChange={v => updateConfig({ eval_steps: v })} min={1} step={100} /></Field>
+                <Field label={t('trainingPanel.fields.saveSteps')}><NumInput value={config.save_steps} onChange={v => updateConfig({ save_steps: v })} min={1} step={100} /></Field>
+                <Field label={t('trainingPanel.fields.saveTotalLimit')} tooltip={t('trainingPanel.fields.saveTotalLimitTooltip')}><NumInput value={config.save_total_limit} onChange={v => updateConfig({ save_total_limit: v })} min={1} step={1} /></Field>
+                <Field label={t('trainingPanel.fields.loggingSteps')}><NumInput value={config.logging_steps} onChange={v => updateConfig({ logging_steps: v })} min={1} step={5} /></Field>
+                <Field label={t('trainingPanel.fields.seed')}><NumInput value={config.seed} onChange={v => updateConfig({ seed: v })} min={0} step={1} /></Field>
+                <Field label={t('trainingPanel.fields.numWorkers')} tooltip={t('trainingPanel.fields.numWorkersTooltip')}><NumInput value={config.num_workers} onChange={v => updateConfig({ num_workers: v })} min={0} max={8} step={1} /></Field>
               </div>
               <div className="grid grid-cols-2 gap-4 pt-2">
-                <Toggle checked={config.gradient_checkpointing} onChange={v => updateConfig({ gradient_checkpointing: v })} label="Gradient Checkpointing" />
-                <Toggle checked={config.group_by_length} onChange={v => updateConfig({ group_by_length: v })} label="Group by Length" />
-                <Toggle checked={config.pin_memory} onChange={v => updateConfig({ pin_memory: v })} label="Pin Memory (GPU)" />
+                <Toggle checked={config.gradient_checkpointing} onChange={v => updateConfig({ gradient_checkpointing: v })} label={t('trainingPanel.fields.gradientCheckpointing')} />
+                <Toggle checked={config.group_by_length} onChange={v => updateConfig({ group_by_length: v })} label={t('trainingPanel.fields.groupByLength')} />
+                <Toggle checked={config.pin_memory} onChange={v => updateConfig({ pin_memory: v })} label={t('trainingPanel.fields.pinMemory')} />
               </div>
             </SectionCard>
 
             <SectionCard
-              title="LoRA / QLoRA"
+              title={t('trainingPanel.sections.lora')}
               icon={<span className="text-violet-400 text-sm font-bold w-4 h-4 flex items-center justify-center">L</span>}
               expanded={sections.lora}
               onToggle={() => toggleSection('lora')}
-              badge={config.use_lora ? <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-md bg-violet-500/20 text-violet-300 border border-violet-500/30">Aktiv</span> : undefined}
+              badge={config.use_lora ? <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-md bg-violet-500/20 text-violet-300 border border-violet-500/30">{t('trainingPanel.sections.loraActiveBadge')}</span> : undefined}
             >
               <div className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 pb-1">
-                  <Toggle checked={config.use_lora} onChange={v => updateConfig({ use_lora: v, load_in_4bit: v ? config.load_in_4bit : false, load_in_8bit: v ? config.load_in_8bit : false })} label="LoRA aktivieren" />
-                  <Toggle checked={config.load_in_4bit} onChange={v => updateConfig({ load_in_4bit: v, load_in_8bit: v ? false : config.load_in_8bit, use_lora: v ? true : config.use_lora })} label="4-bit QLoRA (braucht bitsandbytes)" />
-                  <Toggle checked={config.load_in_8bit} onChange={v => updateConfig({ load_in_8bit: v, load_in_4bit: v ? false : config.load_in_4bit, use_lora: v ? true : config.use_lora })} label="8-bit Quantisierung (braucht bitsandbytes)" />
+                  <Toggle checked={config.use_lora} onChange={v => updateConfig({ use_lora: v, load_in_4bit: v ? config.load_in_4bit : false, load_in_8bit: v ? config.load_in_8bit : false })} label={t('trainingPanel.fields.loraActivate')} />
+                  <Toggle checked={config.load_in_4bit} onChange={v => updateConfig({ load_in_4bit: v, load_in_8bit: v ? false : config.load_in_8bit, use_lora: v ? true : config.use_lora })} label={t('trainingPanel.fields.lora4bit')} />
+                  <Toggle checked={config.load_in_8bit} onChange={v => updateConfig({ load_in_8bit: v, load_in_4bit: v ? false : config.load_in_4bit, use_lora: v ? true : config.use_lora })} label={t('trainingPanel.fields.lora8bit')} />
                 </div>
                 {config.use_lora ? (
                   <div className="grid grid-cols-2 gap-4 pt-1 border-t border-white/10">
-                    <Field label="LoRA Rank (r)" tooltip="Höher = mehr Parameter, mehr RAM. Typisch: 8, 16, 32"><NumInput value={config.lora_r} onChange={v => updateConfig({ lora_r: v })} min={1} max={256} step={2} /></Field>
-                    <Field label="LoRA Alpha" tooltip="Meist 2× lora_r. Skaliert die LoRA-Updates"><NumInput value={config.lora_alpha} onChange={v => updateConfig({ lora_alpha: v })} min={1} step={1} /></Field>
-                    <Field label="LoRA Dropout" tooltip="Dropout in LoRA-Layern (0.0–0.1)"><NumInput value={config.lora_dropout} onChange={v => updateConfig({ lora_dropout: v })} step={0.01} min={0} max={0.5} /></Field>
-                    <Field label="Target Modules" tooltip="Komma-getrennt, z.B. q_proj,v_proj">
+                    <Field label={t('trainingPanel.fields.loraRank')} tooltip={t('trainingPanel.fields.loraRankTooltip')}><NumInput value={config.lora_r} onChange={v => updateConfig({ lora_r: v })} min={1} max={256} step={2} /></Field>
+                    <Field label={t('trainingPanel.fields.loraAlpha')} tooltip={t('trainingPanel.fields.loraAlphaTooltip')}><NumInput value={config.lora_alpha} onChange={v => updateConfig({ lora_alpha: v })} min={1} step={1} /></Field>
+                    <Field label={t('trainingPanel.fields.loraDropout')} tooltip={t('trainingPanel.fields.loraDropoutTooltip')}><NumInput value={config.lora_dropout} onChange={v => updateConfig({ lora_dropout: v })} step={0.01} min={0} max={0.5} /></Field>
+                    <Field label={t('trainingPanel.fields.loraTargetModules')} tooltip={t('trainingPanel.fields.loraTargetModulesTooltip')}>
                       <input
                         type="text"
                         value={config.lora_target_modules}
                         onChange={e => updateConfig({ lora_target_modules: e.target.value })}
-                        placeholder="q_proj,v_proj"
+                        placeholder={t('trainingPanel.fields.loraTargetModulesPlaceholder')}
                         className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-violet-500/50 transition-all font-mono"
                       />
                     </Field>
                   </div>
                 ) : (
                   <div className="px-3 py-2.5 rounded-xl bg-violet-500/[0.08] border border-violet-500/15">
-                    <p className="text-violet-300 text-xs">💡 <span className="font-medium">LoRA</span> aktivieren um massiv RAM zu sparen — ideal für Modelle &gt;1B Parameter. QLoRA (4-bit) reduziert den Bedarf um ~75%.</p>
+                    <p className="text-violet-300 text-xs flex items-start gap-2">
+                      <Lightbulb className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>{t('trainingPanel.fields.loraHint')}</span>
+                    </p>
                   </div>
                 )}
               </div>
             </SectionCard>
 
-            <SectionCard title="RAM-Rechner" icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
+            <SectionCard title={t('trainingPanel.ramCalculator.title')} icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
               <RamCalculator config={config} modelSizeGb={modelSizeGb} />
             </SectionCard>
           </div>
@@ -1154,12 +1338,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   {isRunning ? <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" /> : currentJob.status === 'completed' ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <AlertCircle className="w-4 h-4 text-red-400" />}
-                  <span className="text-white font-medium text-sm">{isRunning ? 'Training läuft…' : `Status: ${currentJob.status}`}</span>
+                  <span className="text-white font-medium text-sm">{isRunning ? t('trainingPanel.progress.title') : t('trainingPanel.progress.statusLabel').replace('{status}', currentJob.status)}</span>
                 </div>
-                <button onClick={() => { setShowDashboardContext(true); setIsDashMinimizedContext(false); }} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded-lg bg-white/5 transition-all">Dashboard öffnen</button>
+                <button onClick={() => { setShowDashboardContext(true); setIsDashMinimizedContext(false); }} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded-lg bg-white/5 transition-all">{t('trainingPanel.progress.openDashboardButton')}</button>
               </div>
               {progress && <div className="h-2 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${progress.progress_percent}%` }} /></div>}
-              {lossPoints.length > 1 && <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3"><p className="text-xs text-gray-500 mb-2">Loss-Verlauf</p><LossChart points={lossPoints} /></div>}
+              {lossPoints.length > 1 && <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3"><p className="text-xs text-gray-500 mb-2">{t('trainingPanel.progress.lossHistory')}</p><LossChart points={lossPoints} /></div>}
             </div>
           )}
 
@@ -1167,17 +1351,20 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
           <div className="flex gap-3">
             {isRunning ? (
               <button onClick={handleStopTraining} className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold text-sm transition-all">
-                <Square className="w-4 h-4" /> Training stoppen
+                <Square className="w-4 h-4" /> {t('trainingPanel.actions.stopButton')}
               </button>
             ) : (
-              <button onClick={handleStartTraining} disabled={!selectedModelId || !selectedDatasetId || selectedDataset?.status !== 'split'}
+              <button onClick={handleStartTraining} disabled={!selectedModelId || !selectedDatasetId || (selectedDataset?.status !== 'split' && !selectedModelId?.startsWith('canvas_'))}
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold text-sm hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg`}>
-                <Play className="w-4 h-4" /> Training starten
+                <Play className="w-4 h-4" /> {t('trainingPanel.actions.startButton')}
               </button>
             )}
           </div>
-          {selectedDataset?.status !== 'split' && selectedDataset && (
-            <p className="text-amber-400 text-xs text-center">⚠️ Dataset muss erst im Dataset-Manager aufgeteilt werden.</p>
+          {selectedDataset?.status !== 'split' && selectedDataset && !selectedModelId?.startsWith('canvas_') && (
+            <p className="text-amber-400 text-xs text-center inline-flex items-center justify-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {t('trainingPanel.actions.noSplitWarning')}
+            </p>
           )}
         </>
       )}
@@ -1185,8 +1372,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       {/* Nicht unterstützt */}
       {mode === 'train' && !isSupported && selectedModel && (
         <div className="p-6 rounded-2xl border border-amber-500/30 bg-amber-500/5 space-y-3">
-          <div className="flex items-start gap-3"><AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" /><div><p className="text-amber-300 font-semibold">Modell wird noch nicht unterstützt</p><p className="text-gray-400 text-sm mt-1">Nutze den <span className="text-blue-300 font-medium">Dev Train Mode</span>.</p></div></div>
-          <button onClick={() => setMode('dev')} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-sm font-medium transition-all"><Code2 className="w-4 h-4" /> Dev Train Mode öffnen</button>
+          <div className="flex items-start gap-3"><AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" /><div><p className="text-amber-300 font-semibold">{t('trainingPanel.unsupported.title')}</p><p className="text-gray-400 text-sm mt-1">{t('trainingPanel.unsupported.description')}</p></div></div>
+          <button onClick={() => setMode('dev')} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-sm font-medium transition-all"><Code2 className="w-4 h-4" /> {t('trainingPanel.unsupported.devModeButton')}</button>
         </div>
       )}
 

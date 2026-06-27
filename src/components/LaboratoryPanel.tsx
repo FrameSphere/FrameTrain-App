@@ -16,6 +16,8 @@ import {
 import { detectPlugin } from '../plugins/registry';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { usePageContext } from '../contexts/PageContext';
 import { callAI } from './TrainingPanel';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -255,7 +257,19 @@ function ConfidenceBar({ value, color = 'amber' }: { value: number; color?: stri
 
 // ── Mini SVG Accuracy Donut ───────────────────────────────────────────────
 
-function AccuracyDonut({ correct, wrong, skipped }: { correct: number; wrong: number; skipped: number }) {
+function AccuracyDonut({
+  correct,
+  wrong,
+  skipped,
+  centerLabel,
+  labels,
+}: {
+  correct: number;
+  wrong: number;
+  skipped: number;
+  centerLabel: string;
+  labels: { correct: string; wrong: string; skipped: string };
+}) {
   const total = correct + wrong + skipped;
   if (total === 0) return <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center"><span className="text-gray-600 text-xs">–</span></div>;
 
@@ -269,9 +283,9 @@ function AccuracyDonut({ correct, wrong, skipped }: { correct: number; wrong: nu
 
   let offset = C * 0.25; // Start oben
   const arcs = [
-    { arc: correctArc, color: '#10b981', label: 'Korrekt' },
-    { arc: wrongArc,   color: '#ef4444', label: 'Falsch' },
-    { arc: skipArc,    color: '#374151', label: 'Übersprungen' },
+    { arc: correctArc, color: '#10b981', label: labels.correct },
+    { arc: wrongArc,   color: '#ef4444', label: labels.wrong },
+    { arc: skipArc,    color: '#374151', label: labels.skipped },
   ];
 
   return (
@@ -290,7 +304,7 @@ function AccuracyDonut({ correct, wrong, skipped }: { correct: number; wrong: nu
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-white font-bold text-sm">{total > 0 ? ((correct / total) * 100).toFixed(0) : 0}%</span>
-        <span className="text-gray-500 text-[9px]">Korrekt</span>
+        <span className="text-gray-500 text-[9px]">{centerLabel}</span>
       </div>
     </div>
   );
@@ -301,27 +315,28 @@ function AccuracyDonut({ correct, wrong, skipped }: { correct: number; wrong: nu
 function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) => void; onClose: () => void; userId?: string }) {
   const [sessions, setSessions] = useState<LabSession[]>([]);
   const { success } = useNotification();
+  const { t, language } = useLanguage();
 
   useEffect(() => { setSessions(loadSessions(userId)); }, [userId]);
 
   const handleDelete = (id: string) => {
     deleteSession(id, userId);
     setSessions(loadSessions(userId));
-    success('Session gelöscht', '');
+    success(t('laboratoryPanel.sessionsModal.deleteSuccess'), '');
   };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2"><FlaskConical className="w-5 h-5 text-pink-400" /><h2 className="text-lg font-bold text-white">Lab-Sessions</h2></div>
+          <div className="flex items-center gap-2"><FlaskConical className="w-5 h-5 text-pink-400" /><h2 className="text-lg font-bold text-white">{t('laboratoryPanel.sessionsModal.title')}</h2></div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {sessions.length === 0 ? (
             <div className="text-center py-12 space-y-2">
               <FlaskConical className="w-10 h-10 text-gray-600 mx-auto" />
-              <p className="text-gray-500 text-sm">Noch keine Sessions gespeichert.</p>
+              <p className="text-gray-500 text-sm">{t('laboratoryPanel.sessionsModal.empty')}</p>
             </div>
           ) : sessions.map(s => {
             const correct = s.results.filter(r => r.userRating === 'correct').length;
@@ -334,17 +349,22 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
                     <p className="text-white font-medium text-sm truncate">{s.name}</p>
                     <p className="text-gray-500 text-xs">{s.modelName} · {s.versionName}</p>
                     <div className="flex items-center gap-3 mt-1.5">
-                      <span className="text-[10px] text-gray-500">{total}/{s.totalSamples} bewertet</span>
-                      {total > 0 && <><span className="text-[10px] text-emerald-400">✅ {correct}</span><span className="text-[10px] text-red-400">❌ {wrong}</span></>}
+                      <span className="text-[10px] text-gray-500">{total}/{s.totalSamples} {t('laboratoryPanel.sessionsModal.ratedLabel')}</span>
+                      {total > 0 && (
+                        <>
+                          <span className="text-[10px] text-emerald-400 inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" />{correct}</span>
+                          <span className="text-[10px] text-red-400 inline-flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />{wrong}</span>
+                        </>
+                      )}
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-md border ${s.engineMode === 'engine' ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-blue-500/15 text-blue-400 border-blue-500/20'}`}>
-                        {s.engineMode === 'engine' ? 'Engine' : 'Dev Script'}
+                        {s.engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge')}
                       </span>
                     </div>
                     <p className="text-gray-600 text-[10px] mt-1">{new Date(s.updatedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
                     <button onClick={() => handleDelete(s.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/30 text-pink-300 text-xs font-medium transition-all">Laden</button>
+                    <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/30 text-pink-300 text-xs font-medium transition-all">{t('laboratoryPanel.sessionsModal.loadButton')}</button>
                   </div>
                 </div>
               </div>
@@ -364,6 +384,7 @@ function DevScriptEditor({ script, onChange, modelPath, datasets, outputPath }: 
   outputPath: string;
 }) {
   const { settings: aiSettings } = useAISettings();
+  const { t, language } = useLanguage();
   const [showAI, setShowAI] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [aiInput, setAiInput] = useState('');
@@ -431,7 +452,7 @@ MODEL_PATH="${modelPath}", OUTPUT_PATH="${outputPath}".
 Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
       const history = [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
       const last = history.pop()!;
-      const resp = await callAI(aiSettings, sys, last.content, history);
+      const resp = await callAI(aiSettings, sys, last.content, history, language);
       setAiMessages(m => [...m, { role: 'assistant', content: resp }]);
       // Code-Block als Skript übernehmen?
       const match = resp.match(/```python\n([\s\S]*?)```/);
@@ -446,15 +467,15 @@ Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-white">Dev Script</span>
+        <span className="text-sm font-medium text-white">{t('laboratoryPanel.devScript.title')}</span>
         <div className="flex items-center gap-2">
-          <button onClick={() => onChange('')} className="text-[10px] text-gray-500 hover:text-red-400 transition-colors">Leeren</button>
-          <button onClick={generateTemplate} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium hover:bg-blue-500/20 transition-all">
-            <Sparkles className="w-3 h-3" /> Template
+          <button onClick={() => onChange('')} className="text-[10px] text-gray-500 hover:text-red-400 transition-colors">{t('laboratoryPanel.devScript.clearButton')}</button>
+            <button onClick={generateTemplate} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium hover:bg-blue-500/20 transition-all">
+            <Sparkles className="w-3 h-3" /> {t('laboratoryPanel.devScript.templateButton')}
           </button>
           {aiSettings.enabled && (
             <button onClick={() => setShowAI(v => !v)} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium border transition-all ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
-              <Bot className="w-3 h-3" /> KI
+              <Bot className="w-3 h-3" /> {t('laboratoryPanel.devScript.aiSidebar.titleShort')}
             </button>
           )}
           <button onClick={() => setExpanded(v => !v)} className="p-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white transition-all">
@@ -468,7 +489,7 @@ Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
           value={script}
           onChange={e => onChange(e.target.value)}
           spellCheck={false}
-          placeholder={"# Skript hier eingeben oder Template laden…\n# Tipp: Template-Button klicken!"}
+          placeholder={t('laboratoryPanel.devScript.placeholder')}
           className="flex-1 p-4 bg-slate-950 border border-white/10 rounded-xl text-[11px] font-mono text-gray-200 focus:outline-none focus:border-blue-500/40 resize-none placeholder:text-gray-700 leading-[1.6rem]"
           style={{ fontFamily: "'JetBrains Mono','Fira Code','Courier New',monospace" }}
         />
@@ -476,14 +497,14 @@ Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
         {showAI && (
           <div className="w-72 flex flex-col bg-slate-950 border border-white/10 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
-              <div className="flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5 text-violet-400" /><span className="text-xs font-medium text-white">KI-Assistent</span></div>
+              <div className="flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5 text-violet-400" /><span className="text-xs font-medium text-white">{t('laboratoryPanel.devScript.aiSidebar.title')}</span></div>
               <button onClick={() => setShowAI(false)} className="p-1 rounded hover:bg-white/5 text-gray-500"><X className="w-3 h-3" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {aiMessages.length === 0 && <p className="text-gray-600 text-[10px] text-center py-4">Frag nach dem Skript…</p>}
+              {aiMessages.length === 0 && <p className="text-gray-600 text-[10px] text-center py-4">{t('laboratoryPanel.devScript.aiSidebar.emptyHint')}</p>}
               {aiMessages.map((m, i) => (
                 <div key={i} className={`px-2.5 py-2 rounded-lg text-[10px] leading-relaxed ${m.role === 'user' ? 'bg-violet-500/10 text-gray-200 border border-violet-500/15 ml-4' : 'bg-white/5 text-gray-300 border border-white/10 mr-4'}`}>
-                  {m.content.replace(/```python[\s\S]*?```/g, '[Code wurde übernommen ✅]').trim()}
+                  {m.content.replace(/```python[\s\S]*?```/g, '[Code wurde übernommen]').trim()}
                 </div>
               ))}
               {aiLoading && <div className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 mr-4"><Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" /></div>}
@@ -491,7 +512,7 @@ Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
             </div>
             <div className="p-2 border-t border-white/10 flex gap-1.5 flex-shrink-0">
               <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && askAI()}
-                placeholder="Frage…" className="flex-1 px-2.5 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-[10px] placeholder:text-gray-600 focus:outline-none" />
+                placeholder={t('laboratoryPanel.devScript.aiSidebar.inputPlaceholder')} className="flex-1 px-2.5 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-[10px] placeholder:text-gray-600 focus:outline-none" />
               <button onClick={askAI} disabled={!aiInput.trim() || aiLoading} className="p-1.5 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-300 disabled:opacity-40 transition-all">
                 <Send className="w-3 h-3" />
               </button>
@@ -499,7 +520,7 @@ Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
           </div>
         )}
       </div>
-      <p className="text-[10px] text-gray-600">Das Skript läuft für jedes Sample einzeln. Ausgabe muss ein JSON-Objekt mit <code className="text-gray-500">{"\"predicted\""}</code> sein.</p>
+      <p className="text-[10px] text-gray-600">{t('laboratoryPanel.devScript.footerNote')}</p>
     </div>
   );
 }
@@ -507,6 +528,7 @@ Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
 // ── Analysis View ─────────────────────────────────────────────────────────
 
 function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => void }) {
+  const { t } = useLanguage();
   const [filterRating, setFilterRating] = useState<'all' | 'correct' | 'wrong' | 'skipped'>('all');
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -533,7 +555,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 
   const exportCSV = () => {
     const rows = [
-      ['Index', 'Input', 'Erwartet', 'Vorhergesagt', 'Konfidenz', 'Bewertung', 'Notiz'],
+      [t('laboratoryPanel.analysis.csvHeaderIndex'), t('laboratoryPanel.analysis.csvHeaderInput'), t('laboratoryPanel.analysis.csvHeaderExpected'), t('laboratoryPanel.analysis.csvHeaderPredicted'), t('laboratoryPanel.analysis.csvHeaderConfidence'), t('laboratoryPanel.analysis.csvHeaderRating'), t('laboratoryPanel.analysis.csvHeaderNote')],
       ...results.map(r => [
         r.sampleIndex + 1, `"${r.inputText.replace(/"/g, '""')}"`,
         r.expectedLabel ?? '', r.predicted,
@@ -554,20 +576,20 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white border border-white/10 transition-all"><ChevronLeft className="w-4 h-4" /></button>
-          <div><h2 className="text-lg font-bold text-white">{session.name}</h2><p className="text-gray-500 text-xs">{session.modelName} · {session.versionName} · {session.engineMode === 'engine' ? 'Test Engine' : 'Dev Script'}</p></div>
+          <div><h2 className="text-lg font-bold text-white">{session.name}</h2><p className="text-gray-500 text-xs">{session.modelName} · {session.versionName} · {session.engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge')}</p></div>
         </div>
         <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-sm transition-all">
-          <Download className="w-4 h-4" /> Export CSV
+          <Download className="w-4 h-4" /> {t('laboratoryPanel.analysis.exportButton')}
         </button>
       </div>
 
       {/* Stats Overview */}
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'Bewertet', value: `${rated}/${session.totalSamples}`, color: 'text-white' },
-          { label: 'Korrekt', value: correct.length, color: 'text-emerald-400' },
-          { label: 'Falsch', value: wrong.length, color: 'text-red-400' },
-          { label: 'Übersprungen', value: skipped.length, color: 'text-gray-400' },
+          { label: t('laboratoryPanel.analysis.statsRated'), value: `${rated}/${session.totalSamples}`, color: 'text-white' },
+          { label: t('laboratoryPanel.analysis.statsCorrect'), value: correct.length, color: 'text-emerald-400' },
+          { label: t('laboratoryPanel.analysis.statsWrong'), value: wrong.length, color: 'text-red-400' },
+          { label: t('laboratoryPanel.analysis.statsSkipped'), value: skipped.length, color: 'text-gray-400' },
         ].map(m => (
           <div key={m.label} className="rounded-xl border border-white/10 bg-white/5 p-4 text-center">
             <p className="text-gray-500 text-xs mb-1">{m.label}</p>
@@ -580,12 +602,22 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
       <div className="grid grid-cols-3 gap-4">
         {/* Donut */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 flex flex-col items-center justify-center gap-3">
-          <AccuracyDonut correct={correct.length} wrong={wrong.length} skipped={skipped.length} />
+                  <AccuracyDonut
+                    correct={correct.length}
+                    wrong={wrong.length}
+                    skipped={skipped.length}
+                    centerLabel={t('laboratoryPanel.analysis.donutCenterLabel')}
+                    labels={{
+                      correct: t('laboratoryPanel.analysis.donutCorrectLabel'),
+                      wrong: t('laboratoryPanel.analysis.donutWrongLabel'),
+                      skipped: t('laboratoryPanel.analysis.donutSkipLabel'),
+                    }}
+                  />
           <div className="space-y-1 w-full">
             {[
-              { color: 'bg-emerald-400', label: 'Korrekt', n: correct.length },
-              { color: 'bg-red-400',     label: 'Falsch',  n: wrong.length },
-              { color: 'bg-gray-600',    label: 'Skip',    n: skipped.length },
+              { color: 'bg-emerald-400', label: t('laboratoryPanel.analysis.donutCorrectLabel'), n: correct.length },
+              { color: 'bg-red-400',     label: t('laboratoryPanel.analysis.donutWrongLabel'),  n: wrong.length },
+              { color: 'bg-gray-600',    label: t('laboratoryPanel.analysis.donutSkipLabel'),    n: skipped.length },
             ].map(x => (
               <div key={x.label} className="flex items-center gap-2 text-xs">
                 <div className={`w-2 h-2 rounded-full ${x.color}`} />
@@ -598,10 +630,10 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 
         {/* Konfidenz Stats */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
-          <p className="text-sm font-medium text-white">Ø Konfidenz</p>
+          <p className="text-sm font-medium text-white">{t('laboratoryPanel.analysis.avgConfidenceTitle')}</p>
           {[
-            { label: 'Korrekte', val: avgConf(correct), color: 'emerald' },
-            { label: 'Falsche',  val: avgConf(wrong),   color: 'red' },
+            { label: t('laboratoryPanel.analysis.avgConfCorrect'), val: avgConf(correct), color: 'emerald' },
+            { label: t('laboratoryPanel.analysis.avgConfWrong'),  val: avgConf(wrong),   color: 'red' },
           ].map(x => (
             <div key={x.label} className="space-y-1">
               <span className="text-xs text-gray-400">{x.label}</span>
@@ -609,7 +641,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
             </div>
           ))}
           <div className="pt-1 border-t border-white/10">
-            <p className="text-xs text-gray-500">Accuracy (bewertet)</p>
+            <p className="text-xs text-gray-500">{t('laboratoryPanel.analysis.accuracyLabel')}</p>
             <p className={`text-xl font-bold mt-0.5 ${accuracy > 0.8 ? 'text-emerald-400' : accuracy > 0.6 ? 'text-amber-400' : 'text-red-400'}`}>
               {rated > 0 ? `${(accuracy * 100).toFixed(1)}%` : '–'}
             </p>
@@ -618,9 +650,9 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 
         {/* Häufigste Falsch-Predictions */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
-          <p className="text-sm font-medium text-white">Häufigste Fehlklassen</p>
+          <p className="text-sm font-medium text-white">{t('laboratoryPanel.analysis.topWrongTitle')}</p>
           {topWrongPreds.length === 0
-            ? <p className="text-gray-600 text-xs">Keine Fehler vorhanden</p>
+            ? <p className="text-gray-600 text-xs">{t('laboratoryPanel.analysis.topWrongEmpty')}</p>
             : topWrongPreds.map(([label, count]) => (
               <div key={label} className="flex items-center gap-2">
                 <span className="text-gray-400 text-xs flex-1 truncate">{label}</span>
@@ -633,24 +665,42 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
       {/* Filter + Table */}
       <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-          <p className="text-white font-medium text-sm">Ergebnisse ({filtered.length})</p>
+          <p className="text-white font-medium text-sm">{t('laboratoryPanel.analysis.resultsTitle', { count: filtered.length })}</p>
           <div className="flex items-center gap-1 p-1 rounded-lg bg-white/5 border border-white/10">
-            {([['all', 'Alle'], ['correct', '✅'], ['wrong', '❌'], ['skipped', '⏭']] as const).map(([val, label]) => (
-              <button key={val} onClick={() => setFilterRating(val as typeof filterRating)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${filterRating === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>{label}</button>
+            {([
+              { val: 'all', label: t('laboratoryPanel.analysis.filterAll'), icon: <ClipboardList className="w-3.5 h-3.5" /> },
+              { val: 'correct', label: t('laboratoryPanel.analysis.filterCorrect'), icon: <CheckCircle className="w-3.5 h-3.5" /> },
+              { val: 'wrong', label: t('laboratoryPanel.analysis.filterWrong'), icon: <XCircle className="w-3.5 h-3.5" /> },
+              { val: 'skipped', label: t('laboratoryPanel.analysis.filterSkipped'), icon: <SkipForward className="w-3.5 h-3.5" /> },
+            ] as const).map(({ val, label, icon }) => (
+              <button
+                key={val}
+                onClick={() => setFilterRating(val as typeof filterRating)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${filterRating === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  {icon}
+                  <span>{label}</span>
+                </span>
+              </button>
             ))}
           </div>
         </div>
         <div className="divide-y divide-white/5 max-h-96 overflow-y-auto">
           {filtered.length === 0
-            ? <p className="text-gray-600 text-sm text-center py-8">Keine Einträge.</p>
+            ? <p className="text-gray-600 text-sm text-center py-8">{t('laboratoryPanel.analysis.noEntries')}</p>
             : filtered.map((r, i) => (
               <div key={r.sampleId}>
                 <button onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
                   className="w-full flex items-center gap-3 px-5 py-3 hover:bg-white/[0.03] transition-all text-left">
                   <span className="text-gray-600 text-xs tabular-nums w-6 flex-shrink-0">{r.sampleIndex + 1}</span>
-                  <span className={`flex-shrink-0 text-base ${r.userRating === 'correct' ? '✅' : r.userRating === 'wrong' ? '❌' : '⏭'}`}>
-                    {r.userRating === 'correct' ? '✅' : r.userRating === 'wrong' ? '❌' : '⏭'}
+                  <span className="flex-shrink-0">
+                    {r.userRating === 'correct'
+                      ? <CheckCircle className="w-4 h-4 text-emerald-400" />
+                      : r.userRating === 'wrong'
+                        ? <XCircle className="w-4 h-4 text-red-400" />
+                        : <SkipForward className="w-4 h-4 text-gray-400" />
+                    }
                   </span>
                   <span className="text-gray-300 text-xs flex-1 truncate">{r.inputText}</span>
                   <span className="text-white text-xs font-medium flex-shrink-0">{r.predicted}</span>
@@ -660,10 +710,10 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
                 {expandedIdx === i && (
                   <div className="px-5 pb-4 space-y-2 bg-white/[0.02] border-t border-white/5">
                     <div className="grid grid-cols-2 gap-3 pt-3 text-xs">
-                      <div><span className="text-gray-500">Input:</span><p className="text-gray-300 mt-0.5">{r.inputText}</p></div>
-                      <div><span className="text-gray-500">Vorhergesagt:</span><p className="text-white font-semibold mt-0.5">{r.predicted}</p></div>
-                      {r.expectedLabel && <div><span className="text-gray-500">Erwartet:</span><p className="text-gray-300 mt-0.5">{r.expectedLabel}</p></div>}
-                      {r.userNote && <div className="col-span-2"><span className="text-gray-500">Notiz:</span><p className="text-gray-400 italic mt-0.5">{r.userNote}</p></div>}
+                      <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailInput')}</span><p className="text-gray-300 mt-0.5">{r.inputText}</p></div>
+                      <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailPredicted')}</span><p className="text-white font-semibold mt-0.5">{r.predicted}</p></div>
+                      {r.expectedLabel && <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailExpected')}</span><p className="text-gray-300 mt-0.5">{r.expectedLabel}</p></div>}
+                      {r.userNote && <div className="col-span-2"><span className="text-gray-500">{t('laboratoryPanel.analysis.detailNote')}</span><p className="text-gray-400 italic mt-0.5">{r.userNote}</p></div>}
                     </div>
                     {r.topPredictions && r.topPredictions.length > 0 && (
                       <div className="space-y-1 pt-1">
@@ -691,6 +741,8 @@ type LabPhase = 'setup' | 'testing' | 'analysis';
 
 export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const { success, error, warning } = useNotification();
+  const { t } = useLanguage();
+  const { setCurrentPageContent } = usePageContext();
 
   // Models
   const [loadingModels, setLoadingModels] = useState(true);
@@ -773,7 +825,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       } catch (e) { console.error('[Lab] initLoad:', e); }
       finally { setLoadingModels(false); }
     })();
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!selectedModelId) { setDatasets([]); setSelectedSampleDatasetId(null); return; }
@@ -812,11 +864,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         serverStatusRef.current = status as typeof serverStatus;
         if (status === 'ready' && version_id) setServerVersionId(version_id);
         if (status === 'error') setServerVersionId(null);
-        if (status === 'error' && message) error('Modell-Ladefehler', message);
+        if (status === 'error' && message) error(t('laboratoryPanel.setup.notifications.modelLoadError'), message);
       }
     );
     return () => { unlisten.then(fn => fn()); };
-  }, []);
+  }, [t]);
 
   // Cleanup: Server stoppen wenn Komponente unmountet
   useEffect(() => {
@@ -824,6 +876,186 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       invoke('lab_stop_model_server').catch(() => {});
     };
   }, []);
+
+  // ── Page context for AI coach ──────────────────────────────────────────────
+
+  useEffect(() => {
+    const results = session?.results ?? [];
+    const testedCount = results.filter(r => r.userRating !== 'skipped').length;
+    const correctCount = results.filter(r => r.userRating === 'correct').length;
+    const accuracy = session?.totalSamples ? ((correctCount / testedCount) * 100).toFixed(1) : '0';
+
+    const lines: string[] = [
+      '=== FrameTrain Labor (LaboratoryPanel) ===',
+      '',
+      '--- SEITENZWECK ---',
+      'Interaktives Sample-Testlabor für Modell-Inferenzen.',
+      'Teste Samples einzeln, sehe Predictions & Confidence, bewerte Ergebnisse & analysiere Performance.',
+      '',
+      '--- AKTUELLE SETUP ---',
+    ];
+
+    if (!selectedModel) {
+      lines.push('❌ Modell: (nicht gewählt) → Wähle ein Modell aus dem Dropdown oben');
+    } else {
+      lines.push(`✓ Modell: ${selectedModel.name} (${selectedModel.model_type ?? 'unbekannter Typ'})`);
+      lines.push(`  Size: ${selectedModel.size_bytes}, Path: ${selectedModel.local_path || selectedModel.source_path || 'N/A'}`);
+      
+      if (selectedVersionTree) {
+        lines.push(`✓ Version: ${selectedVersionTree.name} (v${selectedVersionTree.version_number})`);
+      } else {
+        lines.push('⚠️ Version: (nicht gewählt)');
+      }
+
+      lines.push(`  Engine-Mode: ${engineMode === 'engine' ? '⚡ Standard (schnell, pre-loaded)' : '🐍 Dev-Script (custom Python)'}`);
+      
+      if (engineMode === 'dev' && devScript) {
+        lines.push(`  Dev-Script: ${devScript.length} Zeichen`);
+      }
+
+      if (detectedPlugin) {
+        lines.push(`✓ Plugin: ${detectedPlugin}`);
+      } else {
+        lines.push('⚠️ Plugin: (keine Unterstützung erkannt)');
+      }
+
+      if (serverStatus === 'ready') {
+        lines.push(`  Server: 🟢 Ready (${serverVersionId})`);
+      } else if (serverStatus === 'loading') {
+        lines.push('  Server: 🟡 Loading...');
+      } else if (serverStatus === 'error') {
+        lines.push('  Server: 🔴 Error');
+      }
+    }
+
+    lines.push('');
+    lines.push('--- DATENLADEN ---');
+
+    if (samples.length === 0) {
+      lines.push('❌ Keine Samples geladen → Lade Datei (CSV/JSON/JSONL/TXT) oder wähle Dataset');
+    } else {
+      lines.push(`✓ Samples geladen: ${samples.length} Samples`);
+      lines.push(`  Dateiname: ${sourceFileName}`);
+      if (selectedSampleDatasetId) {
+        lines.push(`  Dataset: ${datasets.find(d => d.id === selectedSampleDatasetId)?.name || selectedSampleDatasetId}`);
+        lines.push(`  Split: ${selectedSampleSplit}`);
+      }
+    }
+
+    lines.push('');
+    lines.push('--- TEST-WORKFLOW FORTSCHRITT ---');
+
+    if (phase === 'setup') {
+      lines.push('Phase: 1️⃣ **SETUP** (aktiv)');
+      lines.push('  → Wähle Modell & Version, lade Samples');
+    } else if (phase === 'testing') {
+      lines.push('Phase: 2️⃣ **TESTING** (aktiv)');
+      if (currentSampleIdx !== undefined && samples.length > 0) {
+        lines.push(`  Sample: ${currentSampleIdx + 1}/${samples.length}`);
+        lines.push(`  Tests durchgeführt: ${testedCount}/${samples.length}`);
+        if (testResult) {
+          lines.push(`  Letztes Ergebnis: "${testResult.predicted}" (Confidence: ${(testResult.confidence ?? 0).toFixed(2)})`);
+          if (testError) lines.push(`  ⚠️ Fehler: ${testError}`);
+        }
+        if (testing) {
+          lines.push('  Status: 🔄 Inference läuft...');
+        }
+      }
+    } else if (phase === 'analysis') {
+      lines.push('Phase: 3️⃣ **ANALYSIS** (aktiv)');
+      lines.push(`  Tests durchgeführt: ${testedCount}/${samples.length}`);
+    } else {
+      lines.push(`Phase: ${String(phase).toUpperCase()}`);
+    }
+
+    lines.push('');
+    lines.push('--- STATISTIKEN (LIVE) ---');
+
+    if (session) {
+      lines.push(`Session: "${session.name}"`);
+      lines.push(`Tests gesamt: ${results.length}/${session.totalSamples}`);
+      lines.push(`Correct: ${correctCount}, Wrong: ${results.filter(r => r.userRating === 'wrong').length}, Skipped: ${results.filter(r => r.userRating === 'skipped').length}`);
+      if (testedCount > 0) {
+        lines.push(`Accuracy: ${accuracy}%`);
+      }
+    } else {
+      lines.push('(keine Session aktiv)');
+    }
+
+    lines.push('');
+    lines.push('--- VERFÜGBARE AKTIONEN ---');
+
+    if (!selectedModel) {
+      lines.push('• Wähle Modell aus der Liste');
+    } else if (!samples.length) {
+      lines.push('• Lade Daten: Datei hochladen oder Dataset aus Dropdown');
+    } else if (phase === 'setup' || phase === 'testing') {
+      lines.push('• Teste Sample: Button "Test diesen Sample" (oder Space-Taste)');
+      lines.push('• Bewerte Ergebnis: "Correct" / "Wrong" / "Skip" → Optionale Notiz hinzufügen');
+      lines.push('• Navigiere: ← → Pfeile zu vor/zurück');
+      lines.push('• KI-Coach: Frag KI um Analyse oder Tipps zur Verbesserung');
+    } else if (phase === 'analysis') {
+      lines.push('• Exportiere Results: CSV-Download');
+      lines.push('• Neue Session: Starte weiteren Test');
+    }
+
+    lines.push('');
+    lines.push('--- UI LAYOUT ---');
+    lines.push('**OBEN (Header):**');
+    lines.push('  • [Modell Dropdown] (linke Seite)');
+    lines.push('  • [Version Dropdown] (daneben)');
+    lines.push('  • [Engine Mode Toggle] (rechts: Server/Dev)');
+    lines.push('');
+    lines.push('**LINKS (Data/Sample Panel):**');
+    lines.push('  • ▼ Dataset Auswahl: Split-Dropdown (Train/Val/Test)');
+    lines.push('  • Sample Counter: "Sample 5/100"');
+    lines.push('  • [◄ Prev Sample] [Sample Input Display] [Next Sample ►]');
+    lines.push('  • Raw Input: Text/JSON anzeige des aktuellen Samples');
+    lines.push('');
+    lines.push('**RECHTS (Results Panel):**');
+    lines.push('  • Predicted Class + Confidence %');
+    lines.push('  • Expected Class + Match Status (✓/✗)');
+    lines.push('  • [👍 Correct] [👎 Wrong] [⏭️ Skip] Buttons');
+    lines.push('  • Prediction Details (Top-3 Classes)');
+    lines.push('');
+    lines.push('**UNTEN (Progress/Stats):**');
+    lines.push('  • Progress Bar: "5/100 samples tested"');
+    lines.push('  • Live Stats: Accuracy %, Correct/Wrong/Skipped counts');
+    lines.push('  • 📊 Accuracy Chart (real-time update)');
+    lines.push('  • [Start Testing] [Pause] [Resume] Buttons');
+    lines.push('');
+    lines.push('--- TIPPS FÜR AI-COACH ---');
+    lines.push('• KI kann Dir helfen, falsche Predictions zu verstehen');
+    lines.push('• KI kann Patterns in Fehlern erkennen');
+    lines.push('• KI kann Modell-Improvements vorschlagen basierend auf Ergebnissen');
+    if (!selectedModel) {
+      lines.push('• Wähle zuerst ein Modell!');
+    }
+
+    setCurrentPageContent(lines.join('\n'));
+  }, [
+    selectedModel,
+    selectedVersionTree,
+    engineMode,
+    devScript,
+    detectedPlugin,
+    serverStatus,
+    serverVersionId,
+    samples,
+    sourceFileName,
+    selectedSampleDatasetId,
+    selectedSampleSplit,
+    datasets,
+    phase,
+    currentSampleIdx,
+    testResult,
+    testError,
+    testing,
+    session,
+    setCurrentPageContent,
+    loadingDatasetSamples,
+  ]);
+
 
   const currentSample = samples[currentSampleIdx] ?? null;
   const results       = session?.results ?? [];
@@ -844,7 +1076,13 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       console.log('[Lab] Gefilterte Dateien:', filtered);
 
       if (filtered.length === 0) {
-        warning('Keine Dateien', `Keine Dateien für Split "${selectedSampleSplit}" gefunden. Verfügbare Splits: ${[...new Set(files.filter(f => !f.is_dir).map(f => f.split))].join(', ') || 'keine'}.`);
+        warning(
+          t('laboratoryPanel.setup.notifications.noDatasetFiles'),
+          t('laboratoryPanel.setup.notifications.noDatasetFilesDetail', {
+            split: selectedSampleSplit,
+            splits: [...new Set(files.filter(f => !f.is_dir).map(f => f.split))].join(', ') || 'keine',
+          }),
+        );
         return;
       }
 
@@ -862,7 +1100,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       }
 
       if (allSamples.length === 0) {
-        warning('Keine Samples', `${filtered.length} Datei(en) geladen, aber keine Samples extrahiert. Prüfe das Format (JSONL, CSV, TXT)`);
+        warning(
+          t('laboratoryPanel.setup.notifications.noSamples'),
+          t('laboratoryPanel.setup.notifications.noSamplesDetail', { count: filtered.length }),
+        );
         return;
       }
 
@@ -870,10 +1111,13 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       setSamples(reindexed);
       const ds = datasets.find(d => d.id === selectedSampleDatasetId);
       setSourceFileName(ds?.name ?? 'Dataset');
-      success('Geladen', `${reindexed.length} Samples aus ${filtered.length} Datei(en) geladen.`);
+      success(
+        t('laboratoryPanel.setup.notifications.loadSuccess'),
+        t('laboratoryPanel.setup.notifications.loadSuccessDetail', { count: reindexed.length, fileCount: filtered.length }),
+      );
     } catch (e) {
       console.error('[Lab] handleLoadFromDataset Fehler:', e);
-      error('Fehler beim Laden', String(e));
+      error(t('laboratoryPanel.setup.notifications.loadError'), String(e));
     } finally {
       setLoadingDatasetSamples(false);
     }
@@ -886,10 +1130,13 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     reader.onload = ev => {
       const content = ev.target?.result as string;
       const parsed = parseSamples(content, file.name);
-      if (parsed.length === 0) { warning('Leer', 'Keine Samples gefunden.'); return; }
+      if (parsed.length === 0) { warning(t('laboratoryPanel.setup.notifications.fileEmpty'), t('laboratoryPanel.setup.notifications.fileEmptyDetail')); return; }
       setSamples(parsed);
       setSourceFileName(file.name);
-      success('Geladen', `${parsed.length} Samples aus „${file.name}" geladen.`);
+      success(
+        t('laboratoryPanel.setup.notifications.fileLoadSuccess'),
+        t('laboratoryPanel.setup.notifications.fileLoadSuccessDetail', { count: parsed.length, name: file.name }),
+      );
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -899,8 +1146,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
   const handleStartSession = () => {
     if (!selectedModel || !selectedVersionId || samples.length === 0) return;
-    if (engineMode === 'engine' && !detectedPlugin) { warning('Nicht unterstützt', 'Dieses Modell wird von der Test Engine noch nicht unterstützt. Nutze den Dev Script Modus.'); return; }
-    if (engineMode === 'dev' && !devScript.trim()) { warning('Kein Skript', 'Bitte ein Dev Script eingeben.'); return; }
+    if (engineMode === 'engine' && !detectedPlugin) { warning(t('laboratoryPanel.setup.notifications.engineNotSupported'), t('laboratoryPanel.setup.notifications.engineNotSupportedDetail')); return; }
+    if (engineMode === 'dev' && !devScript.trim()) { warning(t('laboratoryPanel.setup.notifications.noScript'), t('laboratoryPanel.setup.notifications.noScriptDetail')); return; }
 
     const newSession: LabSession = {
       id: `lab_${Date.now()}`,
@@ -950,11 +1197,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       if (engineMode === 'engine') {
         // ── Persistenter Model-Server: direkt invoke, kein Event-Listener nötig ──
         if (serverStatus !== 'ready') {
-          setTestError(
-            serverStatus === 'loading'
-              ? 'Modell wird noch geladen… Bitte kurz warten.'
-              : 'Kein Modell geladen. Bitte ein Modell auswählen.'
-          );
+            setTestError(
+              serverStatus === 'loading'
+                ? t('laboratoryPanel.testing.serverBannerLoading')
+                : t('laboratoryPanel.testing.serverBannerIdle')
+            );
           setTesting(false);
           return;
         }
@@ -1006,7 +1253,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       setTestError(String(e));
       setTesting(false);
     }
-  }, [currentSample, selectedVersionId, engineMode, devScript, modelPath, dsRefs, testing]);
+  }, [currentSample, selectedVersionId, engineMode, devScript, modelPath, dsRefs, testing, t]);
 
   // ── Rate Sample ──────────────────────────────────────────────────────────
 
@@ -1094,22 +1341,22 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       {/* ── Page Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Labor</h1>
-          <p className="text-gray-400 mt-1">Samples testen, bewerten und Schwachstellen analysieren</p>
+          <h1 className="text-2xl font-bold text-white">{t('laboratoryPanel.title')}</h1>
+          <p className="text-gray-400 mt-1">{t('laboratoryPanel.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           {phase === 'testing' && session && (
             <button onClick={() => setPhase('analysis')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all">
-              <BarChart3 className="w-4 h-4" /> Auswertung
+              <BarChart3 className="w-4 h-4" /> {t('laboratoryPanel.header.analysisButton')}
             </button>
           )}
           {phase === 'analysis' && session && (
             <button onClick={() => setPhase('testing')} disabled={currentSampleIdx >= samples.length} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all disabled:opacity-40">
-              <Play className="w-4 h-4" /> Weiter testen
+              <Play className="w-4 h-4" /> {t('laboratoryPanel.header.continueTestingButton')}
             </button>
           )}
           <button onClick={() => setShowSessions(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/20 text-pink-300 text-sm transition-all">
-            <FolderOpen className="w-4 h-4" /> Sessions
+            <FolderOpen className="w-4 h-4" /> {t('laboratoryPanel.header.sessionsButton')}
           </button>
         </div>
       </div>
@@ -1129,9 +1376,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-xl bg-pink-500/20 border border-pink-500/30 flex items-center justify-center"><FlaskConical className="w-4 h-4 text-pink-400" /></div>
                 <div className="text-left">
-                  <span className="text-white font-semibold text-sm">Konfiguration</span>
+                  <span className="text-white font-semibold text-sm">{t('laboratoryPanel.setup.title')}</span>
                   {phase === 'testing' && selectedModel && (
-                    <p className="text-gray-500 text-xs">{selectedModel.name} · {engineMode === 'engine' ? 'Test Engine' : 'Dev Script'} · {samples.length} Samples aus „{sourceFileName}"</p>
+                    <p className="text-gray-500 text-xs">{selectedModel.name} · {engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge')} · {samples.length} Samples aus „{sourceFileName}"</p>
                   )}
                 </div>
               </div>
@@ -1145,38 +1392,38 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                 {models.length === 0 ? (
                   <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center space-y-2">
                     <Layers className="w-8 h-8 text-gray-600 mx-auto" />
-                    <p className="text-white font-medium">Kein Modell vorhanden</p>
-                    <p className="text-gray-500 text-sm">Füge zuerst ein Modell im Model-Manager hinzu.</p>
+                    <p className="text-white font-medium">{t('laboratoryPanel.setup.noModelsTitle')}</p>
+                    <p className="text-gray-500 text-sm">{t('laboratoryPanel.setup.noModelsDesc')}</p>
                   </div>
                 ) : (
                   <>
                     {/* Model + Version */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <label className="block text-sm font-medium text-white">Modell</label>
+                        <label className="block text-sm font-medium text-white">{t('laboratoryPanel.setup.modelLabel')}</label>
                         <select value={selectedModelId ?? ''} onChange={e => setSelectedModelId(e.target.value)}
                           className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none">
                           {modelsWithVersions.map(m => <option key={m.id} value={m.id} className="bg-slate-900">{m.name}</option>)}
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        <label className="block text-sm font-medium text-white">Version</label>
+                        <label className="block text-sm font-medium text-white">{t('laboratoryPanel.setup.versionLabel')}</label>
                         <select value={selectedVersionId ?? ''} onChange={e => setSelectedVersionId(e.target.value)}
                           className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none">
                           {selectedModelTree?.versions?.length
                             ? [...selectedModelTree.versions].sort((a, b) => b.version_number - a.version_number).map((v, i) => (
-                                <option key={v.id} value={v.id} className="bg-slate-900">{v.name}{i === 0 ? ' (neueste)' : ''}</option>
+                                <option key={v.id} value={v.id} className="bg-slate-900">{v.name}{i === 0 ? t('laboratoryPanel.setup.versionLatest') : ''}</option>
                               ))
-                            : <option value="">Keine Versionen</option>}
+                            : <option value="">{t('laboratoryPanel.setup.noVersions')}</option>}
                         </select>
                       </div>
                     </div>
 
                     {/* Engine Toggle */}
                     <div className="space-y-3">
-                      <label className="block text-sm font-medium text-white">Test Engine</label>
+                      <label className="block text-sm font-medium text-white">{t('laboratoryPanel.setup.engineLabel')}</label>
                       <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
-                        {([['engine', 'Train Engine', Play, 'amber'], ['dev', 'Dev Script', Code2, 'blue']] as const).map(([val, label, Icon, col]) => (
+                        {([['engine', t('laboratoryPanel.setup.engineStandard'), Play, 'amber'], ['dev', t('laboratoryPanel.setup.engineDev'), Code2, 'blue']] as const).map(([val, label, Icon, col]) => (
                           <button key={val} onClick={() => setEngineMode(val as typeof engineMode)}
                             className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${engineMode === val ? (col === 'amber' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30') : 'text-gray-400 hover:text-white'}`}>
                             <Icon className="w-3.5 h-3.5" />{label}
@@ -1187,32 +1434,32 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {engineMode === 'engine' && selectedModel && !detectedPlugin && (
                         <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
                           <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                          <span className="text-amber-300 text-xs">Dieses Modell wird noch nicht von der Test Engine unterstützt. Nutze den Dev Script Modus.</span>
+                          <span className="text-amber-300 text-xs">{t('laboratoryPanel.setup.engineNotSupported')}</span>
                         </div>
                       )}
                       {engineMode === 'engine' && detectedPlugin && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
                             <CheckCircle className="w-3.5 h-3.5 text-amber-400" />
-                            <span className="text-amber-300 text-xs">{detectedPlugin.name} – Plugin erkannt</span>
+                            <span className="text-amber-300 text-xs">{t('laboratoryPanel.setup.pluginDetected', { name: detectedPlugin.name })}</span>
                           </div>
                           {/* Server-Status Badge */}
                           {serverStatus === 'loading' && (
                             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
                               <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin flex-shrink-0" />
-                              <span className="text-blue-300 text-xs">Modell wird geladen… Bitte warten.</span>
+                              <span className="text-blue-300 text-xs">{t('laboratoryPanel.setup.serverLoading')}</span>
                             </div>
                           )}
                           {serverStatus === 'ready' && serverVersionId === selectedVersionId && (
                             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                               <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                              <span className="text-emerald-300 text-xs">Modell geladen – bereit für Inferenz</span>
+                              <span className="text-emerald-300 text-xs">{t('laboratoryPanel.setup.serverReady')}</span>
                             </div>
                           )}
                           {serverStatus === 'error' && (
                             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
                               <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
-                              <span className="text-red-300 text-xs">Fehler beim Laden – Version wechseln oder neu starten</span>
+                              <span className="text-red-300 text-xs">{t('laboratoryPanel.setup.serverError')}</span>
                             </div>
                           )}
                         </div>
@@ -1228,11 +1475,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
                     {/* Dataset Sample-Auswahl */}
                     <div className="space-y-3">
-                      <label className="block text-sm font-medium text-white">Sample-Dataset</label>
+                      <label className="block text-sm font-medium text-white">{t('laboratoryPanel.setup.datasetLabel')}</label>
                       {datasets.length === 0 ? (
                         <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
                           <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                          <span className="text-amber-300 text-xs">Kein Dataset für dieses Modell vorhanden. Bitte zuerst ein Dataset hochladen.</span>
+                          <span className="text-amber-300 text-xs">{t('laboratoryPanel.setup.noDatasetWarning')}</span>
                         </div>
                       ) : (
                         <select
@@ -1240,7 +1487,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                           onChange={e => { setSelectedSampleDatasetId(e.target.value || null); setSamples([]); setSourceFileName(''); }}
                           className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none"
                         >
-                          <option value="" className="bg-slate-900">– Dataset wählen –</option>
+                          <option value="" className="bg-slate-900">{t('laboratoryPanel.setup.datasetPlaceholder')}</option>
                           {datasets.map(d => (
                             <option key={d.id} value={d.id} className="bg-slate-900">
                               {d.name} ({d.file_count} Dateien{d.status === 'split' ? ' · gesplittet' : ''})
@@ -1263,7 +1510,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                                     : 'text-gray-400 hover:text-white'
                                 }`}
                               >
-                                {split === 'all' ? 'Alle' : split.charAt(0).toUpperCase() + split.slice(1)}
+                                {split === 'all' ? t('laboratoryPanel.setup.splitAll') : split.charAt(0).toUpperCase() + split.slice(1)}
                               </button>
                             ))}
                           </div>
@@ -1275,8 +1522,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-sm font-medium transition-all disabled:opacity-50"
                           >
                             {loadingDatasetSamples
-                              ? <><Loader2 className="w-4 h-4 animate-spin" /> Lade Samples…</>
-                              : <><FolderOpen className="w-4 h-4" /> Samples laden</>}
+                              ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('laboratoryPanel.setup.loadingSamplesButton')}</>
+                              : <><FolderOpen className="w-4 h-4" /> {t('laboratoryPanel.setup.loadSamplesButton')}</>}
                           </button>
                         </>
                       )}
@@ -1284,7 +1531,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {samples.length > 0 && (
                         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-pink-500/15 border border-pink-500/20 w-full">
                           <CheckCircle className="w-3.5 h-3.5 text-pink-400 flex-shrink-0" />
-                          <span className="text-pink-300 text-xs font-medium flex-1">{samples.length} Samples geladen · {sourceFileName}</span>
+                          <span className="text-pink-300 text-xs font-medium flex-1">{t('laboratoryPanel.setup.samplesLoaded', { count: samples.length, file: sourceFileName })}</span>
                           <button onClick={() => { setSamples([]); setSourceFileName(''); }} className="text-gray-500 hover:text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
                         </div>
                       )}
@@ -1294,8 +1541,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     {samples.length > 0 && (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium text-white">Vorschau ({samples.length} Samples)</p>
-                          <button onClick={() => { setSamples([]); setSourceFileName(''); }} className="text-xs text-gray-500 hover:text-red-400 transition-colors">Entfernen</button>
+                        <p className="text-sm font-medium text-white">{t('laboratoryPanel.setup.samplesPreviewTitle', { count: samples.length })}</p>
+                          <button onClick={() => { setSamples([]); setSourceFileName(''); }} className="text-xs text-gray-500 hover:text-red-400 transition-colors">{t('laboratoryPanel.setup.samplesRemove')}</button>
                         </div>
                         <div className="rounded-xl border border-white/10 bg-black/20 divide-y divide-white/5 max-h-40 overflow-y-auto">
                           {samples.slice(0, 8).map((s, i) => (
@@ -1305,7 +1552,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                               {s.label && <span className="text-gray-500 text-[10px] flex-shrink-0 px-1.5 py-0.5 rounded bg-white/5">{s.label}</span>}
                             </div>
                           ))}
-                          {samples.length > 8 && <div className="px-3 py-2 text-gray-600 text-xs">+ {samples.length - 8} weitere…</div>}
+                          {samples.length > 8 && <div className="px-3 py-2 text-gray-600 text-xs">{t('laboratoryPanel.setup.samplesPreviewMore', { count: samples.length - 8 })}</div>}
                         </div>
                       </div>
                     )}
@@ -1316,7 +1563,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       disabled={!selectedModel || !selectedVersionId || samples.length === 0 || (engineMode === 'engine' && !detectedPlugin) || (engineMode === 'dev' && !devScript.trim())}
                       className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
                     >
-                      <FlaskConical className="w-4 h-4" /> Lab-Session starten ({samples.length} Samples)
+                      <FlaskConical className="w-4 h-4" /> {t('laboratoryPanel.setup.startButton', { count: samples.length })}
                     </button>
                   </>
                 )}
@@ -1341,10 +1588,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
                   <span>
                     {serverStatus === 'loading'
-                      ? 'Modell wird geladen… Testen wird gleich möglich.'
+                      ? t('laboratoryPanel.testing.serverBannerLoading')
                       : serverStatus === 'error'
-                      ? 'Modell konnte nicht geladen werden. Bitte Version wechseln.'
-                      : 'Kein Modell geladen.'}
+                      ? t('laboratoryPanel.testing.serverBannerError')
+                      : t('laboratoryPanel.testing.serverBannerIdle')}
                   </span>
                 </div>
               )}
@@ -1352,11 +1599,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
               {/* Progress */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-400">Sample {currentSampleIdx + 1} von {samples.length}</span>
+                  <span className="text-gray-400">{t('laboratoryPanel.testing.progressLabel', { current: currentSampleIdx + 1, total: samples.length })}</span>
                   <div className="flex items-center gap-3">
-                    <span className="text-emerald-400">✅ {results.filter(r => r.userRating === 'correct').length}</span>
-                    <span className="text-red-400">❌ {results.filter(r => r.userRating === 'wrong').length}</span>
-                    <span className="text-gray-500">⏭ {results.filter(r => r.userRating === 'skipped').length}</span>
+                    <span className="text-emerald-400 inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" />{results.filter(r => r.userRating === 'correct').length}</span>
+                    <span className="text-red-400 inline-flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />{results.filter(r => r.userRating === 'wrong').length}</span>
+                    <span className="text-gray-500 inline-flex items-center gap-1"><SkipForward className="w-3.5 h-3.5" />{results.filter(r => r.userRating === 'skipped').length}</span>
                   </div>
                 </div>
                 <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
@@ -1373,7 +1620,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                 </button>
                 <div className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-gray-400 text-[10px] tabular-nums font-medium">Sample #{currentSample.index + 1} / {samples.length}</span>
+                    <span className="text-gray-400 text-[10px] tabular-nums font-medium">{t('laboratoryPanel.testing.sampleTitle', { index: currentSample.index + 1, total: samples.length })}</span>
                     {currentSample.label && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/15 border border-pink-500/20 text-pink-300">
                         {currentSample.label}
@@ -1408,7 +1655,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-pink-400" />
-                    <span className="text-white font-medium text-sm">Sample #{currentSample.index + 1}</span>
+                    <span className="text-white font-medium text-sm">{t('laboratoryPanel.testing.sampleCardTitle', { index: currentSample.index + 1 })}</span>
                   </div>
 
                   <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-36 overflow-y-auto">
@@ -1419,7 +1666,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {typeof currentSample.rawData === 'object' && currentSample.rawData !== null && Object.keys(currentSample.rawData as object).length > 1 && (
                     <details className="group">
                       <summary className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 cursor-pointer list-none">
-                        <Eye className="w-3 h-3" /> Rohdaten anzeigen
+                        <Eye className="w-3 h-3" /> {t('laboratoryPanel.testing.rawDataToggle')}
                       </summary>
                       <pre className="mt-2 text-[10px] text-gray-500 font-mono overflow-x-auto bg-black/20 rounded-lg p-2 max-h-24">{JSON.stringify(currentSample.rawData, null, 2)}</pre>
                     </details>
@@ -1429,16 +1676,16 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {!alreadyRated ? (
                     <button onClick={handleRunTest} disabled={testing}
                       className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-60">
-                      {testing ? <><Loader2 className="w-4 h-4 animate-spin" /> Teste…</> : <><Play className="w-4 h-4" /> Testen</>}
+                      {testing ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('laboratoryPanel.testing.testingButton')}</> : <><Play className="w-4 h-4" /> {t('laboratoryPanel.testing.testButton')}</>}
                     </button>
                   ) : (
                     <div className="flex items-center gap-2 justify-center py-2 text-xs text-gray-500">
-                      <CheckCircle className="w-3.5 h-3.5" /> Bereits bewertet als <strong className="text-white">{alreadyRated.userRating}</strong>
+                      <CheckCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.alreadyRatedLabel')} <strong className="text-white">{alreadyRated.userRating}</strong>
                     </div>
                   )}
 
                   <button onClick={handleSkipWithoutTest} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-500 hover:text-gray-300 text-xs transition-all">
-                    <SkipForward className="w-3.5 h-3.5" /> Überspringen
+                    <SkipForward className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.skipButton')}
                   </button>
                 </div>
 
@@ -1446,7 +1693,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 text-amber-400" />
-                    <span className="text-white font-medium text-sm">Ergebnis</span>
+                    <span className="text-white font-medium text-sm">{t('laboratoryPanel.testing.resultTitle')}</span>
                   </div>
 
                   {/* Idle State */}
@@ -1455,7 +1702,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
                         <Play className="w-5 h-5 text-gray-600" />
                       </div>
-                      <p className="text-gray-600 text-sm">Drücke „Testen" um das Ergebnis zu sehen</p>
+                      <p className="text-gray-600 text-sm">{t('laboratoryPanel.testing.idleHint')}</p>
                     </div>
                   )}
 
@@ -1463,7 +1710,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {testing && (
                     <div className="flex flex-col items-center justify-center py-8 gap-3">
                       <Loader2 className="w-8 h-8 text-pink-400 animate-spin" />
-                      <p className="text-gray-400 text-sm">Inference läuft…</p>
+                      <p className="text-gray-400 text-sm">{t('laboratoryPanel.testing.inferenceRunning')}</p>
                     </div>
                   )}
 
@@ -1493,15 +1740,15 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {currentSample.label && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs ${testResult.predicted === currentSample.label ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
                           {testResult.predicted === currentSample.label
-                            ? <><CheckCircle className="w-3.5 h-3.5" /> Übereinstimmend mit erwartetem Label</>
-                            : <><XCircle className="w-3.5 h-3.5" /> Abweichend — erwartet: <strong>{currentSample.label}</strong></>}
-                        </div>
+                            ? <><CheckCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.matchLabel')}</>
+                            : <><XCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.mismatchLabel')} <strong>{currentSample.label}</strong></>}
+                      </div>
                       )}
 
                       {/* Top Predictions */}
                       {testResult.topPredictions && testResult.topPredictions.length > 1 && (
                         <div className="space-y-1.5">
-                          <p className="text-xs text-gray-500">Alle Klassen</p>
+                          <p className="text-xs text-gray-500">{t('laboratoryPanel.testing.allClassesLabel')}</p>
                           {[...testResult.topPredictions].sort((a, b) => b.score - a.score).slice(0, 6).map(p => (
                             <div key={p.label} className="flex items-center gap-2 text-xs">
                               <span className={`w-28 truncate flex-shrink-0 ${p.label === testResult.predicted ? 'text-amber-300 font-medium' : 'text-gray-400'}`}>{p.label}</span>
@@ -1514,11 +1761,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {/* Notiz */}
                       <div className="space-y-2">
                         {showNote ? (
-                          <textarea value={userNote} onChange={e => setUserNote(e.target.value)} rows={2} placeholder="Notiz zum Sample…"
+                          <textarea value={userNote} onChange={e => setUserNote(e.target.value)} rows={2} placeholder={t('laboratoryPanel.testing.notePlaceholder')}
                             className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-white/20 resize-none" />
                         ) : (
                           <button onClick={() => setShowNote(true)} className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-1">
-                            <Pencil className="w-3 h-3" /> Notiz hinzufügen
+                            <Pencil className="w-3 h-3" /> {t('laboratoryPanel.testing.addNoteButton')}
                           </button>
                         )}
                       </div>
@@ -1526,10 +1773,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {/* Rating Buttons */}
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => handleRate('correct')} className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-semibold text-sm transition-all">
-                          <ThumbsUp className="w-4 h-4" /> Korrekt
+                          <ThumbsUp className="w-4 h-4" /> {t('laboratoryPanel.testing.correctButton')}
                         </button>
                         <button onClick={() => handleRate('wrong')} className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold text-sm transition-all">
-                          <ThumbsDown className="w-4 h-4" /> Falsch
+                          <ThumbsDown className="w-4 h-4" /> {t('laboratoryPanel.testing.wrongButton')}
                         </button>
                         <button onClick={() => handleRate('skipped')} className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">
                           <SkipForward className="w-4 h-4" />
@@ -1543,17 +1790,27 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
               {/* Mini Session Summary */}
               {results.length > 0 && (
                 <div className="flex items-center gap-4 px-5 py-3 rounded-2xl bg-white/[0.03] border border-white/10">
-                  <AccuracyDonut correct={results.filter(r => r.userRating === 'correct').length} wrong={results.filter(r => r.userRating === 'wrong').length} skipped={results.filter(r => r.userRating === 'skipped').length} />
+                  <AccuracyDonut
+                    correct={results.filter(r => r.userRating === 'correct').length}
+                    wrong={results.filter(r => r.userRating === 'wrong').length}
+                    skipped={results.filter(r => r.userRating === 'skipped').length}
+                    centerLabel={t('laboratoryPanel.analysis.donutCenterLabel')}
+                    labels={{
+                      correct: t('laboratoryPanel.analysis.donutCorrectLabel'),
+                      wrong: t('laboratoryPanel.analysis.donutWrongLabel'),
+                      skipped: t('laboratoryPanel.analysis.donutSkipLabel'),
+                    }}
+                  />
                   <div className="flex-1 space-y-1">
-                    <p className="text-white text-sm font-medium">Bisherige Session</p>
+                    <p className="text-white text-sm font-medium">{t('laboratoryPanel.testing.sessionSummaryTitle')}</p>
                     <div className="flex items-center gap-4 text-xs">
-                      <span className="text-emerald-400">✅ {results.filter(r => r.userRating === 'correct').length} korrekt</span>
-                      <span className="text-red-400">❌ {results.filter(r => r.userRating === 'wrong').length} falsch</span>
-                      <span className="text-gray-500">⏭ {results.filter(r => r.userRating === 'skipped').length} übersprungen</span>
+                      <span className="text-emerald-400 inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" />{t('laboratoryPanel.testing.correctLabel', { count: results.filter(r => r.userRating === 'correct').length })}</span>
+                      <span className="text-red-400 inline-flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />{t('laboratoryPanel.testing.wrongLabel', { count: results.filter(r => r.userRating === 'wrong').length })}</span>
+                      <span className="text-gray-500 inline-flex items-center gap-1"><SkipForward className="w-3.5 h-3.5" />{t('laboratoryPanel.testing.skippedLabel', { count: results.filter(r => r.userRating === 'skipped').length })}</span>
                     </div>
                   </div>
                   <button onClick={() => setPhase('analysis')} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/20 text-pink-300 text-xs font-medium transition-all">
-                    <BarChart3 className="w-3.5 h-3.5" /> Analyse öffnen
+                    <BarChart3 className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.openAnalysisButton')}
                   </button>
                 </div>
               )}
@@ -1564,9 +1821,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           {phase === 'testing' && session && !currentSample && (
             <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-8 text-center space-y-3">
               <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
-              <p className="text-white font-semibold">Alle Samples bewertet!</p>
+              <p className="text-white font-semibold">{t('laboratoryPanel.testing.allDoneTitle')}</p>
               <button onClick={() => setPhase('analysis')} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/30 text-pink-300 font-medium text-sm transition-all">
-                <BarChart3 className="w-4 h-4" /> Zur Auswertung
+                <BarChart3 className="w-4 h-4" /> {t('laboratoryPanel.testing.toAnalysisButton')}
               </button>
             </div>
           )}

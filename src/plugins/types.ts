@@ -1,7 +1,5 @@
-// Plugin-System Typen für FrameTrain
-// Jedes neue Modell-Training wird als Plugin implementiert
-
 import { ComponentType } from 'react';
+import type { DatasetType, PairingStatus } from './datasetCompatHelpers';
 
 export interface TrainPluginProps {
   modelPath: string;
@@ -9,27 +7,33 @@ export interface TrainPluginProps {
 }
 
 export interface DatasetInfo {
-  id: string;
-  name: string;
-  model_id: string;
-  status: 'unused' | 'split';
-  file_count: number;
-  size_bytes: number;
-  extensions?: string[];
-  storage_path?: string;
+  id:              string;
+  name:            string;
+  model_id:        string;
+  status:          'unused' | 'split';
+  file_count:      number;
+  size_bytes:      number;
+  extensions?:     string[];
+  storage_path?:   string;
+  // v2: Typ-System
+  dataset_type?:   DatasetType;
+  pairing_status?: PairingStatus | null;
+  warnings?:       string[];
+  // v2: Schema-Hint (z.B. dataset.yaml Inhalt bei YOLO)
+  schema_hint?:    Record<string, unknown> | null;
 }
 
 export interface TestPluginProps {
-  modelPath: string;
-  versionId: string;
-  modelId: string;
-  modelName: string;
+  modelPath:   string;
+  versionId:   string;
+  modelId:     string;
+  modelName:   string;
   versionName: string;
-  datasets: DatasetInfo[];
+  datasets:    DatasetInfo[];
 }
 
 export interface ModelConfig {
-  model_type?: string;
+  model_type?:    string;
   architectures?: string[];
   [key: string]: unknown;
 }
@@ -55,4 +59,13 @@ export interface ModelPlugin {
   TrainComponent: ComponentType<TrainPluginProps>;
   /** Test-Oberfläche */
   TestComponent: ComponentType<TestPluginProps>;
+  /**
+   * Phase 7: Welche DatasetTypes kann dieses Modell trainieren?
+   * Wird im Import-Modal zur Kompatibilitätsprüfung genutzt.
+   */
+  supportedDatasetTypes?: DatasetType[];
+  /**
+   * Phase 7: Bevorzugter Import-Typ – wird im Import-Modal als "Empfohlen" angezeigt.
+   */
+  preferredDatasetType?: DatasetType;
 }

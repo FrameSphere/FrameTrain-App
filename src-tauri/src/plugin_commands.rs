@@ -1,6 +1,5 @@
 // plugin_commands.rs
-// Verwaltet den First-Launch-Check und die Installation der Python-Dependencies
-// für die FrameTrain Sequenzklassifikations-Engine.
+// Verwaltet First-Launch-Check, Python-Dependency-Installation und YOLO-Inferenz.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -10,7 +9,37 @@ use std::time::{Instant, Duration};
 use tauri::{AppHandle, Window};
 use tauri::Emitter;
 
-// ============ Typen ============
+// ══════════════════════════════════════════════════════════════════
+// PRE-FLIGHT TYPEN
+// ══════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PreFlightCheck {
+    pub ok: bool,
+    pub python_found: bool,
+    pub python_version: Option<String>,
+    pub python_version_ok: bool,   // >= 3.8
+    pub pip_found: bool,
+    pub free_gb: f64,
+    pub free_gb_ok: bool,          // >= 6 GB
+    pub gpu_info: GpuInfo,
+    pub platform: String,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GpuInfo {
+    pub has_nvidia_gpu: bool,
+    pub cuda_available: bool,
+    pub cuda_version: Option<String>,
+    pub gpu_name: Option<String>,
+    pub recommended_torch_index: String,  // z.B. "cu121" oder "cpu"
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TYPEN
+// ══════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PluginInfo {
@@ -25,10 +54,8 @@ pub struct PluginInfo {
     pub estimated_size_mb: i32,
     pub install_time_minutes: i32,
     pub priority: i32,
-    #[serde(default)]
-    pub is_selected: bool,
-    #[serde(default)]
-    pub is_installed: bool,
+    #[serde(default)] pub is_selected: bool,
+    #[serde(default)] pub is_installed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -46,7 +73,23 @@ pub struct DependencyStatus {
     pub version: Option<String>,
 }
 
-// ============ Hilfsfunktionen ============
+#[derive(Debug, Serialize, Deserialize)]
+pub struct YoloDetection {
+    pub label: String,
+    pub confidence: f32,
+    pub bbox: [f32; 4], // x1, y1, x2, y2
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct YoloInferenceResult {
+    pub detections: Vec<YoloDetection>,
+    pub inference_time_ms: f64,
+    pub image_path: String,
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PYTHON HELPERS
+// ══════════════════════════════════════════════════════════════════
 
 fn verify_python_available() -> Result<(), String> {
     let candidates: Vec<&str> = if cfg!(target_os = "windows") {
@@ -54,23 +97,16 @@ fn verify_python_available() -> Result<(), String> {
     } else {
         vec!["python3", "python"]
     };
-
     for cmd in &candidates {
         if let Ok(out) = Command::new(cmd).arg("--version").output() {
             if out.status.success() {
                 let version = String::from_utf8_lossy(&out.stdout);
-                println!("[Deps] ✅ Python gefunden: {} ({})", cmd, version.trim());
+                println!("[Deps] Python gefunden: {} ({})", cmd, version.trim());
                 return Ok(());
             }
         }
     }
-    
-    Err(
-        "Python ist nicht installiert oder nicht im PATH verfügbar. \
-        Bitte installiere Python 3.8+ von python.org oder nutze einen \
-        Package Manager (brew/apt/choco) und versuche es dann erneut."
-            .to_string()
-    )
+    Err("Python ist nicht installiert oder nicht im PATH verfügbar. Bitte installiere Python 3.8+ von python.org.".to_string())
 }
 
 fn get_python_executable() -> String {
@@ -79,45 +115,33 @@ fn get_python_executable() -> String {
     } else {
         vec!["python3", "python"]
     };
-
     for cmd in &candidates {
         if let Ok(out) = Command::new(cmd).arg("--version").output() {
-            if out.status.success() {
-                return cmd.to_string();
-            }
+            if out.status.success() { return cmd.to_string(); }
         }
     }
     "python3".to_string()
 }
 
 fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
-    // Normiert package für import (z.B. scikit-learn → sklearn, huggingface-hub → huggingface_hub)
     let import_name = match package {
         "scikit-learn"    => "sklearn",
-        "torch"           => "torch",
-        "transformers"    => "transformers",
-        "datasets"        => "datasets",
-        "numpy"           => "numpy",
-        "accelerate"      => "accelerate",
-        "huggingface_hub" => "huggingface_hub",
+        "opencv-python"   => "cv2",
+        "pillow"          => "PIL",
         other             => other,
     };
-
     let check = Command::new(python)
         .args(["-c", &format!(
             "import importlib.metadata, {}; print(importlib.metadata.version('{}'))",
             import_name, package
         )])
         .output();
-
     match check {
         Ok(out) if out.status.success() => {
             let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
             DependencyStatus { package: package.to_string(), installed: true, version: Some(version) }
         }
-        _ => {
-            DependencyStatus { package: package.to_string(), installed: false, version: None }
-        }
+        _ => DependencyStatus { package: package.to_string(), installed: false, version: None },
     }
 }
 
@@ -132,307 +156,788 @@ fn mark_first_launch_complete() -> Result<(), String> {
     let mut settings = if path.exists() {
         let json = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
         serde_json::from_str(&json).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-
+    } else { serde_json::json!({}) };
     settings["first_launch_completed"] = serde_json::json!(true);
-    std::fs::create_dir_all(path.parent().unwrap())
-        .map_err(|e| format!("Verzeichnis erstellen: {}", e))?;
-    std::fs::write(&path, serde_json::to_string_pretty(&settings).unwrap())
-        .map_err(|e| format!("Settings schreiben: {}", e))?;
-
-    println!("[Deps] ✅ First launch als abgeschlossen markiert");
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("mkdir: {}", e))?;
+    std::fs::write(&path, serde_json::to_string_pretty(&settings).unwrap()).map_err(|e| format!("write: {}", e))?;
+    println!("[Deps] First launch als abgeschlossen markiert");
     Ok(())
 }
 
-// ============ Tauri Commands ============
+// ══════════════════════════════════════════════════════════════════
+// PRE-FLIGHT HELPERS
+// ══════════════════════════════════════════════════════════════════
 
-/// Gibt die benötigten Dependencies als PluginInfo-Liste zurück.
+/// Gibt (major, minor) zurück wenn Python-Version >= 3.8, sonst None
+fn parse_python_version(version_str: &str) -> Option<(u32, u32)> {
+    // "Python 3.11.4" oder "3.11.4"
+    let trimmed = version_str.trim().trim_start_matches("Python ");
+    let parts: Vec<&str> = trimmed.split('.').collect();
+    if parts.len() >= 2 {
+        let major = parts[0].parse::<u32>().ok()?;
+        let minor = parts[1].parse::<u32>().ok()?;
+        return Some((major, minor));
+    }
+    None
+}
+
+/// Prüft Python-Version aus stdout+stderr (manche Pythons schreiben auf stderr)
+fn get_python_version_string(cmd: &str) -> Option<String> {
+    if let Ok(out) = Command::new(cmd).arg("--version").output() {
+        let from_stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let from_stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let version_str = if !from_stdout.is_empty() { from_stdout } else { from_stderr };
+        if !version_str.is_empty() { return Some(version_str); }
+    }
+    None
+}
+
+/// Findet Python-Executable UND prüft Version >= 3.8.
+/// Gibt (executable, version_string, version_ok) zurück.
+fn find_valid_python() -> (Option<String>, Option<String>, bool) {
+    let candidates: Vec<&str> = if cfg!(target_os = "windows") {
+        vec!["python", "python3", "python3.12", "python3.11", "python3.10", "python3.9", "python3.8"]
+    } else {
+        vec!["python3", "python", "python3.12", "python3.11", "python3.10", "python3.9", "python3.8"]
+    };
+    for cmd in &candidates {
+        if let Some(ver) = get_python_version_string(cmd) {
+            if let Some((major, minor)) = parse_python_version(&ver) {
+                let ok = major == 3 && minor >= 8;
+                if ok {
+                    return (Some(cmd.to_string()), Some(ver), true);
+                } else if major < 3 || (major == 3 && minor < 8) {
+                    // Python gefunden aber zu alt — weiter suchen
+                    continue;
+                }
+            }
+        }
+    }
+    // Nichts Valides gefunden — schauen ob überhaupt irgendwas da ist
+    for cmd in &candidates {
+        if let Some(ver) = get_python_version_string(cmd) {
+            return (Some(cmd.to_string()), Some(ver), false);
+        }
+    }
+    (None, None, false)
+}
+
+/// Prüft ob pip verfügbar ist für das gegebene Python
+fn check_pip(python: &str) -> bool {
+    Command::new(python)
+        .args(["-m", "pip", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Freier Speicherplatz in GB für das Home-Verzeichnis
+fn get_free_disk_gb() -> f64 {
+    // Wir nutzen ein Python-Einzeiler weil cross-platform sys-Crate nicht im Projekt ist
+    let python = get_python_executable();
+    let script = if cfg!(target_os = "windows") {
+        r#"import shutil,os; s=shutil.disk_usage(os.environ.get('USERPROFILE','C:\')); print(s.free/1e9)""".to_string()
+    } else {
+        r#"import shutil,os; s=shutil.disk_usage(os.path.expanduser('~')); print(s.free/1e9)"".to_string()
+    };
+    if let Ok(out) = Command::new(&python).args(["-c", &script]).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            return s.parse::<f64>().unwrap_or(0.0);
+        }
+    }
+    // Fallback: kein Python — versuche os-native Methode
+    #[cfg(unix)]
+    {
+        if let Ok(out) = Command::new("df").args(["-BG", "/"]).output() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(line) = s.lines().nth(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    if let Ok(gb) = parts[3].trim_end_matches('G').parse::<f64>() {
+                        return gb;
+                    }
+                }
+            }
+        }
+    }
+    0.0
+}
+
+/// GPU-Detection: NVIDIA/CUDA via nvidia-smi + Python torch-check
+fn detect_gpu() -> GpuInfo {
+    // 1. nvidia-smi prüfen
+    let (has_nvidia, cuda_ver, gpu_name) = if let Ok(out) = Command::new("nvidia-smi")
+        .args(["--query-gpu=name", "--format=csv,noheader"])
+        .output()
+    {
+        if out.status.success() {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // CUDA-Version aus nvidia-smi
+            let cuda = Command::new("nvidia-smi")
+                .output()
+                .ok()
+                .and_then(|o| {
+                    let text = String::from_utf8_lossy(&o.stdout).to_string();
+                    // "CUDA Version: 12.1" aus dem Header
+                    text.lines()
+                        .find(|l| l.contains("CUDA Version"))
+                        .and_then(|l| l.split(':').nth(1))
+                        .map(|s| s.trim().to_string())
+                });
+            (true, cuda, if name.is_empty() { None } else { Some(name) })
+        } else { (false, None, None) }
+    } else { (false, None, None) };
+
+    // 2. macOS Apple Silicon — MPS
+    let is_apple_silicon = cfg!(target_os = "macos") && {
+        Command::new("sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("Apple"))
+            .unwrap_or(false)
+    };
+
+    // 3. Empfohlenen torch-Index ableiten
+    let recommended_torch_index = if has_nvidia {
+        // CUDA-Version parsen: "12.1" → "cu121"
+        cuda_ver.as_deref()
+            .and_then(|v| {
+                let parts: Vec<&str> = v.split('.').collect();
+                if parts.len() >= 2 {
+                    let major = parts[0].trim();
+                    let minor = parts[1].trim();
+                    // Torch unterstützt: cu118, cu121, cu124
+                    let major_n = major.parse::<u32>().unwrap_or(0);
+                    let minor_n = minor.parse::<u32>().unwrap_or(0);
+                    Some(match (major_n, minor_n) {
+                        (11, _)            => "cu118".to_string(),
+                        (12, 0..=2)        => "cu121".to_string(),
+                        (12, 3..=u32::MAX) => "cu124".to_string(),
+                        _                  => "cu121".to_string(),
+                    })
+                } else { None }
+            })
+            .unwrap_or_else(|| "cu121".to_string())
+    } else if is_apple_silicon {
+        "cpu".to_string()  // PyTorch für MPS kommt von PyPI direkt, kein Index nötig
+    } else {
+        "cpu".to_string()
+    };
+
+    GpuInfo {
+        has_nvidia_gpu: has_nvidia,
+        cuda_available: has_nvidia,
+        cuda_version: cuda_ver,
+        gpu_name,
+        recommended_torch_index,
+    }
+}
+
+/// Erstellt das torch-Install-Spec abhängig von der GPU
+fn torch_install_args(gpu: &GpuInfo) -> Vec<String> {
+    if gpu.has_nvidia_gpu && gpu.recommended_torch_index != "cpu" {
+        // CUDA-Torch über extra-index-url
+        let index_url = format!(
+            "https://download.pytorch.org/whl/{}",
+            gpu.recommended_torch_index
+        );
+        vec![
+            "torch".to_string(),
+            "torchvision".to_string(),
+            "torchaudio".to_string(),
+            "--index-url".to_string(),
+            index_url,
+        ]
+    } else {
+        // CPU oder MPS (macOS) — normaler PyPI-Torch
+        vec!["torch".to_string(), "torchvision".to_string(), "torchaudio".to_string()]
+    }
+}
+
+/// Prüft ob torch bereits mit korrekter CUDA-Unterstützung installiert ist
+fn torch_needs_reinstall(python: &str, gpu: &GpuInfo) -> bool {
+    if !gpu.has_nvidia_gpu { return false; }
+    // Prüfe ob torch.cuda.is_available()
+    let check = Command::new(python)
+        .args(["-c", "import torch; print('1' if torch.cuda.is_available() else '0')"])
+        .output();
+    match check {
+        Ok(out) if out.status.success() => {
+            let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            result != "1"  // true = braucht Reinstall weil CUDA nicht funktioniert
+        }
+        _ => false,  // torch gar nicht installiert — normaler Install-Flow
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TAURI COMMANDS
+// ══════════════════════════════════════════════════════════════════
+
+/// Pre-Flight-Check: alles prüfen bevor Installation startet
+#[tauri::command]
+pub async fn run_preflight_check() -> Result<PreFlightCheck, String> {
+    let mut errors: Vec<String> = vec![];
+    let mut warnings: Vec<String> = vec![];
+
+    let platform = format!("{}/{}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+
+    // 1. Python finden + Version prüfen
+    let (python_exe, python_ver, python_ver_ok) = find_valid_python();
+    let python_found = python_exe.is_some();
+
+    if !python_found {
+        errors.push("Python wurde nicht gefunden. Bitte installiere Python 3.8+ von python.org".to_string());
+    } else if !python_ver_ok {
+        let ver = python_ver.as_deref().unwrap_or("?");
+        errors.push(format!(
+            "Python {} ist zu alt. FrameTrain benötigt Python 3.8 oder neuer.",
+            ver
+        ));
+    }
+
+    // 2. pip prüfen
+    let pip_found = python_exe.as_deref()
+        .map(check_pip)
+        .unwrap_or(false);
+
+    if python_found && python_ver_ok && !pip_found {
+        errors.push(
+            "pip ist nicht verfügbar. Führe aus: python3 -m ensurepip --upgrade".to_string()
+        );
+    }
+
+    // 3. Speicherplatz
+    let free_gb = get_free_disk_gb();
+    let free_gb_ok = free_gb >= 6.0;
+    if !free_gb_ok && free_gb > 0.0 {
+        errors.push(format!(
+            "Zu wenig Speicherplatz: {:.1} GB frei. FrameTrain benötigt mindestens 6 GB.",
+            free_gb
+        ));
+    }
+    if free_gb > 0.0 && free_gb < 10.0 {
+        warnings.push(format!(
+            "Nur {:.1} GB frei. PyTorch + Modelle benötigen typischerweise 8-15 GB.",
+            free_gb
+        ));
+    }
+
+    // 4. GPU-Detection
+    let gpu_info = detect_gpu();
+    if gpu_info.has_nvidia_gpu {
+        println!("[PreFlight] NVIDIA GPU gefunden: {:?}, CUDA: {:?}",
+            gpu_info.gpu_name, gpu_info.cuda_version);
+    } else {
+        warnings.push("Keine NVIDIA-GPU erkannt. Training läuft auf CPU (langsamer).".to_string());
+    }
+
+    let ok = errors.is_empty();
+    Ok(PreFlightCheck {
+        ok,
+        python_found,
+        python_version: python_ver,
+        python_version_ok: python_ver_ok,
+        pip_found,
+        free_gb,
+        free_gb_ok,
+        gpu_info,
+        platform,
+        errors,
+        warnings,
+    })
+}
+
 #[tauri::command]
 pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginInfo>, String> {
     verify_python_available()?;
-    
     let python = get_python_executable();
 
-    let packages = vec![
-        "torch", "transformers", "datasets", "huggingface_hub",
-        "scikit-learn", "numpy", "accelerate",
-    ];
-
-    let all_installed = packages.iter().all(|p| {
-        check_package_installed(&python, p).installed
-    });
-
-    let plugin = PluginInfo {
-        id:                   "seq_classification".to_string(),
-        name:                 "Text-Klassifikation (HuggingFace)".to_string(),
-        description:          "Trainiert encoder-basierte Modelle (z.B. XLM-RoBERTa, BERT, DeBERTa) für Textklassifikation. Unterstützt Sentiment-Analyse, Topic-Detection, Spam-Filter u.v.m.".to_string(),
-        category:             "NLP".to_string(),
-        icon:                 "🤗".to_string(),
-        built_in:             true,
-        required_packages:    packages.iter().map(|s| s.to_string()).collect(),
-        optional_packages:    vec!["peft".to_string()],
-        estimated_size_mb:    2500,
-        install_time_minutes: 3,
-        priority:             1,
-        is_selected:          true,
-        is_installed:         all_installed,
+    // NLP-Stack
+    let nlp_packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn", "numpy", "accelerate"];
+    let nlp_installed = nlp_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let nlp_plugin = PluginInfo {
+        id: "seq_classification".to_string(),
+        name: "firstLaunch.pluginRegistry.seq_classification.name".to_string(),
+        description: "firstLaunch.pluginRegistry.seq_classification.description".to_string(),
+        category: "NLP".to_string(), icon: "🤗".to_string(), built_in: true,
+        required_packages: nlp_packages.iter().map(|s| s.to_string()).collect(),
+        optional_packages: vec!["peft".to_string()],
+        estimated_size_mb: 2500, install_time_minutes: 3, priority: 1,
+        is_selected: true, is_installed: nlp_installed,
     };
 
-    Ok(vec![plugin])
+    // YOLO-Stack
+    let yolo_packages = vec!["ultralytics", "torch", "numpy", "pillow", "opencv-python"];
+    let yolo_installed = yolo_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let yolo_plugin = PluginInfo {
+        id: "yolo".to_string(),
+        name: "firstLaunch.pluginRegistry.yolo.name".to_string(),
+        description: "firstLaunch.pluginRegistry.yolo.description".to_string(),
+        category: "Vision".to_string(), icon: "🎯".to_string(), built_in: true,
+        required_packages: yolo_packages.iter().map(|s| s.to_string()).collect(),
+        optional_packages: vec![],
+        estimated_size_mb: 1500, install_time_minutes: 2, priority: 2,
+        is_selected: false, is_installed: yolo_installed,
+    };
+
+    Ok(vec![nlp_plugin, yolo_plugin])
 }
 
-/// Prüft den Status aller erforderlichen Python-Pakete.
 #[tauri::command]
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
-    println!("[Deps] Prüfe Abhängigkeitsstatus...");
-    
     verify_python_available()?;
-    
     let python = get_python_executable();
-    let packages = vec![
-        "torch",
-        "transformers",
-        "datasets",
-        "huggingface_hub",
-        "scikit-learn",
-        "numpy",
-        "accelerate",
-    ];
-    
-    let status: Vec<DependencyStatus> = packages
-        .iter()
-        .map(|p| check_package_installed(&python, p))
-        .collect();
-    
-    let all_installed = status.iter().all(|s| s.installed);
-    if all_installed {
-        println!("[Deps] ✅ Alle Pakete installiert");
-    } else {
-        let missing: Vec<_> = status.iter()
-            .filter(|s| !s.installed)
-            .map(|s| s.package.as_str())
-            .collect();
-        println!("[Deps] ⚠️ Fehlende Pakete: {:?}", missing);
-    }
-    
+    let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn", "numpy", "accelerate", "ultralytics"];
+    let status: Vec<DependencyStatus> = packages.iter().map(|p| check_package_installed(&python, p)).collect();
+    let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
+    if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
+    else { println!("[Deps] Fehlende Pakete: {:?}", missing); }
     Ok(status)
 }
 
-/// Prüft ob der First-Launch-Setup noch ausgeführt werden muss.
 #[tauri::command]
 pub async fn check_first_launch() -> Result<bool, String> {
-    println!("[Deps] Prüfe First-Launch-Status...");
-
     let path = settings_path()?;
-    if !path.exists() {
-        println!("[Deps] Keine Settings-Datei → First Launch");
-        return Ok(true);
-    }
-
-    let json = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Settings lesen: {}", e))?;
-    let settings: serde_json::Value = serde_json::from_str(&json)
-        .map_err(|e| format!("Settings parsen: {}", e))?;
-
+    if !path.exists() { return Ok(true); }
+    let json = std::fs::read_to_string(&path).map_err(|e| format!("Settings lesen: {}", e))?;
+    let settings: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Settings parsen: {}", e))?;
     let completed = settings["first_launch_completed"].as_bool().unwrap_or(false);
-    println!("[Deps] First launch completed: {}", completed);
-
-    if !completed {
-        return Ok(true);
-    }
-
-    // Auch wenn completed=true: prüfe ob die Core-Packages noch vorhanden sind.
+    if !completed { return Ok(true); }
     let python = get_python_executable();
-    let core_packages = ["torch", "transformers", "datasets", "huggingface_hub"];
-    let all_ok = core_packages.iter().all(|p| check_package_installed(&python, p).installed);
-
-    if !all_ok {
-        println!("[Deps] Core-Packages fehlen trotz completed=true → First Launch erneut");
-        return Ok(true);
-    }
-
+    let core = ["torch", "transformers", "datasets", "huggingface_hub"];
+    if !core.iter().all(|p| check_package_installed(&python, p).installed) { return Ok(true); }
     Ok(false)
 }
 
-/// Installiert die ausgewählten Dependencies via pip.
-/// Sendet Fortschritts-Events ans Frontend.
 #[tauri::command]
-pub async fn install_plugins(
-    _app_handle: AppHandle,
-    plugin_ids: Vec<String>,
-    window: Window,
-) -> Result<(), String> {
-    println!("[Deps] Installiere Dependencies für: {:?}", plugin_ids);
-    
-    if let Err(e) = verify_python_available() {
-        eprintln!("[Deps] ✗ Python-Fehler: {}", e);
+pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, window: Window) -> Result<(), String> {
+    // --- Schritt 0: Pre-Flight inline ---
+    let preflight = match run_preflight_check().await {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = window.emit("plugin-install-progress", PluginInstallProgress {
+                plugin_id: "system".to_string(), status: "failed".to_string(),
+                message: format!("Pre-Flight-Check fehlgeschlagen: {}", e), progress: Some(0),
+            });
+            return Err(e);
+        }
+    };
+    if !preflight.ok {
+        let msg = preflight.errors.join(" | ");
         let _ = window.emit("plugin-install-progress", PluginInstallProgress {
-            plugin_id: "seq_classification".to_string(),
-            status: "error".to_string(),
-            message: e,
-            progress: None,
+            plugin_id: "system".to_string(), status: "failed".to_string(),
+            message: msg.clone(), progress: Some(0),
         });
-        return Err("Python konnte nicht gefunden werden".to_string());
+        return Err(msg);
     }
+
+    // --- Schritt 1: Paketliste aufbauen ---
+    // Torch wird separat behandelt (GPU-aware), daher hier raus
+    let mut packages: Vec<(&'static str, &'static str)> = vec![
+        ("numpy",           "NumPy"),
+    ];
+    if plugin_ids.iter().any(|id| id == "seq_classification") || plugin_ids.is_empty() {
+        packages.extend([
+            ("transformers",    "Transformers"),
+            ("datasets",        "HuggingFace Datasets"),
+            ("huggingface_hub", "HuggingFace Hub"),
+            ("scikit-learn",    "Scikit-Learn"),
+            ("accelerate",      "Accelerate"),
+        ]);
+    }
+    if plugin_ids.iter().any(|id| id == "yolo") {
+        packages.extend([
+            ("ultralytics",    "Ultralytics YOLO"),
+            ("pillow",         "Pillow"),
+            ("opencv-python",  "OpenCV"),
+        ]);
+    }
+    packages.dedup_by_key(|(p, _)| *p);
+
+    // Torch-Args nach GPU-Typ
+    let gpu_info = preflight.gpu_info.clone();
+    let torch_args = torch_install_args(&gpu_info);
+    let torch_description = if gpu_info.has_nvidia_gpu {
+        format!("PyTorch (CUDA {})", gpu_info.recommended_torch_index)
+    } else {
+        "PyTorch (CPU)".to_string()
+    };
+
+    // Gesamt-Schritte: pip-upgrade + torch + alle packages
+    let total_steps = 1 + 1 + packages.len();
 
     tauri::async_runtime::spawn(async move {
         let python = get_python_executable();
-        println!("[Deps] Verwende Python: {}", python);
+        let t0 = Instant::now();
+        let mut step = 0usize;
 
-        // Installiere in dieser Reihenfolge (torch first - das ist das größte)
-        let packages = vec![
-            ("torch",            "PyTorch (enthält große Modelle)"),
-            ("numpy",            "NumPy (Numerische Berechnungen)"),
-            ("transformers",     "Transformers (Sprachmodelle)"),
-            ("datasets",         "Datasets (HuggingFace Datenverwaltung)"),
-            ("huggingface_hub",  "HuggingFace Hub (Dataset & Model Downloads)"),
-            ("scikit-learn",     "Scikit-Learn (ML-Tools)"),
-            ("accelerate",       "Accelerate (GPU-Unterstützung)"),
-        ];
-
-        let total = packages.len();
-        let install_start = Instant::now();
-
-        for (i, (package, description)) in packages.iter().enumerate() {
-            let progress_pct = ((i as f32 / total as f32) * 100.0) as i32;
-
-            let _ = window.emit("plugin-install-progress", PluginInstallProgress {
-                plugin_id:  "seq_classification".to_string(),
-                status:     "installing_package".to_string(),
-                message:    format!("Installiere {} - {} ({}/{})", package, description, i + 1, total),
-                progress:   Some(progress_pct),
+        let emit_progress = |w: &Window, msg: &str, status: &str, pct: i32| {
+            let _ = w.emit("plugin-install-progress", PluginInstallProgress {
+                plugin_id: "system".to_string(),
+                status: status.to_string(),
+                message: msg.to_string(),
+                progress: Some(pct),
             });
+        };
 
-            println!("[Deps] pip install {} ({})", package, description);
-            let pkg_start = Instant::now();
+        let pct = |s: usize| ((s as f32 / total_steps as f32) * 100.0) as i32;
 
-            let mut child = match Command::new(&python)
-                .args(["-m", "pip", "install", "--upgrade", "--quiet", package])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("[Deps] Fehler beim Starten von pip: {}", e);
-                    let msg = format!(
-                        "pip konnte nicht gestartet werden: {}. Stelle sicher, dass Python richtig installiert ist.",
-                        e
+        // --- Schritt 2: pip selbst upgraden ---
+        emit_progress(&window, "pip wird aktualisiert...", "installing_package", pct(step));
+        let _ = Command::new(&python)
+            .args(["-m", "pip", "install", "--quiet", "--upgrade", "pip"])
+            .output();
+        step += 1;
+        emit_progress(&window, "pip aktualisiert ✓", "package_complete", pct(step));
+
+        // --- Schritt 3: Torch installieren (GPU-aware, mit Retry) ---
+        emit_progress(
+            &window,
+            &format!("Installiere {} (kann mehrere Minuten dauern)...", torch_description),
+            "installing_package",
+            pct(step),
+        );
+
+        // Prüfe ob Torch Reinstall nötig (CPU-Torch aber NVIDIA-GPU vorhanden)
+        let torch_status = check_package_installed(&python, "torch");
+        let needs_reinstall = torch_status.installed && torch_needs_reinstall(&python, &gpu_info);
+
+        if torch_status.installed && !needs_reinstall {
+            emit_progress(
+                &window,
+                &format!("PyTorch bereits vorhanden ({}) ✓",
+                    torch_status.version.as_deref().unwrap_or("✓")),
+                "package_complete",
+                pct(step + 1),
+            );
+        } else {
+            // Torch installieren (oder neu installieren für CUDA)
+            let mut torch_cmd_args = vec!["-m".to_string(), "pip".to_string(),
+                "install".to_string(), "--quiet".to_string()];
+            if needs_reinstall {
+                torch_cmd_args.push("--force-reinstall".to_string());
+                emit_progress(
+                    &window,
+                    "PyTorch wird für CUDA neu installiert...",
+                    "installing_package",
+                    pct(step),
+                );
+            }
+            torch_cmd_args.extend(torch_args.clone());
+
+            let torch_ok = run_pip_with_retry(&python, &torch_cmd_args, &window, 2);
+
+            if !torch_ok {
+                // Fallback: CPU-Torch wenn CUDA-Install fehlschlägt
+                if gpu_info.has_nvidia_gpu {
+                    emit_progress(
+                        &window,
+                        "CUDA-Torch fehlgeschlagen, installiere CPU-Variante als Fallback...",
+                        "installing_package",
+                        pct(step),
                     );
-                    let _ = window.emit("plugin-install-progress", PluginInstallProgress {
-                        plugin_id: "seq_classification".to_string(),
-                        status:    "failed".to_string(),
-                        message:   msg,
-                        progress:  None,
-                    });
+                    let fallback_args = vec!["-m".to_string(), "pip".to_string(),
+                        "install".to_string(), "--quiet".to_string(),
+                        "torch".to_string(), "torchvision".to_string(), "torchaudio".to_string()];
+                    let fallback_ok = run_pip_with_retry(&python, &fallback_args, &window, 1);
+                    if !fallback_ok {
+                        emit_progress(&window, "PyTorch konnte nicht installiert werden. Prüfe Internetverbindung und Speicherplatz.", "failed", pct(step));
+                        return;
+                    }
+                } else {
+                    emit_progress(&window, "PyTorch konnte nicht installiert werden. Prüfe Internetverbindung und Speicherplatz.", "failed", pct(step));
                     return;
                 }
-            };
+            }
+        }
+        step += 1;
 
-            if let Some(stdout) = child.stdout.take() {
-                let win_clone = window.clone();
-                let pkg_clone = package.to_string();
-                std::thread::spawn(move || {
-                    let mut last_update = Instant::now();
-                    let mut current_line_buffer = String::new();
-                    
-                    for line in BufReader::new(stdout).lines().flatten() {
-                        if line.contains("Downloading")
-                            || line.contains("downloading")
-                            || line.contains("Installing")
-                            || line.contains("Collecting")
-                            || line.contains("ERROR")
-                            || line.contains("error")
-                        {
-                            if last_update.elapsed() > Duration::from_millis(500) {
-                                println!("[pip] {} → {}", pkg_clone, line);
-                                let _ = win_clone.emit("plugin-install-progress", PluginInstallProgress {
-                                    plugin_id: "seq_classification".to_string(),
-                                    status:    "installing_package".to_string(),
-                                    message:   line.clone(),
-                                    progress:  None,
-                                });
-                                last_update = Instant::now();
-                            } else {
-                                current_line_buffer = line.clone();
-                            }
-                        }
-                    }
-                    
-                    if !current_line_buffer.is_empty() {
-                        println!("[pip] {}", current_line_buffer);
-                        let _ = win_clone.emit("plugin-install-progress", PluginInstallProgress {
-                            plugin_id: "seq_classification".to_string(),
-                            status:    "installing_package".to_string(),
-                            message:   current_line_buffer,
-                            progress:  None,
-                        });
-                    }
-                });
+        // --- Schritt 4: Rest-Pakete ---
+        for (package, description) in &packages {
+            let current_pct = pct(step);
+
+            // Skip wenn schon installiert
+            let already = check_package_installed(&python, package);
+            if already.installed {
+                println!("[Deps] {} bereits installiert ({}), überspringe",
+                    package, already.version.as_deref().unwrap_or("?"));
+                emit_progress(
+                    &window,
+                    &format!("{} bereits vorhanden ({}) ✓",
+                        description, already.version.as_deref().unwrap_or("✓")),
+                    "package_complete",
+                    current_pct,
+                );
+                step += 1;
+                continue;
             }
 
-            let status = child.wait().expect("Warten auf pip fehlgeschlagen");
-            let elapsed = pkg_start.elapsed();
+            emit_progress(
+                &window,
+                &format!("Installiere {} ({}/{})...", description, step, total_steps),
+                "installing_package",
+                current_pct,
+            );
 
-            if !status.success() {
-                eprintln!("[Deps] ✗ {} konnte nicht installiert werden", package);
-                let _ = window.emit("plugin-install-progress", PluginInstallProgress {
-                    plugin_id: "seq_classification".to_string(),
-                    status:    "failed".to_string(),
-                    message:   format!(
-                        "Fehler beim Installieren von {}.\n\n\
-                        Mögliche Lösungen:\n\
-                        - Überprüfe deine Internetverbindung\n\
-                        - Stelle sicher, dass genug Festplattenspeicher verfügbar ist (mindestens 20GB)\n\
-                        - Versuche: pip install --upgrade pip setuptools wheel", 
-                        package
-                    ),
-                    progress:  None,
-                });
+            // Versionsconstraints
+            let install_spec = match *package {
+                "transformers"    => "transformers>=4.35.0",
+                "datasets"        => "datasets>=2.14.0",
+                "huggingface_hub" => "huggingface_hub>=0.19.0",
+                "scikit-learn"    => "scikit-learn>=1.3.0",
+                "numpy"           => "numpy>=1.24.0,<2.0.0",
+                "accelerate"      => "accelerate>=0.24.0",
+                "ultralytics"     => "ultralytics>=8.0.0",
+                "pillow"          => "pillow>=9.0.0",
+                "opencv-python"   => "opencv-python>=4.8.0",
+                other             => other,
+            };
+
+            let pip_args = vec!["-m".to_string(), "pip".to_string(),
+                "install".to_string(), "--quiet".to_string(),
+                install_spec.to_string()];
+
+            let ok = run_pip_with_retry(&python, &pip_args, &window, 2);
+            if !ok {
+                emit_progress(
+                    &window,
+                    &format!("Fehler beim Installieren von {}. Prüfe Internetverbindung.", package),
+                    "failed",
+                    current_pct,
+                );
                 return;
             }
 
-            let elapsed_secs = elapsed.as_secs();
-            println!("[Deps] ✓ {} installiert ({:.1}s)", package, elapsed_secs);
-            
-            let _ = window.emit("plugin-install-progress", PluginInstallProgress {
-                plugin_id: "seq_classification".to_string(),
-                status: "package_complete".to_string(),
-                message: format!("{} fertig ({} Sekunden)", package, elapsed_secs),
-                progress: Some(progress_pct),
-            });
+            emit_progress(
+                &window,
+                &format!("{} installiert ✓", description),
+                "package_complete",
+                current_pct,
+            );
+            step += 1;
         }
 
-        let total_elapsed = install_start.elapsed();
-        let total_secs = total_elapsed.as_secs();
-        let total_mins = total_secs / 60;
-        
+        // --- Abschluss ---
+        let secs = t0.elapsed().as_secs();
         let _ = mark_first_launch_complete();
-        let _ = window.emit("plugin-install-progress", PluginInstallProgress {
-            plugin_id: "seq_classification".to_string(),
-            status:    "complete".to_string(),
-            message:   format!(
-                "✅ Alle Dependencies erfolgreich installiert!\n\nGesamtdauer: {}m {}s",
-                total_mins,
-                total_secs % 60
-            ),
-            progress:  Some(100),
-        });
+        emit_progress(
+            &window,
+            &format!("Alle Dependencies installiert! ({}m {}s)", secs / 60, secs % 60),
+            "complete",
+            100,
+        );
         let _ = window.emit("plugin-install-complete", ());
-        println!("[Deps] ✅ Installation abgeschlossen in {:.1}s", total_secs);
     });
-
     Ok(())
 }
 
-/// Wird nicht mehr benötigt, aber bleibt für API-Kompatibilität mit dem Frontend.
+/// Führt einen pip-Befehl mit bis zu `retries` Versuchen aus.
+/// Gibt stderr-Meldungen über Events weiter. Gibt true zurück bei Erfolg.
+fn run_pip_with_retry(python: &str, args: &[String], window: &Window, retries: u32) -> bool {
+    for attempt in 0..=retries {
+        if attempt > 0 {
+            let _ = window.emit("plugin-install-progress", PluginInstallProgress {
+                plugin_id: "system".to_string(),
+                status: "installing_package".to_string(),
+                message: format!("Versuch {} von {}...", attempt + 1, retries + 1),
+                progress: None,
+            });
+            std::thread::sleep(Duration::from_secs(3));
+        }
+
+        let mut child = match Command::new(python)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = window.emit("plugin-install-progress", PluginInstallProgress {
+                    plugin_id: "system".to_string(),
+                    status: "installing_package".to_string(),
+                    message: format!("Spawn-Fehler: {}", e),
+                    progress: None,
+                });
+                continue;
+            }
+        };
+
+        // stdout live streamen (rate-limited)
+        if let Some(stdout) = child.stdout.take() {
+            let wc = window.clone();
+            std::thread::spawn(move || {
+                let mut last = Instant::now();
+                for line in BufReader::new(stdout).lines().flatten() {
+                    if last.elapsed() > Duration::from_millis(500) {
+                        let _ = wc.emit("plugin-install-progress", PluginInstallProgress {
+                            plugin_id: "system".to_string(),
+                            status: "installing_package".to_string(),
+                            message: line,
+                            progress: None,
+                        });
+                        last = Instant::now();
+                    }
+                }
+            });
+        }
+
+        // stderr in Buffer sammeln
+        let stderr_buf = child.stderr.take().map(|e| {
+            BufReader::new(e).lines().flatten().collect::<Vec<_>>().join("\n")
+        }).unwrap_or_default();
+
+        let status = match child.wait() {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        if status.success() {
+            return true;
+        }
+
+        // Fehlerdetails weitergeben
+        if !stderr_buf.is_empty() {
+            // Nur die letzten 3 Zeilen — pip gibt oft lange Stacktraces
+            let last_lines: Vec<&str> = stderr_buf.lines().rev().take(3).collect();
+            let short_err = last_lines.into_iter().rev().collect::<Vec<_>>().join(" | ");
+            let _ = window.emit("plugin-install-progress", PluginInstallProgress {
+                plugin_id: "system".to_string(),
+                status: "installing_package".to_string(),
+                message: format!("pip-Fehler: {}", short_err),
+                progress: None,
+            });
+        }
+    }
+    false
+}
+
 #[tauri::command]
-pub async fn handle_plugin_approval(
-    _plugin_id: String,
-    _approved: bool,
-    _remember: bool,
-) -> Result<(), String> {
+pub async fn handle_plugin_approval(_plugin_id: String, _approved: bool, _remember: bool) -> Result<(), String> {
     Ok(())
+}
+
+// ══════════════════════════════════════════════════════════════════
+// YOLO INFERENZ COMMAND
+// ══════════════════════════════════════════════════════════════════
+
+/// Führt YOLO-Inferenz auf einem einzelnen Bild aus via Ultralytics Python-API.
+#[tauri::command]
+pub async fn run_yolo_inference(
+    model_path: String,
+    image_path: String,
+    conf_threshold: f32,
+    iou_threshold: f32,
+) -> Result<YoloInferenceResult, String> {
+    let python = get_python_executable();
+
+    // Inline-Script: gibt JSON auf stdout aus
+    let script = format!(r#"
+import sys, json, time
+
+try:
+    from ultralytics import YOLO
+    import os
+
+    model_path  = r"{}"
+    image_path  = r"{}"
+    conf        = {:.4}
+    iou         = {:.4}
+
+    if not os.path.exists(model_path):
+        print(json.dumps({{"error": f"Modell nicht gefunden: {{model_path}}"}}))
+        sys.exit(1)
+    if not os.path.exists(image_path):
+        print(json.dumps({{"error": f"Bild nicht gefunden: {{image_path}}"}}))
+        sys.exit(1)
+
+    model = YOLO(model_path)
+    t0 = time.perf_counter()
+    results = model(image_path, conf=conf, iou=iou, verbose=False)
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+    detections = []
+    for r in results:
+        boxes = r.boxes
+        if boxes is None:
+            continue
+        names = r.names
+        for box in boxes:
+            cls_id = int(box.cls[0].item())
+            label  = names.get(cls_id, str(cls_id))
+            conf_v = float(box.conf[0].item())
+            xyxy   = box.xyxy[0].tolist()
+            detections.append({{
+                "label":      label,
+                "confidence": conf_v,
+                "bbox":       xyxy,
+            }})
+
+    print(json.dumps({{
+        "detections":        detections,
+        "inference_time_ms": elapsed_ms,
+        "image_path":        image_path,
+    }}))
+
+except ImportError:
+    print(json.dumps({{"error": "ultralytics ist nicht installiert. Installiere es über den First-Launch-Setup."}}))
+    sys.exit(1)
+except Exception as e:
+    print(json.dumps({{"error": str(e)}}))
+    sys.exit(1)
+"#,
+        model_path.replace('\\', "/"),
+        image_path.replace('\\', "/"),
+        conf_threshold,
+        iou_threshold,
+    );
+
+    let tmp_path = std::env::temp_dir().join("ft_yolo_infer.py");
+    std::fs::write(&tmp_path, &script).map_err(|e| format!("Script schreiben: {}", e))?;
+
+    let out = Command::new(&python)
+        .arg(tmp_path.to_string_lossy().to_string())
+        .output()
+        .map_err(|e| format!("Python spawn: {}", e))?;
+
+    std::fs::remove_file(&tmp_path).ok();
+
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!("YOLO-Inferenz fehlgeschlagen: {}", stderr));
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("JSON-Parse: {} (stdout: {})", e, &stdout[..stdout.len().min(200)]))?;
+
+    if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+        return Err(err.to_string());
+    }
+
+    let detections: Vec<YoloDetection> = json.get("detections")
+        .and_then(|d| d.as_array())
+        .map(|arr| arr.iter().filter_map(|v| {
+            let label = v.get("label")?.as_str()?.to_string();
+            let confidence = v.get("confidence")?.as_f64()? as f32;
+            let bbox_arr = v.get("bbox")?.as_array()?;
+            if bbox_arr.len() < 4 { return None; }
+            let bbox = [
+                bbox_arr[0].as_f64()? as f32,
+                bbox_arr[1].as_f64()? as f32,
+                bbox_arr[2].as_f64()? as f32,
+                bbox_arr[3].as_f64()? as f32,
+            ];
+            Some(YoloDetection { label, confidence, bbox })
+        }).collect())
+        .unwrap_or_default();
+
+    let inference_time_ms = json.get("inference_time_ms").and_then(|t| t.as_f64()).unwrap_or(0.0);
+
+    Ok(YoloInferenceResult { detections, inference_time_ms, image_path })
 }

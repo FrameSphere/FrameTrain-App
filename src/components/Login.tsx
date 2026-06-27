@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Key, Lock, AlertCircle, Eye, EyeOff, ExternalLink, Info } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface LoginProps {
   onLogin: (apiKey: string, password: string) => Promise<void>;
@@ -14,6 +15,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [loading, setLoading] = useState(false);
   const [needsDesktopPassword, setNeedsDesktopPassword] = useState(false);
   const { currentTheme } = useTheme();
+  const { t } = useLanguage();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,11 +23,11 @@ export default function Login({ onLogin }: LoginProps) {
     setNeedsDesktopPassword(false);
 
     if (!apiKey.startsWith('ft_') || apiKey.length < 24) {
-      setError('API-Key muss mit „ft_" beginnen und mindestens 24 Zeichen lang sein');
+      setError(t('login.errors.apiKeyInvalid'));
       return;
     }
     if (!password || password.length < 6) {
-      setError('Passwort muss mindestens 6 Zeichen lang sein');
+      setError(t('login.errors.passwordShort'));
       return;
     }
 
@@ -33,8 +35,7 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       await onLogin(apiKey, password);
     } catch (err: any) {
-      const msg: string = err?.message || err || 'Anmeldung fehlgeschlagen';
-      // Hinweis auf fehlendes Desktop-Passwort hervorheben
+      const msg: string = err?.message || err || t('login.errors.loginFailed');
       if (msg.includes('Kein Desktop-Passwort') || msg.includes('desktop-password') || msg.includes('needsDesktopPassword')) {
         setNeedsDesktopPassword(true);
       }
@@ -71,17 +72,17 @@ export default function Login({ onLogin }: LoginProps) {
             </span>
           </div>
           <h1 className="text-4xl font-bold text-white mb-2">FrameTrain</h1>
-          <p className="text-gray-400">Lokales ML-Training auf deinem Desktop</p>
+          <p className="text-gray-400">{t('login.tagline')}</p>
         </div>
 
         {/* Login Card */}
         <form onSubmit={handleSubmit} className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 shadow-2xl">
-          <h2 className="text-2xl font-bold text-white mb-6">Anmelden</h2>
+          <h2 className="text-2xl font-bold text-white mb-6">{t('login.title')}</h2>
 
           {/* API-Key */}
           <div className="mb-5">
             <label htmlFor="apiKey" className="block text-sm font-medium text-gray-300 mb-2">
-              API-Key
+              {t('login.apiKey.label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -98,13 +99,13 @@ export default function Login({ onLogin }: LoginProps) {
                 style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
               />
             </div>
-            <p className="mt-1 text-xs text-gray-400">Dein API-Key aus dem FrameTrain Dashboard</p>
+            <p className="mt-1 text-xs text-gray-400">{t('login.apiKey.hint')}</p>
           </div>
 
           {/* Passwort */}
           <div className="mb-5">
             <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-2">
-              Passwort
+              {t('login.password.label')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -115,7 +116,7 @@ export default function Login({ onLogin }: LoginProps) {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={e => { setPassword(e.target.value); setError(''); setNeedsDesktopPassword(false); }}
-                placeholder="Dein Passwort"
+                placeholder={t('login.password.placeholder')}
                 disabled={loading}
                 className="w-full pl-10 pr-12 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties}
@@ -131,12 +132,12 @@ export default function Login({ onLogin }: LoginProps) {
             {/* Hover-Tooltip */}
             <div className="mt-1 flex items-center gap-1 group relative w-fit">
               <Info className="h-3.5 w-3.5 text-gray-500 cursor-help" />
-              <span className="text-xs text-gray-500 cursor-help">Was muss ich hier eingeben?</span>
+              <span className="text-xs text-gray-500 cursor-help">{t('login.password.hintLabel')}</span>
               <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-10 w-72">
                 <div className="bg-gray-900 border border-white/10 rounded-lg p-3 shadow-xl text-xs text-gray-300 leading-relaxed">
-                  <p className="font-semibold text-white mb-1">Welches Passwort?</p>
-                  <p><span className="text-purple-400">E-Mail-Account:</span> Dein normales FrameTrain-Passwort.</p>
-                  <p className="mt-1"><span className="text-blue-400">Google / GitHub:</span> Das Desktop-Passwort, das du im Dashboard unter „Desktop-App Passwort“ gesetzt hast.</p>
+                  <p className="font-semibold text-white mb-1">{t('login.password.tooltipTitle')}</p>
+                  <p><span className="text-purple-400">E-Mail-Account:</span> {t('login.password.tooltipEmail')}</p>
+                  <p className="mt-1"><span className="text-blue-400">{t('login.password.tooltipOAuthLabel')}</span> {t('login.password.tooltipOAuth')}</p>
                 </div>
                 <div className="w-2.5 h-2.5 bg-gray-900 border-r border-b border-white/10 rotate-45 ml-3 -mt-1.5" />
               </div>
@@ -157,7 +158,7 @@ export default function Login({ onLogin }: LoginProps) {
                     className="inline-flex items-center gap-1 mt-1.5 text-xs text-purple-400 hover:text-purple-300 underline"
                   >
                     <ExternalLink className="w-3 h-3" />
-                    Zum Dashboard → Desktop-App Passwort setzen
+                    {t('login.dashboardLink')}
                   </a>
                 )}
               </div>
@@ -169,12 +170,12 @@ export default function Login({ onLogin }: LoginProps) {
             disabled={loading || !apiKey || !password}
             className={`w-full py-3 px-4 bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold rounded-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
           >
-            {loading ? <><Spinner />Authentifiziere...</> : 'Anmelden'}
+            {loading ? <><Spinner />{t('login.submitting')}</> : t('login.submit')}
           </button>
         </form>
 
         <p className="mt-8 text-center text-sm text-gray-500">
-          Sichere Authentifizierung über FrameTrain-Server
+          {t('login.footer')}
         </p>
       </div>
     </div>

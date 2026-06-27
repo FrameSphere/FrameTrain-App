@@ -8,13 +8,16 @@
 import type { ModelPlugin, ModelConfig } from './types';
 import xlmRobertaPlugin from './xlm-roberta';
 import hfEncoderPlugin from './hf-encoder';
+import canvasPlugin from './canvas';
+import yoloPlugin from './yolo';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
+  canvasPlugin,       // Canvas Neural Net (Synapse Builder) — muss vor generischen Plugins stehen
+  yoloPlugin,         // YOLO Object Detection (YOLOv5/v8/v9/v11)
   xlmRobertaPlugin,
   hfEncoderPlugin,
   // Zukünftige Plugins hier eintragen:
-  // bertPlugin,
   // whisperPlugin,
   // mistralPlugin,
 ];

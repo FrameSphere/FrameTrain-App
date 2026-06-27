@@ -59,7 +59,7 @@ describe('LEVEL_META', () => {
     expect(meta.color).toBeTruthy();
     expect(meta.bg).toBeTruthy();
     expect(meta.border).toBeTruthy();
-    expect(meta.emoji).toBeTruthy();
+    expect(meta.icon).toBeTruthy();
   });
 });
 

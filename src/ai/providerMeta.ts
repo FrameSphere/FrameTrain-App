@@ -2,7 +2,6 @@ import type { AIProvider } from '../contexts/AISettingsContext';
 
 export type ProviderMeta = {
   label: string;
-  emoji: string;
   needsKey: boolean;
   keyPlaceholder: string;
   keyHint: string;
@@ -14,7 +13,6 @@ export type ProviderMeta = {
 export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
   anthropic: {
     label: 'Claude (Anthropic)',
-    emoji: '🤖',
     needsKey: true,
     keyPlaceholder: 'sk-ant-api03-...',
     keyHint: 'Kostenlos testen: console.anthropic.com',
@@ -24,7 +22,6 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
   },
   openai: {
     label: 'GPT-4o (OpenAI)',
-    emoji: '🟢',
     needsKey: true,
     keyPlaceholder: 'sk-...',
     keyHint: 'platform.openai.com/api-keys',
@@ -34,7 +31,6 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
   },
   groq: {
     label: 'Groq',
-    emoji: '⚡',
     needsKey: true,
     keyPlaceholder: 'gsk_...',
     keyHint: 'console.groq.com',
@@ -44,10 +40,9 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
   },
   ollama: {
     label: 'Ollama (Lokal)',
-    emoji: '🦙',
     needsKey: false,
     keyPlaceholder: '',
-    keyHint: '✅ Kein Account nötig — ollama.com installieren',
+    keyHint: 'Kein Account nötig — ollama.com installieren',
     keyLink: 'https://ollama.com',
     models: ['llama3.2', 'llama3.1', 'mistral', 'gemma2', 'qwen2.5'],
     defaultModel: 'llama3.2',

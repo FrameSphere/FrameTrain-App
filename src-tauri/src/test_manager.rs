@@ -222,15 +222,40 @@ pub async fn start_test(
     let test_id = format!("test_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
     let model_path = get_version_path(&app_handle, &version_id)?;
 
-    // Dataset-Pfad aus DB
+    // Dataset-Pfad: user-scoped JSON first, SQLite als Fallback
+    let app_state = app_handle.state::<AppState>();
     let models_dir = get_models_dir(&app_handle)?;
     let dataset_path = {
-        let db_path = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
-        let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
-        let res: Result<String,_> = conn.query_row("SELECT file_path FROM datasets WHERE id = ?1", [&dataset_id], |r| r.get(0));
-        match res {
-            Ok(p) if !p.is_empty() => PathBuf::from(p),
-            _ => models_dir.join(&model_id).join("datasets").join(&dataset_id),
+        let fallback = || models_dir.join(&model_id).join("datasets").join(&dataset_id);
+        // 1. user-scoped Metadaten-JSON
+        let uid_res = app_state.db.lock().ok()
+            .and_then(|db| db.get_current_user_id());
+        if let Some(uid) = uid_res {
+            if let Ok(app_data) = app_handle.path().app_data_dir() {
+                let sanitized: String = uid.chars()
+                    .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+                let meta_file = app_data.join("datasets").join(&sanitized).join("datasets_metadata.json");
+                if let Ok(raw) = fs::read_to_string(&meta_file) {
+                    if let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&raw) {
+                        if let Some(entry) = list.iter().find(|e| e.get("id").and_then(|v| v.as_str()) == Some(&dataset_id)) {
+                            if let Some(sp) = entry.get("storage_path").and_then(|v| v.as_str()) {
+                                let pb = std::path::PathBuf::from(sp);
+                                if pb.exists() { pb } else { fallback() }
+                            } else { fallback() }
+                        } else { fallback() }
+                    } else { fallback() }
+                } else { fallback() }
+            } else { fallback() }
+        } else {
+            // 2. SQLite Fallback
+            let db_path = app_handle.path().app_data_dir()
+                .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
+            let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
+            let res: Result<String,_> = conn.query_row("SELECT file_path FROM datasets WHERE id = ?1", [&dataset_id], |r| r.get(0));
+            match res {
+                Ok(p) if !p.is_empty() => PathBuf::from(p),
+                _ => fallback(),
+            }
         }
     };
 

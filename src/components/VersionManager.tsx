@@ -31,6 +31,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // ============ Types ============
 
@@ -119,6 +120,7 @@ function VersionFilesPanel({ versionPath }: { versionPath: string }) {
   const [files, setFiles] = useState<VersionFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { t } = useLanguage();
 
   useEffect(() => {
     loadFiles();
@@ -142,7 +144,7 @@ function VersionFilesPanel({ versionPath }: { versionPath: string }) {
     return (
       <div className="flex items-center gap-2 px-3 py-4 text-xs text-gray-500">
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        Dateien werden geladen...
+        {t('versionManager.filesPanel.loading')}
       </div>
     );
   }
@@ -153,7 +155,7 @@ function VersionFilesPanel({ versionPath }: { versionPath: string }) {
         <div className="flex items-start gap-2 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
           <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
           <div>
-            <div className="text-xs font-medium text-red-300 mb-0.5">Dateien konnten nicht geladen werden</div>
+            <div className="text-xs font-medium text-red-300 mb-0.5">{t('versionManager.filesPanel.errorTitle')}</div>
             <div className="text-[10px] text-red-400/70 font-mono break-all">{error}</div>
           </div>
         </div>
@@ -167,7 +169,7 @@ function VersionFilesPanel({ versionPath }: { versionPath: string }) {
   if (files.length === 0) {
     return (
       <div className="px-3 py-4 text-xs text-gray-500 text-center">
-        Keine Dateien gefunden in diesem Verzeichnis
+        {t('versionManager.filesPanel.empty')}
       </div>
     );
   }
@@ -192,8 +194,13 @@ function VersionFilesPanel({ versionPath }: { versionPath: string }) {
         </div>
       ))}
       <div className="px-3 py-2 text-[10px] text-gray-600">
-        {files.filter(f => !f.is_dir).length} Datei{files.filter(f => !f.is_dir).length !== 1 ? 'en' : ''}
-        {files.filter(f => f.is_dir).length > 0 && `, ${files.filter(f => f.is_dir).length} Ordner`}
+        {files.filter(f => !f.is_dir).length === 1
+          ? t('versionManager.filesPanel.fileCount').replace('{count}', '1')
+          : t('versionManager.filesPanel.fileCountPlural').replace('{count}', String(files.filter(f => !f.is_dir).length))
+        }
+        {files.filter(f => f.is_dir).length > 0 && (
+          ', ' + t('versionManager.filesPanel.folderCount').replace('{count}', String(files.filter(f => f.is_dir).length))
+        )}
       </div>
     </div>
   );
@@ -230,6 +237,7 @@ function VersionsModal({
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportingVersion, setExportingVersion] = useState<ModelVersion | null>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
+  const { t } = useLanguage();
 
   const handleStartEdit = (version: ModelVersion) => {
     setEditingId(version.id);
@@ -256,7 +264,7 @@ function VersionsModal({
   };
 
   const handleDelete = async (versionId: string, versionName: string) => {
-    if (!confirm(`Möchtest du Version "${versionName}" wirklich löschen?`)) return;
+    if (!confirm(t('versionManager.versionsModal.deleteConfirm').replace('{name}', versionName))) return;
     setLoading(true);
     try {
       await onDelete(versionId);
@@ -302,7 +310,7 @@ function VersionsModal({
             <GitBranch className="w-6 h-6 text-purple-400" />
             <div>
               <h2 className="text-xl font-bold text-white">{model.name}</h2>
-              <p className="text-sm text-gray-400">{versions.length} Version{versions.length !== 1 ? 'en' : ''}</p>
+              <p className="text-sm text-gray-400">{versions.length === 1 ? t('versionManager.versionsModal.versionsCount').replace('{count}','1') : t('versionManager.versionsModal.versionsCountPlural').replace('{count}', String(versions.length))}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -310,7 +318,7 @@ function VersionsModal({
               onClick={onRefresh}
               disabled={loading}
               className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all disabled:opacity-50"
-              title="Aktualisieren"
+              title={t('versionManager.versionsModal.refreshTooltip')}
             >
               <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -384,7 +392,7 @@ function VersionsModal({
                         {version.is_root && (
                           <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded-full flex items-center gap-1">
                             <Star className="w-3 h-3" />
-                            Original
+                            {t('versionManager.versionsModal.originalBadge')}
                           </span>
                         )}
                       </div>
@@ -394,7 +402,7 @@ function VersionsModal({
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                       <div className="flex items-center gap-2 text-gray-400">
                         <FileBox className="w-4 h-4" />
-                        <span>{version.file_count} Dateien</span>
+                        <span>{t('versionManager.versionsModal.filesLabel').replace('{count}', String(version.file_count))}</span>
                       </div>
                       <div className="flex items-center gap-2 text-gray-400">
                         <HardDrive className="w-4 h-4" />
@@ -407,7 +415,7 @@ function VersionsModal({
                       {!version.is_root && (
                         <div className="flex items-center gap-2 text-gray-400">
                           <GitBranch className="w-4 h-4" />
-                          <span className="text-xs">v{version.version_number}</span>
+                          <span className="text-xs">{t('versionManager.versionsModal.versionLabel').replace('{n}', String(version.version_number))}</span>
                         </div>
                       )}
                     </div>
@@ -417,7 +425,7 @@ function VersionsModal({
                       <div className="mt-3 pt-3 border-t border-white/10">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                           <div>
-                            <div className="text-gray-500 mb-1">Train Loss</div>
+                            <div className="text-gray-500 mb-1">{t('versionManager.versionsModal.metricsTrainLoss')}</div>
                             <div className="text-white font-medium flex items-center gap-1">
                               <TrendingUp className="w-3 h-3 text-blue-400" />
                               {version.training_metrics.final_train_loss.toFixed(4)}
@@ -425,20 +433,20 @@ function VersionsModal({
                           </div>
                           {version.training_metrics.final_val_loss !== null && (
                             <div>
-                              <div className="text-gray-500 mb-1">Val Loss</div>
+                              <div className="text-gray-500 mb-1">{t('versionManager.versionsModal.metricsValLoss')}</div>
                               <div className="text-white font-medium">
                                 {version.training_metrics.final_val_loss.toFixed(4)}
                               </div>
                             </div>
                           )}
                           <div>
-                            <div className="text-gray-500 mb-1">Epochen</div>
+                            <div className="text-gray-500 mb-1">{t('versionManager.versionsModal.metricsEpochs')}</div>
                             <div className="text-white font-medium">
                               {version.training_metrics.total_epochs}
                             </div>
                           </div>
                           <div>
-                            <div className="text-gray-500 mb-1">Dauer</div>
+                            <div className="text-gray-500 mb-1">{t('versionManager.versionsModal.metricsDuration')}</div>
                             <div className="text-white font-medium flex items-center gap-1">
                               <Clock className="w-3 h-3 text-purple-400" />
                               {formatDuration(version.training_metrics.training_duration_seconds)}
@@ -462,7 +470,7 @@ function VersionsModal({
                           onClick={(e) => { e.stopPropagation(); handleExportClick(version); }}
                           disabled={loading}
                           className="p-2 rounded-lg text-gray-500 hover:text-green-400 hover:bg-green-500/10 transition-all disabled:opacity-50"
-                          title="Exportieren"
+                          title={t('versionManager.versionsModal.exportTooltip')}
                         >
                           <FolderDown className="w-4 h-4" />
                         </button>
@@ -470,7 +478,7 @@ function VersionsModal({
                           onClick={(e) => { e.stopPropagation(); handleStartEdit(version); }}
                           disabled={loading}
                           className="p-2 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all disabled:opacity-50"
-                          title="Umbenennen"
+                          title={t('versionManager.versionsModal.renameTooltip')}
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -479,7 +487,7 @@ function VersionsModal({
                             onClick={(e) => { e.stopPropagation(); handleDelete(version.id, version.version_name); }}
                             disabled={loading}
                             className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
-                            title="Löschen"
+                            title={t('versionManager.versionsModal.deleteTooltip')}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -500,7 +508,7 @@ function VersionsModal({
                   <div className="border-t border-white/10">
                     <div className="px-4 py-2 flex items-center gap-2 bg-white/[0.02]">
                       <FolderOpen className="w-3.5 h-3.5 text-gray-500" />
-                      <span className="text-xs font-medium text-gray-400">Dateien dieser Version</span>
+                      <span className="text-xs font-medium text-gray-400">{t('versionManager.versionsModal.filesSection')}</span>
                     </div>
                     <VersionFilesPanel versionPath={version.path} />
                   </div>
@@ -516,7 +524,7 @@ function VersionsModal({
             onClick={onClose}
             className={`w-full py-3 bg-gradient-to-r ${gradient} rounded-lg text-white font-medium hover:opacity-90 transition-all`}
           >
-            Schließen
+            {t('versionManager.versionsModal.closeButton')}
           </button>
         </div>
       </div>
@@ -530,7 +538,7 @@ function VersionsModal({
               <div className="flex items-center gap-3">
                 <FolderDown className="w-6 h-6 text-green-400" />
                 <div>
-                  <h3 className="text-lg font-bold text-white">Version exportieren</h3>
+                  <h3 className="text-lg font-bold text-white">{t('versionManager.exportModal.title')}</h3>
                   <p className="text-sm text-gray-400">{exportingVersion.version_name}</p>
                 </div>
               </div>
@@ -549,7 +557,7 @@ function VersionsModal({
             {/* Export Options */}
             <div className="p-6 space-y-4">
               <p className="text-gray-400 text-sm">
-                Wähle eine Export-Option für diese Version:
+                {t('versionManager.exportModal.description')}
               </p>
 
               {/* Local Download */}
@@ -562,8 +570,8 @@ function VersionsModal({
                   <Download className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1 text-left">
-                  <div className="font-semibold text-white">Lokal herunterladen</div>
-                  <div className="text-sm text-gray-400">Exportiere in den Downloads-Ordner</div>
+                  <div className="font-semibold text-white">{t('versionManager.exportModal.localTitle')}</div>
+                  <div className="text-sm text-gray-400">{t('versionManager.exportModal.localDesc')}</div>
                 </div>
                 {loading && <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />}
               </button>
@@ -578,12 +586,12 @@ function VersionsModal({
                 </div>
                 <div className="flex-1 text-left">
                   <div className="font-semibold text-white flex items-center gap-2">
-                    Auf SphereNet hochladen
+                    {t('versionManager.exportModal.sphereNetTitle')}
                     <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded-full">
-                      Bald verfügbar
+                      {t('versionManager.exportModal.sphereNetSoon')}
                     </span>
                   </div>
-                  <div className="text-sm text-gray-400">Teile dein Modell mit der Community</div>
+                  <div className="text-sm text-gray-400">{t('versionManager.exportModal.sphereNetDesc')}</div>
                 </div>
               </button>
             </div>
@@ -598,7 +606,7 @@ function VersionsModal({
                 disabled={loading}
                 className="w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-all disabled:opacity-50"
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
             </div>
           </div>
@@ -614,7 +622,7 @@ export default function VersionManager() {
   const { currentTheme } = useTheme();
   const { success, error, warning } = useNotification();
   const { setCurrentPageContent } = usePageContext();
-
+  const { t } = useLanguage();
   const [models, setModels] = useState<ModelWithVersions[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedModel, setSelectedModel] = useState<ModelWithVersions | null>(null);
@@ -632,7 +640,7 @@ export default function VersionManager() {
       '',
       '--- Seitenzweck ---',
       'Hier werden alle trainierten Modell-Versionen verwaltet.',
-      'Jede Trainingsrunde erstellt eine neue Version. Original-Modelle sind mit ⭐ markiert.',
+      'Jede Trainingsrunde erstellt eine neue Version. Original-Modelle sind als "Original" markiert.',
       '',
       '--- Verf\u00fcgbare Aktionen ---',
       '\u2022 Versionen anzeigen: Klick auf ein Modell \u2192 \u00d6ffnet Versions-\u00dcbersicht mit allen Trainingsst\u00e4nden',
@@ -643,7 +651,7 @@ export default function VersionManager() {
       '\u2022 Refresh-Button: Versionen nach Training neu laden',
       '',
       '--- Versionsstruktur ---',
-      '  Original (v0, ⭐): Das urspr\u00fcnglich importierte Modell, kann nicht gel\u00f6scht werden',
+      '  Original (v0): Das urspr\u00fcnglich importierte Modell, kann nicht gel\u00f6scht werden',
       '  v1, v2, v3...: Jede abgeschlossene Trainingsrunde erstellt eine neue Version',
       '  Versionen bauen aufeinander auf (Tree-Struktur)',
       '',
@@ -664,7 +672,7 @@ export default function VersionManager() {
       selectedModel && modelVersions.length > 0 ? [
         `Versionen (${modelVersions.length}):`,
         ...modelVersions.map(v => [
-          `  \u2022 ${v.is_root ? '⭐ ' : ''}"${v.version_name}" (v${v.version_number})`,
+          `  \u2022 ${v.is_root ? 'Original: ' : ''}"${v.version_name}" (v${v.version_number})`,
           v.training_metrics ? `    Loss: ${v.training_metrics.final_train_loss.toFixed(6)} | Epochen: ${v.training_metrics.total_epochs} | Steps: ${v.training_metrics.total_steps}` : '    (keine Trainings-Metriken)',
         ].join('\n'))
       ].join('\n') : '',
@@ -699,7 +707,7 @@ export default function VersionManager() {
       setModels(modelList);
     } catch (err: any) {
       console.error('Error loading models:', err);
-      error('Fehler beim Laden', String(err));
+      error(t('versionManager.notifications.loadError'), String(err));
     } finally {
       setLoading(false);
     }
@@ -711,7 +719,7 @@ export default function VersionManager() {
       setModelVersions(versions);
     } catch (err: any) {
       console.error('Error loading versions:', err);
-      error('Fehler beim Laden der Versionen', String(err));
+      error(t('versionManager.notifications.loadVersionsError'), ... [String(err)]);
       throw err;
     }
   };
@@ -735,13 +743,13 @@ export default function VersionManager() {
   const handleDeleteVersion = async (versionId: string) => {
     try {
       await invoke('delete_model_version', { versionId });
-      success('Version gelöscht', 'Die Version wurde erfolgreich entfernt.');
+      success(t('versionManager.notifications.deleteSuccess'), t('versionManager.notifications.deleteSuccessDetail'));
       if (selectedModel) {
         await loadVersions(selectedModel.id);
         await loadModels(); // Refresh model list to update counts
       }
     } catch (err: any) {
-      error('Löschen fehlgeschlagen', String(err));
+      error(t('versionManager.notifications.deleteFailed'), ... [String(err)]);
       throw err;
     }
   };
@@ -749,12 +757,12 @@ export default function VersionManager() {
   const handleRenameVersion = async (versionId: string, newName: string) => {
     try {
       await invoke('rename_model_version', { versionId, newName });
-      success('Version umbenannt', 'Der Name wurde erfolgreich geändert.');
+      success(t('versionManager.notifications.renameSuccess'), t('versionManager.notifications.renameSuccessDetail'));
       if (selectedModel) {
         await loadVersions(selectedModel.id);
       }
     } catch (err: any) {
-      error('Umbenennen fehlgeschlagen', String(err));
+      error(t('versionManager.notifications.renameFailed'), ... [String(err)]);
       throw err;
     }
   };
@@ -762,9 +770,9 @@ export default function VersionManager() {
   const handleExportVersion = async (versionId: string, versionName: string) => {
     try {
       const exportPath = await invoke<string>('export_model_version', { versionId });
-      success('Export erfolgreich', `Version "${versionName}" wurde nach ${exportPath} exportiert.`);
+      success(t('versionManager.notifications.exportSuccess'), t('versionManager.notifications.exportSuccessDetail').replace('{name}', versionName).replace('{path}', exportPath))
     } catch (err: any) {
-      error('Export fehlgeschlagen', String(err));
+      error(t('versionManager.notifications.exportFailed'), ... [String(err)]);
       throw err;
     }
   };
@@ -785,13 +793,13 @@ export default function VersionManager() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Versionen</h1>
-          <p className="text-gray-400 mt-1">Verwalte Modell-Versionen und Training-Verläufe</p>
+          <h1 className="text-3xl font-bold text-white">{t('versionManager.title')}</h1>
+          <p className="text-gray-400 mt-1">{t('versionManager.subtitle')}</p>
         </div>
         <button
           onClick={loadModels}
           className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-          title="Aktualisieren"
+          title={t('versionManager.versionsModal.refreshTooltip')}
         >
           <RefreshCw className="w-5 h-5" />
         </button>
@@ -807,8 +815,8 @@ export default function VersionManager() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/5 mb-4">
             <GitBranch className="w-8 h-8 text-gray-400" />
           </div>
-          <h3 className="text-xl font-semibold text-white mb-2">Keine Modelle vorhanden</h3>
-          <p className="text-gray-400">Füge zuerst Modelle auf der Modelle-Seite hinzu.</p>
+          <h3 className="text-xl font-semibold text-white mb-2">{t('versionManager.emptyState.title')}</h3>
+          <p className="text-gray-400">{t('versionManager.emptyState.description')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -838,7 +846,7 @@ export default function VersionManager() {
               <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
                 <div className="flex items-center gap-2 text-gray-400">
                   <GitBranch className="w-4 h-4" />
-                  <span>{model.version_count} Version{model.version_count !== 1 ? 'en' : ''}</span>
+                  <span>{model.version_count === 1 ? t('versionManager.modelCard.versionsLabel').replace('{count}','1') : t('versionManager.modelCard.versionsLabelPlural').replace('{count}', String(model.version_count))}</span>
                 </div>
                 <div className="flex items-center gap-2 text-gray-400">
                   <HardDrive className="w-4 h-4" />
@@ -862,7 +870,7 @@ export default function VersionManager() {
                 className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white font-medium hover:opacity-90 transition-all`}
               >
                 <GitBranch className="w-4 h-4" />
-                Versionen anzeigen
+                {t('versionManager.modelCard.showVersionsButton')}
               </button>
             </div>
           ))}

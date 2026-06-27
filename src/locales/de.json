@@ -1,0 +1,2482 @@
+{
+  "sidebar": {
+    "tagline": "Local ML Training",
+    "nav": {
+      "models": "Modelle",
+      "datasets": "Datensätze",
+      "training": "Training",
+      "analysis": "Analyse",
+      "tests": "Tests",
+      "laboratory": "Laboratory",
+      "synapse": "Synapse Builder",
+      "versions": "Versionen"
+    },
+    "settings": "Einstellungen",
+    "logout": "Abmelden"
+  },
+  "login": {
+    "tagline": "Lokales ML-Training auf deinem Desktop",
+    "title": "Anmelden",
+    "apiKey": {
+      "label": "API-Key",
+      "hint": "Dein API-Key aus dem FrameTrain Dashboard"
+    },
+    "password": {
+      "label": "Passwort",
+      "placeholder": "Dein Passwort",
+      "hintLabel": "Was muss ich hier eingeben?",
+      "tooltipTitle": "Welches Passwort?",
+      "tooltipEmail": "Dein normales FrameTrain-Passwort.",
+      "tooltipOAuthLabel": "Google / GitHub:",
+      "tooltipOAuth": "Das Desktop-Passwort, das du im Dashboard unter \"Desktop-App Passwort\" gesetzt hast."
+    },
+    "submit": "Anmelden",
+    "submitting": "Authentifiziere...",
+    "footer": "Sichere Authentifizierung \u00fcber FrameTrain-Server",
+    "dashboardLink": "Zum Dashboard \u2192 Desktop-App Passwort setzen",
+    "errors": {
+      "apiKeyInvalid": "API-Key muss mit \"ft_\" beginnen und mindestens 24 Zeichen lang sein",
+      "passwordShort": "Passwort muss mindestens 6 Zeichen lang sein",
+      "loginFailed": "Anmeldung fehlgeschlagen"
+    }
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "subtitle": "Verwalte dein Konto und App-Einstellungen",
+    "tabs": {
+      "account": "Konto",
+      "appearance": "Darstellung",
+      "language": "Sprache",
+      "notifications": "Benachrichtigungen",
+      "aiAssistant": "KI-Assistent",
+      "system": "System",
+      "updates": "Updates",
+      "docs": "Dokumentation",
+      "support": "Support",
+      "about": "Über"
+    },
+    "account": {
+      "title": "Benutzerinformationen",
+      "email": "E-Mail",
+      "userId": "User ID",
+      "copy": "Kopieren",
+      "copied": "In Zwischenablage kopiert!",
+      "copyFailed": "Kopieren fehlgeschlagen",
+      "apiKeySection": {
+        "title": "API-Key",
+        "label": "Dein API-Key",
+        "show": "Anzeigen",
+        "hide": "Verbergen",
+        "warning": "Teile deinen API-Key niemals mit anderen. Er gewährt vollen Zugriff auf deinen Account."
+      },
+      "communityName": {
+        "title": "Community-Name",
+        "subtitle": "Dein öffentlicher Name in der Open Script Library",
+        "savedMsg": "Community-Name gespeichert. Künftige Uploads werden als @{name} veröffentlicht.",
+        "firstTime": "Lege einmalig deinen Community-Namen fest, um Skripte in die Open Library hochzuladen.",
+        "change": "Ändere deinen Community-Namen — alle künftigen Uploads verwenden den neuen Namen.",
+        "placeholder": "z. B. ai_enthusiast",
+        "save": "Speichern",
+        "saving": "Wird gespeichert...",
+        "hint": "Nur Buchstaben, Zahlen, Unterstriche, Bindestriche und Punkte erlaubt (max. 40 Zeichen).",
+        "publicLabel": "Dein öffentlicher Name in der Open Library",
+        "saveError": "Fehler beim Speichern: {error}"
+      },
+      "management": {
+        "title": "Kontoverwaltung",
+        "openDashboard": "Dashboard öffnen",
+        "changePassword": "Passwort ändern",
+        "logout": "Abmelden"
+      },
+      "duplicateName": {
+        "title": "Name bereits vergeben",
+        "subtitle": "Dieser Community-Name ist schon in Verwendung.",
+        "message": "Der Name @{name} wird bereits von jemandem anderem verwendet.",
+        "tip": "Versuche einen anderen Community-Namen, z. B. mit Zahlen oder Unterstrichen.",
+        "retry": "Einen anderen Namen versuchen"
+      }
+    },
+    "appearance": {
+      "title": "Farbschema",
+      "subtitle": "Wähle dein bevorzugtes Farbschema für die Desktop-App",
+      "preview": "Vorschau",
+      "exampleButton": "Beispiel Button",
+      "exampleSubtitle": "So sieht dein Theme aus",
+      "themeChanged": "Theme erfolgreich geändert!"
+    },
+    "language": {
+      "title": "Sprache / Language",
+      "subtitle": "Änderungen gelten sofort — kein Neustart nötig.",
+      "changed": "Sprache geändert — {lang}",
+      "moreComingSoon": "Weitere Sprachen folgen",
+      "moreComingSoonDesc": "Aktuell unterstützt FrameTrain Deutsch und Englisch. Weitere Sprachen werden in zukünftigen Versionen ergänzt."
+    },
+    "notifications": {
+      "title": "Desktop-Benachrichtigungen",
+      "trainingComplete": "Training abgeschlossen",
+      "trainingCompleteDesc": "Benachrichtigung wenn Training fertig ist",
+      "errors": "Fehler und Warnungen",
+      "errorsDesc": "Benachrichtigung bei Problemen",
+      "updates": "Updates verfügbar",
+      "updatesDesc": "Benachrichtigung über neue Versionen"
+    },
+    "ai": {
+      "title": "KI-Assistent aktivieren",
+      "subtitle": "Globale Einstellung für den KI-Coach in der App",
+      "active": "KI-Assistent ist aktiv und verfügbar",
+      "inactive": "KI-Assistent ist deaktiviert",
+      "providerTitle": "KI-ANBIETER WÄHLEN",
+      "noKeyNeeded": "Kein API-Key nötig",
+      "keyNeeded": "API-Key nötig",
+      "apiKeyTitle": "API-Key",
+      "getKey": "Key holen ↗",
+      "keyLocalOnly": "Key wird nur lokal gespeichert, nie an FrameTrain übertragen.",
+      "model": "Modell",
+      "ollamaTitle": "Ollama-Konfiguration",
+      "ollamaModelLabel": "Modell-Name (muss lokal installiert sein)",
+      "ollamaPopular": "Beliebte Modelle",
+      "ollamaInstallTitle": "Ollama noch nicht installiert?",
+      "ollamaInstallStep1": "1. ",
+      "ollamaInstallStep1Suffix": " - kostenlos herunterladen",
+      "ollamaInstallStep2": "2. Im Terminal:",
+      "ollamaInstallCommand": "ollama pull llama3.2",
+      "ollamaInstallStep3": "3. Ollama läuft dann im Hintergrund",
+      "globalNote": "Diese Einstellungen gelten global",
+      "globalNoteDesc": "Der KI-Anbieter und das Modell werden für alle KI-Funktionen verwendet: Quick Chat, Training-Analysen und Labor-Assistenz.",
+      "show": "Anzeigen",
+      "hide": "Verbergen"
+    },
+    "system": {
+      "packagesTitle": "Python-Pakete (Training)",
+      "installMissing": "Fehlende installieren",
+      "recheck": "Neu prüfen",
+      "statusNotLoaded": "Status noch nicht geladen.",
+      "installRunning": "Installation läuft…",
+      "installMissingTooltip": "Installiert fehlende Python-Pakete via pip",
+      "hardwareTitle": "Hardware & Beschleunigung",
+      "cudaAvailable": "Verfügbar",
+      "cudaUnavailable": "Nicht verfügbar",
+      "antiSleepTitle": "Anti-Sleep Status",
+      "antiSleepActive": "Aktiv — Gerät bleibt während Training wach",
+      "antiSleepInactive": "Inaktiv — kein Training läuft",
+      "systemReady": "System ist bereit für KI-Trainings",
+      "systemNotReady": "System nicht bereit — Pakete fehlen",
+      "depsInstalled": "Dependencies installiert",
+      "installFailed": "Installation fehlgeschlagen",
+      "pipStarting": "pip wird gestartet…",
+      "installed": "installiert",
+      "missing": "fehlt"
+    },
+    "updates": {
+      "checking": "Auf Updates prüfen...",
+      "upToDate": "Du bist auf dem neuesten Stand!",
+      "updateAvailable": "Neues Update verfügbar",
+      "error": "Update-Prüfung fehlgeschlagen",
+      "recheck": "Neu prüfen",
+      "rechecking": "Wird geprüft...",
+      "installed": "Installiert",
+      "available": "Verfügbar",
+      "updateMsg": "Eine neuere Version ist verfügbar! Klick auf \"Zu GitHub Releases\" um die neue Version herunterzuladen.",
+      "errorMsg": "Konnte nicht auf Updates prüfen. Prüfe deine Internetverbindung oder klick \"Neu prüfen\".",
+      "downloadTitle": "Neue Version herunterladen",
+      "downloadDesc": "Besuche die GitHub Releases-Seite, um die neueste Version von FrameTrain herunterzuladen.",
+      "githubReleases": "Zu GitHub Releases",
+      "installTitle": "Update-Installation",
+      "step1": "1. Lade die neue Version herunter",
+      "step2": "2. Deinstalliere die alte FrameTrain App komplett:",
+      "step3": "3. Installiere die neue Version",
+      "step4": "4. Starte FrameTrain neu (alle Einstellungen und Daten bleiben erhalten)",
+      "uninstallMac": "macOS: Applications → {app} → Move to Trash",
+      "uninstallWindows": "Windows: Control Panel → Uninstall",
+      "uninstallLinux": "Linux: sudo apt remove frametrain oder entsprechend für deine Distribution",
+      "autoUpdateTitle": "Automatische Update-Benachrichtigung",
+      "autoUpdateDesc": "FrameTrain prüft automatisch beim Start auf neue Versionen. Wenn ein Update verfügbar ist, wird dir ein Modal angezeigt. Du kannst auch hier jederzeit manuell prüfen."
+    },
+    "docs": {
+      "title": "FrameTrain Dokumentation",
+      "subtitle": "Lerne alles über FrameTrain – von den Grundlagen bis zu erweiterten Funktionen.",
+      "fullDocsTitle": "Komplette Dokumentation",
+      "fullDocsDesc": "Vollständige Anleitung mit allen Features, Tutorials und Best Practices",
+      "guideTitle": "KI-Training Guide",
+      "guideDesc": "Schritt-für-Schritt Anleitung zum Training deines eigenen KI-Modells",
+      "tipsTitle": "Schnelle Tipps",
+      "tip1": "Starte mit dem Training Guide um ein neues Modell zu trainieren",
+      "tip2": "Nutze die Dokumentation zum Troubleshooting von Fehlern",
+      "tip3": "In den Docs findest du Video-Tutorials und Code-Beispiele",
+      "footerNote": "Die Dokumentation wird regelmäßig aktualisiert.",
+      "footerQuestion": "Haben Sie Fragen? Schau in den Docs vorbei!"
+    },
+    "support": {
+      "title": "Support",
+      "myTickets": "Meine Tickets",
+      "newTicket": "Neues Ticket",
+      "newTicketTitle": "Neues Support-Ticket",
+      "subject": "Betreff",
+      "subjectPlaceholder": "Kurze Beschreibung deines Problems...",
+      "message": "Nachricht",
+      "messagePlaceholder": "Beschreibe dein Anliegen so detailliert wie möglich...",
+      "submit": "Ticket einreichen",
+      "submitting": "Wird gesendet...",
+      "submitSuccess": "Ticket erfolgreich eingereicht!",
+      "submitError": "Fehler beim Einreichen des Tickets",
+      "noTickets": "Du hast noch keine Support-Tickets.",
+      "noTicketsHint": "Hast du ein Problem oder eine Frage? Wir helfen gerne.",
+      "createFirst": "Erstes Ticket erstellen",
+      "yourTickets": "Deine Tickets",
+      "back": "← Zurück zur Übersicht",
+      "noMessages": "Noch keine Nachrichten",
+      "sendPlaceholder": "Nachricht schreiben... (Strg+Enter zum Senden)",
+      "sendFailed": "Senden fehlgeschlagen",
+      "fillRequired": "Bitte Betreff und Nachricht ausfüllen",
+      "ticketClosed": "Dieses Ticket ist {status} – du kannst keine weitere Nachricht schreiben.",
+      "statusOpen": "Offen",
+      "statusInProgress": "In Bearbeitung",
+      "statusResolved": "Gelöst",
+      "statusClosed": "Geschlossen",
+      "sender": "Du",
+      "senderSupport": "Support",
+      "ticketCount": "{count} Ticket",
+      "ticketCountPlural": "{count} Tickets",
+      "userIdNote": "Deine User-ID wird automatisch mitgeschickt."
+    },
+    "about": {
+      "versionLabel": "Version {version}",
+      "subtitle": "Trainiere Machine Learning Modelle lokal auf deinem Computer mit der Leistung von PyTorch.",
+      "desktopTitle": "FrameTrain Desktop",
+      "supportedModels": "Unterstützte Modelle (Training)",
+      "supportedModelsDesc": "Aktuell unterstützt die Train Engine seq_classification für diese HuggingFace model_type-Familien:",
+      "links": "Links",
+      "website": "Website",
+      "docs": "Dokumentation",
+      "github": "GitHub",
+      "copyright": "© 2025 FrameTrain. Alle Rechte vorbehalten."
+    }
+  },
+  "globalTrainingProgress": {
+    "tooltip": "Zum Training",
+    "statusRunning": "Training l\u00e4uft\u2026",
+    "statusCompleted": "Training abgeschlossen",
+    "statusFailed": "Training fehlgeschlagen",
+    "statusStopped": "Training gestoppt"
+  },
+
+  "firstLaunch": {
+    "language": {
+      "headline": "Willkommen bei FrameTrain",
+      "sub": "W\u00e4hle deine Sprache, um zu beginnen.",
+      "btn": "Weiter",
+      "selectedLabel": "Ausgew\u00e4hlt / Selected"
+    },
+
+    "python": {
+      "setupTitle": "FrameTrain wird eingerichtet",
+      "setupSubtitle": "Erforderliche Python-Pakete werden installiert...",
+      "checkingTitle": "Abh\u00e4ngigkeiten werden gepr\u00fcft",
+      "checkingDesc": "Python-Pakete werden \u00fcberpr\u00fcft...",
+      "installingTitle": "Python-Pakete werden installiert",
+      "installingDesc": "Dies kann 5\u201310 Minuten dauern...",
+      "installingPackage": "Installing...",
+      "installDontClose": "Bitte die App w\u00e4hrend der Installation nicht schlie\u00dfen",
+      "errorTitle": "Setup konnte nicht abgeschlossen werden",
+      "errorSubtitle": "Fehler bei der Python-Konfiguration",
+      "nextSteps": "N\u00e4chste Schritte:",
+      "step1": "Installiere Python 3.8 oder neuer",
+      "step2": "Starte die App nach der Installation neu",
+      "step3": "Falls weiterhin Fehler auftreten, \u00fcberpr\u00fcfe die Logs",
+      "restart": "App neustarten",
+      "pythonNotInstalled": "Python ist nicht installiert oder nicht im PATH verf\u00fcgbar.\n\nL\u00f6sungen:\n1. Installiere Python 3.8+ von python.org\n2. Oder nutze einen Package Manager:\n   - macOS: brew install python3\n   - Windows: choco install python\n   - Linux: apt install python3\n\nNach der Installation, bitte starten Sie die App neu."
+    },
+
+    "plugins": {
+      "title": "Willkommen bei FrameTrain",
+      "subtitle": "W\u00e4hle die KI-F\u00e4higkeiten, die installiert werden sollen",
+      "builtInBadge": "Built-in",
+      "skip": "\u00dcberspringen",
+      "install": "Ausgew\u00e4hlte installieren ({count})",
+      "selected": "Plugins ausgew\u00e4hlt",
+      "downloadSize": "Download-Gr\u00f6\u00dfe",
+      "installTime": "Installationszeit",
+      "footerNote": "Weitere Plugins k\u00f6nnen sp\u00e4ter in den Einstellungen installiert werden",
+      "installing": "Abh\u00e4ngigkeiten werden installiert",
+      "installingDesc": "KI/ML-Pakete werden installiert. PyTorch allein ist mehrere GB gro\u00df.",
+      "estimatedTime": "\u23f1\ufe0f Gesch\u00e4tzte Zeit: 10\u201330 Minuten je nach Internetgeschwindigkeit",
+      "doNotClose": "\u23f8\ufe0f Die App w\u00e4hrend der Installation NICHT schlie\u00dfen.",
+      "waitNote": "Falls der Browser \"Seite antwortet nicht\" anzeigt, bitte noch etwas warten \u2014 die Installation l\u00e4uft im Hintergrund weiter.",
+      "progressComplete": "Abgeschlossen",
+      "progressFailed": "Fehlgeschlagen",
+      "progressInstalling": "Wird installiert"
+    },
+
+    "pluginRegistry": {
+      "seq_classification": {
+        "name": "Text-Klassifikation (HuggingFace)",
+        "description": "Trainiert encoder-basierte Modelle (XLM-RoBERTa, BERT, DeBERTa) f\u00fcr Textklassifikation, Sentiment-Analyse, Spam-Filter u.v.m."
+      },
+      "yolo": {
+        "name": "YOLO Objekterkennung (Ultralytics)",
+        "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle f\u00fcr Bounding-Box-Erkennung. Ben\u00f6tigt Ultralytics."
+      }
+    }
+  },
+  "aiCoach": {
+    "openTitle": "KI-Coach öffnen",
+    "chatHistory": "Chatverläufe",
+    "newChat": "Neuer Chat",
+    "newChatStart": "Neuen Chat starten",
+    "back": "Zurück",
+    "noChats": "Noch keine Chats",
+    "noChatsHint": "Starte einen neuen Chat und schreibe eine Nachricht.",
+    "messagesCount": "Nachrichten",
+    "greeting": "Hallo! Ich bin dein KI-Coach.",
+    "greetingWithContext": "Ich kenne deinen aktuellen Seiteninhalt und helfe dir gerne weiter.",
+    "greetingNoContext": "Stelle mir eine Frage zu FrameTrain.",
+    "loadedContext": "Geladener Kontext",
+    "inputPlaceholder": "Frage stellen... (Enter senden)",
+    "thinking": "Denkt nach...",
+    "hadThought": "Hat nachgedacht",
+    "steps": "Schritte",
+    "thinkingAnalyze": "Seite analysieren",
+    "thinkingProcess": "Kontext verarbeiten",
+    "thinkingGenerate": "Antwort generieren",
+    "disabledError": "KI-Assistent ist deaktiviert. Bitte in Einstellungen aktivieren.",
+    "apiKeyMissing": "API-Key fehlt. Bitte in Einstellungen konfigurieren.",
+    "unknownError": "Unbekannter Fehler",
+    "deleteChat": "Chat löschen",
+    "justNow": "Gerade eben",
+    "minutesAgo": "vor {n} Min.",
+    "hoursAgo": "vor {n} Std.",
+    "daysAgo": "vor {n} Tag",
+    "daysAgoPlural": "vor {n} Tagen",
+    "currentArea": "Aktueller Bereich"
+  },
+  "modelManager": {
+    "title": "Modelle",
+    "subtitle": "Verwalte lokale und HuggingFace-Modelle",
+    "refreshTooltip": "Aktualisieren",
+    "addButton": "Modell hinzuf\u00fcgen",
+    "noPlugin": "Kein Plugin",
+    "loading": "Wird geladen...",
+    "noModels": "Keine Modelle vorhanden",
+    "noModelsHint": "Füge dein erstes Modell hinzu, um mit dem Training zu beginnen.",
+    "local": "Lokaler Ordner",
+    "huggingface": "Hugging Face",
+    "hfDownload": "Modell herunterladen",
+    "defaultModelName": "Modell",
+    "emptyState": {
+      "title": "Keine Modelle vorhanden",
+      "description": "F\u00fcge dein erstes Modell hinzu, um mit dem Training zu beginnen.",
+      "addButton": "Erstes Modell hinzuf\u00fcgen"
+    },
+    "card": {
+      "sourceHuggingFace": "Hugging Face",
+      "sourceLocal": "Lokal",
+      "sourceSynapse": "Synapse Builder",
+      "deleteTooltip": "L\u00f6schen",
+      "pluginLabel": "Plugin-Erkennung:",
+      "filesLabel": "{count} Dateien",
+      "viewOnHF": "Auf HuggingFace ansehen"
+    },
+    "deleteDialog": {
+      "title": "Modell l\u00f6schen?",
+      "description": "\u201e{name}\u201c und alle zugeh\u00f6rigen Versionen, Datens\u00e4tze und Trainingsdaten werden unwiderruflich gel\u00f6scht.",
+      "cancelButton": "Abbrechen",
+      "confirmButton": "L\u00f6schen"
+    },
+    "importModal": {
+      "title": "Modell hinzuf\u00fcgen",
+      "tabLocal": "Lokaler Ordner",
+      "tabHuggingFace": "Hugging Face",
+      "local": {
+        "dropzoneIdle": "Modell-Ordner hierher ziehen",
+        "dropzoneDragging": "Ordner hier ablegen",
+        "dropzoneSubtitle": "oder Ordner manuell ausw\u00e4hlen",
+        "browseButton": "Ordner durchsuchen",
+        "browseFolderTitle": "Modell-Ordner ausw\u00e4hlen",
+        "folderSelectedTitle": "Ordner ausgew\u00e4hlt",
+        "folderFilesSummary": "{files} Dateien \u00b7 {size}",
+        "noModelFilesWarning": "Keine Standard-Modelldateien erkannt",
+        "changeFolderLink": "Anderen Ordner w\u00e4hlen",
+        "nameLabel": "Modellname",
+        "namePlaceholder": "z.\u00a0B. xlm-roberta-base",
+        "importButton": "Modell importieren",
+        "importingButton": "Importiere\u2026"
+      },
+      "hf": {
+        "searchLabel": "Modell suchen",
+        "searchPlaceholder": "z.B. xlm-roberta, bert, mistral\u2026",
+        "searchHint": "Mindestens 2 Zeichen eingeben",
+        "resultsCount": "{count} Modelle gefunden",
+        "viewOnHF": "Auf HuggingFace ansehen",
+        "localNameLabel": "Lokaler Name",
+        "localNamePlaceholder": "Name f\u00fcr die lokale Speicherung",
+        "downloadButton": "Modell herunterladen",
+        "downloadNote": "Download-Dauer h\u00e4ngt von der Modellgr\u00f6\u00dfe ab",
+        "cancelDownload": "Download abbrechen",
+        "preparingFile": "Wird vorbereitet\u2026",
+        "fileProgress": "Datei {current} von {total}",
+        "speedLabel": "Geschwindigkeit",
+        "elapsedLabel": "Verstrichene Zeit",
+        "remainingLabel": "Verbleibend"
+      }
+    },
+    "notifications": {
+      "loadError": "Fehler beim Laden",
+      "validationWarning": "Kein g\u00fcltiges Modell",
+      "validationWarningDetail": "Der Ordner enth\u00e4lt keine erkennbaren Modell-Dateien.",
+      "validationError": "Validierungsfehler",
+      "missingFields": "Fehlende Angaben",
+      "missingFieldsLocal": "Ordner und Name werden ben\u00f6tigt.",
+      "missingFieldsHF": "Modell und Name werden ben\u00f6tigt.",
+      "importSuccess": "Modell importiert!",
+      "importSuccessDetail": "\u201e{name}\u201c wurde erfolgreich hinzugef\u00fcgt.",
+      "importError": "Import fehlgeschlagen",
+      "downloadSuccess": "Download abgeschlossen!",
+      "downloadSuccessDetail": "\u201e{name}\u201c wurde heruntergeladen.",
+      "downloadError": "Download fehlgeschlagen",
+      "cancelInfo": "Abgebrochen",
+      "cancelInfoDetail": "Der Download wurde abgebrochen. Unvollst\u00e4ndige Dateien werden gel\u00f6scht.",
+      "dragDropInfo": "Drag & Drop",
+      "dragDropInfoDetail": "Bitte nutze den \u201eOrdner durchsuchen\u201c-Button.",
+      "deleteSuccess": "Gel\u00f6scht",
+      "deleteSuccessDetail": "\u201e{name}\u201c wurde entfernt.",
+      "deleteFailed": "L\u00f6schen fehlgeschlagen"
+    }
+  },
+  "diffViewer": {
+    "title": "Code Änderungen",
+    "removedLines": "{count} Zeilen",
+    "addedLines": "{count} Zeilen",
+    "changesCount": "{count} Änderung",
+    "changesCountPlural": "{count} Änderungen",
+    "appliedCount": "{count} Übernommen",
+    "readyCount": "{count} bereit zur Übernahme",
+    "allApplied": "Alle Änderungen übernommen",
+    "closeButton": "Schließen",
+    "applyAllButton": "Alle übernehmen",
+    "copyTooltip": "Neue Version kopieren",
+    "removeLabel": "Entfernen ({count} Zeilen)",
+    "addLabel": "Hinzufügen ({count} Zeilen)",
+    "appliedLabel": "Übernommen",
+    "failedLabel": "Text nicht gefunden",
+    "applyButton": "Übernehmen"
+  },
+
+  "devTrainPanel": {
+    "infoBanner": {
+      "title": "Dev Train Mode",
+      "description": "Eigenes Python-Skript mit vollem Zugriff auf alle Pfade. Gleiche Live-Loss-Kurven wie beim Standard-Training."
+    },
+    "paths": {
+      "toggleLabel": "Pfade konfigurieren",
+      "modelTitle": "Modell",
+      "modelPathLabel": "Modellpfad",
+      "versionTitle": "Version",
+      "versionFallback": "Keine Version",
+      "datasetTitle": "Dataset",
+      "datasetPathLabel": "Dataset-Pfad",
+      "outputTitle": "Output",
+      "outputPathLabel": "Ausgabepfad",
+      "notSet": "nicht gesetzt",
+      "copyTooltip": "Kopieren",
+      "copied": "Kopiert!"
+    },
+    "toolbar": {
+      "unsavedChangesTooltip": "Ungespeicherte Änderungen",
+      "closeFileTooltip": "Datei schließen",
+      "saveTooltip": "Speichern",
+      "maximizeTooltip": "Vollbild",
+      "minimizeTooltip": "Verkleinern",
+      "noDocument": "Kein Dokument",
+      "searchPlaceholder": "Suchen…",
+      "prevSearchTooltip": "Vorheriges (Shift+Enter)",
+      "nextSearchTooltip": "Nächstes (Enter)",
+      "closeSearchTooltip": "Schließen (Esc)",
+      "newFileButton": "Neue Datei",
+      "loadFileButton": "Datei laden",
+      "openLibraryButton": "Open Library",
+      "saveButton": "Speichern (⌘S)",
+      "libraryButton": "Bibliothek",
+      "aiDisabledTitle": "KI nicht aktiviert",
+      "aiDisabledDetail": "Bitte aktiviere die KI zuerst in den Einstellungen.",
+      "aiDisabledTooltip": "KI nicht konfiguriert – in den Einstellungen aktivieren",
+      "aiButton": "KI",
+      "findTooltip": "Suchen (Cmd/Ctrl+F)",
+      "stopButton": "Stopp",
+      "runButton": "Training starten"
+    },
+    "emptyState": {
+      "description": "Öffne oder erstelle eine Datei um zu starten",
+      "newFile": "Neue Datei",
+      "newFileHint": "Tippe ! + Leertaste für Template",
+      "loadFile": "Datei laden",
+      "loadFileHint": "Aus deiner Bibliothek",
+      "openLib": "Open Library",
+      "openLibHint": "Community-Skripte"
+    },
+    "editor": {
+      "noDocument": "Kein Dokument",
+      "fileName": "train.py",
+      "unsavedChangesTooltip": "Ungespeicherte \u00c4nderungen",
+      "closeTooltip": "Datei schlie\u00dfen",
+      "saveTooltip": "Speichern",
+      "maximizeTooltip": "Vollbild",
+      "minimizeTooltip": "Verkleinern",
+      "saveButton": "Speichern (\u2318S)",
+      "libraryButton": "Bibliothek",
+      "openLibraryButton": "Open Library",
+      "aiButton": "KI",
+      "searchButton": "\u2318F",
+      "newFileButton": "Neue Datei",
+      "loadFileButton": "Datei laden",
+      "stopButton": "Stopp",
+      "runButton": "Training starten",
+      "searchPlaceholder": "Suchen\u2026",
+      "emptyTitle": "\u00d6ffne oder erstelle eine Datei um zu starten",
+      "emptyNewFile": "Neue Datei",
+      "emptyNewFileHint": "Tippe ! + Leertaste f\u00fcr Template",
+      "emptyLoadFile": "Datei laden",
+      "emptyLoadFileHint": "Aus deiner Bibliothek",
+      "emptyOpenLib": "Open Library",
+      "emptyOpenLibHint": "Community-Skripte",
+      "aiNotEnabled": "KI nicht aktiviert",
+      "aiNotEnabledDetail": "Bitte aktiviere die KI zuerst in den Einstellungen.",
+      "noModelForTemplate": "Kein Modell",
+      "noModelForTemplateDetail": "Bitte w\u00e4hle erst ein Modell aus, um ein Template zu generieren."
+    },
+
+    "progress": {
+      "running": "Training l\u00e4uft\u2026",
+      "statusLabel": "Status: {status}",
+      "epochLabel": "Epoch {current}/{total}",
+      "trainLossLabel": "Train Loss",
+      "valLossLabel": "Val Loss",
+      "lrLabel": "LR",
+      "lossHistory": "Loss-Verlauf",
+      "outputLabel": "Ausgabe",
+      "waitingForOutput": "Warte auf Python-Output\u2026",
+      "trainingStarted": "\ud83d\ude80 Training gestartet (Job: {id})...\n",
+      "trainingComplete": "\u2705 Training abgeschlossen!",
+      "trainingStopped": "\u23f9\ufe0f  Training gestoppt."
+    },
+
+    "saveDialog": {
+      "title": "Skript speichern",
+      "description": "Gib einen Namen f\u00fcr dein Skript ein. Es wird dann in der Bibliothek gespeichert.",
+      "placeholder": "z.B. Mein Trainings-Skript",
+      "saveButton": "Speichern",
+      "cancelButton": "Abbrechen"
+    },
+
+    "library": {
+      "title": "Skript-Bibliothek",
+      "empty": "Noch keine Skripte gespeichert.",
+      "loadButton": "Laden",
+      "saveCurrentButton": "Aktuelles Skript speichern",
+      "namePlaceholder": "Skript-Name\u2026"
+    },
+
+    "aiSidebar": {
+      "title": "Code Assistant",
+      "autoBadge": "Auto",
+      "historyTooltip": "Chat-Verlauf",
+      "newChatTooltip": "Neuer Chat",
+      "historyTitle": "Chat-Verlauf",
+      "newChatButton": "Neuer Chat",
+      "noChats": "Noch keine gespeicherten Chats.",
+      "messagesCount": "{count} Nachrichten",
+      "continueButton": "Fortsetzen",
+      "sessionSuffix": " (Fortgesetzt)",
+      "readonlyBadge": "Lesemodus",
+      "readonlyHint": "Lesemodus \u2013 Chat nicht aktiv",
+      "sendHint": "Enter = senden \u00b7 Shift+Enter = neue Zeile",
+      "inputPlaceholder": "Ziel / Problem / gew\u00fcnschte \u00c4nderung\u2026",
+      "readonlyPlaceholder": "Zum Schreiben neuen Chat starten \u2192 \u25a1 oben rechts",
+      "startNewChatButton": "Neuen Chat starten",
+      "replaceCodeButton": "Ersetzen",
+      "editChange": "\u00c4nderung {n}",
+      "undoButton": "R\u00fckg\u00e4ngig",
+      "viewDiffLink": "\u2192 Diff ansehen",
+      "editSummaryReady": "Bereit:",
+      "applyButton": "\u00dcbernehmen",
+      "detailsButton": "Details",
+      "suggestions": {
+        "fixError": "Fehler beheben (Stacktrace)",
+        "paths": "Pfade korrekt nutzen (DATASET_PATH/OUTPUT_PATH)",
+        "performance": "Performance / Stabilit\u00e4t verbessern"
+      },
+      "emptySidebarHint": "Beschreibe Ziel/Problem \u2014 ich liefere direkt Edits oder einen Rewrite."
+    },
+
+    "errorModal": {
+      "title": "Training fehlgeschlagen",
+      "hintLabel": "\ud83d\udca1 Hinweis:",
+      "errorLabel": "Fehler-Meldung:",
+      "detailsLabel": "Details:",
+      "copyButton": "Fehler kopieren",
+      "copied": "Kopiert!",
+      "sendToFrameTrainButton": "An FrameTrain senden",
+      "sendingButton": "Wird gesendet\u2026",
+      "sentButton": "Gesendet!",
+      "sendToAIButton": "An KI schicken",
+      "closeButton": "Schlie\u00dfen",
+      "errorCategories": {
+        "memory":   { "title": "\ud83e\udde0 RAM/GPU \u00dcberlauf",            "hint": "Batch-Gr\u00f6\u00dfe reduzieren, FP16 oder LoRA aktivieren, Gradient Checkpointing einschalten." },
+        "cuda":     { "title": "\u2699\ufe0f Hardware/Device Fehler",         "hint": "Ger\u00e4t nicht verf\u00fcgbar oder inkompatibel. Versuche mit CPU oder anderen Ger\u00e4te-Einstellungen." },
+        "dataset":  { "title": "\ud83d\udcc1 Dataset/Pfad Fehler",            "hint": "Dataset-Pfad pr\u00fcfen, Dateirechte \u00fcberpr\u00fcfen, Dataset existiert noch?" },
+        "packages": { "title": "\ud83d\udce6 Fehlende Python-Pakete",         "hint": "Fehlende Dependencies. Pr\u00fcfe im Skript welche Module importiert werden." },
+        "config":   { "title": "\ud83d\udcca Numerischer Fehler (NaN/Inf)",   "hint": "Learning Rate zu hoch? Gradient Clipping (max_grad_norm) aktivieren, LR reduzieren." },
+        "code":     { "title": "\ud83d\udc1b Code-Fehler",                    "hint": "Syntax-, Typ- oder Namensfehler. Der KI-Assistent kann dir helfen." },
+        "unknown":  { "title": "\u2753 Unbekannter Fehler",                  "hint": "Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen." }
+      }
+    },
+
+    "notifications": {
+      "unsavedChangesTitle": "Ungespeicherte \u00c4nderungen",
+      "unsavedChangesDetail": "Bitte speichere dein Skript zuerst mit Cmd+S oder dem Speichern-Button.",
+      "noModelOrScript": "Fehler",
+      "noModelOrScriptDetail": "Kein Modell ausgew\u00e4hlt oder Skript leer.",
+      "startSuccess": "Gestartet!",
+      "startSuccessDetail": "Dev Training l\u00e4uft\u2026",
+      "startError": "Fehler",
+      "timeout": "Timeout",
+      "timeoutDetail": "Training hat nicht innerhalb von 5 Minuten geantwortet.",
+      "savedUpdated": "Aktualisiert",
+      "savedUpdatedDetail": "Skript in der Bibliothek aktualisiert!",
+      "savedNew": "Gespeichert",
+      "savedNewDetail": "Skript \"{name}\" in der Bibliothek gespeichert!",
+      "libraryScriptSaved": "Gespeichert",
+      "libraryScriptSavedDetail": "Skript \"{name}\" gespeichert.",
+      "sendErrorSuccess": "Gesendet!",
+      "sendErrorSuccessDetail": "Fehler wurde an FrameTrain Team gesendet. Danke!",
+      "sendErrorFail": "Fehler",
+      "sendErrorFailDetail": "Konnte Fehler nicht senden. Pr\u00fcfe deine Internetverbindung.",
+      "networkError": "Netzwerkfehler:"
+    },
+
+    "relativeTime": {
+      "justNow": "gerade eben",
+      "minutesAgo": "vor {n} Min",
+      "hoursAgo": "vor {n} Std",
+      "daysAgo": "vor {n} Tagen"
+    }
+  },
+
+  "devTestPanel": {
+    "banner": {
+      "title": "Dev Test Mode",
+      "description": "Eigenes Python-Skript für Inference, Evaluation und Testing. Voller Zugriff auf Modell- und Dataset-Pfade."
+    },
+    "paths": {
+      "toggleLabel": "Pfade konfigurieren",
+      "modelTitle": "Modell",
+      "modelPathLabel": "Modellpfad",
+      "datasetTitle": "Dataset",
+      "datasetPathLabel": "Dataset-Pfad",
+      "outputTitle": "Output",
+      "outputPathLabel": "Ausgabepfad",
+      "versionFallback": "Keine Version",
+      "notSet": "nicht gesetzt",
+      "copyTooltip": "Kopieren",
+      "copied": "Kopiert!"
+    },
+    "toolbar": {
+      "unsavedChangesTooltip": "Ungespeicherte Änderungen",
+      "closeFileTooltip": "Datei schließen",
+      "saveTooltip": "Speichern",
+      "maximizeTooltip": "Vollbild",
+      "minimizeTooltip": "Verkleinern",
+      "noDocument": "Kein Dokument",
+      "searchPlaceholder": "Suchen…",
+      "prevSearchTooltip": "Vorheriges (Shift+Enter)",
+      "nextSearchTooltip": "Nächstes (Enter)",
+      "closeSearchTooltip": "Schließen (Esc)",
+      "newFileButton": "Neue Datei",
+      "loadFileButton": "Datei laden",
+      "openLibraryButton": "Open Library",
+      "saveButton": "Speichern (⌘S)",
+      "libraryButton": "Bibliothek",
+      "aiDisabledTitle": "KI nicht aktiviert",
+      "aiDisabledDetail": "Bitte aktiviere die KI zuerst in den Einstellungen.",
+      "aiDisabledTooltip": "KI nicht konfiguriert – in den Einstellungen aktivieren",
+      "aiButton": "KI",
+      "findTooltip": "Suchen (Cmd/Ctrl+F)",
+      "stopButton": "Stopp",
+      "startButton": "Test starten"
+    },
+    "emptyState": {
+      "description": "Öffne oder erstelle eine Datei um zu starten",
+      "newFileTitle": "Neue Datei",
+      "newFileHint": "Tippe ! + Leertaste für Template",
+      "loadFileTitle": "Datei laden",
+      "loadFileHint": "Aus deiner Bibliothek",
+      "openLibraryTitle": "Open Library",
+      "openLibraryHint": "Community Test-Skripte"
+    },
+    "editor": {
+      "placeholder": "# Fange an zu tippen…\n# Tippe '! ' + Leertaste um das Template zu laden"
+    },
+    "output": {
+      "running": "Test läuft…",
+      "success": "Test erfolgreich",
+      "failed": "Test fehlgeschlagen",
+      "label": "Ausgabe",
+      "clearButton": "Löschen",
+      "panelLabel": "Ausgabe",
+      "waiting": "Warte auf Python-Output…",
+      "started": "🚀 Test gestartet…",
+      "complete": "✅ Test abgeschlossen!",
+      "errorPrefix": "❌",
+      "stopped": "⏹️  Test gestoppt."
+    },
+    "chat": {
+      "title": "KI-Assistent",
+      "autoBadge": "Auto",
+      "autoBadgeLabel": "Auto",
+      "historyTooltip": "Chat-Verlauf",
+      "newChatTooltip": "Neuer Chat",
+      "newChatTitle": "Neuer Chat",
+      "continuedSuffix": " (Fortgesetzt)",
+      "historyTitle": "Chat-Verlauf",
+      "newChatButton": "Neuer Chat",
+      "emptyHistory": "Noch keine gespeicherten Chats.",
+      "messagesCount": "{count} Nachrichten",
+      "continueButton": "Fortsetzen",
+      "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.",
+      "changeLabel": "Änderung {n}",
+      "undoButton": "Rückgängig",
+      "viewDiffLink": "→ Diff ansehen",
+      "editSummaryReady": "Bereit:",
+      "applyButton": "Übernehmen",
+      "detailsButton": "Details",
+      "readonlyBadge": "Lesemodus",
+      "readonlyHint": "Lesemodus – Chat nicht aktiv",
+      "sendHint": "Enter = senden · Shift+Enter = neue Zeile",
+      "inputPlaceholder": "Ziel / Problem / gewünschte Änderung…",
+      "readonlyPlaceholder": "Zum Schreiben neuen Chat starten → □ oben rechts",
+      "startNewChatButton": "Neuen Chat starten"
+    },
+    "notifications": {
+      "unsavedTitle": "Ungespeicherte Änderungen",
+      "unsavedDetail": "Bitte erst speichern (⌘S).",
+      "noModelOrScriptTitle": "Fehler",
+      "noModelOrScriptDetail": "Kein Modell ausgewählt oder Skript leer.",
+      "startedTitle": "Gestartet!",
+      "startedDetail": "Dev Test läuft…",
+      "updatedTitle": "Aktualisiert",
+      "updatedDetail": "Test-Skript aktualisiert!",
+      "savedTitle": "Gespeichert",
+      "savedDetail": "Test-Skript \"{name}\" gespeichert!",
+      "savedNew": "Gespeichert",
+      "savedNewDetail": "Test-Skript \"{name}\" gespeichert!"
+    },
+    "pageContext": {
+      "title": "=== FrameTrain – Dev Test Mode ===",
+      "purposeBody": "Eigenes Python-Skript für Inference/Evaluation mit eigenen Modellen.",
+      "currentStateTitle": "--- Aktueller Zustand ---",
+      "scriptStateTitle": "--- SKRIPT-ZUSTAND ---",
+      "layoutTitle": "--- UI LAYOUT ---",
+      "availableActionsTitle": "--- Verfügbare Aktionen ---",
+      "contextTitle": "--- Dev Test Context ---"
+    },
+    "infoBanner": {
+      "title": "Dev Test Mode",
+      "description": "Eigenes Python-Skript f\u00fcr Inference, Evaluation und Testing. Voller Zugriff auf Modell- und Dataset-Pfade."
+    },
+
+    "pathsSection": {
+      "toggleLabel": "Pfade konfigurieren",
+      "modelTitle": "Modell",
+      "datasetTitle": "Dataset",
+      "outputTitle": "Output",
+      "notSet": "nicht gesetzt",
+      "copyTooltip": "Kopieren",
+      "copied": "Kopiert!"
+    },
+
+    "editor": {
+      "noDocument": "Kein Dokument",
+      "fileName": "test.py",
+      "unsavedChangesTooltip": "Ungespeicherte \u00c4nderungen",
+      "closeTooltip": "Datei schlie\u00dfen",
+      "saveTooltip": "Speichern",
+      "maximizeTooltip": "Vollbild",
+      "minimizeTooltip": "Verkleinern",
+      "saveButton": "Speichern (\u2318S)",
+      "libraryButton": "Bibliothek",
+      "openLibraryButton": "Open Library",
+      "aiButton": "KI",
+      "searchButton": "\u2318F",
+      "newFileButton": "Neue Datei",
+      "loadFileButton": "Datei laden",
+      "stopButton": "Stopp",
+      "runButton": "Test starten",
+      "searchPlaceholder": "Suchen\u2026",
+      "emptyTitle": "\u00d6ffne oder erstelle eine Datei um zu starten",
+      "emptyNewFile": "Neue Datei",
+      "emptyNewFileHint": "Tippe ! + Leertaste f\u00fcr Template",
+      "emptyLoadFile": "Datei laden",
+      "emptyLoadFileHint": "Aus deiner Bibliothek",
+      "emptyOpenLib": "Open Library",
+      "emptyOpenLibHint": "Community Test-Skripte",
+      "placeholder": "# Fange an zu tippen…\n# Tippe '! ' + Leertaste um das Template zu laden",
+      "placeholderLine1": "# Fange an zu tippen\u2026",
+      "placeholderLine2": "# Tippe '! ' + Leertaste um das Template zu laden",
+      "aiNotEnabled": "KI nicht aktiviert",
+      "aiNotEnabledDetail": "Bitte aktiviere die KI zuerst in den Einstellungen."
+    },
+
+    "output": {
+      "running": "Test l\u00e4uft\u2026",
+      "success": "Test erfolgreich",
+      "failed": "Test fehlgeschlagen",
+      "outputLabel": "Ausgabe",
+      "clearButton": "L\u00f6schen",
+      "waitingForOutput": "Warte auf Python-Output\u2026",
+      "testStarted": "\ud83d\ude80 Test gestartet\u2026",
+      "testComplete": "\u2705 Test abgeschlossen!",
+      "testStopped": "\u23f9\ufe0f  Test gestoppt.",
+      "exitCodeError": "Prozess beendet mit Exit-Code {code}"
+    },
+
+    "saveDialog": {
+      "title": "Skript speichern",
+      "description": "Gib einen Namen f\u00fcr dein Test-Skript ein.",
+      "placeholder": "z.B. Mein Test-Skript",
+      "saveButton": "Speichern",
+      "cancelButton": "Abbrechen"
+    },
+
+    "library": {
+      "title": "Test-Skript Bibliothek",
+      "empty": "Noch keine Test-Skripte gespeichert.",
+      "loadButton": "Laden",
+      "saveCurrentButton": "Aktuelles Skript speichern",
+      "namePlaceholder": "Skript-Name\u2026"
+    },
+
+    "aiSidebar": {
+      "title": "KI-Assistent",
+      "autoBadge": "Auto",
+      "historyTooltip": "Chat-Verlauf",
+      "newChatTooltip": "Neuer Chat",
+      "historyTitle": "Chat-Verlauf",
+      "newChatButton": "Neuer Chat",
+      "noChats": "Noch keine gespeicherten Chats.",
+      "messagesCount": "{count} Nachrichten",
+      "continueButton": "Fortsetzen",
+      "sessionSuffix": " (Fortgesetzt)",
+      "readonlyBadge": "Lesemodus",
+      "readonlyHint": "Lesemodus \u2013 Chat nicht aktiv",
+      "sendHint": "Enter = senden \u00b7 Shift+Enter = neue Zeile",
+      "inputPlaceholder": "Ziel / Problem / gew\u00fcnschte \u00c4nderung\u2026",
+      "readonlyPlaceholder": "Zum Schreiben neuen Chat starten \u2192 \u25a1 oben rechts",
+      "startNewChatButton": "Neuen Chat starten",
+      "autoBadgeLabel": "Auto",
+      "replaceCodeButton": "Ersetzen",
+      "editChange": "\u00c4nderung {n}",
+      "undoButton": "R\u00fckg\u00e4ngig",
+      "viewDiffLink": "\u2192 Diff ansehen",
+      "editSummaryReady": "Bereit:",
+      "applyButton": "\u00dcbernehmen",
+      "detailsButton": "Details",
+      "suggestions": [
+        "Fehler beheben (Stacktrace)",
+        "Eval/Metric hinzuf\u00fcgen (F1/Accuracy)",
+        "Batch-Inference robust machen"
+      ],
+      "emptySidebarHint": "Beschreibe Ziel/Problem \u2014 ich liefere direkt Edits oder einen Rewrite."
+    },
+
+    "errorModal": {
+      "title": "Test fehlgeschlagen",
+      "errorLabel": "Fehler-Meldung:",
+      "detailsLabel": "Details:",
+      "copyButton": "Fehler kopieren",
+      "copied": "Kopiert!",
+      "sendToAIButton": "An KI schicken",
+      "closeButton": "Schlie\u00dfen"
+    },
+
+    "notifications": {
+      "unsavedChangesTitle": "Ungespeicherte \u00c4nderungen",
+      "unsavedChangesDetail": "Bitte erst speichern (\u2318S).",
+      "noModelOrScript": "Fehler",
+      "noModelOrScriptDetail": "Kein Modell ausgew\u00e4hlt oder Skript leer.",
+      "startSuccess": "Gestartet!",
+      "startSuccessDetail": "Dev Test l\u00e4uft\u2026",
+      "startError": "Fehler",
+      "savedUpdated": "Aktualisiert",
+      "savedUpdatedDetail": "Test-Skript aktualisiert!",
+      "savedNew": "Gespeichert",
+      "savedNewDetail": "Test-Skript \"{name}\" gespeichert!",
+      "libraryScriptSaved": "Gespeichert",
+      "libraryScriptSavedDetail": "Test-Skript \"{name}\" gespeichert.",
+      "openLibLoaded": "Geladen!",
+      "openLibLoadedDetail": "\u201e{name}\u201c wurde in den Editor geladen."
+    },
+
+    "relativeTime": {
+      "justNow": "gerade eben",
+      "minutesAgo": "vor {n} Min",
+      "hoursAgo": "vor {n} Std",
+      "daysAgo": "vor {n} Tagen"
+    }
+  },
+
+  "trainingDashboard": {
+    "statusRunning": "Training läuft",
+    "statusCompleted": "Training abgeschlossen",
+    "statusFailed": "Training fehlgeschlagen",
+    "statusStopped": "Training gestoppt",
+    "titleDefault": "Training Dashboard",
+    "modeDev": "Dev Train",
+    "modeStandard": "Standard",
+
+    "minimized": {
+      "epochInfo": "E{epoch}/{total} · Loss: {loss} · {duration}"
+    },
+
+    "header": {
+      "stopButton": "Stoppen",
+      "minimizeTooltip": "Minimieren",
+      "closeTooltip": "Schließen"
+    },
+
+    "metrics": {
+      "trainLoss": "Train Loss",
+      "trainLossSub": "{dir} {pct}% seit Start",
+      "valLoss": "Val Loss",
+      "learningRate": "Learning Rate",
+      "duration": "Laufzeit",
+      "eta": "ETA: ~{eta}",
+      "completed": "Abgeschlossen",
+      "stopped": "Gestoppt"
+    },
+
+    "progress": {
+      "epochStep": "Epoch {epoch} / {totalEpochs} · Step {step} / {totalSteps}"
+    },
+
+    "stopped": {
+      "message": "Training wurde manuell gestoppt. Du kannst es jederzeit neu starten."
+    },
+
+    "completed": {
+      "message": "Training erfolgreich abgeschlossen!",
+      "analyzeButton": "Analyse starten →"
+    },
+
+    "chart": {
+      "title": "Loss-Verlauf",
+      "points": "{count} Punkte",
+      "waitingForData": "Warte auf erste Loss-Werte…",
+      "legendTrain": "Train Loss",
+      "legendVal": "Val Loss",
+      "start": "Start:",
+      "current": "Aktuell:"
+    },
+
+    "config": {
+      "title": "Konfiguration",
+      "devMode": "Dev Train Mode — kein strukturierter Config.",
+      "notAvailable": "Konfiguration nicht verfügbar.",
+      "yes": "Ja",
+      "no": "Nein"
+    },
+
+    "eventLog": {
+      "title": "Trainings-Log",
+      "entriesNote": "{count} Einträge · wird in ft_training_sessions gespeichert",
+      "waiting": "Warte auf Events…",
+      "eventStart": "Training gestartet — {model}",
+      "eventComplete": "Abgeschlossen! Finaler Loss: {loss}",
+      "eventCompleteVal": " | Val: {val}",
+      "eventError": "Fehler: {error}",
+      "eventStopped": "Training manuell gestoppt",
+      "eventEpoch": "Epoch {epoch}/{total} — Train: {trainLoss}",
+      "eventEpochVal": " · Val: {val}"
+    },
+
+    "errorRecovery": {
+      "optionsTitle": "Optionen",
+      "memoryCategoryTitle": "GPU/RAM Überlauf",
+      "memoryCategoryHint": "Batch-Größe reduzieren, FP16 oder LoRA aktivieren, Gradient Checkpointing einschalten.",
+      "cudaCategoryTitle": "Hardware / Device Fehler",
+      "cudaCategoryHint": "Gerät nicht verfügbar oder inkompatibel. FP16 mit BF16 tauschen, oder auf CPU wechseln.",
+      "datasetCategoryTitle": "Dataset / Pfad Fehler",
+      "datasetCategoryHint": "Dataset-Pfad prüfen, Dataset-Split ausführen, Dateirechte prüfen.",
+      "packagesCategoryTitle": "Fehlende Python-Pakete",
+      "packagesCategoryHint": "pip install torch transformers datasets accelerate ausführen.",
+      "configCategoryTitle": "Numerischer Fehler (NaN/Inf)",
+      "configCategoryHint": "Learning Rate zu hoch? Gradient Clipping (max_grad_norm) aktivieren, LR auf 1e-5 reduzieren.",
+      "codeCategoryTitle": "Code-Fehler",
+      "codeCategoryHint": "Syntax- oder Typfehler im Training-Skript. KI-Assistent kann den Fehler analysieren.",
+      "unknownCategoryTitle": "Unbekannter Fehler",
+      "unknownCategoryHint": "Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen.",
+
+      "kiMetricsButton": "KI-Metriken anpassen",
+      "kiMetricsDesc": "KI-Assistent analysiert die Konfiguration und schlägt Fixes vor",
+
+      "ramTipTitle": "RAM-Tipp",
+      "ramTipDesc": "LoRA aktivieren (r=8), FP16 oder BF16 einschalten, Batch auf 2–4 reduzieren, Gradient Checkpointing aktivieren.",
+
+      "datasetTipTitle": "Dataset prüfen",
+      "datasetTipDesc": "Dataset im Dataset-Manager aufteilen (Split ausführen), Pfade und Dateirechte prüfen.",
+
+      "copyReportButton": "Fehlerbericht kopieren",
+      "copyReportDesc": "Vollständigen Bericht in Zwischenablage für FrameTrain-Support",
+      "copyReportCopied": "Fehlerbericht kopiert!",
+
+      "sendToTeamTitle": "An FrameTrain senden",
+      "sendToTeamDesc": "Fehlerbericht kopieren und an das FrameTrain-Team schicken — der Fehler liegt wahrscheinlich in der Engine und wird behoben.",
+
+      "codeFixButton": "Code mit KI korrigieren",
+      "codeFixDesc": "Fehler + Python-Code an den KI-Assistenten senden — KI schlägt direkte Code-Fixes vor",
+
+      "memoryHintTitle": "Speicher-Fehler",
+      "memoryHintDesc": "Im Skript Batch-Größe reduzieren, FP16 / bfloat16 verwenden, oder gradient_checkpointing=True setzen.",
+
+      "copyReportDevDesc": "Für FrameTrain-Support oder GitHub-Issue",
+      "copied": "Kopiert!",
+
+      "reportHeader": "=== FrameTrain Fehlerbericht ===",
+      "reportMode": "Modus: {mode}",
+      "reportModeStandard": "Standard",
+      "reportModeDev": "Dev Train",
+      "reportCategory": "Fehler-Kategorie: {category}",
+      "reportError": "Fehlermeldung: {error}",
+      "reportConfigSection": "--- Konfiguration ---",
+      "reportConfigDev": "Dev Train (kein strukturierter Config)",
+      "reportEnd": "--- Ende Bericht ---",
+
+      "categories": {
+        "memory":   { "title": "GPU/RAM Überlauf",              "hint": "Batch-Größe reduzieren, FP16 oder LoRA aktivieren, Gradient Checkpointing einschalten." },
+        "cuda":     { "title": "Hardware / Device Fehler",       "hint": "Gerät nicht verfügbar oder inkompatibel. FP16 mit BF16 tauschen, oder auf CPU wechseln." },
+        "dataset":  { "title": "Dataset / Pfad Fehler",          "hint": "Dataset-Pfad prüfen, Dataset-Split ausführen, Dateirechte prüfen." },
+        "packages": { "title": "Fehlende Python-Pakete",         "hint": "pip install torch transformers datasets accelerate ausführen." },
+        "config":   { "title": "Numerischer Fehler (NaN/Inf)",   "hint": "Learning Rate zu hoch? Gradient Clipping (max_grad_norm) aktivieren, LR auf 1e-5 reduzieren." },
+        "code":     { "title": "Code-Fehler",                    "hint": "Syntax- oder Typfehler im Training-Skript. KI-Assistent kann den Fehler analysieren." },
+        "unknown":  { "title": "Unbekannter Fehler",             "hint": "Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen." }
+      }
+    }
+  },
+
+  "synapse": {
+    "builder": {
+      "title": "Synapse Builder",
+      "nodesEdgesCount": "{nodes} nodes · {edges} connections",
+      "modelsButton": "Modelle",
+      "aiButton": "AI",
+      "clearButton": "Clear",
+      "fullscreenTooltip": "Fullscreen",
+      "exitFullscreenTooltip": "Exit fullscreen",
+      "canvasEmptyHint": "Drag nodes from the library or click a node to place it",
+      "shapeBannerConnection": "Verbindung wegen Shape-Konflikt blockiert",
+      "shapeBannerGraph": "Graph hat Shape-Fehler — Training nicht möglich",
+      "shapeBannerTraining": "Training: Shape-Fehler im Netzwerk",
+      "shapeBannerRuntime": "Runtime Shape-Fehler",
+      "exportModalTitle": "Modell exportiert!",
+      "exportModalClose": "Verstanden",
+      "logStopped": "[Synapse] Training gestoppt.",
+      "logNoNodes": "[Error] Keine Nodes im Graph. Füge Nodes hinzu und verbinde sie.",
+      "logShapeInvalid": "[Shape] Graph ungültig — Training abgebrochen:",
+      "logComplete": "[Synapse] Training abgeschlossen!",
+      "logStartFailed": "[ERROR] Training konnte nicht gestartet werden: {error}",
+      "logCoachFix": "[AI Coach] Fix angewendet: {title}",
+      "logNoValidGraph": "[Error] Kein gültiger Graph zum Speichern."
+    },
+    "modelLibrary": {
+      "title": "◈ Gespeicherte Modelle",
+      "sessionsLink": "← Sessions",
+      "countLabel": "{count} Modell",
+      "countLabelPlural": "{count} Modelle",
+      "empty": "Noch keine Modelle gespeichert.\nBaue einen Graph und klicke „Speichern“.",
+      "loadButton": "Laden",
+      "footer": "Modelle werden lokal gespeichert – nur für deinen Account sichtbar."
+    },
+    "sessionLibrary": {
+      "title": "◈ Sessions",
+      "modelsLink": "Modelle →",
+      "savePlaceholder": "Aktuellen Graph speichern… ({count} Nodes)",
+      "saveButton": "Speichern",
+      "savedButton": "✓ Gespeichert",
+      "empty": "Noch keine Modelle gespeichert.\nBaue einen Graph und klicke „Speichern“.",
+      "loadButton": "Laden",
+      "footer": "Modelle werden lokal gespeichert."
+    },
+    "nodeLibrary": {
+      "title": "Node Library",
+      "searchPlaceholder": "Search nodes…",
+      "noNodesFound": "No nodes found",
+      "footer": "drag or click to add"
+    },
+    "propertyPanel": {
+      "title": "Properties",
+      "emptyHint": "Select a node to edit its properties",
+      "nodeIdLabel": "Node ID",
+      "noParams": "No configurable params",
+      "tensorShapeLabel": "Tensor Shape"
+    },
+    "shapeErrorBanner": {
+      "closeTooltip": "Schließen",
+      "fixWithAIButton": "Mit AI beheben",
+      "focusNodesButton": "Nodes zoomen"
+    },
+    "trainingConsole": {
+      "epochLabel": "Epoch {current}/{total}",
+      "exportButton": "Export ↓",
+      "stopButton": "■ Stop",
+      "trainButton": "▶ Train",
+      "architectureLabel": "Architektur",
+      "architectureValue": "Canvas Graph",
+      "datasetLabel": "Dataset",
+      "datasetPlaceholder": "— wählen —",
+      "epochsLabel": "Epochs",
+      "batchSizeLabel": "Batch Size",
+      "learningRateLabel": "Learning Rate",
+      "gpuLabel": "GPU",
+      "precisionLabel": "Precision",
+      "gradAccumLabel": "Grad Accum",
+      "noMetrics": "No metrics yet — start training to see data",
+      "metricLoss": "Loss",
+      "metricValLoss": "Val Loss",
+      "metricAccuracy": "Accuracy",
+      "metricLr": "LR",
+      "logWaiting": "Waiting for output…",
+      "doneBannerTitle": "✓ Training abgeschlossen",
+      "doneBannerFiles": "model.pt · metrics.json · canvas_model.py",
+      "openFolderButton": "Ordner öffnen ↗",
+      "exportModal": {
+        "title": "Export ↓",
+        "trainedModelTitle": "✓ Trainiertes Modell verfügbar",
+        "trainedModelDesc": "Exportiert den gesamten Modell-Ordner in deinen Downloads-Ordner (PyTorch-Format).",
+        "exportedLabel": "✓ Exportiert nach: {path}",
+        "exportButton": "↓ In Downloads exportieren",
+        "exportingButton": "Wird exportiert…",
+        "logMetricsLabel": "Log / Metriken exportieren",
+        "formatTxt": "Training Log (.txt)",
+        "formatCsv": "Metrics CSV (.csv)",
+        "formatJson": "Config JSON (.json)"
+      },
+      "datasetSelector": {
+        "title": "Dataset wählen",
+        "loading": "Laden…",
+        "empty": "Keine Einträge vorhanden."
+      }
+    }
+  },
+
+  "synapseAI": {
+    "panel": {
+      "canvasHint": "Canvas bleibt sichtbar — der Assistent baut live auf dem Graph",
+      "title": "Synapse Magic",
+      "subtitleShapeMode": "Shape-Fix — Vorlage bereit",
+      "subtitleStep": "{tool}…",
+      "subtitleSteps": "{done}/{total} Schritte",
+      "subtitleIdle": "Netzwerk per Sprache bauen",
+      "historyTooltip": "Chat-Verlauf",
+      "newChatTooltip": "Neuer Chat",
+      "minimizeTooltip": "Minimieren",
+      "historyTitle": "CHAT-VERLAUF",
+      "newChatButton": "+ Neuer Chat",
+      "deleteChatTooltip": "Chat löschen",
+      "emptyHint": "Beschreibe dein Netzwerk — ich baue Nodes live auf dem Canvas.",
+      "emptyExample": "z.B. „Klassifikator mit 2 Dense-Layern“ oder „CNN für Bilder“",
+      "liveCanvasLabel": "LIVE AUF CANVAS",
+      "thinkingLabel": "Denke nach",
+      "resumeButton": "Fortsetzen",
+      "shapeSendButton": "Shape-Fix senden (Enter)",
+      "affectedLabel": "Markiert:",
+      "inputPlaceholderShapeMode": "Shape-Fix Vorlage — Enter zum Senden",
+      "inputPlaceholder": "Beschreibe dein Netzwerk… (Enter senden)",
+      "abortButton": "■",
+      "sendButton": "↑",
+      "abortTooltip": "Abbrechen",
+      "sendTooltip": "Senden"
+    },
+
+    "toolLabels": {
+      "add_node": "Node hinzufügen",
+      "add_edge": "Verbinden",
+      "remove_node": "Node entfernen",
+      "remove_edge": "Kante entfernen",
+      "set_param": "Parameter",
+      "set_label": "Umbenennen",
+      "move_node": "Verschieben",
+      "done": "Fertig"
+    },
+
+    "coach": {
+      "title": "Synapse AI Coach",
+      "closeButton": "✕",
+      "issuesTitle": "{count} Fehler gefunden:",
+      "warningsTitle": "{count} Warnungen:",
+      "quickQuestionsLabel": "SCHNELLE FRAGEN:",
+      "question1": "Was sind die Probleme?",
+      "question2": "Fixe Shape-Fehler",
+      "question3": "Was soll ich ändern?",
+      "suggestedActionsLabel": "VORGESCHLAGENE AKTIONEN:",
+      "inspectOnlyNote": "ℹ️ Nur zur Information - keine automatische Änderung",
+      "applyButton": "Anwenden",
+      "footerHint": "Frag mich nach Training-Ergebnissen oder Lösungsvorschlägen."
+    }
+  },
+
+  "aiClient": {
+    "errorDisabled": "KI-Assistent deaktiviert. Bitte in Einstellungen aktivieren.",
+    "errorMissingKey": "API-Key für {provider} fehlt.",
+    "errorOllamaUnreachable": "Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?"
+  },
+
+  "versionManager": {
+    "title": "Versionen",
+    "subtitle": "Verwalte Modell-Versionen und Training-Verläufe",
+    "refreshTooltip": "Aktualisieren",
+
+    "emptyState": {
+      "title": "Keine Modelle vorhanden",
+      "description": "Füge zuerst Modelle auf der Modelle-Seite hinzu."
+    },
+
+    "modelCard": {
+      "versionsLabel": "{count} Version",
+      "versionsLabelPlural": "{count} Versionen",
+      "showVersionsButton": "Versionen anzeigen"
+    },
+
+    "versionsModal": {
+      "versionsCount": "{count} Version",
+      "versionsCountPlural": "{count} Versionen",
+      "refreshTooltip": "Aktualisieren",
+      "originalBadge": "Original",
+      "filesLabel": "{count} Dateien",
+      "versionLabel": "v{n}",
+      "metricsTrainLoss": "Train Loss",
+      "metricsValLoss": "Val Loss",
+      "metricsEpochs": "Epochen",
+      "metricsDuration": "Dauer",
+      "exportTooltip": "Exportieren",
+      "renameTooltip": "Umbenennen",
+      "deleteTooltip": "Löschen",
+      "filesSection": "Dateien dieser Version",
+      "deleteConfirm": "Möchtest du Version \"{name}\" wirklich löschen?",
+      "closeButton": "Schließen"
+    },
+
+    "filesPanel": {
+      "loading": "Dateien werden geladen...",
+      "errorTitle": "Dateien konnten nicht geladen werden",
+      "empty": "Keine Dateien gefunden in diesem Verzeichnis",
+      "fileCount": "{count} Datei",
+      "fileCountPlural": "{count} Dateien",
+      "folderCount": "{count} Ordner"
+    },
+
+    "exportModal": {
+      "title": "Version exportieren",
+      "description": "Wähle eine Export-Option für diese Version:",
+      "localTitle": "Lokal herunterladen",
+      "localDesc": "Exportiere in den Downloads-Ordner",
+      "sphereNetTitle": "Auf SphereNet hochladen",
+      "sphereNetDesc": "Teile dein Modell mit der Community",
+      "sphereNetSoon": "Bald verfügbar",
+      "cancelButton": "Abbrechen"
+    },
+
+    "notifications": {
+      "loadError": "Fehler beim Laden",
+      "loadVersionsError": "Fehler beim Laden der Versionen",
+      "deleteSuccess": "Version gelöscht",
+      "deleteSuccessDetail": "Die Version wurde erfolgreich entfernt.",
+      "deleteFailed": "Löschen fehlgeschlagen",
+      "renameSuccess": "Version umbenannt",
+      "renameSuccessDetail": "Der Name wurde erfolgreich geändert.",
+      "renameFailed": "Umbenennen fehlgeschlagen",
+      "exportSuccess": "Export erfolgreich",
+      "exportSuccessDetail": "Version \"{name}\" wurde nach {path} exportiert.",
+      "exportFailed": "Export fehlgeschlagen"
+    }
+  },
+
+  "updateChecker": {
+    "title": "Neues Update verfügbar",
+    "versionAvailable": "Version v{version} ist verfügbar",
+    "installedLabel": "Installiert",
+    "newLabel": "Neu",
+    "warningText1": "Bitte lade dir die neue Version herunter",
+    "warningText2": "und deinstalliere umgehend die alte Version. Diese könnte Sicherheitslücken aufweisen und wird nicht mehr unterstützt.",
+    "guideTitle": "Update-Anleitung:",
+    "step1": "Klick auf \"Zum Dashboard\" um die neue Version herunterzuladen",
+    "step2": "Deinstalliere die alte FrameTrain App komplett:",
+    "step2detail": "Gehe zu Applications \u2192 FrameTrain \u2192 Move to Trash",
+    "step3": "Installiere die neue Version:",
+    "step3detail": "Die heruntergeladene .dmg \u00f6ffnen und FrameTrain in Applications ziehen",
+    "step4": "Starte die neue FrameTrain App",
+    "downloadLabel": "Download verf\u00fcgbar unter:",
+    "dashboardButton": "Zum Dashboard",
+    "closeButton": "Schlie\u00dfen"
+  },
+
+  "testPanel": {
+    "title": "Tests",
+    "subtitleEngine": "Wähle ein Modell – das passende Test-Plugin wird automatisch geladen",
+    "subtitleDev": "Eigenes Python-Skript für Inference und Evaluation",
+
+    "modeEngine": "Test Engine",
+    "modeDev": "Dev Test",
+
+    "noModel": {
+      "title": "Kein Modell vorhanden",
+      "description": "Füge zuerst ein Modell im Model-Manager hinzu."
+    },
+
+    "modelSelector": {
+      "modelLabel": "Modell",
+      "versionLabel": "Version",
+      "versionLatest": " (neueste)",
+      "noVersions": "Keine Versionen"
+    },
+
+    "pluginBadge": {
+      "supported": "{name} – {description}",
+      "unsupportedTitle": "Modell wird für Tests noch nicht unterstützt",
+      "devModeLink": "Dev Test Mode →"
+    },
+
+    "startButton": "Test starten →",
+    "changeModelButton": "← Anderes Modell / Version wählen",
+
+    "pluginBanner": {
+      "pluginLabel": "Plugin:",
+      "activeLabel": "Aktiv"
+    },
+
+    "unsupported": {
+      "title": "Modell wird noch nicht unterstützt",
+      "description": "Aktuell wird Testing nur für XLM-RoBERTa unterstützt. Nutze den Dev Test Mode für eigene Skripte.",
+      "devModeLink": "Dev Test Mode"
+    }
+  },
+
+"trainingPanel": {
+    "title": "Training",
+    "subtitle": "Trainiere Sequenzklassifikations-Modelle",
+
+    "header": {
+      "historyButton": "Verlauf",
+      "modeTraining": "Training",
+      "modeDev": "Dev Train"
+    },
+
+    "noModels": {
+      "title": "Kein Modell vorhanden",
+      "description": "Füge zuerst ein Modell im Model-Manager hinzu."
+    },
+
+    "modelBlock": {
+      "modelLabel": "Modell",
+      "versionLabel": "Version",
+      "versionLatest": " (neueste)",
+      "noVersions": "Keine Versionen",
+      "pluginSupported": "{name} – unterstützt",
+      "pluginUnsupported": "Noch nicht unterstützt",
+      "devModeButton": "Dev Train Mode →"
+    },
+
+    "datasetBlock": {
+      "label": "Dataset",
+      "noDataset": "Kein Dataset für dieses Modell.",
+      "statusSplit": " (aufgeteilt)",
+      "statusUnsplit": " (nicht aufgeteilt)",
+      "noSplitWarning": "Kein Split – erst im Dataset-Manager aufteilen.",
+      "canvasBadge": "⚡ Canvas-Modell — beliebige Datensätze unterstützt (Bilder, CSV, Text)"
+    },
+
+    "requirements": {
+      "notReadyTitle": "Python-Umgebung nicht bereit",
+      "python": "Python",
+      "pytorch": "PyTorch",
+      "transformers": "Transformers",
+      "cudaMps": "CUDA/MPS"
+    },
+
+    "toolbar": {
+      "templatesButton": "Templates",
+      "aiButton": "KI-Assistent",
+      "resetButton": "Reset"
+    },
+
+    "sections": {
+      "basic": "Basis-Parameter",
+      "optimizer": "Optimizer & Scheduler",
+      "advanced": "Erweitert & Evaluation",
+      "lora": "LoRA / QLoRA",
+      "loraActiveBadge": "Aktiv",
+      "ram": "RAM-Rechner"
+    },
+
+    "fields": {
+      "epochs": "Epochs",
+      "epochsTooltip": "Anzahl Trainingsepochen.",
+      "batchSize": "Batch Size",
+      "learningRate": "Learning Rate",
+      "learningRateTooltip": "1e-5 bis 5e-5 für Encoder.",
+      "maxSeqLength": "Max Seq Length",
+      "maxSeqLengthTooltip": "Standard: 128, Max: 512",
+      "warmupRatio": "Warmup Ratio",
+      "gradientAccumulation": "Gradient Accumulation",
+      "gradientAccumulationTooltip": "Effektive Batch-Vergrößerung.",
+      "fp16": "FP16 Mixed Precision",
+      "bf16": "BF16 Mixed Precision",
+      "optimizer": "Optimizer",
+      "scheduler": "Scheduler",
+      "weightDecay": "Weight Decay",
+      "maxGradNorm": "Max Grad Norm",
+      "adamBeta1": "Adam β1",
+      "adamBeta1Tooltip": "Erster Momentum-Koeffizient (Standard: 0.9)",
+      "adamBeta2": "Adam β2",
+      "adamBeta2Tooltip": "Zweiter Momentum-Koeffizient (Standard: 0.999)",
+      "adamEpsilon": "Adam ε",
+      "adamEpsilonTooltip": "Numerische Stabilität (Standard: 1e-8)",
+      "dropout": "Dropout",
+      "labelSmoothing": "Label Smoothing",
+      "warmupSteps": "Warmup Steps",
+      "warmupStepsTooltip": "Absolute Schritte (0 = warmup_ratio verwenden)",
+      "maxSteps": "Max Steps",
+      "maxStepsTooltip": "-1 = alle Epochen durchlaufen",
+      "evalStrategy": "Eval Strategy",
+      "evalStrategyEpoch": "Epoch",
+      "evalStrategySteps": "Steps",
+      "evalStrategyNone": "Keine",
+      "evalSteps": "Eval Steps",
+      "evalStepsTooltip": "Nur wenn eval_strategy='steps'",
+      "saveSteps": "Save Steps",
+      "saveTotalLimit": "Save Total Limit",
+      "saveTotalLimitTooltip": "Max. Checkpoints.",
+      "loggingSteps": "Logging Steps",
+      "seed": "Seed",
+      "numWorkers": "Num Workers",
+      "numWorkersTooltip": "DataLoader Worker-Threads (0–8)",
+      "gradientCheckpointing": "Gradient Checkpointing",
+      "groupByLength": "Group by Length",
+      "pinMemory": "Pin Memory (GPU)",
+      "loraActivate": "LoRA aktivieren",
+      "lora4bit": "4-bit QLoRA (braucht bitsandbytes)",
+      "lora8bit": "8-bit Quantisierung (braucht bitsandbytes)",
+      "loraRank": "LoRA Rank (r)",
+      "loraRankTooltip": "Höher = mehr Parameter, mehr RAM. Typisch: 8, 16, 32",
+      "loraAlpha": "LoRA Alpha",
+      "loraAlphaTooltip": "Meist 2× lora_r. Skaliert die LoRA-Updates",
+      "loraDropout": "LoRA Dropout",
+      "loraDropoutTooltip": "Dropout in LoRA-Layern (0.0–0.1)",
+      "loraTargetModules": "Target Modules",
+      "loraTargetModulesTooltip": "Komma-getrennt, z.B. q_proj,v_proj",
+      "loraTargetModulesPlaceholder": "q_proj,v_proj",
+      "loraHint": "LoRA aktivieren um massiv RAM zu sparen — ideal für Modelle >1B Parameter. QLoRA (4-bit) reduziert den Bedarf um ~75%."
+    },
+
+    "optimizerOptions": {
+      "adamw": "AdamW",
+      "adam": "Adam",
+      "sgd": "SGD",
+      "adafactor": "Adafactor"
+    },
+
+    "schedulerOptions": {
+      "linear": "Linear",
+      "cosine": "Cosine",
+      "constant": "Constant",
+      "polynomial": "Polynomial"
+    },
+
+    "ramCalculator": {
+      "title": "RAM-Schätzung",
+      "subtitle": "({sizeGb} GB Modell{lora}{quant})",
+      "loraLabel": " · LoRA",
+      "quantLabel": " · {bits}bit",
+      "weights": "Modell-Gewichte",
+      "gradientsLora": "LoRA-Gradienten (~5%)",
+      "gradients": "Gradienten",
+      "optimizerLora": "LoRA-Optimizer (~10%)",
+      "optimizer": "Optimizer (Adam)",
+      "activations": "Aktivierungen (Batch {batch}{gradCkpt})",
+      "gradCkptLabel": " · GradCkpt",
+      "misc": "Misc",
+      "total": "Gesamt",
+      "fp16Tip": "FP16 aktivieren spart ~{save} GB RAM",
+      "loraTip": "LoRA aktivieren reduziert den Bedarf auf ~{save} GB",
+      "highRamTitle": "RAM senken:",
+      "highRamDesc": "• LoRA r=8, 4-bit QLoRA, Batch 2–4, FP16 + Grad Checkpointing"
+    },
+
+    "lossChart": {
+      "waitingForData": "Warte auf Trainings-Daten…",
+      "legendTrain": "Train",
+      "legendVal": "Val"
+    },
+
+    "templates": {
+      "title": "Metriken-Templates",
+      "tabBuiltin": "Vordefiniert",
+      "tabUser": "Meine ({count})",
+      "noTemplates": "Keine Templates vorhanden.",
+      "deleteError": "Fehler",
+      "deleteSuccess": "Gelöscht",
+      "loadButton": "Laden",
+      "saveCurrentButton": "Aktuelle Config als Template speichern",
+      "saveNamePlaceholder": "Template-Name…",
+      "saveDescPlaceholder": "Beschreibung (optional)…",
+      "saveButton": "Speichern",
+      "cancelButton": "Abbrechen",
+      "builtinTemplates": {
+        "standard": { "name": "Standard", "description": "Balance für die meisten Aufgaben." },
+        "small":    { "name": "Kleines Dataset (<5k)", "description": "Mehr Epochen, höhere LR." },
+        "large":    { "name": "Großes Dataset (>50k)", "description": "Weniger Epochen, größere Batch." },
+        "lowram":   { "name": "Low RAM", "description": "Grad Accumulation + FP16." },
+        "lora":     { "name": "LoRA (RAM-sparend)", "description": "LoRA r=8, ideal für große Modelle." },
+        "qlora":    { "name": "QLoRA 4-bit", "description": "QLoRA für maximale RAM-Ersparnis." }
+      }
+    },
+
+    "aiAssistant": {
+      "title": "KI-Metrik-Assistent",
+      "configTitle": "Aktuelle Konfiguration",
+      "historyTitle": "Vorherige Trainings-Analysen",
+      "historySoon": "Bald",
+      "historyHint": "Sobald Trainings-Analysen verfügbar sind, kann die KI auf vorherige Loss-Kurven zugreifen.",
+      "goalLabel": "Ziel / Problem",
+      "goalHint": "z. B. Training schlägt fehl, weniger Overfitting, geringerer RAM-Verbrauch, bessere Genauigkeit…",
+      "goalPlaceholder": "z. B. Ich bekomme einen Out-of-Memory Fehler mit 16 GB RAM. Modell ist 3B Parameter.",
+      "startButton": "KI-Analyse starten",
+      "analysingText": "Analysiere Hyperparameter…",
+      "analysingGoal": "Berücksichtige: {goal}…",
+      "suggestionsTitle": "Vorgeschlagene Änderungen ({count} Metriken)",
+      "applyButton": "Alle {count} Metriken übernehmen",
+      "applyDoneLabel": "Übernommen!",
+      "discardButton": "Verwerfen",
+      "saveAsTemplateButton": "Als Metriken-Template speichern",
+      "savedAsTemplateLabel": "Als Template gespeichert",
+      "continueInCoachButton": "Im KI-Coach weiterplanen",
+      "backButton": "← Zurück",
+      "reanalyzeButton": "Neu analysieren"
+    },
+
+    "progress": {
+      "title": "Training läuft…",
+      "statusLabel": "Status: {status}",
+      "openDashboardButton": "Dashboard öffnen",
+      "lossHistory": "Loss-Verlauf"
+    },
+
+    "actions": {
+      "startButton": "Training starten",
+      "stopButton": "Training stoppen",
+      "noSplitWarning": "Dataset muss erst im Dataset-Manager aufgeteilt werden."
+    },
+
+    "unsupported": {
+      "title": "Modell wird noch nicht unterstützt",
+      "description": "Nutze den Dev Train Mode.",
+      "devModeButton": "Dev Train Mode öffnen"
+    },
+
+    "history": {
+      "title": "Trainings-Verlauf",
+      "entries": "Einträge",
+      "filterAll": "Alle",
+      "filterRunning": "Läuft",
+      "filterCompleted": "Erfolgreich",
+      "filterFailed": "Fehlgeschlagen",
+      "filterStopped": "Gestoppt",
+      "noEntries": "Keine Trainings in dieser Kategorie",
+      "statusCompleted": "Erfolgreich",
+      "statusFailed": "Fehlgeschlagen",
+      "statusStopped": "Gestoppt",
+      "statusRunning": "Läuft",
+      "statusPending": "Wartet",
+      "errorLabel": "Fehler:",
+      "datasetLabel": "Dataset:",
+      "epochLabel": "Epoche {epoch}/{total}",
+      "lossLabel": "Loss:",
+      "valLabel": "Val:"
+    },
+
+    "notifications": {
+      "missingSelection": "Fehlende Auswahl",
+      "missingSelectionDetail": "Bitte Modell und Dataset wählen.",
+      "notSupported": "Nicht unterstützt",
+      "notSupportedDetail": "Nutze den Dev Train Modus.",
+      "noSplit": "Kein Split",
+      "noSplitDetail": "Das Dataset muss erst im Dataset-Manager aufgeteilt werden.",
+      "started": "Training gestartet!",
+      "startedDetail": "Job läuft…",
+      "startFailed": "Start fehlgeschlagen",
+      "stopped": "Gestoppt",
+      "stopFailed": "Fehler",
+      "templateSaved": "Template gespeichert!",
+      "aiTemplateSaved": "Template gespeichert!",
+      "aiTemplateSavedDetail": "KI-Vorschlag als Template hinterlegt.",
+      "trainingComplete": "Training abgeschlossen!",
+      "trainingCompleteDetail": "Das Modell wurde gespeichert."
+    },
+
+    "pageContext": {
+      "title": "=== FrameTrain Training Panel ===",
+      "purposeTitle": "--- SEITENZWECK ---",
+      "purposeBody": "Konfiguriere und starte ML-Modelltraining mit erweiterten Hyperparameter-Optionen.",
+      "purposeFlow": "Wähle Modell & Dataset → Konfiguriere Parameter → Starte Training → Überwache Fortschritt.",
+      "currentSelection": "--- AKTUELLE AUSWAHL ---",
+      "modelMissing": "❌ Modell: (nicht gewählt) → Wähle aus Dropdown",
+      "modelSelected": "✓ Modell: {name} ({type})",
+      "versionSelected": "✓ Version: {name} (v{version})",
+      "versionMissing": "⚠️ Version: (nicht gewählt)",
+      "pluginSelected": "✓ Plugin: {name} ({task})",
+      "pluginUnsupported": "⚠️ Plugin: Nicht unterstützt",
+      "datasetMissing": "❌ Dataset: (nicht gewählt) → Wähle aus Dropdown",
+      "datasetSelected": "✓ Dataset: {name}",
+      "datasetStatus": "  Status: {status}",
+      "datasetSplit": "✓ Split (Train/Val/Test)",
+      "datasetUnsplit": "⚠️ Nicht aufgeteilt",
+      "trainingModeTitle": "--- TRAINING MODE ---",
+      "trainingMode": "Mode: {mode}",
+      "trainingStatusTitle": "--- TRAINING STATUS ---",
+      "status": "Status: {status}",
+      "epoch": "Epoch: {epoch}/{total}",
+      "step": "Step: {step}/{total}",
+      "trainLoss": "Train Loss: {value}",
+      "valLoss": "Val Loss: {value}",
+      "progress": "Progress: {value}",
+      "error": "⚠️ Error: {error}",
+      "readyTitle": "--- BEREIT ZUM TRAINING ---",
+      "readyBody": "(Kein aktives Training)",
+      "layoutTitle": "--- UI LAYOUT ---",
+      "layoutTop": "**OBEN (Header):**",
+      "layoutTopModel": "  • [Modell Dropdown] (linke Seite)",
+      "layoutTopDataset": "  • [Dataset Dropdown] (Mitte)",
+      "layoutTopMode": "  • [Mode: Train/Dev Toggle] (rechte Seite)",
+      "layoutMiddle": "**MITTE (Konfiguration):**",
+      "layoutMiddleBasic": "  • ▼ Basic Config (default offen): Epochs, Batch Size, Learning Rate",
+      "layoutMiddleOptimizer": "  • ▼ Optimizer: Scheduler, Weight Decay, Warmup",
+      "layoutMiddleAdvanced": "  • ▼ Advanced: Gradient Accumulation, Max Seq Length, etc.",
+      "layoutMiddleLora": "  • ▼ LoRA (wenn enabled): Target Modules, Rank, Alpha",
+      "layoutMiddleInfo": "  • Info Box: Speicheranforderung, GPU-Kompatibilität",
+      "layoutBottom": "**UNTEN (Actions):**",
+      "layoutBottomStart": "  • 🚀 \"Training starten\" (rechts, Hauptbutton - grün wenn bereit)",
+      "layoutBottomDashboard": "  • 📊 \"Dashboard\" Toggle/Button",
+      "layoutBottomHistory": "  • 📋 Training History Link",
+      "availableActions": "--- VERFÜGBARE AKTIONEN ---",
+      "actionPickModel": "1. Öffne [Modell Dropdown] oben links → wähle Modell",
+      "actionPickDataset": "2. Öffne [Dataset Dropdown] oben Mitte → wähle Dataset",
+      "actionDevMode": "1. Klick [Mode Toggle] oben rechts → schalte auf \"Dev Mode\"",
+      "actionDevScript": "2. Schreib eigenes Python-Training-Skript",
+      "actionOpenDatasets": "1. Gehe zu Datensätze-Tab",
+      "actionOpenDataset": "2. Öffne Dataset \"{name}\"",
+      "actionSplitDataset": "3. Klick \"Dataset aufteilen\" → konfiguriere Train/Val/Test",
+      "actionAdjustConfig": "1. Passe Config an (optional): Öffne ▼ Sections in der Mitte",
+      "actionStartTraining": "2. Klick 🚀 \"Training starten\" unten rechts",
+      "actionDashboardOpens": "3. Dashboard öffnet sich automatisch",
+      "actionMonitor": "1. Überwache: Schaue auf 📊 Dashboard für Live-Logs & Loss-Charts",
+      "actionPauseStop": "2. Kann während Training pausiert/gestoppt werden (Buttons im Dashboard)"
+    }
+  },
+  "analysisPanel": {
+    "title": "Trainingsanalyse",
+    "subtitle": "Metriken · Graphen · KI-Auswertung · Parameter-Templates",
+
+    "header": {
+      "templatesButton": "Templates ({count})",
+      "exportButton": "Export",
+      "refreshButton": "Aktualisieren"
+    },
+
+    "emptyState": {
+      "noModel": {
+        "title": "Kein Modell vorhanden",
+        "description": "Trainiere zunächst ein Modell."
+      },
+      "noData": {
+        "title": "Keine Trainingsdaten",
+        "description": "Diese Version wurde noch nicht trainiert oder die Logs wurden nicht gespeichert."
+      }
+    },
+
+    "modelSelector": {
+      "modelLabel": "Modell",
+      "versionLabel": "Version",
+      "versionOriginalPrefix": "Original: ",
+      "versionOriginalSuffix": " (v0)",
+      "versionSuffix": " (v{n})"
+    },
+
+    "metricCards": {
+      "finalTrainLoss": "Final Train Loss",
+      "valLabel": "Val: {value}",
+      "epochsSteps": "Epochen / Steps",
+      "stepsLabel": "{count} Steps",
+      "duration": "Dauer",
+      "bestEpoch": "Best: E{epoch}",
+      "status": "Status",
+      "statusDone": "Fertig"
+    },
+
+    "derivedStats": {
+      "title": "Abgeleitete Statistiken",
+      "lossReduction": "Loss-Reduktion",
+      "overfittingGap": "Overfitting-Gap",
+      "avgGradNorm": "Ø Grad Norm",
+      "logEntries": "Log-Einträge"
+    },
+
+    "smoothing": {
+      "label": "Smoothing (Moving Average)",
+      "description": "Reduziert Noise in Loss-Kurven"
+    },
+
+    "charts": {
+      "common": {
+        "chartMissing": "Chart-Element nicht gefunden",
+        "downloadedTitle": "Bild erfolgreich heruntergeladen!"
+      },
+      "bigLoss": {
+        "smoothingBadge": "Smoothing",
+        "legendTrain": "Train Loss",
+        "legendVal": "Val Loss",
+        "exportTooltip": "Chart als PNG exportieren",
+        "stepStart": "Step 1",
+        "stepEnd": "Step {n}",
+        "hoverEpoch": "Step {step} · Epoch {epoch}",
+        "hoverTrainLoss": "Train Loss:",
+        "hoverValLoss": "Val Loss:",
+        "hoverLr": "LR:"
+      },
+      "epochLoss": {
+        "title": "Ø Loss pro Epoche",
+        "legendTrain": "Train",
+        "legendVal": "Val",
+        "exportTooltip": "Chart als PNG exportieren"
+      },
+      "overfitting": {
+        "title": "Overfitting-Indikator (Val – Train)",
+        "gapBadge": "Gap groß",
+        "currentLabel": "Aktuell:",
+        "exportTooltip": "Chart als PNG exportieren",
+        "warmupEnd": "Warmup Ende",
+        "warningText": "Der Gap zwischen Val und Train Loss wächst — Overfitting-Zeichen. Mehr Regularisierung oder Early Stopping empfohlen.",
+        "okText": "Val–Train Gap bleibt gering — kein starkes Overfitting erkennbar."
+      },
+      "epochImprovement": {
+        "title": "Loss-Verbesserung pro Epoche (ΔTrain)"
+      },
+      "lrSchedule": {
+        "title": "Learning Rate Schedule",
+        "exportTooltip": "Chart als PNG exportieren",
+        "axisStart": "Start",
+        "axisEnd": "Ende",
+        "warmupLabel": "Warmup Ende"
+      },
+      "gradNorm": {
+        "title": "Gradient Norm",
+        "spikeBadge": "Spike",
+        "maxLabel": "Max:",
+        "avgLabel": "Ø:",
+        "exportTooltip": "Chart als PNG exportieren",
+        "spikeWarning": "Gradient-Spikes über 5.0 erkannt — Gradient Clipping (max_grad_norm ≤ 1.0) empfohlen."
+      },
+      "epochDuration": {
+        "title": "Trainingsdauer pro Epoche"
+      }
+    },
+
+    "hardware": {
+      "title": "Hardware"
+    },
+
+    "datasetModel": {
+      "title": "Dataset & Modell"
+    },
+
+    "epochTable": {
+      "title": "Epoch-Zusammenfassung ({count} Epochen)",
+      "colEpoch": "Epoche",
+      "colAvgTrainLoss": "Ø Train Loss",
+      "colMinLoss": "Min Loss",
+      "colValLoss": "Val Loss",
+      "colDuration": "Dauer",
+      "colSteps": "Steps"
+    },
+
+    "logTable": {
+      "title": "Training Logs ({count} Einträge)",
+      "colEpoch": "E",
+      "colStep": "Step",
+      "colTrainLoss": "Train Loss",
+      "colValLoss": "Val Loss",
+      "colLr": "LR",
+      "colGradNorm": "Grad Norm",
+      "colTime": "Zeit"
+    },
+
+    "aiAnalysis": {
+      "title": "KI-Trainingsanalyse",
+      "reanalyzeButton": "Neu analysieren",
+      "startButton": "KI-Analyse starten",
+      "generatingText": "Analysiere Training mit {provider}…",
+      "generatingSubtext": "Das kann 10–30 Sekunden dauern.",
+      "notEnabledTitle": "KI-Assistent nicht aktiviert",
+      "notEnabledDescription": "Aktiviere einen KI-Anbieter unter Einstellungen → KI-Assistent.",
+      "noJsonNote": "KI hat keinen JSON-Parameterblock generiert · Manuelle Templates können oben gespeichert werden.",
+
+      "recommendedParams": {
+        "title": "Empfohlene Parameter für nächstes Training",
+        "countLabel": "{count} Parameter empfohlen",
+        "moreLabel": "+{n} weitere",
+        "saveButton": "Als Training-Template speichern",
+        "savingButton": "Speichere…"
+      },
+
+      "chat": {
+        "toggleShow": "Mit KI über das Training chatten",
+        "toggleHide": "Chat ausblenden",
+        "emptyHint": "Stelle Fragen zum Training, zu den Parametern oder zu Optimierungsstrategien.",
+        "inputPlaceholder": "Frage zum Training stellen…"
+      },
+
+      "coach": {
+        "button": "Im KI-Coach weiterführen"
+      }
+    },
+
+    "templates": {
+      "title": "Gespeicherte Parameter-Templates",
+      "emptyText": "Noch keine Templates. Generiere eine KI-Analyse und speichere die empfohlenen Parameter.",
+      "sourceAI": "KI-Empfehlung",
+      "sourceUser": "Eigenes Template",
+      "saveCurrentButton": "Aktuelle Config als Template speichern",
+      "saveButton": "Speichern",
+      "cancelButton": "Abbrechen",
+      "nameInput": "Template-Name",
+      "descriptionInput": "Beschreibung (optional)"
+    }
+  },
+  "datasetUpload": {
+    "title": "Datasets",
+    "subtitle": "Verwalte Trainingsdaten für deine Modelle",
+    "subtitleAlt": "Verwalte deine Trainingsdaten",
+
+    "emptyState": {
+      "noModel": {
+        "title": "Kein Modell vorhanden",
+        "description": "Füge zuerst ein Modell hinzu, bevor du Datasets importierst."
+      },
+      "noDatasets": {
+        "title": "Keine Datasets",
+        "description": "Füge ein Dataset für \u201e{model}\u201c hinzu.",
+        "addButton": "Erstes Dataset hinzufügen"
+      }
+    },
+
+    "header": {
+      "refreshTooltip": "Aktualisieren",
+      "addButton": "Dataset hinzufügen"
+    },
+
+    "modelSelector": {
+      "label": "Modell auswählen",
+      "sourceHF": "HF",
+      "sourceLocal": "Lokal"
+    },
+
+    "card": {
+      "statusSplit": "Aufgeteilt",
+      "statusNoSplit": "Kein Split",
+      "usedCount": "{count}\u00d7 benutzt",
+      "pairedCount": "{count} Paare",
+      "orphanCount": "{count} Orphans",
+      "filesLabel": "{count} Dateien",
+      "lastUsed": "Zuletzt:",
+      "extensionsMore": "+{count}",
+      "filesButton": "Dateien",
+      "splitButton": "Split",
+      "splitTrain": "Train",
+      "splitVal": "Val",
+      "splitTest": "Test",
+      "halveButton": "\u00bd Halbieren",
+      "halveTooltip": "Bei RAM-Problemen halbieren"
+    },
+
+    "deleteDialog": {
+      "title": "Dataset löschen?",
+      "description": "\u201e{name}\u201c und alle zugehörigen Dateien werden unwiderruflich entfernt.",
+      "cancelButton": "Abbrechen",
+      "confirmButton": "Löschen"
+    },
+
+    "splitModal": {
+      "title": "Dataset aufteilen",
+      "pairedWarning": "Strukturiertes Dataset ({type}). Nur Root-Dateien werden aufgeteilt \u2013 bei Paired-Datasets m\u00fcssen Prim\u00e4r- und Labeldateien separat geteilt werden.",
+      "fileCount": "{count} Dateien aufteilen.",
+      "labelTrain": "Training",
+      "labelVal": "Validierung",
+      "labelTest": "Test",
+      "splitButton": "Dataset aufteilen",
+      "splittingButton": "Teile auf\u2026",
+      "successTitle": "Aufgeteilt!",
+      "successDetail": "\u201e{name}\u201c wurde in Train/Val/Test aufgeteilt.",
+      "errorTitle": "Split fehlgeschlagen",
+      "invalidRatioTitle": "Ung\u00fcltige Aufteilung",
+      "invalidRatioDetail": "Die Summe muss 100% ergeben."
+    },
+
+    "halveModal": {
+      "title": "Dataset halbieren",
+      "whyTitle": "Wof\u00fcr ist das?",
+      "whyDescription": "Wenn das Training mit einem RAM-Fehler abbricht, hilft es den Datensatz zu halbieren.",
+      "halfLabel": "H\u00e4lfte {n}",
+      "filesLabel": "Dateien ({label})",
+      "originalNote": "Das Original bleibt erhalten.",
+      "halveButton": "\u00bd In zwei H\u00e4lften teilen",
+      "halvingButton": "Teile auf\u2026",
+      "successTitle": "Geteilt!",
+      "successDetail": "\u201e{a}\u201c und \u201e{b}\u201c erstellt.",
+      "errorTitle": "Halbieren fehlgeschlagen"
+    },
+
+    "importModal": {
+      "title": "Dataset hinzuf\u00fcgen",
+      "forModel": "f\u00fcr: {model}",
+      "tabLocal": "Lokaler Ordner",
+      "tabHuggingFace": "Hugging Face",
+
+      "local": {
+        "supportedFormats": ".csv .jsonl .json .parquet .txt YOLO/ COCO/ Pascal VOC/ Audio+TXT",
+        "dropzoneIdle": "Dataset-Ordner hierher ziehen",
+        "dropzoneDragging": "Ordner hier ablegen",
+        "dropzoneSubtitle": "Flat Files, YOLO, COCO, Pascal VOC, Audio/Transkript, \u2026",
+        "browseButton": "Ordner durchsuchen",
+        "browseFolderTitle": "Dataset-Ordner ausw\u00e4hlen",
+        "folderSelected": "Ordner ausgew\u00e4hlt",
+        "changeFolderLink": "Anderen Ordner w\u00e4hlen",
+        "analysisLoading": "Analysiere Dataset-Typ\u2026",
+        "nameLabel": "Dataset-Name",
+        "namePlaceholder": "z.\u202fB. mein-datensatz-v1",
+        "importButton": "Dataset importieren",
+        "importingButton": "Importiere\u2026",
+        "importSuccess": "Dataset importiert!",
+        "importSuccessDetail": "\u201e{name}\u201c wurde hinzugef\u00fcgt.",
+        "importError": "Import fehlgeschlagen",
+        "missingFieldsTitle": "Fehlende Angaben",
+        "missingFieldsDetail": "Ordner, Name und Modell werden ben\u00f6tigt.",
+        "dragDropInfo": "Bitte nutze den \u201eOrdner durchsuchen\u201c-Button.",
+        "dragDropInfoTitle": "Drag & Drop",
+        "pluginPreferredType": "Bevorzugter Typ:",
+        "pluginAlsoCompatible": "Auch kompatibel:"
+      },
+
+      "hf": {
+        "filterToggleShow": "Filter anzeigen",
+        "filterToggleHide": "Filter ausblenden",
+        "filterTask": "Task",
+        "filterLanguage": "Sprache",
+        "filterSize": "Gr\u00f6\u00dfe",
+        "filterAll": "Alle",
+        "searchLabel": "Dataset suchen",
+        "searchPlaceholder": "z.\u202fB. squad, imdb, common_voice\u2026",
+        "searchHint": "Mindestens 2 Zeichen eingeben",
+        "resultsCount": "{count} Datasets gefunden",
+        "viewOnHF": "Auf HuggingFace ansehen",
+        "localNameLabel": "Lokaler Name",
+        "localNamePlaceholder": "Name f\u00fcr lokale Speicherung",
+        "downloadButton": "Dataset herunterladen",
+        "downloadNote": "Download-Dauer h\u00e4ngt von der Datenmenge ab",
+        "cancelDownload": "Download abbrechen",
+        "cancelSuccess": "Abgebrochen",
+        "cancelDetail": "Der Download wurde abgebrochen.",
+        "downloadSuccess": "Download abgeschlossen!",
+        "downloadSuccessDetail": "\u201e{name}\u201c wurde heruntergeladen.",
+        "downloadError": "Download fehlgeschlagen",
+        "missingFieldsTitle": "Fehlende Angaben",
+        "missingFieldsDetail": "Dataset, Name und Modell werden ben\u00f6tigt.",
+        "connectingLabel": "Verbinde\u2026",
+        "waitingNote": "Dataset wird geladen \u2013 kann einige Minuten dauern\u2026",
+        "speedLabel": "Geschwindigkeit",
+        "elapsedLabel": "Vergangen",
+        "remainingLabel": "Verbleibend"
+      }
+    },
+
+    "structureGuide": {
+      "toggleLabel": "Wie muss mein Dataset-Ordner aufgebaut sein?",
+      "types": {
+        "yolo":        { "label": "YOLO (Image + Labels)",     "hint": "W\u00e4hle den Ordner der BEIDE Unterordner enth\u00e4lt \u2013 nicht images/ oder labels/ direkt." },
+        "flatfile":    { "label": "Flat File (Text/CSV/JSONL)", "hint": "W\u00e4hle den Ordner der die Dateien enth\u00e4lt. Mehrere Dateien sind erlaubt." },
+        "folderclass": { "label": "Ordner-Klassifikation",      "hint": "Jeder Unterordner ist eine Klasse. Bilder oder Textdateien drin." },
+        "audio":       { "label": "Audio + Transkript",         "hint": "Gleicher Dateiname f\u00fcr Audio und Transkript \u2013 nur die Endung unterscheidet sich." },
+        "pascal":      { "label": "Pascal VOC",                 "hint": "Gleicher Basename in images/ und annotations/ \u2013 z.B. bild1.jpg \u2194 bild1.xml." }
+      }
+    },
+
+    "analysisPreview": {
+      "confidenceLabel": "{confidence}% Konfidenz \u00b7 {count} Dateien",
+      "autoDetectedTooltip": "Auto-erkannt",
+      "pairedCount": "{count} Paare vollst\u00e4ndig",
+      "orphanCount": "{count} Dateien ohne Partner"
+    },
+
+    "notifications": {
+      "loadModelsError": "Fehler beim Laden der Modelle",
+      "loadDatasetsError": "Fehler beim Laden der Datasets",
+      "deleteSuccess": "Gel\u00f6scht",
+      "deleteSuccessDetail": "\u201e{name}\u201c wurde entfernt.",
+      "deleteError": "L\u00f6schen fehlgeschlagen"
+    }
+  },
+
+  "datasetFileManager": {
+    "pairedHints": {
+      "yolo_bbox": "YOLO: images/ + labels/ – Primär- und Label-Dateien müssen denselben Basename haben.",
+      "pascal_voc": "Pascal VOC: images/ + annotations/*.xml – gleicher Basename erforderlich.",
+      "audio_transcript": "Audio+Transkript: .wav + .txt gleicher Basename, getrennt aufteilen.",
+      "coco_json": "COCO: annotations.json referenziert Bilder per ID – nicht zeilenweise splitten."
+    },
+
+    "header": {
+      "totalFiles": "{count} Dateien gesamt",
+      "statTrain": "Train: {count}",
+      "statVal": "Val: {count}",
+      "statTest": "Test: {count}",
+      "statUnsplit": "Unsplit: {count}"
+    },
+
+    "tabs": {
+      "files": "Dateien",
+      "yaml": "dataset.yaml"
+    },
+
+    "toolbar": {
+      "searchPlaceholder": "Dateien durchsuchen…",
+      "filterAll": "Alle",
+      "addButton": "Hinzufügen",
+      "addDialogTitle": "Dateien hinzufügen"
+    },
+
+    "selection": {
+      "selectedCount": "{count} ausgewählt",
+      "moveToTrain": "→ train",
+      "moveToVal": "→ val",
+      "moveToTest": "→ test",
+      "deleteButton": "Löschen"
+    },
+
+    "table": {
+      "colName": "Name",
+      "colFolder": "Ordner",
+      "colSize": "Größe",
+      "viewTooltip": "Ansehen",
+      "noFiles": "Keine Dateien gefunden"
+    },
+
+    "notifications": {
+      "loadError": "Fehler beim Laden",
+      "readError": "Fehler beim Lesen",
+      "moveSuccess": "{count} Datei(en) → {split}",
+      "moveError": "Fehler beim Verschieben",
+      "deleteSuccess": "{count} Datei(en) gelöscht",
+      "deleteError": "Fehler beim Löschen",
+      "addSuccess": "{count} Datei(en) hinzugefügt",
+      "addError": "Fehler"
+    },
+
+    "yaml": {
+      "description": "Die dataset.yaml wird von Ultralytics/YOLO direkt eingelesen. Trage hier die Pfade und Klassen ein – alles wird im richtigen Format gespeichert.",
+      "sectionPaths": "Pfade",
+      "trainPathLabel": "train: – relativer Pfad zu Trainingsbildern",
+      "trainPathPlaceholder": "images/train",
+      "trainPathHint": "z.B. images/train oder train/images",
+      "valPathLabel": "val: – relativer Pfad zu Validierungsbildern",
+      "valPathPlaceholder": "images/val",
+      "valPathHint": "z.B. images/val oder val/images",
+      "sectionClasses": "Klassen",
+      "ncLabel": "nc = {count}",
+      "noClasses": "Noch keine Klassen eingetragen",
+      "removeClassTooltip": "Entfernen",
+      "newClassPlaceholder": "Neue Klasse, z.B. Person",
+      "addClassButton": "Hinzufügen",
+      "sectionPreview": "Vorschau",
+      "previewNoClasses": "  # Noch keine Klassen",
+      "saveButton": "dataset.yaml speichern",
+      "savingButton": "Speichere…",
+      "savedButton": "Gespeichert!",
+      "saveSuccess": "Gespeichert",
+      "saveSuccessDetail": "dataset.yaml wurde aktualisiert.",
+      "saveError": "Speichern fehlgeschlagen",
+      "yamlError": "YAML Fehler"
+    }
+  },
+
+  "datasetCompatBadge": {
+    "noModelSelected": "Kein Modell gewählt",
+    "checking": "Prüfe Dataset…",
+    "detailsLabel": "Details pro Dateiformat:"
+  },
+
+  "laboratoryPanel": {
+    "title": "Labor",
+    "subtitle": "Samples testen, bewerten und Schwachstellen analysieren",
+
+    "header": {
+      "analysisButton": "Auswertung",
+      "continueTestingButton": "Weiter testen",
+      "sessionsButton": "Sessions"
+    },
+
+    "sessionsModal": {
+      "title": "Lab-Sessions",
+      "empty": "Noch keine Sessions gespeichert.",
+      "ratedLabel": "{tested}/{total} bewertet",
+      "engineBadge": "Engine",
+      "devScriptBadge": "Dev Script",
+      "deleteButton": "L\u00f6schen",
+      "loadButton": "Laden",
+      "deleteSuccess": "Session gel\u00f6scht"
+    },
+
+    "setup": {
+      "title": "Konfiguration",
+      "configSummary": "{model} \u00b7 {engine} \u00b7 {count} Samples aus \u201e{file}\u201c",
+      "noModelsTitle": "Kein Modell vorhanden",
+      "noModelsDesc": "F\u00fcge zuerst ein Modell im Model-Manager hinzu.",
+
+      "modelLabel": "Modell",
+      "versionLabel": "Version",
+      "versionLatest": " (neueste)",
+      "noVersions": "Keine Versionen",
+
+      "engineLabel": "Test Engine",
+      "engineStandard": "Train Engine",
+      "engineDev": "Dev Script",
+
+      "engineNotSupported": "Dieses Modell wird noch nicht von der Test Engine unterst\u00fctzt. Nutze den Dev Script Modus.",
+      "pluginDetected": "{name} \u2013 Plugin erkannt",
+      "serverLoading": "Modell wird geladen\u2026 Bitte warten.",
+      "serverReady": "Modell geladen \u2013 bereit f\u00fcr Inferenz",
+      "serverError": "Fehler beim Laden \u2013 Version wechseln oder neu starten",
+
+      "datasetLabel": "Sample-Dataset",
+      "datasetPlaceholder": "\u2013 Dataset w\u00e4hlen \u2013",
+      "datasetFileCount": "{count} Dateien",
+      "datasetSplitSuffix": " \u00b7 gesplittet",
+      "noDatasetWarning": "Kein Dataset f\u00fcr dieses Modell vorhanden. Bitte zuerst ein Dataset hochladen.",
+
+      "splitAll": "Alle",
+
+      "loadSamplesButton": "Samples laden",
+      "loadingSamplesButton": "Lade Samples\u2026",
+      "samplesLoaded": "{count} Samples geladen \u00b7 {file}",
+      "samplesPreviewTitle": "Vorschau ({count} Samples)",
+      "samplesPreviewMore": "+ {count} weitere\u2026",
+      "samplesRemove": "Entfernen",
+
+      "startButton": "Lab-Session starten ({count} Samples)",
+
+      "notifications": {
+        "engineNotSupported": "Nicht unterst\u00fctzt",
+        "engineNotSupportedDetail": "Dieses Modell wird von der Test Engine noch nicht unterst\u00fctzt. Nutze den Dev Script Modus.",
+        "noScript": "Kein Skript",
+        "noScriptDetail": "Bitte ein Dev Script eingeben.",
+        "noDatasetFiles": "Keine Dateien",
+        "noDatasetFilesDetail": "Keine Dateien f\u00fcr Split \"{split}\" gefunden. Verf\u00fcgbare Splits: {splits}.",
+        "noSamples": "Keine Samples",
+        "noSamplesDetail": "{count} Datei(en) geladen, aber keine Samples extrahiert. Pr\u00fcfe das Format (JSONL, CSV, TXT)",
+        "loadSuccess": "Geladen",
+        "loadSuccessDetail": "{count} Samples aus {fileCount} Datei(en) geladen.",
+        "loadError": "Fehler beim Laden",
+        "fileLoadSuccess": "Geladen",
+        "fileLoadSuccessDetail": "{count} Samples aus \u201e{name}\u201c geladen.",
+        "fileEmpty": "Leer",
+        "fileEmptyDetail": "Keine Samples gefunden.",
+        "modelLoadError": "Modell-Ladefehler"
+      }
+    },
+
+    "devScript": {
+      "title": "Dev Script",
+      "clearButton": "Leeren",
+      "templateButton": "Template",
+      "aiButton": "KI",
+      "placeholder": "# Skript hier eingeben oder Template laden\u2026\n# Tipp: Template-Button klicken!",
+      "footerNote": "Das Skript l\u00e4uft f\u00fcr jedes Sample einzeln. Ausgabe muss ein JSON-Objekt mit \"predicted\" sein.",
+
+      "aiSidebar": {
+        "title": "KI-Assistent",
+        "titleShort": "KI",
+        "emptyHint": "Frag nach dem Skript\u2026",
+        "codeTakenLabel": "[Code wurde \u00fcbernommen]",
+        "inputPlaceholder": "Frage\u2026"
+      }
+    },
+
+    "testing": {
+      "serverBannerLoading": "Modell wird geladen\u2026 Testen wird gleich m\u00f6glich.",
+      "serverBannerError": "Modell konnte nicht geladen werden. Bitte Version wechseln.",
+      "serverBannerIdle": "Kein Modell geladen.",
+
+      "progressLabel": "Sample {current} von {total}",
+
+      "sampleTitle": "Sample #{index} / {total}",
+      "sampleCardTitle": "Sample #{index}",
+      "rawDataToggle": "Rohdaten anzeigen",
+      "testButton": "Testen",
+      "testingButton": "Teste\u2026",
+      "alreadyRatedLabel": "Bereits bewertet als",
+      "skipButton": "\u00dcberspringen",
+
+      "resultTitle": "Ergebnis",
+      "idleHint": "Dr\u00fccke \u201eTesten\u201c um das Ergebnis zu sehen",
+      "inferenceRunning": "Inference l\u00e4uft\u2026",
+      "matchLabel": "\u00dcbereinstimmend mit erwartetem Label",
+      "mismatchLabel": "Abweichend \u2014 erwartet:",
+      "allClassesLabel": "Alle Klassen",
+      "addNoteButton": "Notiz hinzuf\u00fcgen",
+      "notePlaceholder": "Notiz zum Sample\u2026",
+      "correctButton": "Korrekt",
+      "wrongButton": "Falsch",
+
+      "sessionSummaryTitle": "Bisherige Session",
+      "correctLabel": "{count} korrekt",
+      "wrongLabel": "{count} falsch",
+      "skippedLabel": "{count} \u00fcbersprungen",
+      "openAnalysisButton": "Analyse \u00f6ffnen",
+
+      "allDoneTitle": "Alle Samples bewertet!",
+      "toAnalysisButton": "Zur Auswertung"
+    },
+
+    "analysis": {
+      "exportButton": "Export CSV",
+      "statsRated": "Bewertet",
+      "statsCorrect": "Korrekt",
+      "statsWrong": "Falsch",
+      "statsSkipped": "\u00dcbersprungen",
+
+      "donutCorrectLabel": "Korrekt",
+      "donutWrongLabel": "Falsch",
+      "donutSkipLabel": "\u00dcbersprungen",
+      "donutCenterLabel": "Korrekt",
+
+      "avgConfidenceTitle": "\u00d8 Konfidenz",
+      "avgConfCorrect": "Korrekte",
+      "avgConfWrong": "Falsche",
+      "accuracyLabel": "Accuracy (bewertet)",
+
+      "topWrongTitle": "H\u00e4ufigste Fehlklassen",
+      "topWrongEmpty": "Keine Fehler vorhanden",
+      "topWrongSuffix": "{count}\u00d7",
+
+      "resultsTitle": "Ergebnisse ({count})",
+      "filterAll": "Alle",
+      "filterCorrect": "Korrekt",
+      "filterWrong": "Falsch",
+      "filterSkipped": "\u00dcbersprungen",
+      "noEntries": "Keine Eintr\u00e4ge.",
+
+      "detailInput": "Input:",
+      "detailPredicted": "Vorhergesagt:",
+      "detailExpected": "Erwartet:",
+      "detailNote": "Notiz:",
+
+      "csvHeaderIndex": "Index",
+      "csvHeaderInput": "Input",
+      "csvHeaderExpected": "Erwartet",
+      "csvHeaderPredicted": "Vorhergesagt",
+      "csvHeaderConfidence": "Konfidenz",
+      "csvHeaderRating": "Bewertung",
+      "csvHeaderNote": "Notiz",
+      "csvHeaders": ["Index", "Input", "Erwartet", "Vorhergesagt", "Konfidenz", "Bewertung", "Notiz"]
+    }
+  },
+  "openLibrary": {
+    "title": "Open Script Library",
+    "scriptsAvailable": "{n} Skripte verfügbar",
+    "reload": "Neu laden",
+    "tabBrowse": "Durchsuchen",
+    "tabUpload": "Hochladen",
+    "searchPlaceholder": "Name, Beschreibung, Autor, Tags…",
+    "filterModelType": "Modell-Typ",
+    "filterFramework": "Framework",
+    "onlyVerified": "Nur Verified",
+    "resetFilters": "Alle zurücksetzen",
+    "loading": "Lade…",
+    "found": "{n} Skripte gefunden",
+    "foundOne": "1 Skript gefunden",
+    "verified": "verifiziert",
+    "noScripts": "Keine Skripte gefunden",
+    "noScriptsHint": "Passe deine Filter an oder lade als Erster ein Skript hoch!",
+    "inLibrary": "In Bibliothek",
+    "unverified": "Ungeprüft",
+    "notVerified": "Nicht verifiziert",
+    "uploading": "Wird hochgeladen…",
+    "submit": "Skript einreichen",
+    "added": "Hinzugefügt!",
+    "addedMsg": "wurde zu deiner lokalen Bibliothek hinzugefügt.",
+    "dupTitle": "Name bereits vergeben",
+    "dupSubtitle": "Dieser Community-Name ist nicht verfügbar",
+    "dupMsg": "wird bereits von einem anderen Community-Mitglied verwendet.",
+    "dupHint": "Tipp: Probiere einen Namen mit Zahlen oder Unterstrichen, z.B. ai_enthusiast_42",
+    "dupRetry": "Anderen Namen versuchen",
+    "unverifiedTitle": "Nicht verifiziertes Skript",
+    "unverifiedSubtitle": "Dieses Skript wurde noch nicht von FrameTrain geprüft",
+    "unverifiedBody": "Nicht verifizierte Skripte stammen direkt von Community-Mitgliedern und wurden noch nicht auf Sicherheit und Korrektheit geprüft.",
+    "addAnyway": "Trotzdem hinzufügen",
+    "cancel": "Abbrechen",
+    "details": "Details →",
+
+    "verifiedInfoTitle": "Verifiziertes Skript",
+    "verifiedInfoBody": "Dieses Skript wurde von FrameTrain auf Sicherheit und Funktionalität geprüft. Es enthält keine schädlichen Operationen und läuft stabil.",
+    "unverifiedInfoTitle": "Community-Upload (ungeprüft)",
+    "unverifiedInfoBody": "Dieses Skript wurde noch nicht von FrameTrain geprüft. Schau den Code-Inhalt durch bevor du es ausführst.",
+
+    "scriptPreviewTitle": "Skript-Vorschau",
+    "scriptPreviewLines": "({count} Zeilen)",
+    "copyButton": "Kopieren",
+    "copiedButton": "Kopiert!",
+
+    "upload": {
+      "infoBannerTitle": "Skript zur Community-Bibliothek beisteuern",
+      "infoBannerBody": "Wähle ein Skript aus deiner privaten Bibliothek. Es wird eingereicht, geprüft und erhält dann ein Verified-Badge.",
+      "pickScriptLabel": "Skript aus deiner Bibliothek wählen",
+      "noOwnScripts": "Keine eigenen Skripte in deiner Bibliothek.",
+      "noOwnScriptsHint": "Schreibe zuerst ein Skript im {mode} und speichere es.",
+      "scriptLineCount": "{count} Zeilen",
+      "scriptSavedAt": "gespeichert {date}",
+      "previewLabel": "Vorschau:",
+      "nameLabel": "Name",
+      "namePlaceholder": "z.B. LoRA Fine-Tuning für GPT-2",
+      "authorChangeTooltip": "Namen ändern",
+      "authorLabel": "Autor",
+      "authorPlaceholder": "Dein Community-Name (z. B. ai_enthusiast)",
+      "authorFirstUploadHint": "Der Name wird beim Absenden des Skripts gespeichert und für alle deine Uploads verwendet.",
+      "authorChangeHint": "Namen ändern — alle künftigen Uploads und retroaktive Updates in der Bibliothek verwenden den neuen Namen.",
+      "authorSaved": "gespeichert",
+      "descriptionLabel": "Beschreibung",
+      "descriptionPlaceholder": "Wofür eignet sich dieses Skript? Welche Voraussetzungen gibt es?",
+      "modelTypeLabel": "Modell-Typ",
+      "taskTypeLabel": "Task-Typ",
+      "frameworkLabel": "Framework",
+      "tagsLabel": "Tags (kommagetrennt)",
+      "tagsPlaceholder": "lora, llm, 4bit",
+      "noScriptError": "Kein Skript",
+      "noScriptErrorDetail": "Bitte erst ein Skript aus deiner Bibliothek auswählen.",
+      "missingFields": "Fehlende Felder",
+      "missingFieldsDetail": "Bitte Name und Beschreibung ausfüllen.",
+      "missingAuthor": "Community-Name erforderlich",
+      "missingAuthorDetail": "Bitte gib einen Community-Namen ein.",
+      "uploadedTitle": "Skript eingereicht!",
+      "uploadedBody": "Dein Skript wird vom FrameTrain-Team auf Sicherheit und Funktionalität geprüft. Nach der Verifikation erscheint es in der Bibliothek mit dem Verified-Badge.",
+      "submitAnotherButton": "Weiteres Skript einreichen",
+      "successTitle": "Hochgeladen!",
+      "successDetail": "Dein Skript wurde eingereicht und wird bald geprüft."
+    }
+  },
+  "canvasInferenceTab": {
+    "modelSelectPlaceholder": "— Modell wählen —",
+    "inputPlaceholder": "0.1, 0.5, 0.3 …",
+    "invalidInput": "Ungültiger Input – kommagetrennte Zahlen eingeben, z.B. 0.1, 0.5, 0.3"
+  },
+  "synapseBuilder": {
+    "title": "Synapse Builder",
+    "subtitle": "Visueller Modell-Pipeline-Builder",
+    "exportGraphTooltip": "Graph als neues Modell in FrameTrain-Bibliothek exportieren",
+    "modelsButton": "Modelle",
+    "sessionsModelsButton": "Sessions & Modelle",
+    "aiAssistantButton": "AI Assistent",
+    "addNode": "Node hinzufügen",
+    "clearCanvas": "Canvas leeren",
+    "export": "Exportieren",
+    "validate": "Validieren",
+    "save": "Session speichern",
+    "load": "Session laden",
+    "nodeLibrary": "Node-Bibliothek",
+    "properties": "Eigenschaften",
+    "console": "Konsole",
+    "sessions": "Sessions",
+    "noNodes": "Noch keine Nodes auf dem Canvas",
+    "validationOk": "Graph valide",
+    "validationErrors": "Validierungsfehler",
+    "aiSummary": {
+      "executed": "{count} Schritte ausgeführt",
+      "noChanges": "(keine Änderungen)"
+    },
+    "exportModal": {
+      "title": "Modell exportiert!",
+      "description": "ist jetzt in der FrameTrain-Bibliothek.",
+      "nextStepsTitle": "Was passiert als nächstes:",
+      "step1": "1️⃣ Training-Seite öffnen",
+      "step2": "2️⃣ Modell wählen → {name}",
+      "step3": "3️⃣ Dataset hinzufügen & Training starten",
+      "step4": "4️⃣ Nach Training: model.pt erscheint in Versionen",
+      "confirmButton": "Verstanden"
+    }
+  },
+  "datasetCompat": {
+    "noModelSelected": "Kein Modell gewählt",
+    "checkingDataset": "Prüfe Dataset…",
+    "fileDetailsTitle": "Details pro Dateiformat:",
+    "unknownCompat": "Kompatibilität für dieses Modell noch unbekannt.",
+    "unknownCompatHint": "Dieses Modell wird in einer späteren Version geprüft.",
+    "noCheckConfigured": "Keine Kompatibilitätsprüfung konfiguriert.",
+    "levels": {
+      "perfect": "Perfekt geeignet",
+      "ok": "Geeignet",
+      "warning": "Bedingt geeignet",
+      "bad": "Nicht geeignet"
+    },
+    "datasetTypes": {
+      "flat_file": "Flat File",
+      "yolo_bbox": "YOLO Bounding Box",
+      "coco_json": "COCO JSON",
+      "pascal_voc": "Pascal VOC",
+      "folder_class": "Ordner-Klassen",
+      "audio_transcript": "Audio + Transkript",
+      "common_voice": "Common Voice",
+      "pre_split": "Voraufgeteilt",
+      "multi_shard": "Multi-Shard Parquet",
+      "unknown": "Unbekannt"
+    }
+  },
+
+  "pluginRegistry": {
+    "noModelPath": "Kein Modellpfad angegeben.",
+    "notSupported": "Dieses Modell wird noch nicht unterstützt. Aktuell verfügbar: {plugins}."
+  },
+
+  "common": {
+    "loading": "Wird geladen...",
+    "error": "Fehler",
+    "notSelected": "nicht gewählt",
+    "positionTop": "OBEN (Header):",
+    "positionMiddle": "MITTE (Hauptbereich):",
+    "positionRight": "RECHTS (optional):",
+    "success": "Erfolg",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen",
+    "delete": "Löschen",
+    "save": "Speichern",
+    "close": "Schließen",
+    "back": "Zurück",
+    "next": "Weiter",
+    "yes": "Ja",
+    "no": "Nein",
+    "refresh": "Aktualisieren",
+    "search": "Suchen",
+    "filter": "Filtern",
+    "export": "Exportieren",
+    "import": "Importieren",
+    "copy": "Kopieren",
+    "edit": "Bearbeiten",
+    "unknown": "Unbekannt",
+    "noData": "Keine Daten verfügbar",
+    "optional": "Optional",
+    "modelInputHint": "HuggingFace Model-ID (z. B. xlm-roberta-base)",
+    "modelInputPlaceholder": "xlm-roberta-base  oder  /pfad/zum/modell"
+  }
+}

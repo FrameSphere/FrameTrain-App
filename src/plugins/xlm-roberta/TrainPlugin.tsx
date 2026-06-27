@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Dumbbell, AlertTriangle, Loader2, Rocket } from 'lucide-react';
 import type { TrainPluginProps } from '../types';
 
 export default function XLMRobertaTrainPlugin({ modelPath, onNavigateToAnalysis }: TrainPluginProps) {
@@ -40,7 +41,7 @@ export default function XLMRobertaTrainPlugin({ modelPath, onNavigateToAnalysis 
       {/* Header */}
       <div className="flex items-center gap-3 p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10">
         <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-xl">
-          🏋️
+          <Dumbbell className="w-5 h-5 text-emerald-300" />
         </div>
         <div>
           <p className="text-emerald-300 text-sm font-medium">XLM-RoBERTa · Keyword Recognition</p>
@@ -51,7 +52,10 @@ export default function XLMRobertaTrainPlugin({ modelPath, onNavigateToAnalysis 
       {/* Fehlermeldung */}
       {error && (
         <div className="p-4 rounded-xl border border-red-500/40 bg-red-500/10 text-red-300 text-sm">
-          ⚠️ {error}
+          <span className="inline-flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            <span>{error}</span>
+          </span>
         </div>
       )}
 
@@ -117,7 +121,17 @@ export default function XLMRobertaTrainPlugin({ modelPath, onNavigateToAnalysis 
         disabled={isStarting}
         className="w-full py-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-medium text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isStarting ? '⏳ Starte Training…' : '🚀 Training starten'}
+        {isStarting ? (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Starte Training…
+          </span>
+        ) : (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Rocket className="w-4 h-4" />
+            Training starten
+          </span>
+        )}
       </button>
     </div>
   );

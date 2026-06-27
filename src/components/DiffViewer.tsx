@@ -3,6 +3,7 @@ import {
   X, Check, Copy, ChevronDown, ChevronUp, Plus, Minus,
 } from 'lucide-react';
 import type { CodeEdit } from '../ai/codeEdits';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface DiffViewerProps {
   edits: CodeEdit[];
@@ -50,6 +51,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
 
   const findLines = edit.find.split('\n');
   const replaceLines = edit.replace.split('\n');
+  const { t } = useLanguage();
 
   return (
     <div className="border border-white/10 rounded-lg overflow-hidden">
@@ -87,7 +89,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
           <div className="border-b border-white/5">
             <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2">
               <p className="text-xs font-medium text-red-300 flex items-center gap-2">
-                <Minus className="w-3.5 h-3.5" /> Entfernen ({findLines.length} Zeilen)
+                <Minus className="w-3.5 h-3.5" /> {t('diffViewer.removeLabel').replace('{count}', String(findLines.length))}
               </p>
             </div>
             <div>
@@ -101,7 +103,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
           <div>
             <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2">
               <p className="text-xs font-medium text-emerald-300 flex items-center gap-2">
-                <Plus className="w-3.5 h-3.5" /> Hinzufügen ({replaceLines.length} Zeilen)
+                <Plus className="w-3.5 h-3.5" /> {t('diffViewer.addLabel').replace('{count}', String(replaceLines.length))}
               </p>
             </div>
             <div>
@@ -123,7 +125,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
               setTimeout(() => setCopied(false), 2000);
             }}
             className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-            title="Neue Version kopieren"
+            title={t('diffViewer.copyTooltip')}
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
@@ -131,11 +133,11 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
 
         {edit.applied ? (
           <div className="flex items-center gap-2 text-emerald-300 text-xs font-medium">
-            <Check className="w-3.5 h-3.5" /> Übernommen
+            <Check className="w-3.5 h-3.5" /> {t('diffViewer.appliedLabel')}
           </div>
         ) : edit.failed ? (
           <div className="flex items-center gap-2 text-red-300 text-xs font-medium">
-            <X className="w-3.5 h-3.5" /> Text nicht gefunden
+            <X className="w-3.5 h-3.5" /> {t('diffViewer.failedLabel')}
           </div>
         ) : (
           <button
@@ -143,7 +145,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
             disabled={isApplying}
             className="px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-medium transition-all disabled:opacity-50"
           >
-            Übernehmen
+            {t('diffViewer.applyButton')}
           </button>
         )}
       </div>
@@ -156,6 +158,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
   const totalRemoved = edits.reduce((acc, e) => acc + countLines(e.find), 0);
   const totalAdded = edits.reduce((acc, e) => acc + countLines(e.replace), 0);
   const allApplied = edits.every(e => e.applied);
+  const { t } = useLanguage();
 
   useEffect(() => {
     setEdits(initialEdits);
@@ -181,15 +184,15 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-bold text-white">Codeänderungen</h2>
+            <h2 className="text-lg font-bold text-white">{t('diffViewer.title')}</h2>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <Minus className="w-4 h-4 text-red-400" />
-                <span className="text-sm font-medium text-red-300">{totalRemoved} Zeilen</span>
+                <span className="text-sm font-medium text-red-300">{t('diffViewer.removedLines').replace('{count}', String(totalRemoved))}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Plus className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-medium text-emerald-300">{totalAdded} Zeilen</span>
+                <span className="text-sm font-medium text-emerald-300">{t('diffViewer.addedLines').replace('{count}', String(totalAdded))}</span>
               </div>
             </div>
           </div>
@@ -204,7 +207,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <p className="text-xs text-gray-500">
-            {edits.length} Änderung{edits.length !== 1 ? 'en' : ''} · {edits.filter(e => e.applied).length} übernommen
+            {(edits.length === 1 ? t('diffViewer.changesCount') : t('diffViewer.changesCountPlural')).replace('{count}', String(edits.length))} · {t('diffViewer.appliedCount').replace('{count}', String(edits.filter(e => e.applied).length))}
           </p>
           {edits.map((edit) => (
             <EditDiff
@@ -219,14 +222,21 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
         {/* Footer */}
         <div className="border-t border-white/10 bg-white/[0.02] px-6 py-4 flex items-center justify-between flex-shrink-0">
           <p className="text-xs text-gray-500">
-            {allApplied ? '✅ Alle Änderungen übernommen' : `${edits.filter(e => !e.applied && !e.failed).length} bereit zur Übernahme`}
+            {allApplied ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5" />
+                {t('diffViewer.allApplied')}
+              </span>
+            ) : (
+              t('diffViewer.readyCount').replace('{count}', String(edits.filter(e => !e.applied && !e.failed).length))
+            )}
           </p>
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
               className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm font-medium transition-all"
             >
-              Schließen
+              {t('diffViewer.closeButton')}
             </button>
             {!allApplied && edits.some(e => !e.applied && !e.failed) && (
               <button
@@ -234,7 +244,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
                 disabled={isApplying}
                 className="px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-sm font-medium transition-all disabled:opacity-50"
               >
-                Alle übernehmen
+                {t('diffViewer.applyAllButton')}
               </button>
             )}
           </div>

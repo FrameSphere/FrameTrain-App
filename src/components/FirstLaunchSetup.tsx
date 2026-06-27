@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from '@tauri-apps/api/event';
-import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle } from 'lucide-react';
+import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 
 interface PluginInfo {
   id: string;
@@ -31,8 +32,68 @@ interface DependencyStatus {
   version?: string;
 }
 
+interface GpuInfo {
+  has_nvidia_gpu: boolean;
+  cuda_available: boolean;
+  cuda_version?: string;
+  gpu_name?: string;
+  recommended_torch_index: string;
+}
+
+interface PreFlightCheck {
+  ok: boolean;
+  python_found: boolean;
+  python_version?: string;
+  python_version_ok: boolean;
+  pip_found: boolean;
+  free_gb: number;
+  free_gb_ok: boolean;
+  gpu_info: GpuInfo;
+  platform: string;
+  errors: string[];
+  warnings: string[];
+}
+
 const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   const { currentTheme } = useTheme();
+  const { language, setLanguage, t } = useLanguage();
+
+  // Screen 0: Sprachauswahl — kommt vor Python-Check
+  const [languageSelected, setLanguageSelected] = useState(false);
+
+  const handleLanguageConfirm = (lang: Language) => {
+    setLanguage(lang);
+    setLanguageSelected(true);
+  };
+
+  // Screen 1: Pre-Flight-Check
+  const [preFlightDone, setPreFlightDone] = useState(false);
+  const [preFlightResult, setPreFlightResult] = useState<PreFlightCheck | null>(null);
+  const [preFlightLoading, setPreFlightLoading] = useState(false);
+
+  const runPreFlight = async () => {
+    setPreFlightLoading(true);
+    try {
+      const result = await invoke<PreFlightCheck>('run_preflight_check');
+      setPreFlightResult(result);
+    } catch (e) {
+      setPreFlightResult({
+        ok: false, python_found: false, python_version_ok: false,
+        pip_found: false, free_gb: 0, free_gb_ok: false,
+        platform: '', errors: [String(e)], warnings: [],
+        gpu_info: { has_nvidia_gpu: false, cuda_available: false, recommended_torch_index: 'cpu' }
+      });
+    } finally {
+      setPreFlightLoading(false);
+    }
+  };
+
+  // Pre-Flight starten sobald Sprache gewählt
+  useEffect(() => {
+    if (languageSelected && !preFlightResult) {
+      runPreFlight();
+    }
+  }, [languageSelected]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [selectedPlugins, setSelectedPlugins] = useState<Set<string>>(new Set(['text']));
   const [installing, setInstalling] = useState(false);
@@ -43,20 +104,22 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   const [dependencyStatus, setDependencyStatus] = useState<DependencyStatus[]>([]);
   const [pythonError, setPythonError] = useState<string>('');
   
-  // Computed values
+  // Computed values — alle selected Plugins zählen (auch built_in haben Größe)
   const totalSize = Array.from(selectedPlugins)
     .map(id => plugins.find(p => p.id === id))
-    .filter(p => p && !p.built_in)
-    .reduce((sum, p) => sum + (p?.estimated_size_mb || 0), 0);
+    .filter((p): p is PluginInfo => !!p)
+    .reduce((sum, p) => sum + (p.estimated_size_mb || 0), 0);
   
   const totalTime = Array.from(selectedPlugins)
     .map(id => plugins.find(p => p.id === id))
-    .filter(p => p && !p.built_in)
-    .reduce((sum, p) => sum + (p?.install_time_minutes || 0), 0);
+    .filter((p): p is PluginInfo => !!p)
+    .reduce((sum, p) => sum + (p.install_time_minutes || 0), 0);
   
   useEffect(() => {
-    checkPythonDependencies();
-  }, []);
+    if (preFlightDone) {
+      checkPythonDependencies();
+    }
+  }, [preFlightDone]);
   
   const checkPythonDependencies = async () => {
     console.log('[Setup] Checking Python dependencies...');
@@ -82,15 +145,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
       // Bessere Fehlermeldungen basierend auf dem Fehlertyp
       let userFriendlyError = errorMsg;
       if (errorMsg.includes('not installed') || errorMsg.includes('nicht installiert')) {
-        userFriendlyError = 
-          'Python ist nicht installiert oder nicht im PATH verfügbar.\n\n' +
-          'Lösungen:\n' +
-          '1. Installiere Python 3.8+ von python.org\n' +
-          '2. Oder nutze einen Package Manager:\n' +
-          '   - macOS: brew install python3\n' +
-          '   - Windows: choco install python\n' +
-          '   - Linux: apt install python3\n\n' +
-          'Nach der Installation, bitte starten Sie die App neu.';
+        userFriendlyError = t('firstLaunch.python.pythonNotInstalled');
       }
       
       setPythonSetupPhase('error');
@@ -231,9 +286,18 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   return (
     <div className={`h-screen flex items-center justify-center bg-gradient-to-br ${currentTheme.colors.background} p-6`}>
       <div className="w-full max-w-5xl h-[90vh] bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl flex flex-col overflow-hidden">
-        
-        {/* Show Python Setup Screen while checking/installing */}
-        {pythonSetupPhase !== 'complete' && (
+
+        {/* Screen 0: Sprachauswahl */}
+        {!languageSelected && (
+          <LanguageSelectScreen
+            currentLanguage={language}
+            currentTheme={currentTheme}
+            onConfirm={handleLanguageConfirm}
+          />
+        )}
+
+        {/* Screen 1: Python Setup */}
+        {languageSelected && pythonSetupPhase !== 'complete' && (
           <PythonSetupScreen 
             phase={pythonSetupPhase}
             dependencyStatus={dependencyStatus}
@@ -243,8 +307,8 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
           />
         )}
         
-        {/* Show Plugin Selection Screen after Python setup is complete */}
-        {pythonSetupPhase === 'complete' && (
+        {/* Screen 2: Plugin-Auswahl */}
+        {languageSelected && pythonSetupPhase === 'complete' && (
           <PluginSelectionScreen
             plugins={plugins}
             selectedPlugins={selectedPlugins}
@@ -265,6 +329,101 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   );
 };
 
+// ============ Sub-Component: Language Select Screen ============
+interface LanguageSelectScreenProps {
+  currentLanguage: Language;
+  currentTheme: any;
+  onConfirm: (lang: Language) => void;
+}
+
+const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
+  currentLanguage,
+  currentTheme,
+  onConfirm,
+}) => {
+  const [selected, setSelected] = useState<Language>(currentLanguage);
+  const { t } = useLanguage();
+
+  const labels = {
+    de: {
+      headline: 'Willkommen bei FrameTrain',
+      sub: 'Wähle deine Sprache, um zu beginnen.',
+      btn: 'Weiter',
+    },
+    en: {
+      headline: 'Welcome to FrameTrain',
+      sub: 'Choose your language to get started.',
+      btn: 'Continue',
+    },
+  };
+  const ui = labels[selected];
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex-shrink-0 p-8 border-b border-white/10">
+        <div className="flex items-center gap-4">
+          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
+            <Globe className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white">{ui.headline}</h1>
+            <p className="text-gray-300 mt-1">{ui.sub}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 flex flex-col items-center justify-center p-8">
+        <div className="w-full max-w-sm space-y-4">
+          {(Object.entries(LANGUAGE_META) as [Language, typeof LANGUAGE_META[Language]][]).map(
+            ([lang, meta]) => {
+              const active = selected === lang;
+              return (
+                <button
+                  key={lang}
+                  onClick={() => setSelected(lang)}
+                  className={`w-full flex items-center gap-5 px-6 py-5 rounded-2xl border-2 transition-all duration-200 ${
+                    active
+                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} border-transparent shadow-lg scale-[1.02]`
+                      : 'bg-white/5 border-white/15 hover:bg-white/10 hover:border-white/30'
+                  }`}
+                >
+                  <span className="text-4xl">{meta.flag}</span>
+                  <div className="text-left">
+                    <div className="text-white font-bold text-lg">{meta.nativeLabel}</div>
+                    {active && (
+                      <div className="text-white/70 text-sm">{t('firstLaunch.language.selectedLabel')}</div>
+                    )}
+                  </div>
+                  {active && (
+                    <div className="ml-auto w-6 h-6 rounded-full bg-white/30 flex items-center justify-center">
+                      <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                    </div>
+                  )}
+                </button>
+              );
+            },
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 p-6 border-t border-white/10 bg-black/20">
+        <div className="flex justify-end">
+          <button
+            onClick={() => onConfirm(selected)}
+            className={`px-8 py-3 rounded-xl font-semibold text-white bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 transition-all shadow-lg flex items-center gap-2`}
+          >
+            {ui.btn}
+            <span className="text-lg">→</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
 // ============ Sub-Component: Python Setup Screen ============
 interface PythonSetupScreenProps {
   phase: 'checking' | 'installing' | 'error';
@@ -282,6 +441,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
   installProgress
 }) => {
   const progress = installProgress.get('seq_classification');
+  const { t } = useLanguage();
   
   return (
     <>
@@ -292,8 +452,8 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
             <Package className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">Setting Up FrameTrain</h1>
-            <p className="text-gray-300">Installing required Python packages...</p>
+            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.python.setupTitle')}</h1>
+            <p className="text-gray-300">{t('firstLaunch.python.setupSubtitle')}</p>
           </div>
         </div>
       </div>
@@ -305,8 +465,8 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
             <>
               <div className="text-center mb-8">
                 <Loader2 className="w-16 h-16 text-blue-400 animate-spin mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-white mb-2">Checking Dependencies</h2>
-                <p className="text-gray-400">Verifying Python package installation...</p>
+                <h2 className="text-2xl font-bold text-white mb-2">{t('firstLaunch.python.checkingTitle')}</h2>
+                <p className="text-gray-400">{t('firstLaunch.python.checkingDesc')}</p>
               </div>
             </>
           )}
@@ -315,8 +475,8 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
             <>
               <div className="text-center mb-8">
                 <Loader2 className="w-16 h-16 text-blue-400 animate-spin mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-white mb-2">Installing Python Packages</h2>
-                <p className="text-gray-400">This may take 5-10 minutes...</p>
+                <h2 className="text-2xl font-bold text-white mb-2">{t('firstLaunch.python.installingTitle')}</h2>
+                <p className="text-gray-400">{t('firstLaunch.python.installingDesc')}</p>
               </div>
               
               <div className="space-y-4">
@@ -329,7 +489,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
                           <Check className="w-4 h-4" /> {dep.version || 'installed'}
                         </span>
                       ) : (
-                        <span className="text-gray-400">Installing...</span>
+                        <span className="text-gray-400">{t('firstLaunch.python.installingPackage')}</span>
                       )}
                     </div>
                     
@@ -352,7 +512,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
               )}
               
               <p className="text-sm text-gray-500 text-center mt-8">
-                Please don't close the application during installation
+                {t('firstLaunch.python.installDontClose')}
               </p>
             </>
           )}
@@ -361,8 +521,8 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
             <>
               <div className="text-center mb-8">
                 <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-white mb-2">Setup konnte nicht abgeschlossen werden</h2>
-                <p className="text-gray-400">Fehler bei der Python-Konfiguration</p>
+                <h2 className="text-2xl font-bold text-white mb-2">{t('firstLaunch.python.errorTitle')}</h2>
+                <p className="text-gray-400">{t('firstLaunch.python.errorSubtitle')}</p>
               </div>
               
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-8">
@@ -370,11 +530,11 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
               </div>
               
               <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-6">
-                <h3 className="text-blue-300 font-semibold mb-2">Nächste Schritte:</h3>
+                <h3 className="text-blue-300 font-semibold mb-2">{t('firstLaunch.python.nextSteps')}</h3>
                 <ul className="text-blue-300 text-sm space-y-1 list-disc list-inside">
-                  <li>Installiere Python 3.8 oder neuer</li>
-                  <li>Starte die App nach der Installation neu</li>
-                  <li>Falls weiterhin Fehler auftreten, überprüfe die Logs</li>
+                  <li>{t('firstLaunch.python.step1')}</li>
+                  <li>{t('firstLaunch.python.step2')}</li>
+                  <li>{t('firstLaunch.python.step3')}</li>
                 </ul>
               </div>
               
@@ -382,7 +542,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
                 onClick={() => window.location.reload()}
                 className="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl transition-all font-semibold"
               >
-                App neustarten
+                {t('firstLaunch.python.restart')}
               </button>
             </>
           )}
@@ -422,6 +582,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
   getCategoryColor,
   getStatusColor
 }) => {
+  const { t } = useLanguage();
   return (
     <>
       {/* Header */}
@@ -431,8 +592,8 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
             <Package className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">Welcome to FrameTrain</h1>
-            <p className="text-gray-300">Choose which AI capabilities to install</p>
+            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.plugins.title')}</h1>
+            <p className="text-gray-300">{t('firstLaunch.plugins.subtitle')}</p>
           </div>
         </div>
       </div>
@@ -483,14 +644,14 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-lg font-semibold text-white">{plugin.name}</h3>
+                          <h3 className="text-lg font-semibold text-white">{t(plugin.name)}</h3>
                           {plugin.built_in && (
                             <span className="px-2 py-0.5 bg-green-500/20 text-green-300 text-xs rounded-full border border-green-400/30">
-                              Built-in
+                              {t('firstLaunch.plugins.builtInBadge')}
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-300 mb-2">{plugin.description}</p>
+                        <p className="text-sm text-gray-300 mb-2">{t(plugin.description)}</p>
                         
                         {!plugin.built_in && (
                           <div className="flex items-center gap-3 text-xs text-gray-400">
@@ -525,7 +686,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
               <div className="flex gap-8">
                 <div>
                   <div className="text-2xl font-bold text-white">{selectedPlugins.size}</div>
-                  <div className="text-xs text-gray-400">Plugins Selected</div>
+                  <div className="text-xs text-gray-400">{t('firstLaunch.plugins.selected')}</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">
@@ -534,11 +695,11 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                       : `${totalSize} MB`
                     }
                   </div>
-                  <div className="text-xs text-gray-400">Download Size</div>
+                  <div className="text-xs text-gray-400">{t('firstLaunch.plugins.downloadSize')}</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">~{totalTime} min</div>
-                  <div className="text-xs text-gray-400">Install Time</div>
+                  <div className="text-xs text-gray-400">{t('firstLaunch.plugins.installTime')}</div>
                 </div>
               </div>
               
@@ -547,7 +708,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                   onClick={onSkipSetup}
                   className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/20"
                 >
-                  Skip for Now
+                  {t('firstLaunch.plugins.skip')}
                 </button>
                 <button
                   onClick={onStartInstallation}
@@ -561,13 +722,13 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                   `}
                 >
                   <Download className="w-5 h-5" />
-                  Install Selected ({selectedPlugins.size})
+                  {t('firstLaunch.plugins.install').replace('{count}', String(selectedPlugins.size))}
                 </button>
               </div>
             </div>
             
             <p className="text-xs text-gray-400 text-center">
-              You can install additional plugins later in Settings
+              {t('firstLaunch.plugins.footerNote')}
             </p>
           </div>
         </>
@@ -575,23 +736,56 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
         /* Installation Progress */
         <div className="flex-1 flex flex-col p-8 overflow-y-auto">
           <div className="w-full max-w-3xl mx-auto">
+            {/* Header */}
             <div className="text-center mb-8">
               <Loader2 className="w-16 h-16 text-blue-400 animate-spin mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-2">Installing Dependencies</h2>
-              <p className="text-gray-300">
-                Installing AI/ML packages. This is normal - PyTorch alone is several GB.
-              </p>
-              <p className="text-sm text-gray-400 mt-4">
-                ⏱️ Estimated time: 10-30 minutes depending on your internet speed
-              </p>
+              <h2 className="text-2xl font-bold text-white mb-2">{t('firstLaunch.plugins.installing')}</h2>
+              <p className="text-gray-300">{t('firstLaunch.plugins.installingDesc')}</p>
+              <p className="text-sm text-gray-400 mt-4">{t('firstLaunch.plugins.estimatedTime')}</p>
             </div>
-            
+
+            {/* Globale Progress Bar (aus system-Event) */}
+            {(() => {
+              const sys = installProgress.get('system');
+              const pct = sys?.progress ?? 0;
+              const isGlobalComplete = sys?.status === 'complete';
+              const isGlobalFailed   = sys?.status === 'failed';
+              return (
+                <div className="mb-8">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-300">
+                      {isGlobalComplete
+                        ? t('firstLaunch.plugins.progressComplete')
+                        : isGlobalFailed
+                        ? t('firstLaunch.plugins.progressFailed')
+                        : sys?.message || t('firstLaunch.plugins.progressInstalling')}
+                    </span>
+                    <span className={`text-sm font-bold ${
+                      isGlobalComplete ? 'text-green-400' :
+                      isGlobalFailed   ? 'text-red-400'   :
+                      'text-blue-300'
+                    }`}>{pct}%</span>
+                  </div>
+                  <div className="w-full bg-white/10 rounded-full h-4 overflow-hidden shadow-inner">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ease-out bg-gradient-to-r ${
+                        isGlobalComplete ? 'from-green-500 to-green-400' :
+                        isGlobalFailed   ? 'from-red-500 to-red-400'   :
+                        'from-blue-600 to-purple-500'
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Pakete-Liste */}
             <div className="space-y-3 mb-8">
               {Array.from(selectedPlugins).map(pluginId => {
                 const plugin = plugins.find(p => p.id === pluginId);
                 const progress = installProgress.get(pluginId);
-                
-                if (!plugin || plugin.built_in) return null;
+                if (!plugin) return null;
                 
                 const isComplete = progress?.status === 'complete' || progress?.status === 'package_complete';
                 const isFailed = progress?.status === 'failed';
@@ -600,74 +794,38 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                 return (
                   <div 
                     key={pluginId} 
-                    className={`
-                      rounded-xl p-4 border transition-all
-                      ${isComplete 
-                        ? 'bg-green-500/10 border-green-500/30' 
-                        : isFailed
-                        ? 'bg-red-500/10 border-red-500/30'
-                        : 'bg-white/5 border-white/10'
-                      }
-                    `}
+                    className={`rounded-xl p-4 border transition-all ${
+                      isComplete ? 'bg-green-500/10 border-green-500/30' 
+                      : isFailed  ? 'bg-red-500/10 border-red-500/30'
+                      : 'bg-white/5 border-white/10'
+                    }`}
                   >
-                    <div className="flex items-start gap-3 mb-2">
+                    <div className="flex items-start gap-3">
                       <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${getCategoryColor(plugin.category)} flex items-center justify-center flex-shrink-0`}>
                         <span className="text-xl">{plugin.icon}</span>
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-white">{plugin.name}</span>
-                          {isComplete && (
-                            <span className="text-green-400 flex items-center gap-1 flex-shrink-0">
-                              <Check className="w-4 h-4" /> Complete
-                            </span>
-                          )}
-                          {isFailed && (
-                            <span className="text-red-400 flex-shrink-0">✗ Failed</span>
-                          )}
-                          {isInstalling && (
-                            <span className="text-blue-400 flex items-center gap-1 flex-shrink-0">
-                              <Loader2 className="w-3 h-3 animate-spin" /> Installing
-                            </span>
-                          )}
+                          <span className="font-semibold text-white">{t(plugin.name)}</span>
+                          {isComplete  && <span className="text-green-400 flex items-center gap-1 flex-shrink-0"><Check className="w-4 h-4" />{t('firstLaunch.plugins.progressComplete')}</span>}
+                          {isFailed    && <span className="text-red-400 flex items-center gap-1 flex-shrink-0"><XCircle className="w-4 h-4" />{t('firstLaunch.plugins.progressFailed')}</span>}
+                          {isInstalling && <span className="text-blue-400 flex items-center gap-1 flex-shrink-0"><Loader2 className="w-3 h-3 animate-spin" />{t('firstLaunch.plugins.progressInstalling')}</span>}
                         </div>
-                        
                         {progress?.message && (
                           <p className={`text-sm mt-1 break-words ${
-                            isFailed ? 'text-red-300' :
-                            isComplete ? 'text-green-300' :
-                            'text-gray-300'
-                          }`}>
-                            {progress.message}
-                          </p>
+                            isFailed ? 'text-red-300' : isComplete ? 'text-green-300' : 'text-gray-300'
+                          }`}>{progress.message}</p>
                         )}
                       </div>
                     </div>
-                    
-                    {progress && progress.progress !== undefined && (
-                      <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden mt-2">
-                        <div
-                          className={`h-full transition-all duration-300 bg-gradient-to-r ${
-                            isComplete ? 'from-green-500 to-green-600' :
-                            isFailed ? 'from-red-500 to-red-600' :
-                            'from-blue-500 to-purple-500'
-                          }`}
-                          style={{ width: `${progress.progress}%` }}
-                        />
-                      </div>
-                    )}
                   </div>
                 );
               })}
             </div>
             
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
-              <p className="text-sm text-blue-300 text-center">
-                ⏸️ Do NOT close the application or your browser during installation.
-              </p>
-              <p className="text-xs text-blue-400 text-center mt-2">
-                If the browser shows "Page not responding", wait a bit longer - the installation continues in the background.
-              </p>
+              <p className="text-sm text-blue-300 text-center">{t('firstLaunch.plugins.doNotClose')}</p>
+              <p className="text-xs text-blue-400 text-center mt-2">{t('firstLaunch.plugins.waitNote')}</p>
             </div>
           </div>
         </div>

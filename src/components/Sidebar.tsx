@@ -10,8 +10,11 @@ import {
   User,
   FlaskConical,
   Microscope,
+  Zap,
+  Network,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface SidebarProps {
   currentView: string;
@@ -22,15 +25,17 @@ interface SidebarProps {
 
 export default function Sidebar({ currentView, onViewChange, userEmail, onLogout }: SidebarProps) {
   const { currentTheme } = useTheme();
+  const { t } = useLanguage();
   
   const menuItems = [
-    { id: 'models', label: 'Modelle', icon: Layers },
-    { id: 'dataset', label: 'Datensätze', icon: Upload },
-    { id: 'training', label: 'Training', icon: Play },
-    { id: 'analysis', label: 'Analyse', icon: BarChart3 },
-    { id: 'tests', label: 'Tests', icon: FlaskConical },
-    { id: 'laboratory', label: 'Laboratory', icon: Microscope },
-    { id: 'versions', label: 'Versionen', icon: GitBranch },
+    { id: 'models',     label: t('sidebar.nav.models'),    icon: Layers },
+    { id: 'dataset',    label: t('sidebar.nav.datasets'),  icon: Upload },
+    { id: 'training',   label: t('sidebar.nav.training'),  icon: Play },
+    { id: 'analysis',   label: t('sidebar.nav.analysis'),  icon: BarChart3 },
+    { id: 'tests',      label: t('sidebar.nav.tests'),     icon: FlaskConical },
+    { id: 'laboratory', label: t('sidebar.nav.laboratory'),icon: Microscope },
+    { id: 'synapse',    label: t('sidebar.nav.synapse'),   icon: Network },
+    { id: 'versions',   label: t('sidebar.nav.versions'),  icon: GitBranch },
   ];
 
   return (
@@ -38,7 +43,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
       {/* Header */}
       <div className="p-6 border-b border-white/10">
         <h1 className="text-2xl font-bold text-white">FrameTrain</h1>
-        <p className="text-gray-400 text-sm mt-1">Local ML Training</p>
+        <p className="text-gray-400 text-sm mt-1">{t('sidebar.tagline')}</p>
       </div>
 
       {/* Navigation */}
@@ -84,7 +89,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
           }`}
         >
           <SettingsIcon className="w-5 h-5" />
-          <span className="font-medium">Einstellungen</span>
+          <span className="font-medium">{t('sidebar.settings')}</span>
         </button>
 
         {/* Logout Button */}
@@ -93,7 +98,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
           className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-red-500/20 hover:text-red-300 transition-all"
         >
           <LogOut className="w-5 h-5" />
-          <span className="font-medium">Abmelden</span>
+          <span className="font-medium">{t('sidebar.logout')}</span>
         </button>
       </div>
     </div>

@@ -99,6 +99,16 @@ impl Database {
         let schema = r#"
 -- FrameTrain Desktop App Database Schema
 
+-- Canvas Model Designs Table
+-- Source of truth for Synapse Builder editor state (nodes, edges, viewport).
+-- Separate from `models` (metadata) and graph_metadata.json (training/inference IR).
+CREATE TABLE IF NOT EXISTS canvas_model_designs (
+    model_id        TEXT    PRIMARY KEY,
+    design_json     TEXT    NOT NULL,
+    updated_at      INTEGER NOT NULL DEFAULT 0,
+    schema_version  INTEGER NOT NULL DEFAULT 1
+);
+
 -- Models Table
 CREATE TABLE IF NOT EXISTS models (
     id TEXT PRIMARY KEY,
@@ -184,6 +194,16 @@ CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Canvas Model Designs Table (W3: SQLite as single source of truth)
+-- Stores the full editor state: nodes, edges, viewport, graphConfig, pythonCode
+-- Keyed by the canvas_XXXX model_id from the models table
+CREATE TABLE IF NOT EXISTS canvas_model_designs (
+    model_id       TEXT    PRIMARY KEY,
+    design_json    TEXT    NOT NULL,
+    updated_at     INTEGER NOT NULL DEFAULT 0,
+    schema_version INTEGER NOT NULL DEFAULT 1
 );
 
 -- Create Indexes
@@ -664,6 +684,62 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
             rusqlite::params![version_id, user_id],
             |row| row.get(0),
         ).map_err(|e| format!("Version nicht gefunden oder kein Zugriff: {}", e))
+    }
+
+    // ==================== CANVAS MODEL DESIGNS (W3) ====================
+
+    /// Speichert oder aktualisiert den vollständigen Editor-Zustand eines Canvas-Modells.
+    /// design_json enthält: nodes, edges, viewport, graphConfig, pythonCode, schemaVersion.
+    /// UPSERT: überschreibt bestehenden Eintrag wenn model_id bereits existiert.
+    pub fn save_canvas_model_design(
+        &self,
+        model_id: &str,
+        design_json: &str,
+    ) -> std::result::Result<(), String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        self.conn.execute(
+            "INSERT INTO canvas_model_designs (model_id, design_json, updated_at, schema_version) \
+             VALUES (?1, ?2, ?3, 1) \
+             ON CONFLICT(model_id) DO UPDATE SET \
+                 design_json    = excluded.design_json, \
+                 updated_at     = excluded.updated_at, \
+                 schema_version = excluded.schema_version",
+            rusqlite::params![model_id, design_json, now],
+        ).map_err(|e| format!("save_canvas_model_design: {}", e))?;
+        Ok(())
+    }
+
+    /// Lädt den Editor-Zustand eines Canvas-Modells.
+    /// Gibt None zurück wenn kein Eintrag vorhanden (noch nicht gespeichert).
+    pub fn load_canvas_model_design(
+        &self,
+        model_id: &str,
+    ) -> std::result::Result<Option<String>, String> {
+        match self.conn.query_row(
+            "SELECT design_json FROM canvas_model_designs WHERE model_id = ?1",
+            rusqlite::params![model_id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(json) => Ok(Some(json)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("load_canvas_model_design: {}", e)),
+        }
+    }
+
+    /// Löscht den Editor-Zustand eines Canvas-Modells.
+    /// Kein Fehler wenn kein Eintrag vorhanden.
+    pub fn delete_canvas_model_design(
+        &self,
+        model_id: &str,
+    ) -> std::result::Result<(), String> {
+        self.conn.execute(
+            "DELETE FROM canvas_model_designs WHERE model_id = ?1",
+            rusqlite::params![model_id],
+        ).map_err(|e| format!("delete_canvas_model_design: {}", e))?;
+        Ok(())
     }
 }
 

@@ -28,4 +28,11 @@ npm-debug.log*
 
 release.sh
 
+hardcoded_strings_report.txt
+locale_parity_report.txt
+find_hardcoded_strings.py
+check_locale_parity.py
+
 FrameTrain_Plugin_Integration_Guide.md
+
+DATASET_ROADMAP.md

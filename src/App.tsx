@@ -12,6 +12,7 @@ import { NotificationProvider } from './contexts/NotificationContext';
 import { AISettingsProvider } from './contexts/AISettingsContext';
 import { PageContextProvider } from './contexts/PageContext';
 import { TrainingContextProvider } from './contexts/TrainingContext';
+import { LanguageProvider } from './contexts/LanguageContext';
 import './App.css';
 
 interface ApiKeyValidation {
@@ -64,7 +65,7 @@ function CloseConfirmDialog({ isTraining, onConfirm, onCancel }: CloseDialogProp
           {isTraining && (
             <div className="mb-5 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
               <p className="text-amber-300 text-xs">
-                ⚠️ Tipp: Stoppe das Training zuerst über den „Training stoppen“-Button, um den Fortschritt zu sichern.
+                Tipp: Stoppe das Training zuerst über den „Training stoppen“-Button, um den Fortschritt zu sichern.
               </p>
             </div>
           )}
@@ -245,10 +246,11 @@ function App() {
       // Lösche gespeicherte Config
       await invoke('clear_config');
 
-      // FIX: localStorage beim Logout leeren (AI-Keys + Lab-Sessions)
+      // FIX: localStorage beim Logout leeren (nur Auth-bezogene Daten, nicht User-Daten wie Sessions)
       if (userData) {
         localStorage.removeItem(`ft_ai_settings_${userData.userId}`);
         localStorage.removeItem(`ft_lab_sessions_${userData.userId}`);
+        // NOTE: synapse_sessions_${userId} NICHT löschen - Sessions sind User-Daten und müssen persistent sein
       }
       // Legacy-Keys ohne userId ebenfalls entfernen
       localStorage.removeItem('ft_ai_settings');
@@ -281,6 +283,7 @@ function App() {
   if (showFirstLaunch) {
     return (
       <ThemeProvider>
+      <LanguageProvider>
         <NotificationProvider>
           <AISettingsProvider userId={userData?.userId}>
             <PageContextProvider>
@@ -290,12 +293,14 @@ function App() {
             </PageContextProvider>
           </AISettingsProvider>
         </NotificationProvider>
-      </ThemeProvider>
+      </LanguageProvider>
+    </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider>
+      <LanguageProvider>
         <NotificationProvider>
           <AISettingsProvider userId={userData?.userId}>
             <PageContextProvider>
@@ -327,6 +332,7 @@ function App() {
           </PageContextProvider>
         </AISettingsProvider>
       </NotificationProvider>
+      </LanguageProvider>
     </ThemeProvider>
   );
 }

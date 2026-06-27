@@ -234,8 +234,11 @@ class Orchestrator:
             self._start_logging(log_dir)
 
             MessageProtocol.status("init", "Setup...")
-            self.plugin.setup()
+            setup_ok = self.plugin.setup()
             if self.plugin.is_stopped: return
+            if not setup_ok:
+                # setup() hat bereits eine Fehlermeldung gesendet — nicht duplizieren
+                return
 
             self.plugin.load_data()
             if self.plugin.is_stopped: return

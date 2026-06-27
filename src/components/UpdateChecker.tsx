@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface UpdateInfo {
   latestVersion: string;
@@ -10,6 +11,7 @@ interface UpdateInfo {
 export function UpdateChecker() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [showDialog, setShowDialog] = useState(false);
+  const { t } = useLanguage();
 
   useEffect(() => {
     checkForUpdates();
@@ -122,10 +124,10 @@ export function UpdateChecker() {
             </div>
             <div>
               <h2 className="text-white font-semibold text-lg leading-tight">
-                Neues Update verfügbar 🚀
+                {t('updateChecker.title')}
               </h2>
               <p className="text-gray-400 text-sm mt-1">
-                Version <span className="font-mono text-orange-400">v{updateInfo.latestVersion}</span> ist verfügbar
+                {t('updateChecker.versionAvailable').replace('{version}', updateInfo.latestVersion)}
               </p>
             </div>
           </div>
@@ -133,12 +135,12 @@ export function UpdateChecker() {
           {/* Versions-Info */}
           <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-4 flex justify-between text-sm">
             <div className="text-center">
-              <p className="text-gray-500 text-xs mb-1">Installiert</p>
+              <p className="text-gray-500 text-xs mb-1">{t('updateChecker.installedLabel')}</p>
               <p className="font-mono text-gray-300">v{updateInfo.currentVersion}</p>
             </div>
             <div className="flex items-center text-gray-600">→</div>
             <div className="text-center">
-              <p className="text-gray-500 text-xs mb-1">Neu</p>
+              <p className="text-gray-500 text-xs mb-1">{t('updateChecker.newLabel')}</p>
               <p className="font-mono text-green-400 font-semibold">v{updateInfo.latestVersion}</p>
             </div>
           </div>
@@ -146,34 +148,32 @@ export function UpdateChecker() {
           {/* Nachricht */}
           <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-5">
             <p className="text-red-300 text-sm leading-relaxed">
-              ⚠️ <strong>Bitte lade dir die neue Version herunter</strong> und deinstalliere
-              umgehend die alte Version. Diese könnte Sicherheitslücken aufweisen und wird
-              nicht mehr unterstützt.
+              <strong>{t('updateChecker.warningText1')}</strong> {t('updateChecker.warningText2')}
             </p>
           </div>
 
           {/* Update-Anleitung */}
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-5">
-            <p className="text-blue-300 font-semibold text-sm mb-3">📋 Update-Anleitung:</p>
+            <p className="text-blue-300 font-semibold text-sm mb-3">{t('updateChecker.guideTitle')}</p>
             <ol className="text-gray-300 text-xs space-y-1.5 ml-4 list-decimal">
-              <li>Klick auf <strong>"Zum Dashboard"</strong> um die neue Version herunterzuladen</li>
-              <li>Deinstalliere die alte FrameTrain App komplett:
+              <li>{t('updateChecker.step1')}</li>
+              <li>{t('updateChecker.step2')}
                 <div className="mt-1 p-2 bg-black/30 rounded text-gray-400 font-mono text-[10px]">
-                  Gehe zu <strong>Applications</strong> → FrameTrain → <strong>Move to Trash</strong>
+                  {t('updateChecker.step2detail')}
                 </div>
               </li>
-              <li>Installiere die neue Version:
+              <li>{t('updateChecker.step3')}
                 <div className="mt-1 p-2 bg-black/30 rounded text-gray-400 font-mono text-[10px]">
-                  Die heruntergeladene <strong>.dmg</strong> öffnen und FrameTrain in <strong>Applications</strong> ziehen
+                  {t('updateChecker.step3detail')}
                 </div>
               </li>
-              <li>Starte die neue FrameTrain App</li>
+              <li>{t('updateChecker.step4')}</li>
             </ol>
           </div>
 
           {/* Download Link */}
           <div className="bg-white/5 rounded-xl p-4 mb-5 text-center">
-            <p className="text-gray-400 text-xs mb-2">Download verfügbar unter:</p>
+            <p className="text-gray-400 text-xs mb-2">{t('updateChecker.downloadLabel')}</p>
             <p
               className="text-blue-400 underline cursor-pointer hover:text-blue-300 transition-colors text-sm font-semibold"
               onClick={openDashboard}
@@ -188,13 +188,13 @@ export function UpdateChecker() {
               onClick={openDashboard}
               className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-sm font-semibold transition-all"
             >
-              Zum Dashboard
+              {t('updateChecker.dashboardButton')}
             </button>
             <button
               onClick={() => setShowDialog(false)}
               className="flex-1 py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-gray-300 text-sm font-medium transition-all"
             >
-              Schließen
+              {t('updateChecker.closeButton')}
             </button>
           </div>
         </div>

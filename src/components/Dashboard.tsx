@@ -12,6 +12,7 @@ import Settings from './Settings';
 import FloatingAICoach from './FloatingAICoach';
 import GlobalTrainingProgress from './GlobalTrainingProgress';
 import TrainingDashboard from './TrainingDashboard';
+import SynapseBuilder from './synapse/SynapseBuilder';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 
@@ -27,7 +28,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type View = 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory';
+type View = 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse';
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('models');
@@ -69,6 +70,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         return <VersionManager />;
       case 'settings':
         return <Settings userData={userData} onLogout={onLogout} />;
+      case 'synapse':
+        return <SynapseBuilder userId={userData.userId} />;
       default:
         return <ModelManager />;
     }
@@ -97,14 +100,14 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         onLogout={onLogout}
       />
       
-      <main className="flex-1 overflow-auto p-8">
-        <div className="max-w-7xl mx-auto">
+      <main className={`flex-1 ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+        <div className={currentView === 'synapse' ? 'h-full' : 'max-w-7xl mx-auto'}>
           {renderView()}
         </div>
       </main>
 
       {/* Floating AI Coach */}
-      <FloatingAICoach />
+      <FloatingAICoach userId={userData.userId} />
 
       {/* Globales Mini-Training-Widget — sichtbar auf JEDER Seite solange minimiert */}
       {trainingState.isDashMinimized && (

@@ -7,6 +7,7 @@ import { listen } from '@tauri-apps/api/event';
 import {
   Loader2, Square, FileText, Type, CheckCircle,
   AlertCircle, BarChart3, ChevronDown, ChevronUp,
+  FlaskConical, AlertTriangle,
 } from 'lucide-react';
 import type { TestPluginProps } from '../types';
 
@@ -242,7 +243,9 @@ export default function XLMRobertaTestPlugin({
 
       {/* Header */}
       <div className="flex items-center gap-3 p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10">
-        <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-xl">🧪</div>
+        <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center">
+          <FlaskConical className="w-5 h-5 text-amber-300" />
+        </div>
         <div className="min-w-0">
           <p className="text-amber-300 text-sm font-medium">XLM-RoBERTa · Keyword Recognition</p>
           <p className="text-gray-400 text-xs truncate">{modelName} · {versionName}</p>
@@ -387,13 +390,16 @@ export default function XLMRobertaTestPlugin({
                 >
                   {datasets.map(d => (
                     <option key={d.id} value={d.id} className="bg-slate-900">
-                      {d.name} {d.status === 'split' ? '✅' : '⚠️'} · {d.file_count} Dateien · {formatBytes(d.size_bytes)}
+                      {d.name}{d.status === 'split' ? ' (aufgeteilt)' : ' (nicht aufgeteilt)'} · {d.file_count} Dateien · {formatBytes(d.size_bytes)}
                     </option>
                   ))}
                 </select>
               )}
               {selectedDataset?.status === 'unused' && (
-                <p className="text-amber-400 text-xs">⚠️ Dataset hat noch keinen Split – erst im Dataset-Manager aufteilen.</p>
+                <p className="text-amber-400 text-xs inline-flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  Dataset hat noch keinen Split – erst im Dataset-Manager aufteilen.
+                </p>
               )}
             </div>
 

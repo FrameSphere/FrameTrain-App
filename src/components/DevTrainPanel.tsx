@@ -15,6 +15,8 @@ import OpenLibraryModal from './OpenLibraryModal';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
+import { usePageContext } from '../contexts/PageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import type { TrainingJob, TrainingProgress, LossPoint, ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI, LossChart } from './TrainingPanel';
 import TrainingDashboard from './TrainingDashboard';
@@ -70,26 +72,24 @@ function calculateAffectedLines(script: string, edit: CodeEdit): HighlightedLine
 
 type ErrorCategory = 'memory' | 'dataset' | 'packages' | 'cuda' | 'code' | 'config' | 'unknown';
 
-function analyzeError(errorMsg: string): { 
-  category: ErrorCategory; 
-  title: string; 
-  hint: string; 
+function analyzeError(errorMsg: string): {
+  category: ErrorCategory;
   icon: string;
 } {
   const e = (errorMsg ?? '').toLowerCase();
   if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
-    return { category: 'memory', title: '🧠 RAM/GPU Überlauf', hint: 'Batch-Größe reduzieren, FP16 oder LoRA aktivieren, Gradient Checkpointing einschalten.', icon: '🧠' };
+    return { category: 'memory', icon: '🧠' };
   if (e.includes('cuda') || e.includes('mps') || e.includes('device'))
-    return { category: 'cuda', title: '⚙️ Hardware/Device Fehler', hint: 'Gerät nicht verfügbar oder inkompatibel. Versuche mit CPU oder anderen Geräte-Einstellungen.', icon: '⚙️' };
+    return { category: 'cuda', icon: '⚙️' };
   if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
-    return { category: 'dataset', title: '📁 Dataset/Pfad Fehler', hint: 'Dataset-Pfad prüfen, Dateirechte überprüfen, Dataset existiert noch?', icon: '📁' };
+    return { category: 'dataset', icon: '📁' };
   if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module named'))
-    return { category: 'packages', title: '📦 Fehlende Python-Pakete', hint: 'Fehlende Dependencies. Prüfe im Skript welche Module importiert werden.', icon: '📦' };
+    return { category: 'packages', icon: '📦' };
   if (e.includes('nan') || e.includes('inf') || e.includes('gradient') || e.includes('loss'))
-    return { category: 'config', title: '📊 Numerischer Fehler (NaN/Inf)', hint: 'Learning Rate zu hoch? Gradient Clipping (max_grad_norm) aktivieren, LR reduzieren.', icon: '📊' };
+    return { category: 'config', icon: '📊' };
   if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror') || e.includes('nameerror'))
-    return { category: 'code', title: '🐛 Code-Fehler', hint: 'Syntax-, Typ- oder Namensfehler. Der KI-Assistent kann dir helfen.', icon: '🐛' };
-  return { category: 'unknown', title: '❓ Unbekannter Fehler', hint: 'Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen.', icon: '❓' };
+    return { category: 'code', icon: '🐛' };
+  return { category: 'unknown', icon: '❓' };
 }
 
 // ── Error Modal (Dev Train) ───────────────────────────────────────────────
@@ -119,11 +119,16 @@ function DevTrainErrorModal({
   onSendToAI,
   isSending,
 }: DevTrainErrorModalProps) {
+  const { t, language } = useLanguage();
   const analysis = analyzeError(errorMessage);
   const [copied, setCopied] = useState(false);
   const [sent, setSent] = useState(false);
 
   if (!isOpen) return null;
+
+  const categoryKey = `devTrainPanel.errorModal.errorCategories.${analysis.category}`;
+  const analysisTitle = t(`${categoryKey}.title`);
+  const analysisHint = t(`${categoryKey}.hint`);
 
   const errorContext = `[Dev Train Fehler]\n\nTitel: ${errorTitle}\n\nFehler: ${errorMessage}\n\nDetails: ${errorDetails}\n\nSkript:\n${script}\n\nAusgabe/Logs:\n${output}`;
 
@@ -135,8 +140,8 @@ function DevTrainErrorModal({
           <div className="flex items-center gap-3">
             <div className="text-3xl">{analysis.icon}</div>
             <div>
-              <h2 className="text-lg font-bold text-white">Training fehlgeschlagen</h2>
-              <p className="text-sm text-red-300">{analysis.title}</p>
+              <h2 className="text-lg font-bold text-white">{t('devTrainPanel.errorModal.title')}</h2>
+              <p className="text-sm text-red-300">{analysisTitle}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all">
@@ -148,13 +153,13 @@ function DevTrainErrorModal({
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {/* Hint */}
           <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-            <p className="text-sm text-blue-300"><strong>💡 Hinweis:</strong> {analysis.hint}</p>
+            <p className="text-sm text-blue-300"><strong>{t('devTrainPanel.errorModal.hintLabel')}</strong> {analysisHint}</p>
           </div>
 
           {/* Error Message */}
           {errorMessage && (
             <div>
-              <p className="text-xs text-gray-500 font-medium mb-2">Fehler-Meldung:</p>
+              <p className="text-xs text-gray-500 font-medium mb-2">{t('devTrainPanel.errorModal.errorLabel')}</p>
               <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg overflow-x-auto max-h-24">
                 <pre className="text-xs text-red-300 font-mono whitespace-pre-wrap break-words">{errorMessage}</pre>
               </div>
@@ -164,7 +169,7 @@ function DevTrainErrorModal({
           {/* Details */}
           {errorDetails && (
             <div>
-              <p className="text-xs text-gray-500 font-medium mb-2">Details:</p>
+              <p className="text-xs text-gray-500 font-medium mb-2">{t('devTrainPanel.errorModal.detailsLabel')}</p>
               <div className="p-3 bg-white/5 border border-white/10 rounded-lg overflow-x-auto max-h-24">
                 <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap break-words">{errorDetails}</pre>
               </div>
@@ -183,7 +188,7 @@ function DevTrainErrorModal({
             className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-all"
           >
             {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'Kopiert!' : 'Fehler kopieren'}
+            {copied ? t('devTrainPanel.errorModal.copied') : t('devTrainPanel.errorModal.copyButton')}
           </button>
 
           <button
@@ -198,17 +203,17 @@ function DevTrainErrorModal({
             {isSending ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Wird gesendet…
+                {t('devTrainPanel.errorModal.sendingButton')}
               </>
             ) : sent ? (
               <>
                 <Check className="w-4 h-4" />
-                Gesendet!
+                {t('devTrainPanel.errorModal.sentButton')}
               </>
             ) : (
               <>
                 <AlertCircle className="w-4 h-4" />
-                An FrameTrain senden
+                {t('devTrainPanel.errorModal.sendToFrameTrainButton')}
               </>
             )}
           </button>
@@ -218,14 +223,14 @@ function DevTrainErrorModal({
             className="flex items-center gap-2 px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-lg text-sm text-violet-300 transition-all"
           >
             <Sparkles className="w-4 h-4" />
-            An KI schicken
+            {t('devTrainPanel.errorModal.sendToAIButton')}
           </button>
 
           <button
             onClick={onClose}
             className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-all"
           >
-            Schließen
+            {t('devTrainPanel.errorModal.closeButton')}
           </button>
         </div>
       </div>
@@ -236,6 +241,7 @@ function DevTrainErrorModal({
 // ── Save Name Dialog Modal ────────────────────────────────────────────────
 
 function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: boolean; defaultName: string; onSave: (name: string) => void; onClose: () => void; }) {
+  const { t, language } = useLanguage();
   const [name, setName] = useState(defaultName);
 
   useEffect(() => {
@@ -255,19 +261,19 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
           <div className="flex items-center gap-2">
             <Save className="w-5 h-5 text-amber-400" />
-            <h2 className="text-lg font-bold text-white">Skript speichern</h2>
+            <h2 className="text-lg font-bold text-white">{t('devTrainPanel.saveDialog.title')}</h2>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all">
             <X className="w-5 h-5" />
           </button>
         </div>
         <div className="p-6 space-y-4">
-          <p className="text-gray-300 text-sm">Gib einen Namen für dein Skript ein. Es wird dann in der Bibliothek gespeichert.</p>
+          <p className="text-gray-300 text-sm">{t('devTrainPanel.saveDialog.description')}</p>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSave()}
-            placeholder="z.B. Mein Trainings-Skript"
+            placeholder={t('devTrainPanel.saveDialog.placeholder')}
             autoFocus
             className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40"
           />
@@ -278,13 +284,13 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
             disabled={!name.trim()}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-40 transition-all"
           >
-            <Save className="w-4 h-4" /> Speichern
+            <Save className="w-4 h-4" /> {t('devTrainPanel.saveDialog.saveButton')}
           </button>
           <button
             onClick={onClose}
             className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white text-sm font-medium transition-all"
           >
-            Abbrechen
+            {t('devTrainPanel.saveDialog.cancelButton')}
           </button>
         </div>
       </div>
@@ -295,6 +301,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
 // ── Script Library Modal ──────────────────────────────────────────────────
 
 function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; userId?: string; }) {
+  const { t, language } = useLanguage();
   const [scripts, setScripts]       = useState<SavedScript[]>([]);
   const [saveName, setSaveName]     = useState('');
   const [showSaveForm, setShowForm] = useState(false);
@@ -307,21 +314,21 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
     saveScript(saveName.trim(), currentScript, userId);
     setScripts(loadScripts(userId));
     setSaveName(''); setShowForm(false);
-    success('Gespeichert', `Skript "${saveName}" gespeichert.`);
+    success(t('devTrainPanel.library.savedTitle'), t('devTrainPanel.library.savedDetail').replace('{name}', saveName));
   };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2"><FolderClosed className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">Skript-Bibliothek</h2></div>
+          <div className="flex items-center gap-2"><FolderClosed className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">{t('devTrainPanel.library.title')}</h2></div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {scripts.length === 0 ? (
             <div className="text-center py-12 space-y-2">
               <FileText className="w-10 h-10 text-gray-600 mx-auto" />
-              <p className="text-gray-500 text-sm">Noch keine Skripte gespeichert.</p>
+              <p className="text-gray-500 text-sm">{t('devTrainPanel.library.empty')}</p>
             </div>
           ) : scripts.map(s => (
             <div key={s.id} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/[0.07] transition-all group">
@@ -333,7 +340,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
                   <button onClick={() => { deleteScript(s.id, userId); setScripts(loadScripts(userId)); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all">Laden</button>
+                  <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all">{t('devTrainPanel.library.loadButton')}</button>
                 </div>
               </div>
             </div>
@@ -342,14 +349,14 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
         <div className="px-5 pb-5 border-t border-white/10 pt-4 flex-shrink-0">
           {showSaveForm ? (
             <div className="flex gap-2">
-              <input value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSave()} placeholder="Skript-Name…" autoFocus
+              <input value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSave()} placeholder={t('devTrainPanel.library.namePlaceholder')} autoFocus
                 className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40" />
               <button onClick={handleSave} disabled={!saveName.trim()} className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-40"><Save className="w-4 h-4" /></button>
               <button onClick={() => setShowForm(false)} className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 text-sm"><X className="w-4 h-4" /></button>
             </div>
           ) : (
             <button onClick={() => setShowForm(true)} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-300 text-sm font-medium transition-all">
-              <Save className="w-4 h-4" /> Aktuelles Skript speichern
+              <Save className="w-4 h-4" /> {t('devTrainPanel.library.saveCurrentButton')}
             </button>
           )}
         </div>
@@ -533,6 +540,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   onHighlightLines?: (edits: CodeEdit[]) => void;
   onClearHighlights?: () => void;
 }) {
+  const { t, language } = useLanguage();
   const { settings: aiSettings } = useAISettings();
   const [messages, setMessages]  = useState<AiMessage[]>([]);
   const [input, setInput]        = useState('');
@@ -561,10 +569,10 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
     if (!last || tooOld || tooLong) {
       // Neue Session starten
       const id = `s_${Date.now()}`;
-      const newSession: ChatSession = { id, title: 'Neuer Chat', messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const newSession: ChatSession = { id, title: t('devTrainPanel.aiSidebar.newChatButton'), messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       saveChatSessions([newSession, ...sessions]);
       setCurrentSessionId(id);
-      setSessionTitle('Neuer Chat');
+      setSessionTitle(t('devTrainPanel.aiSidebar.newChatButton'));
       setMessages([]);
     } else {
       setCurrentSessionId(last.id);
@@ -592,12 +600,12 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
 
   const startNewSession = () => {
     const id = `s_${Date.now()}`;
-    const newSession: ChatSession = { id, title: 'Neuer Chat', messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const newSession: ChatSession = { id, title: t('devTrainPanel.aiSidebar.newChatButton'), messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     // Leere Sessions aufräumen bevor neue hinzugefügt wird
     const sessions = loadChatSessions().filter(s => s.messages.length > 0);
     saveChatSessions([newSession, ...sessions]);
     setCurrentSessionId(id);
-    setSessionTitle('Neuer Chat');
+      setSessionTitle(t('devTrainPanel.aiSidebar.newChatButton'));
     setMessages([]);
     setAppliedEdits([]);
     setCurrentMessageWithEdits(null);
@@ -619,7 +627,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
 
   const continueFromSession = (session: ChatSession) => {
     const id = `s_${Date.now()}`;
-    const title = session.title + ' (Fortgesetzt)';
+    const title = session.title + t('devTrainPanel.aiSidebar.continuedSuffix');
     const newSession: ChatSession = { id, title, messages: session.messages, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const sessions = loadChatSessions();
     saveChatSessions([newSession, ...sessions]);
@@ -688,9 +696,9 @@ ANFORDERUNGEN:
   const systemPrompt = buildAutoSystemPrompt(baseSystemPrompt);
 
   const suggestions = [
-    'Fehler beheben (Stacktrace)',
-    'Pfade korrekt nutzen (DATASET_PATH/OUTPUT_PATH)',
-    'Performance / Stabilität verbessern',
+    t('devTrainPanel.aiSidebar.suggestions.fixError'),
+    t('devTrainPanel.aiSidebar.suggestions.paths'),
+    t('devTrainPanel.aiSidebar.suggestions.performance'),
   ];
 
   const send = async () => {
@@ -709,7 +717,7 @@ ANFORDERUNGEN:
     try {
       const history = [...messages, userMsg].map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
       const last = history.pop()!;
-      const response = await callAI(aiSettings, systemPrompt, last.content, history);
+      const response = await callAI(aiSettings, systemPrompt, last.content, history, language);
 
       const { action, cleaned } = parseAutoAction(response);
       const inferredEdit = (action?.mode === 'edit') || cleaned.includes('##EDIT_START##');
@@ -827,13 +835,13 @@ ANFORDERUNGEN:
         <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Bot className="w-4 h-4 text-violet-400 flex-shrink-0" />
-            <span className="text-sm font-medium text-white">Code Assistant</span>
-            <span className="ml-1 px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/25 text-purple-200 text-[10px] font-medium flex-shrink-0">Auto</span>
+            <span className="text-sm font-medium text-white">{t('devTrainPanel.aiSidebar.title')}</span>
+            <span className="ml-1 px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/25 text-purple-200 text-[10px] font-medium flex-shrink-0">{t('devTrainPanel.aiSidebar.autoBadge')}</span>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
               onClick={() => setShowHistory(v => !v)}
-              title="Chat-Verlauf"
+              title={t('devTrainPanel.aiSidebar.historyTooltip')}
               className={`p-1.5 rounded-lg transition-all ${
                 showHistory
                   ? 'bg-violet-500/20 text-violet-300'
@@ -844,7 +852,7 @@ ANFORDERUNGEN:
             </button>
             <button
               onClick={startNewSession}
-              title="Neuer Chat"
+              title={t('devTrainPanel.aiSidebar.newChatTooltip')}
               className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all"
             >
               <MessageSquarePlus className="w-3.5 h-3.5" />
@@ -856,12 +864,12 @@ ANFORDERUNGEN:
         </div>
 
         {/* Session-Titel Chip */}
-        {sessionTitle && sessionTitle !== 'Neuer Chat' && (
+        {sessionTitle && sessionTitle !== t('devTrainPanel.aiSidebar.newChatButton') && (
           <div className="px-3 py-1.5 border-b border-white/[0.06] bg-white/[0.01] flex items-center gap-1.5">
             <span className="text-[9px] text-gray-600">↳</span>
             <span className="text-[10px] text-gray-500 truncate">{sessionTitle}</span>
             {isReadonly && (
-              <span className="ml-auto flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80">Lesemodus</span>
+              <span className="ml-auto flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80">{t('devTrainPanel.aiSidebar.readonlyBadge')}</span>
             )}
           </div>
         )}
@@ -870,14 +878,14 @@ ANFORDERUNGEN:
         {showHistory && (
           <div className="absolute inset-x-0 top-[41px] z-10 bg-slate-950 border-b border-white/10 flex flex-col shadow-xl" style={{ maxHeight: '60%', overflowY: 'auto' }}>
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
-              <span className="text-[10px] font-medium text-gray-400">Chat-Verlauf</span>
+              <span className="text-[10px] font-medium text-gray-400">{t('devTrainPanel.aiSidebar.historyTitle')}</span>
               <button onClick={startNewSession} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-300 text-[10px] transition-all">
-                <MessageSquarePlus className="w-3 h-3" /> Neuer Chat
+                <MessageSquarePlus className="w-3 h-3" /> {t('devTrainPanel.aiSidebar.newChatButton')}
               </button>
             </div>
             <div className="overflow-y-auto flex-1">
               {loadChatSessions().length === 0 ? (
-                <p className="text-center text-gray-600 text-[10px] py-6">Noch keine gespeicherten Chats.</p>
+                <p className="text-center text-gray-600 text-[10px] py-6">{t('devTrainPanel.aiSidebar.emptyHistory')}</p>
               ) : loadChatSessions().map(session => {
                 const isActive = session.id === currentSessionId;
                 return (
@@ -896,7 +904,7 @@ ANFORDERUNGEN:
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[9px] text-gray-600">{relativeTime(session.updatedAt)}</span>
-                        <span className="text-[9px] text-gray-700">· {session.messages.length} Nachrichten</span>
+                        <span className="text-[9px] text-gray-700">· {t('devTrainPanel.aiSidebar.messagesCount').replace('{count}', String(session.messages.length))}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
@@ -905,7 +913,7 @@ ANFORDERUNGEN:
                           onClick={e => { e.stopPropagation(); continueFromSession(session); }}
                           className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-all"
                         >
-                          Fortsetzen
+                          {t('devTrainPanel.aiSidebar.continueButton')}
                         </button>
                       )}
                       <button
@@ -926,9 +934,7 @@ ANFORDERUNGEN:
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {messages.length === 0 && (
             <div className="py-6 space-y-3">
-              <p className="text-gray-400 text-xs">
-                Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.
-              </p>
+              <p className="text-gray-400 text-xs">{t('devTrainPanel.aiSidebar.emptySidebarHint')}</p>
               <div className="flex flex-wrap gap-1.5">
                 {suggestions.map(s => (
                   <button key={s} onClick={() => setInput(s)}
@@ -970,9 +976,9 @@ ANFORDERUNGEN:
                     return (
                       <div key={pi} className="w-full rounded-xl overflow-hidden border border-white/10">
                         <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.03] border-b border-white/10">
-                          <span className="text-[10px] text-gray-500 font-mono">Python</span>
+                          <span className="text-[10px] text-gray-500 font-mono">{t('trainingPanel.requirements.python')}</span>
                           <button onClick={() => onReplaceScript(code)} className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all">
-                            Ersetzen
+                            {t('devTrainPanel.aiSidebar.replaceCodeButton')}
                           </button>
                         </div>
                         <pre className="p-3 text-[10px] font-mono text-gray-300 overflow-x-auto max-h-48 leading-relaxed">{code}</pre>
@@ -1021,7 +1027,7 @@ ANFORDERUNGEN:
                           <div className="flex items-center justify-between">
                             <span className={`font-medium flex items-center gap-2 ${isApplied ? 'text-emerald-300' : 'text-amber-300'}`}>
                               {isApplied ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
-                              Änderung {editIdx + 1}
+                              {t('devTrainPanel.aiSidebar.editChange').replace('{n}', String(editIdx + 1))}
                             </span>
                             {isApplied ? (
                               <button
@@ -1031,10 +1037,10 @@ ANFORDERUNGEN:
                                 }}
                                 className="text-emerald-400/70 hover:text-emerald-300 text-xs flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/[0.15] hover:bg-emerald-500/25 transition-all"
                               >
-                                <span>Rückgängig</span>
+                                <span>{t('devTrainPanel.aiSidebar.undoButton')}</span>
                               </button>
                             ) : (
-                              <span className="text-amber-400/70 text-xs">→ Diff ansehen</span>
+                              <span className="text-amber-400/70 text-xs">{t('devTrainPanel.aiSidebar.viewDiffLink')}</span>
                             )}
                           </div>
                         </button>
@@ -1071,7 +1077,7 @@ ANFORDERUNGEN:
             return (
               <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/20 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 pt-2 pb-1.5">
-                  <span className="text-[10px] text-gray-500 shrink-0">Bereit:</span>
+                  <span className="text-[10px] text-gray-500 shrink-0">{t('devTrainPanel.aiSidebar.editSummaryReady')}</span>
                   <span className="text-[10px] font-medium text-emerald-400 flex items-center gap-0.5">
                     <Plus className="w-3 h-3" />{addedLines}
                   </span>
@@ -1085,7 +1091,7 @@ ANFORDERUNGEN:
                     onClick={() => handleApplyAllEdits(latestEditMsg.edits, latestEditMsg)}
                     className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-[10px] font-medium transition-all"
                   >
-                    <Check className="w-3 h-3" /> Übernehmen
+                    <Check className="w-3 h-3" /> {t('devTrainPanel.aiSidebar.applyButton')}
                   </button>
                   <button
                     onClick={() => {
@@ -1094,7 +1100,7 @@ ANFORDERUNGEN:
                     }}
                     className="flex items-center justify-center px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-[10px] font-medium transition-all"
                   >
-                    Details
+                    {t('devTrainPanel.aiSidebar.detailsButton')}
                   </button>
                 </div>
               </div>
@@ -1103,16 +1109,16 @@ ANFORDERUNGEN:
           
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] text-gray-600">
-              {isReadonly ? 'Lesemodus – Chat nicht aktiv' : 'Enter = senden · Shift+Enter = neue Zeile'}
+              {isReadonly ? t('devTrainPanel.aiSidebar.readonlyHint') : t('devTrainPanel.aiSidebar.sendHint')}
             </span>
-            <span className="text-[10px] text-purple-300/70">Auto</span>
+            <span className="text-[10px] text-purple-300/70">{t('devTrainPanel.aiSidebar.autoBadge')}</span>
           </div>
           <div className="flex gap-2 items-end">
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder={isReadonly ? 'Zum Schreiben neuen Chat starten → □ oben rechts' : 'Ziel / Problem / gewünschte Änderung…'}
+              placeholder={isReadonly ? t('devTrainPanel.aiSidebar.readonlyPlaceholder') : t('devTrainPanel.aiSidebar.inputPlaceholder')}
               rows={2}
               disabled={isReadonly}
               className={`flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-white/20 resize-none transition-opacity ${
@@ -1129,7 +1135,7 @@ ANFORDERUNGEN:
               onClick={startNewSession}
               className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-300 text-[10px] font-medium transition-all"
             >
-              <MessageSquarePlus className="w-3 h-3" /> Neuen Chat starten
+              <MessageSquarePlus className="w-3 h-3" /> {t('devTrainPanel.aiSidebar.startNewChatButton')}
             </button>
           )}
         </div>
@@ -1170,6 +1176,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const { currentTheme } = useTheme();
   const { success, error }      = useNotification();
   const { settings: aiSettings } = useAISettings();
+  const { setCurrentPageContent } = usePageContext();
+  const { t, language } = useLanguage();
 
   const [fileOpen, setFileOpen]   = useState(false);
   const [tlHovered, setTlHovered] = useState(false);
@@ -1233,6 +1241,70 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const lineCount = useMemo(() => Math.max(1, (script || '').split('\n').length), [script]);
   const highlightedHtml = useMemo(() => highlightPythonToHtml(script || ''), [script]);
 
+  // ── AI Coach Page Context ──────────────────────────────────────────────────
+  useEffect(() => {
+    const dsRefs = datasets.map((d, i) => ({
+      key:   i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`,
+      value: d.storage_path || '',
+      name:  d.name,
+    }));
+
+    const lines: string[] = [
+      t('devTrainPanel.pageContext.title'),
+      '',
+      t('devTrainPanel.pageContext.purposeBody'),
+      '',
+      t('devTrainPanel.pageContext.currentStateTitle'),
+      `${t('devTrainPanel.pageContext.statusLabel')}: ${running ? t('devTrainPanel.pageContext.statusRunning') : isDirty ? t('devTrainPanel.pageContext.statusDirty') : t('devTrainPanel.pageContext.statusReady')}`,
+      `${t('devTrainPanel.pageContext.modelLabel')}: ${modelInfo?.name || t('devTrainPanel.pageContext.modelNotLoaded')}`,
+      `${t('devTrainPanel.pageContext.scriptSizeLabel').replace('{lines}', String(lineCount)).replace('{chars}', String(script.length))}`,
+      running ? t('devTrainPanel.pageContext.runtimeActive').replace('{lines}', String(output.split('\n').length)) : output ? t('devTrainPanel.pageContext.lastRun').replace('{lines}', String(output.split('\n').length)) : t('devTrainPanel.pageContext.noOutput'),
+      currentJob ? t('devTrainPanel.pageContext.jobStatus').replace('{status}', currentJob.status).replace('{epoch}', String(currentJob.progress?.epoch ?? 0)).replace('{total}', String(currentJob.progress?.total_epochs ?? 0)) : '',
+      '',
+      t('devTrainPanel.pageContext.scriptStateTitle'),
+      isDirty ? t('devTrainPanel.pageContext.unsaved') : t('devTrainPanel.pageContext.saved'),
+      currentScriptId ? t('devTrainPanel.pageContext.loaded').replace('{id}', currentScriptId) : t('devTrainPanel.pageContext.newUnsaved'),
+      running ? t('devTrainPanel.pageContext.running') : showDashboard ? t('devTrainPanel.pageContext.dashboardOpen') : t('devTrainPanel.pageContext.idle').replace('{count}', String(lossPoints.length)),
+      '',
+      t('devTrainPanel.pageContext.layoutTitle'),
+      t('devTrainPanel.pageContext.topSection'),
+      t('devTrainPanel.pageContext.topModel').replace('{name}', modelInfo?.name || t('devTrainPanel.pageContext.none')),
+      t('devTrainPanel.pageContext.topVersionPath').replace('{status}', selectedVersionPath ? t('devTrainPanel.pageContext.loaded') : t('devTrainPanel.pageContext.notSet')),
+      t('devTrainPanel.pageContext.topSave'),
+      t('devTrainPanel.pageContext.topLibrary'),
+      '',
+      t('devTrainPanel.pageContext.leftSection'),
+      t('devTrainPanel.pageContext.leftEditor'),
+      t('devTrainPanel.pageContext.leftGutter'),
+      t('devTrainPanel.pageContext.leftStart'),
+      '',
+      t('devTrainPanel.pageContext.rightSection'),
+      t('devTrainPanel.pageContext.rightOutput'),
+      running ? t('devTrainPanel.pageContext.rightLive') : t('devTrainPanel.pageContext.rightLast'),
+      t('devTrainPanel.pageContext.rightButtons'),
+      t('devTrainPanel.pageContext.rightDashboard'),
+      '',
+      t('devTrainPanel.pageContext.bottomSection'),
+      t('devTrainPanel.pageContext.bottomChat'),
+      t('devTrainPanel.pageContext.bottomDashboard'),
+      '',
+      t('devTrainPanel.pageContext.availableActionsTitle'),
+      !script.trim() ? t('devTrainPanel.pageContext.step1Empty') : t('devTrainPanel.pageContext.step1Filled'),
+      t('devTrainPanel.pageContext.step2'),
+      t('devTrainPanel.pageContext.step3'),
+      running ? t('devTrainPanel.pageContext.step4Running') : output ? t('devTrainPanel.pageContext.step4Error') : '',
+      t('devTrainPanel.pageContext.step5'),
+      '',
+      t('devTrainPanel.pageContext.contextTitle'),
+      t('devTrainPanel.pageContext.contextModel').replace('{name}', modelInfo?.name || t('devTrainPanel.pageContext.none')),
+      t('devTrainPanel.pageContext.contextDatasets').replace('{count}', String(datasets.length)).replace('{names}', datasets.length > 0 ? datasets.map(d => d.name).join(', ') : t('devTrainPanel.pageContext.none')),
+      t('devTrainPanel.pageContext.contextDatasetPaths').replace('{paths}', dsRefs.map(d => d.key).join(', ')),
+      t('devTrainPanel.pageContext.contextOutput').replace('{path}', outputPath || '[AppData]/training_outputs/dev_<job_id>'),
+      lossPoints.length > 0 ? t('devTrainPanel.pageContext.contextLoss').replace('{count}', String(lossPoints.length)) : '',
+    ];
+
+    setCurrentPageContent(lines.join('\n'));
+  }, [script, lineCount, running, isDirty, output, modelInfo, datasets, currentScriptId, outputPath, selectedVersionPath, currentJob, lossPoints, showDashboard, setCurrentPageContent]);
 
   const syncEditorScroll = () => {
     const ta = editorRef.current;
@@ -1405,7 +1477,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       updateScript(currentScriptId, script, userData?.userId);
       setSavedScript(script);
       setIsDirty(false);
-      success('Aktualisiert', 'Skript in der Bibliothek aktualisiert!');
+      success(t('devTrainPanel.notifications.savedUpdated'), t('devTrainPanel.notifications.savedUpdatedDetail'));
     } else {
       // Skript ist neu → Dialog für Namen zeigen
       setSaveName('Mein Trainings-Skript');
@@ -1425,7 +1497,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
     setIsDirty(false);
     setShowSaveDialog(false);
     setSaveName('');
-    success('Gespeichert', `Skript "${name}" in der Bibliothek gespeichert!`);
+    success(t('devTrainPanel.notifications.savedTitle'), t('devTrainPanel.notifications.savedDetail').replace('{name}', name));
   };
 
   // Keyboard shortcuts: Cmd+S / Ctrl+S zum Speichern
@@ -1491,7 +1563,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       }
       setRunning(false);
       setJob(j => j ? { ...j, status: 'completed' } : null);
-      setOutput(o => o + '\n✅ Training abgeschlossen!');
+      setOutput(o => o + '\n' + t('devTrainPanel.progress.trainingComplete'));
       invoke('disable_prevent_sleep').catch(() => {});
     }).then(fn => { u3 = fn; });
 
@@ -1555,20 +1627,20 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         refs,
       });
       setJob(job);
-      setOutput(`🚀 Training gestartet (Job: ${job.id})...\n`);
+      setOutput(`${t('devTrainPanel.progress.trainingStarted').replace('{id}', job.id)}\n`);
       invoke('enable_prevent_sleep').catch(() => {});
       devSessionIdRef.current = job.id;
       devStartedAtRef.current = Date.now();
       setShowDashboard(true);
       setIsDashMinimized(false);
-      success('Gestartet!', 'Dev Training läuft…');
+      success(t('devTrainPanel.notifications.startSuccess'), t('devTrainPanel.notifications.startSuccessDetail'));
       
       // Timeout: Wenn nach 5 Minuten kein Event kommt, als fehlgeschlagen markieren
       const timeoutId = setTimeout(() => {
         setJob(j => {
           if (j && (j.status === 'pending' || j.status === 'running')) {
             setRunning(false);
-            error('Timeout', 'Training hat nicht innerhalb von 5 Minuten geantwortet.');
+            error(t('devTrainPanel.notifications.timeout'), t('devTrainPanel.notifications.timeoutDetail'));
             return { ...j, status: 'failed', error: 'Timeout: Kein Response vom Backend' };
           }
           return j;
@@ -1578,10 +1650,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       // Cleanup-Funktion speichern (optional)
       (window as any).__devTrainingTimeout = timeoutId;
     } catch (err: unknown) {
-      setOutput(`❌ ${String(err)}`);
+      setOutput(`${t('common.error')}: ${String(err)}`);
       setRunning(false);
       setJob(null);
-      error('Fehler', String(err));
+      error(t('common.error'), String(err));
     }
   };
 
@@ -1592,7 +1664,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
     invoke('disable_prevent_sleep').catch(() => {});
     setRunning(false); 
     setJob(null);
-    setOutput(o => o + '\n⏹️  Training gestoppt.');
+    setOutput(o => o + '\n' + t('devTrainPanel.progress.trainingStopped'));
     
     // Clear timeout wenn vorhanden
     if ((window as any).__devTrainingTimeout) {
@@ -1606,6 +1678,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
     setIsSendingError(true);
     try {
       const analysis = analyzeError(errorMessage);
+      const categoryKey = `devTrainPanel.errorModal.errorCategories.${analysis.category}`;
       const response = await fetch(
         'https://webcontrol-hq-api.karol-paschek.workers.dev/api/app-errors',
         {
@@ -1620,7 +1693,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             logs: output,           // Alle Output-Logs
             script_full: script,     // Komplettes Skript
             error_analysis: analysis.category,
-            error_category: analysis.title,
+            error_category: t(`${categoryKey}.title`),
             platform: navigator.platform || 'unknown',
             app_version: 'desktop-app',
             timestamp: new Date().toISOString(),
@@ -1668,10 +1741,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         {!dismissed && (
           <div className="p-4 rounded-2xl border border-blue-500/30 bg-blue-500/10">
             <div className="flex items-start justify-between gap-2 mb-1">
-              <div className="flex items-center gap-2"><Terminal className="w-4 h-4 text-blue-400" /><span className="text-blue-300 font-semibold text-sm">Dev Train Mode</span></div>
+              <div className="flex items-center gap-2"><Terminal className="w-4 h-4 text-blue-400" /><span className="text-blue-300 font-semibold text-sm">{t('devTrainPanel.banner.title')}</span></div>
               <button onClick={() => { setDismissed(true); localStorage.setItem('devTrainBannerDismissed', 'true'); }} className="p-1 rounded-lg hover:bg-white/10 text-blue-400/60 hover:text-white transition-all"><X className="w-3.5 h-3.5" /></button>
             </div>
-            <p className="text-gray-400 text-xs">Eigenes Python-Skript mit vollem Zugriff auf alle Pfade. Gleiche Live-Loss-Kurven wie beim Standard-Training.</p>
+            <p className="text-gray-400 text-xs">{t('devTrainPanel.banner.description')}</p>
           </div>
         )}
 
@@ -1682,7 +1755,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         >
           <div className="flex items-center gap-2">
             <FolderOpen className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-medium text-blue-300">Pfade konfigurieren</span>
+            <span className="text-sm font-medium text-blue-300">{t('devTrainPanel.paths.toggleLabel')}</span>
           </div>
           <div className={`transform transition-transform ${showPathsModal ? 'rotate-180' : ''}`}>
             <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1698,15 +1771,15 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             <div className="space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <FolderOpen className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-medium text-white">Modell</span>
+                <span className="text-sm font-medium text-white">{t('devTrainPanel.paths.modelTitle')}</span>
               </div>
-              <RefRow color="text-emerald-400" label="MODEL_PATH" value={modelPath} hint={modelInfo?.name} />
+              <RefRow color="text-emerald-400" label={t('devTrainPanel.paths.modelPathLabel')} value={modelPath} hint={modelInfo?.name} />
               
               <div className="flex items-center gap-2 mb-1 mt-3">
-                <span className="text-sm font-medium text-white">Version</span>
+                <span className="text-sm font-medium text-white">{t('devTrainPanel.paths.versionTitle')}</span>
               </div>
               <div className="text-[11px] font-mono text-gray-400">
-                {modelInfo?.name ? `${modelInfo.name}` : 'Keine Version'}
+                {modelInfo?.name ? `${modelInfo.name}` : t('devTrainPanel.paths.versionFallback')}
               </div>
             </div>
 
@@ -1717,9 +1790,17 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             <div className="space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <FolderOpen className="w-4 h-4 text-blue-400" />
-                <span className="text-sm font-medium text-white">Dataset</span>
+                <span className="text-sm font-medium text-white">{t('devTrainPanel.paths.datasetTitle')}</span>
               </div>
-              {dsRefs.map(r => <RefRow key={r.key} color="text-blue-400" label={r.key} value={r.value} hint={r.name} />)}
+              {dsRefs.map((r, idx) => (
+                <RefRow
+                  key={r.key}
+                  color="text-blue-400"
+                  label={t('devTrainPanel.paths.datasetPathLabel') + (datasets.length > 1 ? ` ${idx + 1}` : '')}
+                  value={r.value}
+                  hint={r.name}
+                />
+              ))}
             </div>
 
             {/* Divider */}
@@ -1729,9 +1810,13 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-purple-400" />
-                <span className="text-sm font-medium text-white">Output</span>
+                <span className="text-sm font-medium text-white">{t('devTrainPanel.paths.outputTitle')}</span>
               </div>
-              <RefRow color="text-purple-400" label="OUTPUT_PATH" value={outputPath.replace('<job_id>', '{wird beim Start gesetzt}')} />
+              <RefRow
+                color="text-purple-400"
+                label={t('devTrainPanel.paths.outputPathLabel')}
+                value={outputPath.replace('<job_id>', 'dev_train')}
+              />
             </div>
           </div>
         )}
@@ -1752,7 +1837,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   className={`relative w-3 h-3 rounded-full flex items-center justify-center transition-all ${
                     fileOpen ? 'bg-red-500 cursor-pointer hover:bg-red-400' : 'bg-red-500/40 cursor-default'
                   }`}
-                  title={fileOpen ? (isDirty ? 'Ungespeicherte Änderungen' : 'Datei schließen') : ''}
+                  title={fileOpen ? (isDirty ? t('devTrainPanel.toolbar.unsavedChangesTooltip') : t('devTrainPanel.toolbar.closeFileTooltip')) : ''}
                 >
                   {tlHovered && fileOpen && (
                     <X className="w-[7px] h-[7px] text-red-900 stroke-[3]" />
@@ -1768,7 +1853,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   className={`relative w-3 h-3 rounded-full flex items-center justify-center transition-all ${
                     fileOpen && isDirty ? 'bg-amber-400 cursor-pointer hover:bg-amber-300' : 'bg-amber-500/40 cursor-default'
                   }`}
-                  title={fileOpen && isDirty ? 'Speichern' : ''}
+                  title={fileOpen && isDirty ? t('devTrainPanel.toolbar.saveTooltip') : ''}
                 >
                   {tlHovered && fileOpen && isDirty && (
                     <Minus className="w-[7px] h-[7px] text-amber-900 stroke-[3]" />
@@ -1781,7 +1866,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   className={`relative w-3 h-3 rounded-full flex items-center justify-center transition-all ${
                     fileOpen ? 'bg-emerald-500 cursor-pointer hover:bg-emerald-400' : 'bg-emerald-500/40 cursor-default'
                   }`}
-                  title={fileOpen ? (expanded ? 'Verkleinern' : 'Vollbild') : ''}
+                  title={fileOpen ? (expanded ? t('devTrainPanel.toolbar.minimizeTooltip') : t('devTrainPanel.toolbar.maximizeTooltip')) : ''}
                 >
                   {tlHovered && fileOpen && (
                     expanded
@@ -1793,7 +1878,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
               <div className="flex items-center gap-2">
                 <FileCode className={`w-4 h-4 ${fileOpen ? 'text-emerald-400' : 'text-gray-600'}`} />
                 <span className={`text-sm font-medium truncate max-w-[160px] ${fileOpen ? 'text-gray-300' : 'text-gray-600'}`}>
-                  {fileOpen ? 'train.py' : 'Kein Dokument'}
+                  {fileOpen ? t('devTrainPanel.editor.fileName') : t('devTrainPanel.editor.noDocument')}
                 </span>
               </div>
             </div>
@@ -1819,7 +1904,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                       editorRef.current?.focus();
                     }
                   }}
-                  placeholder="Suchen…"
+                  placeholder={t('devTrainPanel.editor.searchPlaceholder')}
                   className="w-44 px-2 py-1 bg-transparent text-gray-200 text-xs focus:outline-none placeholder:text-gray-600"
                 />
                 <span className="text-[10px] text-gray-500 font-mono w-12 text-right">
@@ -1828,21 +1913,21 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 <button
                   onClick={() => findNext(-1)}
                   className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[10px] transition-all"
-                  title="Vorheriges (Shift+Enter)"
+                  title={t('devTrainPanel.editor.prevSearchTooltip')}
                 >
                   ↑
                 </button>
                 <button
                   onClick={() => findNext(1)}
                   className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[10px] transition-all"
-                  title="Nächstes (Enter)"
+                  title={t('devTrainPanel.editor.nextSearchTooltip')}
                 >
                   ↓
                 </button>
                 <button
                   onClick={() => { setFindOpen(false); setFindStatus(null); editorRef.current?.focus(); }}
                   className="p-1 rounded-lg hover:bg-white/10 text-gray-500 hover:text-white transition-all"
-                  title="Schließen (Esc)"
+                  title={t('devTrainPanel.editor.closeSearchTooltip')}
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1854,15 +1939,15 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 <>
                   <button onClick={handleNewFile}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/25 text-emerald-400 text-xs font-medium transition-all">
-                    <FileCode className="w-3.5 h-3.5" /> Neue Datei
+                    <FileCode className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.newFileButton')}
                   </button>
                   <button onClick={() => setShowLib(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 text-xs font-medium transition-all">
-                    <FolderClosed className="w-3.5 h-3.5" /> Datei laden
+                    <FolderClosed className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.loadFileButton')}
                   </button>
                   <button onClick={() => setShowOpenLib(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/25 text-violet-400 text-xs font-medium transition-all">
-                    <Globe className="w-3.5 h-3.5" /> Open Library
+                    <Globe className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.openLibraryButton')}
                   </button>
                 </>
               ) : (
@@ -1871,28 +1956,28 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   {isDirty && (
                     <button onClick={handleSave}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-medium transition-all">
-                      <Save className="w-3.5 h-3.5" /> Speichern (⌘S)
+                      <Save className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.saveButton')}
                     </button>
                   )}
                   <button onClick={() => setShowLib(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium transition-all">
-                    <FolderClosed className="w-3.5 h-3.5" /> Bibliothek
+                    <FolderClosed className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.libraryButton')}
                   </button>
                   <button onClick={() => setShowOpenLib(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-400 text-xs font-medium transition-all">
-                    <Globe className="w-3.5 h-3.5" /> Open Library
+                    <Globe className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.openLibraryButton')}
                   </button>
                   <button
                     onClick={() => {
                       if (!aiSettings.enabled) {
-                        error('KI nicht aktiviert', 'Bitte aktiviere die KI zuerst in den Einstellungen.');
+                        error(t('devTrainPanel.editor.aiNotEnabled'), t('devTrainPanel.editor.aiNotEnabledDetail'));
                         return;
                       }
                       setShowAI(v => !v);
                     }}
-                    title={!aiSettings.enabled ? 'KI nicht konfiguriert – in den Einstellungen aktivieren' : ''}
+                    title={!aiSettings.enabled ? t('devTrainPanel.editor.aiNotEnabledDetail') : ''}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${showAI ? 'bg-violet-500/20 text-violet-300 border-violet-500/30' : !aiSettings.enabled ? 'bg-white/5 text-gray-500 border-white/10 opacity-60' : 'bg-white/5 text-gray-400 hover:text-white border-white/10'}`}>
-                    <Bot className="w-3.5 h-3.5" /> KI
+                    <Bot className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.aiButton')}
                   </button>
                   <button
                     onClick={() => {
@@ -1902,7 +1987,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                       updateFindStatus(findQuery, ta?.selectionStart ?? 0);
                     }}
                     className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-xs font-medium transition-all"
-                    title="Suchen (Cmd/Ctrl+F)"
+                    title={t('devTrainPanel.editor.searchButton')}
                   >
                     ⌘F
                   </button>
@@ -1913,12 +1998,12 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   {isRunning ? (
                     <button onClick={handleStop}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-medium transition-all">
-                      <Square className="w-3.5 h-3.5" /> Stopp
+                      <Square className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.stopButton')}
                     </button>
                   ) : (
                     <button onClick={handleStart} disabled={!script.trim() || !modelInfo}
                       className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed`}>
-                      <Play className="w-3.5 h-3.5" /> Training starten
+                      <Play className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.runButton')}
                     </button>
                   )}
                 </>
@@ -1933,7 +2018,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
               style={{ height: `${editorH}px` }}
             >
               <FileCode className="w-12 h-12 text-gray-700 mb-6" />
-              <p className="text-gray-500 text-sm mb-8">Öffne oder erstelle eine Datei um zu starten</p>
+              <p className="text-gray-500 text-sm mb-8">{t('devTrainPanel.emptyState.description')}</p>
               <div className="flex gap-4">
                 <button
                   onClick={handleNewFile}
@@ -1941,8 +2026,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 >
                   <FileCode className="w-7 h-7 text-emerald-500 group-hover:text-emerald-400" />
                   <div>
-                    <p className="font-semibold text-white text-sm">Neue Datei</p>
-                    <p className="text-xs text-gray-500 mt-1">Tippe <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-gray-400 font-mono text-[10px]">!</kbd> + Leertaste für Template</p>
+                    <p className="font-semibold text-white text-sm">{t('devTrainPanel.emptyState.newFile')}</p>
+                    <p className="text-xs text-gray-500 mt-1">{t('devTrainPanel.emptyState.newFileHint')}</p>
                   </div>
                 </button>
                 <button
@@ -1951,8 +2036,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 >
                   <FolderClosed className="w-7 h-7 text-amber-500 group-hover:text-amber-400" />
                   <div>
-                    <p className="font-semibold text-white text-sm">Datei laden</p>
-                    <p className="text-xs text-gray-500 mt-1">Aus deiner Bibliothek</p>
+                    <p className="font-semibold text-white text-sm">{t('devTrainPanel.emptyState.loadFile')}</p>
+                    <p className="text-xs text-gray-500 mt-1">{t('devTrainPanel.emptyState.loadFileHint')}</p>
                   </div>
                 </button>
                 <button
@@ -1961,8 +2046,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 >
                   <Globe className="w-7 h-7 text-violet-500 group-hover:text-violet-400" />
                   <div>
-                    <p className="font-semibold text-white text-sm">Open Library</p>
-                    <p className="text-xs text-gray-500 mt-1">Community-Skripte</p>
+                    <p className="font-semibold text-white text-sm">{t('devTrainPanel.emptyState.openLib')}</p>
+                    <p className="text-xs text-gray-500 mt-1">{t('devTrainPanel.emptyState.openLibHint')}</p>
                   </div>
                 </button>
               </div>
@@ -2051,12 +2136,12 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                       autoFocus
                       value={script}
                       wrap="off"
-                      placeholder={"# Fange an zu tippen…\n# Tippe '! ' + Leertaste um das Template zu laden"}
+                      placeholder={t('devTrainPanel.editor.placeholder')}
                       onChange={e => {
                         const newVal = e.target.value;
                         if (newVal === '! ') {
                           if (!modelInfo) {
-                            error('Kein Modell', 'Bitte wähle erst ein Modell aus, um ein Template zu generieren.');
+                            error(t('devTrainPanel.editor.noModelForTemplate'), t('devTrainPanel.editor.noModelForTemplateDetail'));
                             return;
                           }
                           generateTemplate();
@@ -2171,7 +2256,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                     ? <CheckCircle className="w-4 h-4 text-emerald-400" />
                     : <AlertCircle className="w-4 h-4 text-red-400" />}
                 <span className="text-white font-medium text-sm">
-                  {isRunning ? 'Training läuft…' : `Status: ${currentJob?.status}`}
+                  {isRunning ? t('devTrainPanel.output.running') : `Status: ${currentJob?.status}`}
                 </span>
               </div>
               {progress && <span className="text-gray-400 text-xs">Epoch {progress.epoch}/{progress.total_epochs}</span>}
@@ -2186,7 +2271,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
             {lossPoints.length > 1 && (
               <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3">
-                <p className="text-xs text-gray-500 mb-2">Loss-Verlauf</p>
+                <p className="text-xs text-gray-500 mb-2">{t('devTrainPanel.output.lossHistory')}</p>
                 <LossChart points={lossPoints} />
               </div>
             )}
@@ -2194,9 +2279,9 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             {progress && (
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: 'Train Loss', value: progress.train_loss?.toFixed(4) ?? '—', icon: <TrendingDown className="w-3.5 h-3.5" /> },
-                  { label: 'Val Loss',   value: progress.val_loss?.toFixed(4)   ?? '—', icon: <BarChart3    className="w-3.5 h-3.5" /> },
-                  { label: 'LR',         value: progress.learning_rate?.toExponential(2) ?? '—', icon: <Zap className="w-3.5 h-3.5" /> },
+                  { label: t('devTrainPanel.output.trainLossLabel'), value: progress.train_loss?.toFixed(4) ?? '—', icon: <TrendingDown className="w-3.5 h-3.5" /> },
+                  { label: t('devTrainPanel.output.valLossLabel'),   value: progress.val_loss?.toFixed(4)   ?? '—', icon: <BarChart3    className="w-3.5 h-3.5" /> },
+                  { label: t('devTrainPanel.output.lrLabel'),         value: progress.learning_rate?.toExponential(2) ?? '—', icon: <Zap className="w-3.5 h-3.5" /> },
                 ].map(m => (
                   <div key={m.label} className="p-3 rounded-xl bg-white/5 space-y-1">
                     <div className="flex items-center gap-1.5 text-gray-500">{m.icon}<span className="text-xs">{m.label}</span></div>
@@ -2210,10 +2295,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
               <div className="rounded-xl border border-white/10 bg-black/30 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
                   <Terminal className="w-3.5 h-3.5 text-gray-500" />
-                  <span className="text-[10px] text-gray-500">Ausgabe</span>
+                  <span className="text-[10px] text-gray-500">{t('devTrainPanel.output.outputLabel')}</span>
                 </div>
                 <div ref={outputRef} className="p-3 max-h-48 overflow-y-auto">
-                  {isRunning && !output && <p className="text-gray-600 text-[10px] animate-pulse">Warte auf Python-Output…</p>}
+                  {isRunning && !output && <p className="text-gray-600 text-[10px] animate-pulse">{t('devTrainPanel.output.waitingForOutput')}</p>}
                   <pre className="text-[10px] font-mono text-gray-300 whitespace-pre-wrap leading-relaxed">{output}</pre>
                 </div>
               </div>
@@ -2296,11 +2381,11 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         devScript={script}
         onSendCodeToKI={(s, err) => {
           setShowAI(true);
-          setAiPrefill(
-            `[Dev Train Fehler]\n\n` +
-            `Bitte korrigiere mein Skript.\n\n` +
-            `FEHLER:\n${err}\n\n` +
-            `SCRIPT:\n${s}\n`
+      setAiPrefill(
+            `[Dev Train Error]\n\n` +
+            `${t('devTrainPanel.aiPrefill.fixScript')}\n\n` +
+            `${t('devTrainPanel.aiPrefill.error')}\n${err}\n\n` +
+            `${t('devTrainPanel.aiPrefill.script')}\n${s}\n`
           );
         }}
       />
@@ -2311,6 +2396,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 // ── Helper Components ─────────────────────────────────────────────────────
 
 function RefRow({ color, label, value, hint }: { color: string; label: string; value: string; hint?: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -2328,7 +2414,7 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
       <span className={`${color} min-w-[140px] flex-shrink-0`}>{label}</span>
       <div className="min-w-0 flex-1">
         <span className={`break-all ${value ? 'text-gray-300' : 'text-gray-600 italic'}`}>
-          {value || 'nicht gesetzt'}
+          {value || t('devTrainPanel.paths.notSet')}
         </span>
         {hint && <span className="text-gray-600 ml-1.5 text-[10px]">({hint})</span>}
       </div>
@@ -2340,7 +2426,7 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
               ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-300'
               : 'bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10'
           }`}
-          title="Kopieren"
+          title={useLanguage().t('settings.account.copy')}
         >
           {copied ? (
             <Check className="w-3.5 h-3.5" />

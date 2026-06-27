@@ -119,6 +119,19 @@ pub struct TrainingConfig {
     /// Plugin-spezifische Parameter — werden 1:1 an Python durchgereicht.
     /// Jedes Plugin kann hier eigene Werte ablegen (image_size, num_classes, etc.)
     #[serde(default)]                           pub plugin_config: serde_json::Value,
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // PHASE 4: Canvas Integration
+    // ──────────────────────────────────────────────────────────────────────────
+    /// Canvas-generierter PyTorch nn.Module Code
+    /// Falls gesetzt: Canvas wird als Trainingsquelle verwendet (statt model_id)
+    #[serde(default)]                           pub canvas_model_code: String,
+    
+    /// Canvas Graph Metadaten für Debugging
+    #[serde(default)]                           pub canvas_graph_metadata: serde_json::Value,
+
+    /// Canvas Graph IR (JSON) — runtime training source for Synapse Builder
+    #[serde(default)]                           pub canvas_graph: serde_json::Value,
 }
 
 fn default_epochs() -> u32 { 3 }
@@ -174,7 +187,23 @@ impl Default for TrainingConfig {
             training_type: "fine_tuning".to_string(),
             task_type: "seq_classification".to_string(),
             plugin_config: serde_json::Value::Object(serde_json::Map::new()),
+            canvas_model_code: String::new(),
+            canvas_graph_metadata: serde_json::Value::Object(serde_json::Map::new()),
+            canvas_graph: serde_json::Value::Object(serde_json::Map::new()),
         }
+    }
+}
+
+/// True when canvas_graph IR has nodes (not empty object/array).
+fn has_canvas_graph_ir(cg: &serde_json::Value) -> bool {
+    match cg {
+        serde_json::Value::Object(m) => {
+            m.get("nodes")
+                .and_then(|n| n.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+        }
+        _ => false,
     }
 }
 
@@ -557,47 +586,172 @@ pub async fn start_training(
 
     let job_id = format!("train_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
     let models_dir = get_models_dir(&app_handle)?;
-
-    // Modell-Pfad: Aus Version-DB lesen wenn version_id gesetzt, sonst models_dir/model_id
-    let model_path = if let Some(ref vid) = version_id {
-        let db_path = app_handle.path().app_data_dir()
-            .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
-        let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
-        let vpath: String = conn.query_row(
-            "SELECT path FROM model_versions_new WHERE id = ?1", [vid], |r| r.get(0),
-        ).map_err(|e| format!("Version nicht gefunden: {}", e))?;
-        PathBuf::from(vpath)
-    } else {
-        models_dir.join(&model_id)
-    };
-
-    // Dataset-Pfad aus DB
-    let dataset_path = {
-        let db_path = app_handle.path().app_data_dir()
-            .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
-        let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
-        let res: Result<String, _> = conn.query_row(
-            "SELECT file_path FROM datasets WHERE id = ?1", [&dataset_id], |r| r.get(0),
-        );
-        match res {
-            Ok(p) if !p.is_empty() => PathBuf::from(p),
-            _ => {
-                // Fallback: Verwende standard datasets_dir statt model-spezifischen Pfad
-                let datasets_dir = app_handle.path().app_data_dir()
-                    .map_err(|e| format!("AppDataDir: {}", e))?
-                    .join("datasets");
-                datasets_dir.join(&dataset_id)
-            }
-        }
-    };
-
     let output_dir   = get_output_dir(&app_handle, &job_id)?;
     let checkpoint_dir = output_dir.join("checkpoints");
     fs::create_dir_all(&checkpoint_dir).map_err(|e| format!("Checkpoint-Dir: {}", e))?;
 
     let mut final_config = config.clone();
-    final_config.model_path    = model_path.to_string_lossy().to_string();
-    final_config.dataset_path  = dataset_path.to_string_lossy().to_string();
+    
+    // ──────────────────────────────────────────────────────────────────────────
+    // Canvas / Synapse: IR first, then legacy code, else model_id path
+    // ──────────────────────────────────────────────────────────────────────────
+    // FIX Bug 1: user-scoped JSON-Metadaten first (storage_path), SQLite als Fallback.
+    // Vorher wurde nur SQLite file_path gelesen – der stimmt nicht mit dem
+    // user-isolierten datasets/<user_id>/<dataset_id>/ Pfad überein.
+    let resolve_dataset_path = || -> PathBuf {
+        // 1. user-scoped Metadaten-JSON → storage_path (Primary Source)
+        if let Ok(app_data) = app_handle.path().app_data_dir() {
+            // Eigener Block: app_state + db_guard werden hier sofort gedropt
+            let maybe_uid: Option<String> = {
+                let app_state = app_handle.state::<crate::AppState>();
+                app_state.db.lock().ok().and_then(|g| g.get_current_user_id())
+            };
+            if let Some(uid) = maybe_uid {
+                let sanitized: String = uid.chars()
+                    .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                    .collect();
+                let user_dir = app_data.join("datasets").join(sanitized);
+                let meta_file = user_dir.join("datasets_metadata.json");
+                if let Ok(raw) = fs::read_to_string(&meta_file) {
+                    if let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&raw) {
+                        if let Some(entry) = list.iter().find(|e| {
+                            e.get("id").and_then(|v| v.as_str()) == Some(&dataset_id)
+                        }) {
+                            if let Some(sp) = entry.get("storage_path").and_then(|v| v.as_str()) {
+                                let pb = PathBuf::from(sp);
+                                if pb.exists() { return pb; }
+                            }
+                            let fallback = user_dir.join(&dataset_id);
+                            if fallback.exists() { return fallback; }
+                        }
+                    }
+                }
+            }
+        }
+        // 2. SQLite file_path (Legacy-Fallback für ältere Einträge)
+        if let Ok(app_data) = app_handle.path().app_data_dir() {
+            if let Ok(conn) = rusqlite::Connection::open(app_data.join("frametrain.db")) {
+                let res: Result<String, _> = conn.query_row(
+                    "SELECT file_path FROM datasets WHERE id = ?1", [&dataset_id], |r| r.get(0),
+                );
+                if let Ok(p) = res {
+                    if !p.is_empty() {
+                        let pb = PathBuf::from(&p);
+                        if pb.exists() { return pb; }
+                    }
+                }
+            }
+        }
+        // 3. Bare fallback
+        app_handle.path().app_data_dir()
+            .map(|d| d.join("datasets").join(&dataset_id))
+            .unwrap_or_else(|_| PathBuf::from(&dataset_id))
+    };
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Canvas-Modell aus Modellbibliothek: graph_metadata.json auto-injizieren
+    // wenn canvas_graph noch leer ist (Aufruf von TrainingPanel ohne IR)
+    // ──────────────────────────────────────────────────────────────────────────
+    if model_id.starts_with("canvas_") && !has_canvas_graph_ir(&final_config.canvas_graph) {
+        let meta_path = models_dir.join(&model_id).join("graph_metadata.json");
+        if meta_path.exists() {
+            if let Ok(content) = fs::read_to_string(&meta_path) {
+                if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(ir) = meta.get("graphIR") {
+                        if has_canvas_graph_ir(ir) {
+                            final_config.canvas_graph = ir.clone();
+                            eprintln!("[Canvas] ✓ graph_metadata.json → canvas_graph ({} nodes)",
+                                ir.get("nodes").and_then(|n| n.as_array()).map(|a| a.len()).unwrap_or(0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Iteratives Training: letzten Checkpoint suchen und in plugin_config hinterlegen
+    if model_id.starts_with("canvas_") {
+        let db_path_val = app_handle.path().app_data_dir()
+            .map(|p| p.join("frametrain.db"));
+        if let Ok(db_path_val) = db_path_val {
+            if let Ok(conn) = rusqlite::Connection::open(&db_path_val) {
+                let res: Result<String, _> = conn.query_row(
+                    "SELECT path FROM model_versions_new WHERE model_id=?1 AND is_root=0 ORDER BY version_number DESC LIMIT 1",
+                    [&model_id], |r| r.get(0),
+                );
+                if let Ok(ver_path) = res {
+                    let pt = PathBuf::from(&ver_path).join("model.pt");
+                    if pt.exists() {
+                        let mut pc_obj = final_config.plugin_config
+                            .as_object()
+                            .cloned()
+                            .unwrap_or_default();
+                        pc_obj.insert(
+                            "prev_checkpoint".to_string(),
+                            serde_json::Value::String(pt.to_string_lossy().to_string()),
+                        );
+                        final_config.plugin_config = serde_json::Value::Object(pc_obj);
+                        eprintln!("[Canvas] ✓ Iteratives Training: prev_checkpoint = {:?}", pt);
+                    }
+                }
+            }
+        }
+    }
+
+    if has_canvas_graph_ir(&final_config.canvas_graph) {
+        eprintln!("[Canvas] ✓ Graph-IR erkannt ({} nodes)", 
+            final_config.canvas_graph.get("nodes").and_then(|n| n.as_array()).map(|a| a.len()).unwrap_or(0));
+        final_config.task_type = "canvas".to_string();
+        final_config.model_path = String::new();
+        final_config.canvas_model_code = String::new();
+        let dp = resolve_dataset_path();
+        final_config.dataset_path = dp.to_string_lossy().to_string();
+        let ir_path = output_dir.join("canvas_graph.json");
+        fs::write(&ir_path, serde_json::to_string_pretty(&final_config.canvas_graph)
+            .unwrap_or_default())
+            .ok();
+    } else if !final_config.canvas_model_code.is_empty() {
+        eprintln!("[Canvas] ✓ Canvas-Modell erkannt ({} chars Code)", final_config.canvas_model_code.len());
+        let canvas_code_path = output_dir.join("canvas_model.py");
+        fs::write(&canvas_code_path, &final_config.canvas_model_code)
+            .map_err(|e| format!("Canvas-Code speichern: {}", e))?;
+        final_config.task_type = "canvas".to_string();
+        final_config.model_path = String::new();
+        final_config.dataset_path = resolve_dataset_path().to_string_lossy().to_string();
+    } else {
+        // Traditionelles Modell - lade von Festplatte
+        // Modell-Pfad: Aus Version-DB lesen wenn version_id gesetzt, sonst models_dir/model_id
+        let model_path = if let Some(ref vid) = version_id {
+            let db_path = app_handle.path().app_data_dir()
+                .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
+            let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
+            let vpath: String = conn.query_row(
+                "SELECT path FROM model_versions_new WHERE id = ?1", [vid], |r| r.get(0),
+            ).map_err(|e| format!("Version nicht gefunden: {}", e))?;
+            PathBuf::from(vpath)
+        } else {
+            models_dir.join(&model_id)
+        };
+        
+    // FIX Bug 1: Dataset-Pfad — user-scoped Metadaten-JSON first, SQLite als Fallback.
+        let dataset_path = resolve_dataset_path();
+        
+        // dataset.yaml in plugin_config eintragen wenn vorhanden
+        // (YOLO-Plugins und Custom-Scripts können den Pfad direkt aus plugin_config lesen)
+        let yaml_path = dataset_path.join("dataset.yaml");
+        if yaml_path.exists() {
+            let mut pc = final_config.plugin_config.as_object().cloned().unwrap_or_default();
+            pc.entry("dataset_yaml_path".to_string()).or_insert_with(|| {
+                serde_json::Value::String(yaml_path.to_string_lossy().to_string())
+            });
+            final_config.plugin_config = serde_json::Value::Object(pc);
+            eprintln!("[Training] dataset.yaml -> plugin_config: {:?}", yaml_path);
+        }
+        
+        final_config.model_path = model_path.to_string_lossy().to_string();
+        final_config.dataset_path = dataset_path.to_string_lossy().to_string();
+    }
+    
     final_config.output_path   = output_dir.join("final_model").to_string_lossy().to_string();
     final_config.checkpoint_dir= checkpoint_dir.to_string_lossy().to_string();
     // task_type kommt vom Frontend – nur Fallback wenn leer
@@ -689,8 +843,8 @@ fn create_version(
         let mp = models_dir.join(model_id).to_string_lossy().to_string();
         let unique_name = format!("{} ({})", model_name, &model_id[..8.min(model_id.len())]);
         conn.execute(
-            "INSERT INTO models (id, name, model_path, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6)",
-            rusqlite::params![model_id, &unique_name, &mp, "trained", &now, &now],
+            "INSERT INTO models (id, name, model_path, status, user_id, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            rusqlite::params![model_id, &unique_name, &mp, "trained", user_id, &now, &now],
         ).ok();
     }
 
@@ -1202,4 +1356,389 @@ pub fn delete_metrics_template(
     let mut templates: Vec<MetricsTemplate> = serde_json::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default();
     templates.retain(|t| t.id != template_id);
     fs::write(&path, serde_json::to_string_pretty(&templates).unwrap_or_default()).map_err(|e| format!("Write: {}", e))
+}
+
+// ─── Synapse Builder: register trained canvas output as a FrameTrain version ───
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SynapseVersionResult {
+    pub version_id: String,
+    pub model_id: String,
+}
+
+/// Copies Synapse training output (model.pt, metrics.json, …) into the model library.
+#[tauri::command]
+pub async fn register_synapse_training_version(
+    app_handle: tauri::AppHandle,
+    model_name: String,
+    output_dir: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<SynapseVersionResult, String> {
+    let user_id = {
+        let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+        db.get_current_user_id().ok_or_else(|| "Kein User eingeloggt".to_string())?
+    };
+    let model_id = format!(
+        "synapse_{}",
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+    );
+    let version_id = create_version(
+        &app_handle,
+        &model_id,
+        &model_name,
+        None,
+        &output_dir,
+        &user_id,
+    )?;
+    Ok(SynapseVersionResult { version_id, model_id })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CanvasNetworkResult {
+    pub model_id: String,
+    pub path: String,
+}
+
+#[tauri::command]
+pub async fn create_canvas_network_model(
+    app_handle: tauri::AppHandle,
+    model_name: String,
+    metadata: String,
+    python_code: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<CanvasNetworkResult, String> {
+    let user_id = {
+        let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+        db.get_current_user_id().ok_or_else(|| "Kein User eingeloggt".to_string())?
+    };
+    let model_id = format!(
+        "canvas_{}",
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+    );
+    let models_dir = get_models_dir(&app_handle)?;
+    let model_path = models_dir.join(&model_id);
+    fs::create_dir_all(&model_path).map_err(|e| format!("mkdir: {}", e))?;
+    fs::write(model_path.join("canvas_model.py"), &python_code)
+        .map_err(|e| format!("canvas_model.py: {}", e))?;
+    fs::write(model_path.join("graph_metadata.json"), &metadata)
+        .map_err(|e| format!("graph_metadata.json: {}", e))?;
+
+    let db_path = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?
+        .join("frametrain.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        let now = Utc::now().to_rfc3339();
+        let unique_name = format!("{} ({})", model_name, &model_id[..8.min(model_id.len())]);
+        conn.execute(
+            "INSERT OR IGNORE INTO models (id, name, model_path, status, user_id, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            rusqlite::params![
+                &model_id,
+                &unique_name,
+                model_path.to_string_lossy().to_string(),
+                "canvas",
+                &user_id,
+                &now,
+                &now
+            ],
+        ).ok();
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO model_versions_new (id,model_id,version_name,version_number,path,size_bytes,file_count,created_at,is_root,parent_version_id,user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            rusqlite::params![
+                format!("ver_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]),
+                &model_id,
+                "Canvas v1",
+                1i32,
+                model_path.to_string_lossy().to_string(),
+                0i64,
+                0i32,
+                &now,
+                1i32,
+                Option::<String>::None,
+                &user_id
+            ],
+        );
+    }
+
+    Ok(CanvasNetworkResult {
+        model_id: model_id.clone(),
+        path: model_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn update_canvas_network_model(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+    metadata: String,
+    python_code: String,
+) -> Result<(), String> {
+    let models_dir = get_models_dir(&app_handle)?;
+    let model_path = models_dir.join(&model_id);
+    if !model_path.exists() {
+        return Err(format!("Modell nicht gefunden: {}", model_id));
+    }
+    fs::write(model_path.join("canvas_model.py"), &python_code)
+        .map_err(|e| format!("canvas_model.py: {}", e))?;
+    fs::write(model_path.join("graph_metadata.json"), &metadata)
+        .map_err(|e| format!("graph_metadata.json: {}", e))?;
+    // updated_at in DB aktualisieren
+    let db_path = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE models SET updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![&now, &model_id],
+        ).ok();
+    }
+    eprintln!("[Canvas] ✓ Modell {} aktualisiert", model_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn is_canvas_network_model(model_id: String) -> Result<bool, String> {
+    Ok(model_id.starts_with("canvas_") || model_id.starts_with("synapse_"))
+}
+
+#[tauri::command]
+pub async fn get_canvas_network_code(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+) -> Result<String, String> {
+    let models_dir = get_models_dir(&app_handle)?;
+    let code_path = models_dir.join(&model_id).join("canvas_model.py");
+    if !code_path.exists() {
+        return Err(format!("Canvas-Code nicht gefunden: {}", code_path.display()));
+    }
+    fs::read_to_string(&code_path).map_err(|e| format!("Lesen: {}", e))
+}
+
+// ─── Canvas Inference ─────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct CanvasModelInfo {
+    pub model_id: String,
+    pub name: String,
+    pub has_weights: bool,
+    pub model_pt_path: String,
+    pub metadata_path: String,
+    pub task_type: String,
+    pub num_classes: i64,
+}
+
+/// Listet alle Canvas-Modelle auf, die ein model.pt haben (inferenzbereit).
+#[tauri::command]
+pub async fn list_canvas_models_with_pt(
+    app_handle: tauri::AppHandle,
+    user_id: String,
+) -> Result<Vec<CanvasModelInfo>, String> {
+    let models_dir = get_models_dir(&app_handle)?;
+    let db_path = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?
+        .join("frametrain.db");
+
+    let conn = rusqlite::Connection::open(&db_path)
+        .map_err(|e| format!("DB: {}", e))?;
+
+    // Alle Canvas-Modelle des Users laden
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name FROM models WHERE user_id = ?1 AND (id LIKE 'canvas_%' OR id LIKE 'synapse_%')",
+        )
+        .map_err(|e| format!("Stmt: {}", e))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![&user_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("Query: {}", e))?;
+
+    let mut result = Vec::new();
+    for row in rows.flatten() {
+        let (model_id, name) = row;
+        let model_path = models_dir.join(&model_id);
+        let metadata_path = model_path.join("graph_metadata.json");
+        if !metadata_path.exists() {
+            continue;
+        }
+
+        // Prüfen ob model.pt vorhanden
+        let pt_candidates = ["model.pt", "model_best.pt", "checkpoint.pt"];
+        let pt_path = pt_candidates
+            .iter()
+            .map(|n| model_path.join(n))
+            .find(|p| p.exists());
+
+        let has_weights = pt_path.is_some();
+        let model_pt_path = pt_path
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // task_type + num_classes aus graph_metadata.json lesen
+        let (task_type, num_classes) = if let Ok(raw) = fs::read_to_string(&metadata_path) {
+            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let ir = meta.get("graphIR").or_else(|| meta.get("graph_ir"));
+                let task = ir
+                    .and_then(|v| v.get("training"))
+                    .and_then(|v| v.get("taskType"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("classification")
+                    .to_string();
+                let classes = ir
+                    .and_then(|v| v.get("training"))
+                    .and_then(|v| v.get("numClasses"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(10);
+                (task, classes)
+            } else {
+                ("classification".to_string(), 10)
+            }
+        } else {
+            ("classification".to_string(), 10)
+        };
+
+        result.push(CanvasModelInfo {
+            model_id,
+            name,
+            has_weights,
+            model_pt_path,
+            metadata_path: metadata_path.to_string_lossy().to_string(),
+            task_type,
+            num_classes,
+        });
+    }
+
+    Ok(result)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct CanvasInferenceResult {
+    pub predicted_class: Option<i64>,
+    pub confidence: Option<f64>,
+    pub predicted_value: Option<serde_json::Value>,
+    pub top_predictions: Option<Vec<serde_json::Value>>,
+    pub all_probs: Option<Vec<f64>>,
+    pub inference_ms: f64,
+    pub task_type: String,
+    pub error: Option<String>,
+}
+
+/// Führt eine einzelne Inferenz auf einem Canvas-Modell durch.
+/// Spawnt canvas_inference_server.py, sendet Input, liest Result, beendet Prozess.
+#[tauri::command]
+pub async fn run_canvas_inference(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+    input: Vec<f64>,
+) -> Result<CanvasInferenceResult, String> {
+    let models_dir = get_models_dir(&app_handle)?;
+    let model_dir = models_dir.join(&model_id);
+    if !model_dir.exists() {
+        return Err(format!("Modell-Ordner nicht gefunden: {}", model_id));
+    }
+
+    let python_path = get_python_path();
+    let server_script = get_train_engine_path(&app_handle)?
+        .parent()
+        .ok_or_else(|| "train_engine.py hat kein Parent-Verzeichnis".to_string())?
+        .join("plugins")
+        .join("canvas")
+        .join("canvas_inference_server.py");
+
+    if !server_script.exists() {
+        return Err(format!(
+            "canvas_inference_server.py nicht gefunden: {}",
+            server_script.display()
+        ));
+    }
+
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(&python_path)
+        .arg(&server_script)
+        .arg("--model-dir")
+        .arg(model_dir.to_string_lossy().as_ref())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Python spawn: {}", e))?;
+
+    let stdin = child.stdin.as_mut().ok_or("Kein stdin")?;
+    let stdout = child.stdout.take().ok_or("Kein stdout")?;
+
+    // Warte auf "ready" Signal
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut ready_line = String::new();
+    reader
+        .read_line(&mut ready_line)
+        .map_err(|e| format!("Ready lesen: {}", e))?;
+
+    let ready: serde_json::Value = serde_json::from_str(ready_line.trim())
+        .map_err(|e| format!("Ready parse: {} | raw: {}", e, ready_line.trim()))?;
+
+    if ready.get("type").and_then(|v| v.as_str()) == Some("error") {
+        let _ = child.kill();
+        return Err(ready
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unbekannter Fehler beim Laden")
+            .to_string()
+            .into());
+    }
+
+    // Input senden
+    let req = serde_json::json!({ "input": input, "input_type": "tensor" });
+    writeln!(stdin, "{}", req).map_err(|e| format!("Stdin write: {}", e))?;
+
+    // Ergebnis lesen
+    let mut result_line = String::new();
+    reader
+        .read_line(&mut result_line)
+        .map_err(|e| format!("Result lesen: {}", e))?;
+
+    // Shutdown
+    let _ = writeln!(stdin, "{{\"cmd\": \"shutdown\"}}");
+    let _ = child.wait();
+
+    let val: serde_json::Value = serde_json::from_str(result_line.trim())
+        .map_err(|e| format!("Result parse: {} | raw: {}", e, result_line.trim()))?;
+
+    if val.get("type").and_then(|v| v.as_str()) == Some("error") {
+        return Ok(CanvasInferenceResult {
+            predicted_class: None,
+            confidence: None,
+            predicted_value: None,
+            top_predictions: None,
+            all_probs: None,
+            inference_ms: 0.0,
+            task_type: "classification".to_string(),
+            error: val.get("message").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        });
+    }
+
+    Ok(CanvasInferenceResult {
+        predicted_class: val.get("predicted_class").and_then(|v| v.as_i64()),
+        confidence: val.get("confidence").and_then(|v| v.as_f64()),
+        predicted_value: val.get("predicted_value").cloned(),
+        top_predictions: val
+            .get("top_predictions")
+            .and_then(|v| v.as_array())
+            .map(|a| a.clone()),
+        all_probs: val
+            .get("all_probs")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_f64()).collect()),
+        inference_ms: val.get("inference_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        task_type: val
+            .get("task_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("classification")
+            .to_string(),
+        error: None,
+    })
 }

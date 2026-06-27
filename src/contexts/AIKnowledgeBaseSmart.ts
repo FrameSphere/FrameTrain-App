@@ -143,7 +143,7 @@ text,label
 - **Was**: Learning Rate sinkt graduell nach Kosinus-Kurve während Training
 - **Effekt**: Zuerst schnelles Lernen, später feine Anpassungen
 - **Mit Warmup**: Zuerst LOW LR, dann Kosinus runter
-- **Empfehlung**: 🏆 Am besten für die meisten Fälle
+- **Empfehlung**: Am besten für die meisten Fälle
 
 ### Step Scheduler  
 - **Was**: Learning Rate wird nach X Steps reduziert
@@ -217,7 +217,7 @@ Mit 4bit:   70B Model mit LoRA = ~8-12GB VRAM ⭐
 - **Was**: Model wird noch komprimierter in 4-bit komprimiert
 - **Vorteil**: -87.5% VRAM (8x weniger!)
 - **Nachteil**: Weitere Precision-Verluste, aber meist ok
-- **Wann**: 🏆 Beste Balance wenn Speicher sehr knapp (z.B. 13B auf 8GB)
+- **Wann**: Beste Balance wenn Speicher sehr knapp (z.B. 13B auf 8GB)
 - **Combo**: 4bit + LoRA + Rank 8 = sehr klein mit guten Ergebnissen
 
 ## Precision Formats
@@ -230,7 +230,7 @@ Mit 4bit:   70B Model mit LoRA = ~8-12GB VRAM ⭐
 ### BF16 (Brain Float 16-bit)
 - **Vorteil**: Mehr Stabilität als FP16, fast gleich schnell
 - **Nachteil**: Neuere GPUs nötig (A100, H100, RTX 40x)
-- **Wann**: 🏆 Wenn GPU es unterstützt, beste Option
+- **Wann**: Wenn GPU es unterstützt, beste Option
 
 ### FP32 (Float 32-bit, Standard)
 - **Vorteil**: Stabil, vereinheitlicht
@@ -439,7 +439,7 @@ Error: "Model failed to load" oder "CUDA out of memory while loading"
     content: `
 # Performance Tipps & Best Practices
 
-## Für schnelleres Training ⚡
+## Für schnelleres Training
 
 1. **LoRA aktivieren** (wenn Model > 7B)
    - Spart 50-70% Trainingszeit
@@ -466,7 +466,7 @@ Error: "Model failed to load" oder "CUDA out of memory while loading"
    - Von 10 auf 50-100
    - Logs schreiben ist Overhead
 
-## Für bessere Ergebnisse 🎯
+## Für bessere Ergebnisse
 
 1. **Learning Rate fein-tunen**
    - Nicht zu hoch (exploding), nicht zu niedrig (stuck)
@@ -493,7 +493,7 @@ Error: "Model failed to load" oder "CUDA out of memory while loading"
    - Macht Model robuster
 
 6. **Scheduler auswählen**
-   - Cosine Annealing 🏆 (am besten)
+   - Cosine Annealing (am besten)
    - Step am besten für supervised Learning
 
 7. **Dropout nicht zu hoch**
@@ -596,7 +596,7 @@ Error: "Model failed to load" oder "CUDA out of memory while loading"
 → **Llama 2 70B** 
 - Best-in-class für komplexe Aufgaben
 - Training: 10-48h je nach Größe
-- ⚠️ Braucht sehr gute Hardware oder Cloud
+- Hinweis: Braucht sehr gute Hardware oder Cloud
 
 ## RAM Requirements Schnell-Referenz
 

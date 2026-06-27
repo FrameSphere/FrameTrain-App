@@ -14,6 +14,9 @@ const hfEncoderPlugin: ModelPlugin = {
   detect: detectHFEncoder,
   TrainComponent: HFEncoderTrainPlugin,
   TestComponent: HFEncoderTestPlugin,
+  // Phase 7: Dataset-Kompatibilität
+  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],
+  preferredDatasetType: 'flat_file',
 };
 
 export default hfEncoderPlugin;

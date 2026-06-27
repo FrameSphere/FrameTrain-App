@@ -7,6 +7,7 @@ import {
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePageContext } from '../contexts/PageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 import { PROVIDER_META } from '../ai/providerMeta';
 import { onOpenAICoach } from '../ai/aiCoachEvents';
@@ -45,24 +46,10 @@ const MAX_CHATS = 50;
 
 // ============ Helpers ============
 
-function loadChats(): Chat[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function saveChats(chats: Chat[]): void {
-  try {
-    const limited = chats.slice(0, MAX_CHATS);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(limited));
-  } catch { /* ignore */ }
-}
-
-function createFreshChat(): Chat {
+function createFreshChat(title: string): Chat {
   return {
     id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    title: 'Neuer Chat',
+    title,
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -73,15 +60,26 @@ function generateTitle(firstMessage: string): string {
   return firstMessage.slice(0, 40) + (firstMessage.length > 40 ? '…' : '');
 }
 
-function formatRelativeTime(ts: number): string {
+type TFn = (key: string, fallback?: string) => string;
+function formatRelativeTime(ts: number, t: TFn): string {
   const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
-  if (mins < 1) return 'Gerade eben';
-  if (mins < 60) return `vor ${mins} Min.`;
-  if (hours < 24) return `vor ${hours} Std.`;
-  return `vor ${days} Tag${days !== 1 ? 'en' : ''}`;
+  if (mins < 1) return t('aiCoach.justNow');
+  if (mins < 60) return t('aiCoach.minutesAgo').replace('{n}', String(mins));
+  if (hours < 24) return t('aiCoach.hoursAgo').replace('{n}', String(hours));
+  return (days === 1 ? t('aiCoach.daysAgo') : t('aiCoach.daysAgoPlural')).replace('{n}', String(days));
+}
+
+function formatPageContextTitle(pageContent: string): string {
+  const firstLine = pageContent.split('\n').find(line => line.trim())?.trim() ?? '';
+  const clean = firstLine
+    .replace(/^=+\s*/, '')
+    .replace(/\s*=+$/, '')
+    .replace(/^FrameTrain\s+/i, '')
+    .trim();
+  return clean || '–';
 }
 
 // ============ Markdown Renderer ============
@@ -215,6 +213,55 @@ function darkenHex(hex: string, amount: number): string {
   } catch { return hex; }
 }
 
+const COACH_MAGIC_CSS = `
+  @keyframes ftCoachButtonFloat { 0%,100% { transform:translateY(0) scale(1); } 50% { transform:translateY(-3px) scale(1.02); } }
+  @keyframes ftCoachPanelIn { from { opacity:0; transform:translate3d(10px,14px,0) scale(.975); filter:blur(8px); } to { opacity:1; transform:none; filter:blur(0); } }
+  @keyframes ftCoachAuraSweep { 0%,100% { opacity:.28; transform:translateX(-32%); } 50% { opacity:.82; transform:translateX(32%); } }
+  @keyframes ftCoachMessageIn { from { opacity:0; transform:translateY(8px) scale(.985); } to { opacity:1; transform:none; } }
+  @keyframes ftCoachThinkingSweep { from { transform:translateX(-80%); opacity:.18; } 50% { opacity:.72; } to { transform:translateX(180%); opacity:.18; } }
+  @keyframes ftCoachSoftPulse { 0%,100% { box-shadow:0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 26px rgba(255,255,255,.12); } }
+  .ft-coach-button { animation:ftCoachButtonFloat 4.5s ease-in-out infinite; }
+  .ft-coach-shell {
+    animation:ftCoachPanelIn .26s cubic-bezier(.2,.85,.22,1);
+    backdrop-filter:blur(22px) saturate(1.28);
+    -webkit-backdrop-filter:blur(22px) saturate(1.28);
+  }
+  .ft-coach-shell::before {
+    content:"";
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    border-radius:16px;
+    background:
+      radial-gradient(circle at 18% 4%, rgba(255,255,255,.10), transparent 28%),
+      radial-gradient(circle at 88% 10%, rgba(255,255,255,.08), transparent 30%);
+    opacity:.75;
+  }
+  .ft-coach-shell::after {
+    content:"";
+    position:absolute;
+    top:0;
+    left:14px;
+    right:14px;
+    height:1px;
+    pointer-events:none;
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+    animation:ftCoachAuraSweep 5.2s ease-in-out infinite;
+  }
+  .ft-coach-message { animation:ftCoachMessageIn .22s ease both; }
+  .ft-coach-scroll::-webkit-scrollbar { width:6px; }
+  .ft-coach-scroll::-webkit-scrollbar-track { background:transparent; }
+  .ft-coach-scroll::-webkit-scrollbar-thumb { background:rgba(148,163,184,.32); border-radius:999px; }
+  .ft-coach-thinking-card { position:relative; overflow:hidden; }
+  .ft-coach-thinking-card::before {
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.10), transparent);
+    animation:ftCoachThinkingSweep 1.7s ease-in-out infinite;
+  }
+`;
+
 // ============ Thinking Block ============
 
 function ThinkingBlock({
@@ -230,6 +277,7 @@ function ThinkingBlock({
 }) {
   // Fix 4: Theme-Farben im ThinkingBlock
   const { currentTheme } = useTheme();
+  const { t } = useLanguage();
   const tPrimary = hexLuminance(currentTheme.colors.primary) > 0.5
     ? darkenHex(currentTheme.colors.primary, 100)
     : currentTheme.colors.primary;
@@ -253,10 +301,10 @@ function ThinkingBlock({
 
   if (isActive) {
     return (
-      <div className="mb-3">
+      <div className="ft-coach-thinking-card mb-3 rounded-2xl border border-white/10 bg-white/[0.045] p-2.5">
         <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: textColor }}>
           <Loader2 className="w-3 h-3 animate-spin" style={{ color: tPrimary }} />
-          <span>{activeStep?.label || 'Denkt nach...'}</span>
+          <span>{activeStep?.label || t('aiCoach.thinking')}</span>
         </div>
         <div className="pl-1 space-y-1 ml-1.5" style={{ borderLeft: `2px solid ${borderColor}` }}>
           {steps.map(step => (
@@ -295,16 +343,16 @@ function ThinkingBlock({
     <div className="mb-2">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all group"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all group hover:scale-[1.015]"
         style={{ background: bgColor, border: `1px solid ${borderColor}` }}
         onMouseEnter={e => (e.currentTarget.style.background = bgHover)}
         onMouseLeave={e => (e.currentTarget.style.background = bgColor)}
       >
         <Brain className="w-3 h-3 flex-shrink-0" style={{ color: tPrimary }} />
         <span className="text-[11px] font-medium" style={{ color: textColor }}>
-          Hat nachgedacht
+          {t('aiCoach.hadThought')}
         </span>
-        <span className="text-[10px] ml-0.5" style={{ color: chevronColor }}>· {doneCount} Schritte</span>
+        <span className="text-[10px] ml-0.5" style={{ color: chevronColor }}>· {doneCount} {t('aiCoach.steps')}</span>
         <ChevronDown
           className={`w-3 h-3 ml-auto transition-transform ${collapsed ? '' : 'rotate-180'}`}
           style={{ color: chevronColor }}
@@ -336,12 +384,50 @@ function ThinkingBlock({
 
 interface FloatingAICoachProps {
   currentPageContent?: string;
+  userId?: string;
 }
 
-export default function FloatingAICoach({ currentPageContent }: FloatingAICoachProps) {
+function getChatStorageKey(userId?: string) {
+  if (!userId) return STORAGE_KEY;
+  return `${STORAGE_KEY}_${userId}`;
+}
+
+function loadChatsForUser(userId?: string): Chat[] {
+  // Migration: legacy (global) -> user scoped (only if userId present and scoped is empty)
+  const scopedKey = getChatStorageKey(userId);
+  try {
+    const scopedRaw = localStorage.getItem(scopedKey);
+    if (scopedRaw) return JSON.parse(scopedRaw);
+  } catch { /* ignore */ }
+
+  if (!userId) return [];
+
+  try {
+    const legacyRaw = localStorage.getItem(STORAGE_KEY);
+    if (!legacyRaw) return [];
+    const parsed = JSON.parse(legacyRaw) as Chat[];
+    // Only migrate if scoped key is missing/empty
+    localStorage.setItem(scopedKey, JSON.stringify(parsed));
+    localStorage.removeItem(STORAGE_KEY);
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function saveChatsForUser(chats: Chat[], userId?: string): void {
+  try {
+    const limited = chats.slice(0, MAX_CHATS);
+    localStorage.setItem(getChatStorageKey(userId), JSON.stringify(limited));
+  } catch { /* ignore */ }
+}
+
+export default function FloatingAICoach({ currentPageContent, userId }: FloatingAICoachProps) {
   const { settings } = useAISettings();
+  const { language } = useLanguage();
   const { currentTheme } = useTheme();
   const { currentPageContent: ctxPageContent } = usePageContext();
+  const { t } = useLanguage();
 
   // Theme-Farben mit Light-Color-Detection (Fix für Monochrome / Arctic White)
   const safePrimary   = hexLuminance(currentTheme.colors.primary)   > 0.5 ? darkenHex(currentTheme.colors.primary,   100) : currentTheme.colors.primary;
@@ -383,9 +469,9 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
   // Load chats from localStorage on mount (only persisted ones)
   useEffect(() => {
-    const loaded = loadChats();
+    const loaded = loadChatsForUser(userId);
     setChats(loaded);
-  }, []);
+  }, [userId]);
 
   // Fix 3: Scroll nur wenn neue Nachricht hinzukommt, nicht bei Collapse-Toggle
   useEffect(() => {
@@ -434,7 +520,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
   // ── Opens modal with a fresh empty chat (never saved until message sent) ──
   const openModal = useCallback(() => {
-    const fresh = createFreshChat();
+    const fresh = createFreshChat(t('aiCoach.newChat'));
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
     setView('chat');
@@ -447,7 +533,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   // ── Start a new chat (from chat list or header button) ──
   // Creates a fresh unsaved chat and switches to it, without touching `chats`
   const handleNewChat = useCallback(() => {
-    const fresh = createFreshChat();
+    const fresh = createFreshChat(t('aiCoach.newChat'));
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
     setView('chat');
@@ -487,14 +573,14 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     e.stopPropagation();
     const updated = chats.filter(c => c.id !== chatId);
     setChats(updated);
-    saveChats(updated);
+    saveChatsForUser(updated, userId);
     // If we're currently viewing this chat, open a fresh one
-    if (currentChat?.id === chatId) {
-      const fresh = createFreshChat();
+      if (currentChat?.id === chatId) {
+      const fresh = createFreshChat(t('aiCoach.newChat'));
       setCurrentChat(fresh);
       currentChatPersistedRef.current = false;
     }
-  }, [chats, currentChat]);
+  }, [chats, currentChat, t]);
 
   // ── Update currentChat and sync to `chats` if already persisted ──
   const applyToCurrentChat = useCallback((updater: (c: Chat) => Chat) => {
@@ -505,7 +591,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       if (currentChatPersistedRef.current) {
         setChats(prevChats => {
           const newChats = prevChats.map(c => c.id === updated.id ? updated : c);
-          saveChats(newChats);
+          saveChatsForUser(newChats, userId);
           return newChats;
         });
       }
@@ -519,7 +605,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       currentChatPersistedRef.current = true;
       setChats(prev => {
         const newChats = [chat, ...prev];
-        saveChats(newChats);
+        saveChatsForUser(newChats, userId);
         return newChats;
       });
     }
@@ -573,7 +659,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     if (!text || isLoading || !currentChat) return;
 
     if (!settings.enabled) {
-      setError('KI-Assistent ist deaktiviert. Bitte in Einstellungen aktivieren.');
+      setError(t('aiCoach.disabledError'));
       return;
     }
 
@@ -609,7 +695,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     if (!isFirstMessage && currentChatPersistedRef.current) {
       setChats(prev => {
         const updated = prev.map(c => c.id === chatWithUserMsg.id ? chatWithUserMsg : c);
-        saveChats(updated);
+        saveChatsForUser(updated, userId);
         return updated;
       });
     }
@@ -622,7 +708,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
     try {
       const meta = PROVIDER_META[settings.provider];
       if (meta.needsKey && !settings.apiKey) {
-        throw new Error('API-Key fehlt. Bitte in Einstellungen → KI-Assistent konfigurieren.');
+        throw new Error(t('aiCoach.apiKeyMissing'));
       }
 
       const history = chatWithUserMsg.messages.slice(-10);
@@ -632,6 +718,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         messages: history.map(m => ({ role: m.role, content: m.content })),
         maxTokens: 1500,
         temperature: 0.7,
+        responseLanguage: language,
       });
 
       setThinkingSteps([]);
@@ -652,7 +739,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         if (currentChatPersistedRef.current) {
           setChats(prevChats => {
             const newChats = prevChats.map(c => c.id === updated.id ? updated : c);
-            saveChats(newChats);
+            saveChatsForUser(newChats, userId);
             return newChats;
           });
         }
@@ -661,7 +748,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
     } catch (e: any) {
       setThinkingSteps([]);
-      setError(e?.message || 'Unbekannter Fehler');
+      setError(e?.message || t('aiCoach.unknownError'));
     } finally {
       setIsLoading(false);
     }
@@ -682,14 +769,21 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   // ── Closed: floating button ──
   if (!isOpen) {
     return (
-      <button
-        onClick={openModal}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl hover:shadow-purple-500/30 hover:scale-110 transition-all flex items-center justify-center z-40"
-        style={{ background: themeGradient }}
-        title="KI-Coach öffnen"
-      >
-        <Brain className="w-6 h-6 text-white" />
-      </button>
+      <>
+        <style>{COACH_MAGIC_CSS}</style>
+        <button
+          onClick={openModal}
+          className="ft-coach-button fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl hover:shadow-white/20 hover:scale-110 transition-all flex items-center justify-center z-40"
+          style={{
+            background: themeGradient,
+            boxShadow: `0 18px 48px ${safePrimary}33, 0 0 0 1px rgba(255,255,255,.14), inset 0 1px 0 rgba(255,255,255,.28)`,
+          }}
+          title={t('aiCoach.openTitle')}
+        >
+          <Sparkles className="absolute w-3 h-3 text-white/70 -top-0.5 right-1.5" />
+          <Brain className="w-6 h-6 text-white" />
+        </button>
+      </>
     );
   }
 
@@ -702,21 +796,21 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       >
         <div className="flex items-center gap-2 pointer-events-none">
           <MessageSquare className="w-4 h-4 text-purple-400" />
-          <span className="text-sm font-semibold text-white">Chatverläufe</span>
+          <span className="text-sm font-semibold text-white">{t('aiCoach.chatHistory')}</span>
           <span className="text-xs text-gray-500">({chats.length})</span>
         </div>
         <div className="pointer-events-auto flex items-center gap-1">
           <button
             onClick={handleNewChat}
             className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all"
-            title="Neuer Chat"
+            title={t('aiCoach.newChat')}
           >
             <Plus className="w-4 h-4" />
           </button>
           <button
             onClick={() => setView('chat')}
             className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-            title="Zurück"
+            title={t('aiCoach.back')}
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
@@ -726,18 +820,18 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      <div className="ft-coach-scroll flex-1 overflow-y-auto p-2 space-y-1">
         {chats.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-4">
             <MessageSquare className="w-8 h-8 text-gray-600" />
-            <p className="text-gray-500 text-sm">Noch keine Chats</p>
-            <p className="text-gray-600 text-xs">Starte einen neuen Chat und schreibe eine Nachricht.</p>
+            <p className="text-gray-500 text-sm">{t('aiCoach.noChats')}</p>
+            <p className="text-gray-600 text-xs">{t('aiCoach.noChatsHint')}</p>
             <button
               onClick={handleNewChat}
               className="px-3 py-2 text-xs font-medium bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg border border-purple-500/30 transition-all flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              Neuen Chat starten
+              {t('aiCoach.newChatStart')}
             </button>
           </div>
         ) : (
@@ -747,34 +841,36 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-white/10 hover:border-purple-500/30 hover:bg-purple-500/5 text-gray-400 hover:text-purple-300 transition-all text-xs font-medium"
             >
               <Plus className="w-3.5 h-3.5" />
-              Neuer Chat
+              {t('aiCoach.newChat')}
             </button>
             {chats.map(chat => (
-              <button
-                key={chat.id}
-                onClick={() => switchToChat(chat.id)}
-                className={`w-full flex items-start justify-between gap-2 px-3 py-2.5 rounded-xl border text-left transition-all group ${
-                  chat.id === currentChat?.id
-                    ? 'bg-purple-500/15 border-purple-500/30 text-white'
-                    : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06] hover:border-white/10 text-gray-300'
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium truncate">{chat.title}</div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-gray-600">{formatRelativeTime(chat.updatedAt)}</span>
-                    {chat.messages.length > 0 && (
-                      <span className="text-[10px] text-gray-600">{chat.messages.length} Nachrichten</span>
-                    )}
+              <div key={chat.id} className="ft-coach-message flex items-center gap-1.5 group">
+                <button
+                  onClick={() => switchToChat(chat.id)}
+                  className={`flex-1 flex items-start justify-between gap-2 px-3 py-2.5 rounded-xl border text-left transition-all ${
+                    chat.id === currentChat?.id
+                      ? 'bg-white/[0.10] border-white/20 text-white shadow-lg shadow-black/20'
+                      : 'bg-white/[0.035] border-white/5 hover:bg-white/[0.07] hover:border-white/10 text-gray-300 hover:translate-x-0.5'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-medium truncate">{chat.title}</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-gray-600">{formatRelativeTime(chat.updatedAt, t)}</span>
+                      {chat.messages.length > 0 && (
+                        <span className="text-[10px] text-gray-600">{chat.messages.length} {t('aiCoach.messagesCount')}</span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </button>
                 <button
                   onClick={(e) => deleteChat(chat.id, e)}
-                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400 transition-all flex-shrink-0"
+                  className="p-1.5 rounded-lg hover:bg-red-500/20 text-gray-600 hover:text-red-400 transition-all flex-shrink-0 hover:scale-110"
+                  title={t('aiCoach.deleteChat')}
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
-              </button>
+              </div>
             ))}
           </>
         )}
@@ -797,20 +893,20 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           </div>
           <div className="min-w-0">
             <div className="text-xs font-bold text-white truncate max-w-[160px]">
-              {currentChat?.title || 'KI-Coach'}
+              {currentChat?.title || t('aiCoach.openTitle')}
             </div>
             {pageContent && (
               <div className="text-[10px] text-gray-500 truncate max-w-[160px]">
-                {pageContent.split('\n')[0]?.slice(0, 35)}
+                {formatPageContextTitle(pageContent).slice(0, 35)}
               </div>
             )}
           </div>
         </div>
         <div className="flex items-center gap-1 pointer-events-auto flex-shrink-0">
-          <button onClick={() => setView('chatList')} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title="Chatverläufe">
+          <button onClick={() => setView('chatList')} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title={t('aiCoach.chatHistory')}>
             <MessageSquare className="w-3.5 h-3.5" />
           </button>
-          <button onClick={handleNewChat} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title="Neuer Chat">
+          <button onClick={handleNewChat} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title={t('aiCoach.newChat')}>
             <Plus className="w-3.5 h-3.5" />
           </button>
           {!isMaximized && (
@@ -830,37 +926,39 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      <div className="ft-coach-scroll flex-1 overflow-y-auto px-3 py-3 space-y-4">
         {(!currentChat || currentChat.messages.length === 0) && !isLoading && (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
+          <div className="ft-coach-message flex flex-col items-center justify-center h-full text-center gap-3 py-8">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-              style={{ background: `linear-gradient(135deg, ${currentTheme.colors.primary}33, ${currentTheme.colors.secondary}1a)` }}>
-              <Brain className="w-6 h-6 text-purple-400" />
+              style={{ background: `linear-gradient(135deg, ${currentTheme.colors.primary}33, ${currentTheme.colors.secondary}1a)`, boxShadow: `0 14px 34px ${safePrimary}22, inset 0 1px 0 rgba(255,255,255,.12)` }}>
+              <Brain className="w-6 h-6" style={{ color: safePrimary }} />
             </div>
             <div>
-              <p className="text-gray-300 text-sm font-medium">Hallo! Ich bin dein KI-Coach.</p>
+              <p className="text-gray-300 text-sm font-medium">{t('aiCoach.greeting')}</p>
               <p className="text-gray-600 text-xs mt-1">
                 {pageContent
-                  ? 'Ich kenne deinen aktuellen Seiteninhalt und helfe dir gerne weiter.'
-                  : 'Stelle mir eine Frage zu FrameTrain.'}
+                  ? t('aiCoach.greetingWithContext')
+                  : t('aiCoach.greetingNoContext')}
               </p>
             </div>
             {pageContent && (
-              <div className="w-full max-w-xs px-3 py-2 bg-white/[0.03] border border-white/5 rounded-xl">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <FileSearch className="w-3 h-3 text-purple-400" />
-                  <span className="text-[10px] text-purple-300/70 font-medium">Geladener Kontext</span>
+              <div className="flex justify-center w-full">
+                <div className="max-w-[220px] px-3 py-2 bg-white/[0.03] border border-white/5 rounded-xl space-y-1">
+                  <div className="flex items-center gap-1 leading-none">
+                    <FileSearch className="w-3 h-3 flex-shrink-0" style={{ color: safePrimary }} />
+                    <span className="text-[10px] font-medium" style={{ color: `${safePrimary}cc` }}>{t('aiCoach.loadedContext')}</span>
+                  </div>
+                  <p className="text-[10px] text-gray-600 leading-relaxed truncate">
+                    {formatPageContextTitle(pageContent)}
+                  </p>
                 </div>
-                <p className="text-[10px] text-gray-600 leading-relaxed truncate">
-                  {pageContent.split('\n')[0]}
-                </p>
               </div>
             )}
           </div>
         )}
 
         {currentChat?.messages.map(msg => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={msg.id} className={`ft-coach-message flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'assistant' ? (
               <div className="max-w-[88%] space-y-1">
                 {/* Thinking block — shown above the message when finished */}
@@ -872,13 +970,13 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
                     onToggle={() => toggleMessageThinking(msg.id)}
                   />
                 )}
-                <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.06] border border-white/[0.08] text-gray-200">
+                <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.065] border border-white/[0.10] text-gray-200 shadow-lg shadow-black/20">
                   <MarkdownText text={msg.content} />
                 </div>
               </div>
             ) : (
-              <div className="max-w-[85%] px-3 py-2.5 rounded-2xl rounded-tr-sm text-white text-sm leading-relaxed"
-                style={{ background: themeGradient }}>
+              <div className="max-w-[85%] px-3 py-2.5 rounded-2xl rounded-tr-sm text-white text-sm leading-relaxed shadow-lg shadow-black/20"
+                style={{ background: themeGradient, boxShadow: `0 12px 28px ${safePrimary}20, inset 0 1px 0 rgba(255,255,255,.16)` }}>
                 {msg.content}
               </div>
             )}
@@ -887,7 +985,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
 
         {/* Active thinking steps (while loading) */}
         {isLoading && thinkingSteps.length > 0 && (
-          <div className="flex justify-start">
+          <div className="ft-coach-message flex justify-start">
             <div className="max-w-[88%]">
               <ThinkingBlock
                 steps={thinkingSteps}
@@ -900,7 +998,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
         )}
 
         {error && (
-          <div className="flex justify-start">
+          <div className="ft-coach-message flex justify-start">
             <div className="max-w-[88%] px-3 py-2.5 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-start gap-2">
               <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
               <span className="text-red-300 text-xs leading-relaxed break-words">{error}</span>
@@ -912,7 +1010,7 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
       </div>
 
       {/* Input */}
-      <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-white/5">
+      <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-white/5 bg-black/10">
         <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
@@ -921,10 +1019,18 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
             }}
-            placeholder="Frage stellen... (Enter senden)"
+            placeholder={t('aiCoach.inputPlaceholder')}
             disabled={isLoading}
             rows={1}
-            className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder-gray-600 focus:outline-none focus:border-purple-500/40 disabled:opacity-50 resize-none leading-relaxed"
+            className="flex-1 px-3 py-2 bg-white/[0.055] border border-white/10 rounded-xl text-white text-xs placeholder-gray-600 focus:outline-none disabled:opacity-50 resize-none leading-relaxed transition-all focus:bg-white/[0.075]"
+            onFocus={e => {
+              e.currentTarget.style.borderColor = `${safePrimary}66`;
+              e.currentTarget.style.boxShadow = `0 0 0 3px ${safePrimary}1f`;
+            }}
+            onBlur={e => {
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
             style={{ maxHeight: '80px' }}
             onInput={e => {
               const el = e.target as HTMLTextAreaElement;
@@ -935,8 +1041,8 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
           <button
             onClick={sendMessage}
             disabled={isLoading || !inputText.trim()}
-            className="p-2 rounded-xl text-white flex-shrink-0 transition-all disabled:opacity-40 hover:opacity-90 active:scale-95"
-            style={{ background: themeGradient }}
+            className="p-2 rounded-xl text-white flex-shrink-0 transition-all disabled:opacity-40 hover:opacity-95 hover:scale-105 active:scale-95"
+            style={{ background: themeGradient, boxShadow: `0 10px 26px ${safePrimary}25, inset 0 1px 0 rgba(255,255,255,.20)` }}
           >
             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
@@ -951,7 +1057,8 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   if (isMaximized) {
     return (
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-        <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+        <style>{COACH_MAGIC_CSS}</style>
+        <div className="ft-coach-shell relative bg-slate-900/90 rounded-2xl border border-white/10 w-full max-w-2xl h-[85vh] overflow-hidden flex flex-col shadow-2xl">
           {content}
         </div>
       </div>
@@ -961,15 +1068,16 @@ export default function FloatingAICoach({ currentPageContent }: FloatingAICoachP
   // ── Floating window ──
   return (
     <div
-      className="fixed bg-slate-900/95 backdrop-blur-md rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden flex flex-col z-50"
+      className="ft-coach-shell fixed bg-slate-900/90 rounded-2xl border border-white/[0.10] shadow-2xl overflow-hidden flex flex-col z-50"
       style={{
         width: `${size.width}px`,
         height: `${size.height}px`,
         left: `${position.x}px`,
         top: `${position.y}px`,
-        boxShadow: '0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)',
+        boxShadow: `0 25px 70px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,255,255,0.06), 0 0 48px ${safePrimary}14`,
       }}
     >
+      <style>{COACH_MAGIC_CSS}</style>
       {content}
       <div
         className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize"

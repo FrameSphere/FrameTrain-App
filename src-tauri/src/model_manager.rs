@@ -81,6 +81,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 fn detect_model_type(path: &Path) -> Option<String> {
+    // 0. Canvas-Modell erkennen (hat graph_metadata.json vom Synapse Builder)
+    if path.join("graph_metadata.json").exists() {
+        return Some("canvas".to_string());
+    }
     // 1. Aus config.json lesen (exakt, wie HuggingFace es speichert)
     let cfg_path = path.join("config.json");
     if cfg_path.exists() {

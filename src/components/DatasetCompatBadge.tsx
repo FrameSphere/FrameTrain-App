@@ -1,47 +1,73 @@
 // DatasetCompatBadge – zeigt an ob ein Dataset für ein Modell geeignet ist
-// Nutzung: In DatasetUpload, TrainingPanel, überall wo ein Dataset gewählt wird
+// Unterstützt alte API (extensions) und neue API (DatasetAnalysis)
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { checkDatasetCompat, LEVEL_META, type DatasetCompatResult } from '../plugins/datasetCompat';
+import { ChevronDown, ChevronUp, CheckCircle, Info, AlertTriangle, Ban } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
+import {
+  checkDatasetCompat, LEVEL_META,
+  type DatasetCompatResult, type DatasetAnalysis,
+} from '../plugins/datasetCompat';
 
 interface DatasetCompatBadgeProps {
   /** Plugin-ID des Modells, z.B. "xlm-roberta" */
   modelPluginId: string | null;
-  /** Dateiendungen im Dataset (lowercase, mit Punkt). Wenn null → Ladeanimation */
+  /**
+   * Dateiendungen im Dataset (lowercase, mit Punkt).
+   * Wenn null → Ladeanimation.
+   */
   extensions: string[] | null;
+  /**
+   * Optional: vollständige DatasetAnalysis vom Backend.
+   * Wenn vorhanden, wird die neue checkDataset-API bevorzugt.
+   */
+  analysis?: DatasetAnalysis | null;
   /** Kompakte Ansicht (nur Badge, kein Detail-Dropdown) */
   compact?: boolean;
 }
 
-export default function DatasetCompatBadge({ modelPluginId, extensions, compact = false }: DatasetCompatBadgeProps) {
+export default function DatasetCompatBadge({
+  modelPluginId,
+  extensions,
+  analysis,
+  compact = false,
+}: DatasetCompatBadgeProps) {
   const [expanded, setExpanded] = useState(false);
+  const { t } = useLanguage();
 
-  // Kein Modell ausgewählt
   if (!modelPluginId) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-500">
-        Kein Modell gewählt
+        {t('datasetCompat.noModelSelected')}
       </span>
     );
   }
 
-  // Extensions noch nicht geladen
   if (extensions === null) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-gray-500 animate-pulse">
-        Prüfe Dataset…
+        {t('datasetCompat.checkingDataset')}
       </span>
     );
   }
 
-  const result: DatasetCompatResult = checkDatasetCompat(modelPluginId, extensions);
+  const result: DatasetCompatResult = checkDatasetCompat(modelPluginId, extensions, analysis);
   const meta = LEVEL_META[result.overallLevel];
+  const levelIcon = (() => {
+    const cls = 'w-4 h-4';
+    switch (meta.icon) {
+      case 'check': return <CheckCircle className={`${cls} ${meta.color}`} />;
+      case 'info': return <Info className={`${cls} ${meta.color}`} />;
+      case 'alert': return <AlertTriangle className={`${cls} ${meta.color}`} />;
+      case 'ban': return <Ban className={`${cls} ${meta.color}`} />;
+      default: return <Info className={`${cls} ${meta.color}`} />;
+    }
+  })();
 
   if (compact) {
     return (
       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${meta.bg} ${meta.border} border ${meta.color}`}>
-        {meta.emoji} {meta.label}
+        {levelIcon} {meta.label}
       </span>
     );
   }
@@ -51,7 +77,7 @@ export default function DatasetCompatBadge({ modelPluginId, extensions, compact 
       {/* Header – immer sichtbar */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-base">{meta.emoji}</span>
+          <span className="text-base">{levelIcon}</span>
           <div>
             <span className={`text-sm font-semibold ${meta.color}`}>{meta.label}</span>
             <p className="text-gray-400 text-xs mt-0.5 leading-snug">{result.summary}</p>
@@ -77,7 +103,7 @@ export default function DatasetCompatBadge({ modelPluginId, extensions, compact 
       {/* Detail pro Dateiformat */}
       {expanded && result.fileResults.length > 0 && (
         <div className="px-4 pb-3 space-y-1.5 border-t border-white/10 pt-3">
-          <p className="text-xs text-gray-500 font-medium mb-2">Details pro Dateiformat:</p>
+          <p className="text-xs text-gray-500 font-medium mb-2">{t('datasetCompat.fileDetailsTitle')}</p>
           {result.fileResults.map(fr => {
             const fm = LEVEL_META[fr.level];
             return (

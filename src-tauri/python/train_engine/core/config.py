@@ -90,6 +90,19 @@ class TrainingConfig:
     scheduler_gamma: float = 0.1
     cosine_min_lr: float = 0.0
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # PHASE 4: Canvas Integration
+    # ──────────────────────────────────────────────────────────────────────────
+    # Canvas-generierter PyTorch nn.Module Code (als String)
+    # Falls nicht leer: Canvas wird als Trainingsquelle verwendet
+    canvas_model_code: str = ""
+    
+    # Canvas Graph Metadaten für Debugging
+    canvas_graph_metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # Canvas Graph IR (JSON) — primary training source for Synapse
+    canvas_graph: Dict[str, Any] = field(default_factory=dict)
+
     # Extra-Felder die nicht bekannt sind (werden gesammelt, nicht verworfen)
     extra: Dict[str, Any] = field(default_factory=dict)
 

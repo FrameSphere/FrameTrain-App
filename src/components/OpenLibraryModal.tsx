@@ -6,9 +6,10 @@ import {
   X, Search, ShieldCheck, ShieldAlert, Upload, Download, Star,
   Globe, Filter, Tag, User, Loader2, AlertTriangle, Check,
   FileCode, Clock, Sparkles, ArrowLeft, ChevronDown, Plus,
-  TrendingUp, Eye, BookOpen, Send, RefreshCw, FolderClosed, Pencil,
+  TrendingUp, Eye, BookOpen, Send, RefreshCw, FolderClosed, Pencil, Lightbulb,
 } from 'lucide-react';
 import { useNotification } from '../contexts/NotificationContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // ── API ───────────────────────────────────────────────────────────────────
 
@@ -88,12 +89,14 @@ export function saveAuthorName(userId: string, name: string): void {
   localStorage.setItem(AUTHOR_KEY(userId), validateAuthorName(name));
 }
 
-function relativeDate(iso: string | undefined | null): string {
+type TFn = (key: string, fallback?: string) => string;
+function relativeDate(iso: string | undefined | null, t: TFn): string {
   const diff = Date.now() - parseDate(iso).getTime();
-  if (diff < 3_600_000)       return `vor ${Math.floor(diff / 60_000)} Min`;
-  if (diff < 86_400_000)      return `vor ${Math.floor(diff / 3_600_000)} Std`;
-  if (diff < 7 * 86_400_000)  return `vor ${Math.floor(diff / 86_400_000)} Tagen`;
-  return parseDate(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const isDE = t('common.loading', '') === 'Wird geladen...';
+  if (diff < 3_600_000)       return `${Math.floor(diff / 60_000)} min`;
+  if (diff < 86_400_000)      return `${Math.floor(diff / 3_600_000)} h`;
+  if (diff < 7 * 86_400_000)  return `${Math.floor(diff / 86_400_000)}d`;
+  return parseDate(iso).toLocaleDateString(isDE ? 'de-DE' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 const MODEL_TYPE_COLORS: Record<string, string> = {
@@ -114,27 +117,27 @@ function DuplicateNameError({
   name: string;
   onRetry: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-red-500/30 w-full max-w-md overflow-hidden">
         <div className="px-6 py-5 bg-red-500/10 border-b border-red-500/20 flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
           <div>
-            <h2 className="text-white font-bold text-base">Name bereits vergeben</h2>
-            <p className="text-red-300/80 text-xs mt-0.5">Dieser Community-Name ist nicht verfügbar</p>
+            <h2 className="text-white font-bold text-base">{t('openLibrary.dupTitle')}</h2>
+            <p className="text-red-300/80 text-xs mt-0.5">{t('openLibrary.dupSubtitle')}</p>
           </div>
         </div>
         <div className="p-6 space-y-4">
           <div className="p-4 rounded-xl bg-red-500/8 border border-red-500/20 space-y-2">
-            <p className="text-gray-400 text-xs">Der Community-Name</p>
             <p className="text-white font-mono text-sm">@{name}</p>
-            <p className="text-gray-400 text-xs mt-2">wird bereits von einem anderen Community-Mitglied verwendet.</p>
+            <p className="text-gray-400 text-xs mt-2">{t('openLibrary.dupMsg')}</p>
           </div>
-          <p className="text-gray-300 text-sm leading-relaxed">
-            Wähle einen anderen Namen. Community-Namen müssen eindeutig sein, um Verwechslungen zu vermeiden.
-          </p>
           <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-            <p className="text-blue-300 text-xs">💡 Tipp: Probiere einen Namen mit Zahlen oder Unterstrichen, z.B. <span className="font-mono">ai_enthusiast_42</span></p>
+            <p className="text-blue-300 text-xs inline-flex items-center gap-2">
+              <Lightbulb className="w-3.5 h-3.5" />
+              <span>{t('openLibrary.dupHint')}</span>
+            </p>
           </div>
         </div>
         <div className="px-6 pb-6 flex gap-2">
@@ -142,7 +145,7 @@ function DuplicateNameError({
             onClick={onRetry}
             className="flex-1 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 text-violet-300 text-sm font-medium transition-all"
           >
-            Anderen Namen versuchen
+            {t('openLibrary.dupRetry')}
           </button>
         </div>
       </div>
@@ -161,44 +164,30 @@ function UnverifiedWarning({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-amber-500/30 w-full max-w-md overflow-hidden">
         <div className="px-6 py-5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0" />
           <div>
-            <h2 className="text-white font-bold text-base">Nicht verifiziertes Skript</h2>
-            <p className="text-amber-300/80 text-xs mt-0.5">Dieses Skript wurde noch nicht von FrameTrain geprüft</p>
+            <h2 className="text-white font-bold text-base">{t('openLibrary.unverifiedTitle')}</h2>
+            <p className="text-amber-300/80 text-xs mt-0.5">{t('openLibrary.unverifiedSubtitle')}</p>
           </div>
         </div>
         <div className="p-6 space-y-4">
           <div className="p-4 rounded-xl bg-amber-500/8 border border-amber-500/20 space-y-2">
             <p className="text-white font-medium text-sm">„{script.name}"</p>
-            <p className="text-gray-400 text-xs">von @{script.author}</p>
+            <p className="text-gray-400 text-xs">@{script.author}</p>
           </div>
-          <p className="text-gray-300 text-sm leading-relaxed">
-            Nicht verifizierte Skripte stammen direkt von Community-Mitgliedern und wurden
-            <strong className="text-amber-300"> noch nicht auf Sicherheit und Korrektheit geprüft</strong>.
-            Führe unbekannte Skripte nur aus, wenn du den Inhalt selbst geprüft hast.
-          </p>
-          <ul className="text-xs text-gray-500 space-y-1">
-            <li className="flex items-center gap-2"><AlertTriangle className="w-3 h-3 text-amber-500/70 flex-shrink-0" />Könnte unbekannte Imports oder Netzwerkzugriffe enthalten</li>
-            <li className="flex items-center gap-2"><AlertTriangle className="w-3 h-3 text-amber-500/70 flex-shrink-0" />Möglicherweise unvollständig oder fehlerhaft</li>
-            <li className="flex items-center gap-2"><Check className="w-3 h-3 text-emerald-500/70 flex-shrink-0" />Skript-Vorschau vor dem Laden einsehbar</li>
-          </ul>
+          <p className="text-gray-300 text-sm leading-relaxed">{t('openLibrary.unverifiedBody')}</p>
         </div>
         <div className="px-6 pb-6 flex gap-2">
-          <button
-            onClick={onConfirm}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-sm font-medium transition-all"
-          >
-            <Download className="w-4 h-4" /> Trotzdem hinzufügen
+          <button onClick={onConfirm} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-sm font-medium transition-all">
+            <Download className="w-4 h-4" /> {t('openLibrary.addAnyway')}
           </button>
-          <button
-            onClick={onCancel}
-            className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white text-sm font-medium transition-all"
-          >
-            Abbrechen
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white text-sm font-medium transition-all">
+            {t('openLibrary.cancel')}
           </button>
         </div>
       </div>
@@ -219,6 +208,7 @@ function ScriptDetail({
 }) {
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const { t } = useLanguage();
 
   return (
     <div className="flex flex-col h-full">
@@ -236,11 +226,11 @@ function ScriptDetail({
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/25 text-amber-300 text-[10px] font-semibold flex-shrink-0">
-                <ShieldAlert className="w-3 h-3" /> Nicht verifiziert
+                <ShieldAlert className="w-3 h-3" /> {t('openLibrary.notVerified')}
               </span>
             )}
           </div>
-          <p className="text-gray-500 text-xs mt-0.5">@{script.author} · {relativeDate(script.created_at)}</p>
+          <p className="text-gray-500 text-xs mt-0.5">@{script.author} · {relativeDate(script.created_at, t)}</p>
         </div>
       </div>
 
@@ -265,7 +255,7 @@ function ScriptDetail({
         <div className="flex items-center gap-5 text-gray-500 text-xs">
           <span className="flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /> {script.downloads} Downloads</span>
           <span className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-400" /> {script.stars}</span>
-          <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> {relativeDate(script.created_at)}</span>
+          <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> {relativeDate(script.created_at, t)}</span>
         </div>
 
         {/* Tags */}
@@ -284,16 +274,16 @@ function ScriptDetail({
           <div className="p-4 rounded-xl bg-emerald-500/8 border border-emerald-500/20 flex gap-3">
             <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-emerald-300 text-sm font-semibold">Verifiziertes Skript</p>
-              <p className="text-gray-400 text-xs mt-1">Dieses Skript wurde von FrameTrain auf Sicherheit und Funktionalität geprüft. Es enthält keine schädlichen Operationen und läuft stabil.</p>
+              <p className="text-emerald-300 text-sm font-semibold">{t('openLibrary.verifiedInfoTitle')}</p>
+              <p className="text-gray-400 text-xs mt-1">{t('openLibrary.verifiedInfoBody')}</p>
             </div>
           </div>
         ) : (
           <div className="p-4 rounded-xl bg-amber-500/8 border border-amber-500/20 flex gap-3">
             <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-amber-300 text-sm font-semibold">Community-Upload (ungeprüft)</p>
-              <p className="text-gray-400 text-xs mt-1">Dieses Skript wurde noch nicht von FrameTrain geprüft. Schau den Code-Inhalt durch bevor du es ausführst.</p>
+              <p className="text-amber-300 text-sm font-semibold">{t('openLibrary.unverifiedInfoTitle')}</p>
+              <p className="text-gray-400 text-xs mt-1">{t('openLibrary.unverifiedInfoBody')}</p>
             </div>
           </div>
         )}
@@ -306,8 +296,8 @@ function ScriptDetail({
           >
             <div className="flex items-center gap-2">
               <FileCode className="w-4 h-4 text-gray-400" />
-              <span className="text-gray-300 text-sm font-medium">Skript-Vorschau</span>
-              <span className="text-gray-600 text-xs">({script.script.split('\n').length} Zeilen)</span>
+              <span className="text-gray-300 text-sm font-medium">{t('openLibrary.scriptPreviewTitle')}</span>
+              <span className="text-gray-600 text-xs">{t('openLibrary.scriptPreviewLines').replace('{count}', String(script.script.split('\n').length))}</span>
             </div>
             <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showPreview ? 'rotate-180' : ''}`} />
           </button>
@@ -318,7 +308,7 @@ function ScriptDetail({
                   onClick={() => { navigator.clipboard.writeText(script.script); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all ${copied ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/25' : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'}`}
                 >
-                  {copied ? <><Check className="w-3 h-3" /> Kopiert!</> : <><Eye className="w-3 h-3" /> Kopieren</>}
+                  {copied ? <><Check className="w-3 h-3" /> {t('openLibrary.copiedButton')}</> : <><Eye className="w-3 h-3" /> {t('openLibrary.copyButton')}</>}
                 </button>
               </div>
               <pre className="p-4 text-[10px] font-mono text-gray-300 overflow-x-auto max-h-80 leading-relaxed whitespace-pre bg-black/20">
@@ -340,7 +330,7 @@ function ScriptDetail({
           }`}
         >
           <Download className="w-4 h-4" />
-          In lokale Bibliothek hinzufügen
+          {t('openLibrary.addAnyway')}
           {!script.verified && <AlertTriangle className="w-3.5 h-3.5 ml-1 opacity-70" />}
         </button>
       </div>
@@ -352,6 +342,7 @@ function ScriptDetail({
 
 function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; userData?: { userId: string; email: string; apiKey: string } }) {
   const { success, error } = useNotification();
+  const { t } = useLanguage();
   const localKey = getLocalKey(mode, userData?.userId);
 
   // Eigene Skripte aus lokaler Bib laden (ohne fromOpenLib) – user-spezifisch
@@ -443,15 +434,15 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
 
   const handleSubmit = async () => {
     if (!selectedScript) {
-      error('Kein Skript', 'Bitte erst ein Skript aus deiner Bibliothek auswählen.');
+      error(t('openLibrary.upload.noScriptError'), t('openLibrary.upload.noScriptErrorDetail'))
       return;
     }
     if (!form.name.trim() || !form.description.trim()) {
-      error('Fehlende Felder', 'Bitte Name und Beschreibung ausfüllen.');
+      error(t('openLibrary.upload.missingFields'), t('openLibrary.upload.missingFieldsDetail'));
       return;
     }
     if (!authorInput.trim()) {
-      error('Community-Name erforderlich', 'Bitte gib einen Community-Namen ein.');
+      error(t('openLibrary.upload.missingAuthor'), t('openLibrary.upload.missingAuthorDetail'));
       return;
     }
     
@@ -491,11 +482,11 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSubmitted(true);
-      success('Hochgeladen!', 'Dein Skript wurde eingereicht und wird bald geprüft.');
+      success(t('openLibrary.upload.successTitle'), t('openLibrary.upload.successDetail'));
     } catch (err) {
       console.error('Upload error:', err);
       setSubmitted(true);
-      success('Eingereicht!', 'Dein Skript wurde eingereicht und wartet auf Prüfung.');
+      success(t('openLibrary.upload.successTitle'), t('openLibrary.upload.successDetail'));
     } finally {
       setSubmitting(false);
     }
@@ -508,14 +499,14 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
           <Check className="w-8 h-8 text-emerald-400" />
         </div>
         <div>
-          <p className="text-white font-bold text-lg">Skript eingereicht!</p>
-          <p className="text-gray-400 text-sm mt-2">Dein Skript wird vom FrameTrain-Team auf Sicherheit und Funktionalität geprüft. Nach der Verifikation erscheint es in der Bibliothek mit dem <span className="text-emerald-300">Verified</span>-Badge.</p>
+          <p className="text-white font-bold text-lg">{t('openLibrary.upload.uploadedTitle')}</p>
+          <p className="text-gray-400 text-sm mt-2">{t('openLibrary.upload.uploadedBody')}</p>
         </div>
         <button
           onClick={() => { setSubmitted(false); setSelectedId(''); setForm({ name: '', description: '', model_type: 'LLM', task_type: 'Fine-Tuning', framework: 'transformers', tags: '' }); }}
           className="px-6 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white text-sm transition-all"
         >
-          Weiteres Skript einreichen
+          {t('openLibrary.upload.submitAnotherButton')}
         </button>
       </div>
     );
@@ -527,10 +518,10 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       <div className="p-4 rounded-xl bg-blue-500/8 border border-blue-500/20 flex gap-3">
         <Sparkles className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-blue-300 text-sm font-semibold">Skript zur Community-Bibliothek beisteuern</p>
+          <p className="text-blue-300 text-sm font-semibold">{t('openLibrary.upload.infoBannerTitle')}</p>
           <p className="text-gray-400 text-xs mt-1 leading-relaxed">
-            Wähle ein Skript aus deiner privaten Bibliothek. Es wird eingereicht, geprüft und erhält dann ein
-            <span className="text-emerald-300 mx-1">✓ Verified</span>-Badge.
+            {t('openLibrary.upload.infoBannerBody')}
+            <span className="text-emerald-300 mx-1 inline-flex items-center gap-1"><Check className="w-3.5 h-3.5" />Verified</span>-Badge.
           </p>
         </div>
       </div>
@@ -538,13 +529,13 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       {/* Skript aus Bibliothek wählen */}
       <div className="space-y-2">
         <label className="text-xs text-gray-400 font-medium flex items-center gap-1.5">
-          <FolderClosed className="w-3.5 h-3.5" /> Skript aus deiner Bibliothek wählen <span className="text-red-400">*</span>
+          <FolderClosed className="w-3.5 h-3.5" /> {t('openLibrary.upload.pickScriptLabel')} <span className="text-red-400">*</span>
         </label>
         {ownScripts.length === 0 ? (
           <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 text-center space-y-1">
             <FileCode className="w-6 h-6 text-gray-600 mx-auto" />
-            <p className="text-gray-500 text-xs">Keine eigenen Skripte in deiner Bibliothek.</p>
-            <p className="text-gray-600 text-[10px]">Schreibe zuerst ein Skript im {mode === 'test' ? 'Dev Test' : 'Dev Train'} und speichere es.</p>
+            <p className="text-gray-500 text-xs">{t('openLibrary.upload.noOwnScripts')}</p>
+            <p className="text-gray-600 text-[10px]">{t('openLibrary.upload.noOwnScriptsHint').replace('{mode}', mode === 'test' ? 'Dev Test' : 'Dev Train')}</p>
           </div>
         ) : (
           <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
@@ -561,7 +552,7 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{s.name}</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">{s.script.split('\n').length} Zeilen · gespeichert {new Date(s.savedAt).toLocaleDateString('de-DE')}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">{t('openLibrary.upload.scriptLineCount').replace('{count}', String(s.script.split('\n').length))} · {t('openLibrary.upload.scriptSavedAt').replace('{date}', new Date(s.savedAt).toLocaleDateString())}</p>
                   </div>
                   {selectedId === s.id && <Check className="w-4 h-4 text-violet-400 flex-shrink-0" />}
                 </div>
@@ -571,7 +562,7 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
         )}
         {selectedScript && (
           <div className="p-3 rounded-xl bg-black/20 border border-white/10">
-            <p className="text-[10px] text-gray-600 mb-1">Vorschau:</p>
+            <p className="text-[10px] text-gray-600 mb-1">{t('openLibrary.upload.previewLabel')}</p>
             <pre className="text-[10px] font-mono text-gray-400 line-clamp-3 overflow-hidden">{selectedScript.script.split('\n').slice(0, 3).join('\n')}</pre>
           </div>
         )}
@@ -581,19 +572,19 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2 space-y-1.5">
-            <label className="text-xs text-gray-400 font-medium">Name <span className="text-red-400">*</span></label>
+            <label className="text-xs text-gray-400 font-medium">{t('openLibrary.upload.nameLabel')} <span className="text-red-400">*</span></label>
             <input
               value={form.name}
               onChange={e => setField('name', e.target.value)}
-              placeholder="z.B. LoRA Fine-Tuning für GPT-2"
+              placeholder={t('openLibrary.upload.namePlaceholder')}
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/40"
             />
           </div>
           <div className="col-span-2 space-y-1.5">
             <label className="text-xs text-gray-400 font-medium flex items-center gap-1.5">
-              Autor
+              {t('openLibrary.upload.authorLabel')}
               {authorLocked && !editingAuthor && (
-                <button onClick={() => setEditingAuthor(true)} className="text-gray-600 hover:text-violet-400 transition-colors" title="Namen ändern">
+                <button onClick={() => setEditingAuthor(true)} className="text-gray-600 hover:text-violet-400 transition-colors" title={t('openLibrary.upload.authorChangeTooltip')}>
                   <Pencil className="w-3 h-3" />
                 </button>
               )}
@@ -603,58 +594,58 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
                   <input
                     value={authorInput}
                     onChange={e => setAuthorInput(e.target.value.replace(/[^a-z0-9_\-. ]/gi, ''))}
-                    placeholder="Dein Community-Name (z. B. ai_enthusiast)"
+                    placeholder={t('openLibrary.upload.authorPlaceholder')}
                     maxLength={40}
                   className="w-full px-3 py-2.5 bg-white/5 border border-violet-500/30 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/60"
                 />
                 <p className="text-[10px] text-violet-400/70">
-                  {!authorLocked ? 'Der Name wird beim Absenden des Skripts gespeichert und für alle deine Uploads verwendet.' : 'Namen ändern — alle künftigen Uploads und retroaktive Updates in der Bibliothek verwenden den neuen Namen.'}
+                  {!authorLocked ? t('openLibrary.upload.authorFirstUploadHint') : t('openLibrary.upload.authorChangeHint')}
                 </p>
               </>
             ) : (
               <div className="flex items-center gap-2 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl">
                 <span className="text-white text-sm flex-1">@{authorInput}</span>
-                <span className="text-[10px] text-gray-600">gespeichert</span>
+                <span className="text-[10px] text-gray-600">{t('openLibrary.upload.authorSaved')}</span>
               </div>
             )}
           </div>
           <div className="col-span-2 space-y-1.5">
-            <label className="text-xs text-gray-400 font-medium">Beschreibung <span className="text-red-400">*</span></label>
+            <label className="text-xs text-gray-400 font-medium">{t('openLibrary.upload.descriptionLabel')} <span className="text-red-400">*</span></label>
             <textarea
               value={form.description}
               onChange={e => setField('description', e.target.value)}
-              placeholder="Wofür eignet sich dieses Skript? Welche Voraussetzungen gibt es?"
+              placeholder={t('openLibrary.upload.descriptionPlaceholder')}
               rows={3}
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/40 resize-none"
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-400 font-medium">Modell-Typ</label>
+            <label className="text-xs text-gray-400 font-medium">{t('openLibrary.upload.modelTypeLabel')}</label>
             <select value={form.model_type} onChange={e => setField('model_type', e.target.value)}
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-violet-500/40">
               {MODEL_TYPES.filter(t => t !== 'Alle').map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-400 font-medium">Task-Typ</label>
+            <label className="text-xs text-gray-400 font-medium">{t('openLibrary.upload.taskTypeLabel')}</label>
             <select value={form.task_type} onChange={e => setField('task_type', e.target.value)}
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-violet-500/40">
               {TASK_TYPES.filter(t => t !== 'Alle').map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-400 font-medium">Framework</label>
+            <label className="text-xs text-gray-400 font-medium">{t('openLibrary.upload.frameworkLabel')}</label>
             <select value={form.framework} onChange={e => setField('framework', e.target.value)}
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-violet-500/40">
               {FRAMEWORKS.filter(t => t !== 'Alle').map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-400 font-medium">Tags (kommagetrennt)</label>
+            <label className="text-xs text-gray-400 font-medium">{t('openLibrary.upload.tagsLabel')}</label>
             <input
               value={form.tags}
               onChange={e => setField('tags', e.target.value)}
-              placeholder="lora, llm, 4bit"
+              placeholder={t('openLibrary.upload.tagsPlaceholder')}
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/40"
             />
           </div>
@@ -668,7 +659,7 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
         className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 text-violet-300 font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
       >
         {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        {submitting ? 'Wird hochgeladen…' : 'Skript einreichen'}
+        {submitting ? t('openLibrary.uploading') : t('openLibrary.submit')}
       </button>
 
       {/* Duplicate Name Error Modal */}
@@ -691,6 +682,7 @@ function ScriptCard({
   script: LibraryScript;
   onClick: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <button
       onClick={onClick}
@@ -707,11 +699,11 @@ function ScriptCard({
               </span>
             ) : (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400/70 text-[9px] flex-shrink-0">
-                <ShieldAlert className="w-2.5 h-2.5" /> Ungeprüft
+                <ShieldAlert className="w-2.5 h-2.5" /> {t('openLibrary.unverified')}
               </span>
             )}
           </div>
-          <p className="text-gray-500 text-[10px] mt-0.5">@{script.author} · {relativeDate(script.created_at)}</p>
+          <p className="text-gray-500 text-[10px] mt-0.5">@{script.author} · {relativeDate(script.created_at, t)}</p>
         </div>
         <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center border text-xs font-bold ${MODEL_TYPE_COLORS[script.model_type] ?? MODEL_TYPE_COLORS['Custom']}`}>
           {script.model_type.slice(0, 2).toUpperCase()}
@@ -734,7 +726,7 @@ function ScriptCard({
           <span className="flex items-center gap-1"><Star className="w-3 h-3 text-amber-500/60" /> {script.stars}</span>
         </div>
         <span className="text-violet-400/60 text-[10px] font-medium group-hover:text-violet-300 transition-colors flex items-center gap-1">
-          Details →
+          {t('openLibrary.details')}
         </span>
       </div>
     </button>
@@ -752,6 +744,7 @@ interface OpenLibraryModalProps {
 
 export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train', userData }: OpenLibraryModalProps) {
   const { success } = useNotification();
+  const { t } = useLanguage();
   const [tab, setTab] = useState<'browse' | 'upload'>('browse');
   const [scripts, setScripts] = useState<LibraryScript[]>([]);
   const [loading, setLoading] = useState(true);
@@ -854,7 +847,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
         addToLocalLibrary(script.name, script.script, true, getLocalKey(mode, userData?.userId));
       }
       setAddedIds(prev => new Set([...prev, script.id]));
-      success('Hinzugefügt!', `„${script.name}" wurde zu deiner lokalen Bibliothek hinzugefügt.`);
+      success(t('openLibrary.added'), script.name + ' ' + t('openLibrary.addedMsg'));
     };
 
  return (
@@ -869,15 +862,15 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                 <Globe className="w-4 h-4 text-violet-300" />
               </div>
               <div>
-                <h1 className="text-white font-bold text-base">Open Script Library</h1>
-                <p className="text-gray-500 text-[10px]">Community {mode === 'test' ? 'Test' : 'Training'}-Skripte · {scripts.length} Skripte verfügbar</p>
+                <h1 className="text-white font-bold text-base">{t('openLibrary.title')}</h1>
+                <p className="text-gray-500 text-[10px]">{t('openLibrary.scriptsAvailable').replace('{n}', String(scripts.length))}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={loadScripts}
                 className="p-1.5 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition-all"
-                title="Neu laden"
+                title={t('openLibrary.reload')}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               </button>
@@ -889,20 +882,20 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
 
           {/* Tabs */}
           <div className="flex px-6 pt-3 gap-1 border-b border-white/10 flex-shrink-0">
-            {(['browse', 'upload'] as const).map(t => (
+            {(['browse', 'upload'] as const).map(tabId => (
               <button
-                key={t}
-                onClick={() => { setTab(t); setSelectedScript(null); }}
+                key={tabId}
+                onClick={() => { setTab(tabId); setSelectedScript(null); }}
                 className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-all border-b-2 ${
-                  tab === t
+                  tab === tabId
                     ? 'text-white border-violet-400'
                     : 'text-gray-500 hover:text-gray-300 border-transparent'
                 }`}
               >
-                {t === 'browse' ? (
-                  <span className="flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" /> Durchsuchen</span>
+                {tabId === 'browse' ? (
+                  <span className="flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" /> {t('openLibrary.tabBrowse')}</span>
                 ) : (
-                  <span className="flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Hochladen</span>
+                  <span className="flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> {t('openLibrary.tabUpload')}</span>
                 )}
               </button>
             ))}
@@ -928,7 +921,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                       ref={searchInputRef}
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      placeholder="Name, Beschreibung, Autor, Tags…"
+                      placeholder={t('openLibrary.searchPlaceholder')}
                       className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/20"
                     />
                   </div>
@@ -954,23 +947,23 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                 {showFilters && (
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <div className="space-y-1">
-                      <label className="text-[9px] text-gray-600 uppercase tracking-wide font-medium">Modell-Typ</label>
+                      <label className="text-[9px] text-gray-600 uppercase tracking-wide font-medium">{t('openLibrary.filterModelType')}</label>
                       <div className="flex flex-wrap gap-1">
-                        {MODEL_TYPES.map(t => (
-                          <button key={t} onClick={() => setFilterModelType(t)}
-                            className={`px-2 py-0.5 rounded-md text-[10px] transition-all ${filterModelType === t ? 'bg-violet-500/25 border border-violet-500/30 text-violet-300' : 'bg-white/5 border border-white/10 text-gray-500 hover:text-gray-300'}`}>
-                            {t}
+                        {MODEL_TYPES.map(type => (
+                          <button key={type} onClick={() => setFilterModelType(type)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] transition-all ${filterModelType === type ? 'bg-violet-500/25 border border-violet-500/30 text-violet-300' : 'bg-white/5 border border-white/10 text-gray-500 hover:text-gray-300'}`}>
+                            {type}
                           </button>
                         ))}
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9px] text-gray-600 uppercase tracking-wide font-medium">Framework</label>
+                      <label className="text-[9px] text-gray-600 uppercase tracking-wide font-medium">{t('openLibrary.filterFramework')}</label>
                       <div className="flex flex-wrap gap-1">
-                        {FRAMEWORKS.map(t => (
-                          <button key={t} onClick={() => setFilterFramework(t)}
-                            className={`px-2 py-0.5 rounded-md text-[10px] transition-all ${filterFramework === t ? 'bg-blue-500/25 border border-blue-500/30 text-blue-300' : 'bg-white/5 border border-white/10 text-gray-500 hover:text-gray-300'}`}>
-                            {t}
+                        {FRAMEWORKS.map(type => (
+                          <button key={type} onClick={() => setFilterFramework(type)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] transition-all ${filterFramework === type ? 'bg-blue-500/25 border border-blue-500/30 text-blue-300' : 'bg-white/5 border border-white/10 text-gray-500 hover:text-gray-300'}`}>
+                            {type}
                           </button>
                         ))}
                       </div>
@@ -985,14 +978,14 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                         }`}
                       >
                         <ShieldCheck className="w-3.5 h-3.5" />
-                        Nur Verified
+                        {t('openLibrary.onlyVerified')}
                       </button>
                       {activeFilterCount > 0 && (
                         <button
                           onClick={() => { setFilterModelType('Alle'); setFilterTaskType('Alle'); setFilterFramework('Alle'); setOnlyVerified(false); }}
                           className="text-[10px] text-gray-600 hover:text-gray-400 underline transition-all"
                         >
-                          Alle zurücksetzen
+                          {t('openLibrary.resetFilters')}
                         </button>
                       )}
                     </div>
@@ -1003,11 +996,11 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
               {/* Result info */}
               <div className="px-5 py-2 flex items-center justify-between flex-shrink-0">
                 <span className="text-[10px] text-gray-600">
-                  {loading ? 'Lade…' : `${filtered.length} Skript${filtered.length !== 1 ? 'e' : ''} gefunden`}
+                  {loading ? t('openLibrary.loading') : (filtered.length === 1 ? t('openLibrary.foundOne') : t('openLibrary.found').replace('{n}', String(filtered.length)))}
                 </span>
                 <div className="flex items-center gap-2 text-[10px] text-gray-600">
                   <ShieldCheck className="w-3 h-3 text-emerald-500/60" />
-                  <span className="text-emerald-500/60">{scripts.filter(s => s.verified).length} verifiziert</span>
+                  <span className="text-emerald-500/60">{scripts.filter(s => s.verified).length} {t('openLibrary.verified')}</span>
                 </div>
               </div>
 
@@ -1020,8 +1013,8 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                 ) : filtered.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 space-y-3">
                     <Globe className="w-12 h-12 text-gray-700" />
-                    <p className="text-gray-500 text-sm">Keine Skripte gefunden</p>
-                    <p className="text-gray-600 text-xs">Passe deine Filter an oder lade als Erster ein Skript hoch!</p>
+                    <p className="text-gray-500 text-sm">{t('openLibrary.noScripts')}</p>
+                    <p className="text-gray-600 text-xs">{t('openLibrary.noScriptsHint')}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1030,7 +1023,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                         <ScriptCard script={s} onClick={() => setSelectedScript(s)} />
                         {addedIds.has(s.id) && (
                           <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/25 text-emerald-300 text-[9px] font-medium pointer-events-none">
-                            <Check className="w-2.5 h-2.5" /> In Bibliothek
+                            <Check className="w-2.5 h-2.5" /> {t('openLibrary.inLibrary')}
                           </div>
                         )}
                       </div>

@@ -1,5 +1,5 @@
-// DatasetUpload.tsx – Dataset-Manager
-// Portiert & erweitert aus desktop-app2
+// DatasetUpload.tsx – Dataset-Manager v2
+// Neu: DatasetType-Erkennung, Analyse-Vorschau, Typ-Badge in Cards, Pairing-Status
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -8,12 +8,17 @@ import {
   Upload, FolderOpen, Download, Trash2, Search,
   HardDrive, Cloud, CheckCircle, Loader2, Database,
   Calendar, ExternalLink, X, RefreshCw, ChevronDown,
-  Scissors, Layers, FileText, Filter,
+  Scissors, Layers, FileText, Filter, AlertTriangle,
+  Zap, Heart, Info,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import DatasetFileManager from './DatasetFileManager';
+import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
+import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
+import { detectPlugin } from '../plugins/registry';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,13 +30,23 @@ interface SplitInfo {
 }
 
 interface DatasetInfo {
-  id: string; name: string; model_id: string;
-  source: 'local' | 'huggingface';
-  source_path: string | null;
-  size_bytes: number; file_count: number; created_at: string;
-  status: 'unused' | 'split';
-  split_info: SplitInfo | null;
-  training_count: number; last_used_at: string | null;
+  id:              string;
+  name:            string;
+  model_id:        string;
+  source:          'local' | 'huggingface';
+  source_path:     string | null;
+  size_bytes:      number;
+  file_count:      number;
+  created_at:      string;
+  status:          'unused' | 'split';
+  split_info:      SplitInfo | null;
+  training_count:  number;
+  last_used_at:    string | null;
+  extensions?:     string[];
+  // v2
+  dataset_type?:   DatasetType;
+  pairing_status?: PairingStatus | null;
+  warnings?:       string[];
 }
 
 interface HuggingFaceDataset {
@@ -76,9 +91,266 @@ function formatDownloads(n: number | undefined): string {
   return n.toString();
 }
 
+// ── AnalysisPreview (im Import-Modal nach Ordnerauswahl) ───────────────────
+
+interface AnalysisPreviewProps {
+  analysis: DatasetAnalysis;
+  /** Falls gesetzt: Plugin-Kompatibilitätsprüfung anzeigen */
+  modelId?: string | null;
+}
+
+function AnalysisPreview({ analysis, modelId }: AnalysisPreviewProps) {
+  const { t } = useLanguage();
+  const typeMeta = DATASET_TYPE_LABELS[analysis.detected_type] ?? DATASET_TYPE_LABELS['unknown'];
+
+  // Plugin-Kompatibilität prüfen
+  let pluginCompat: { ok: boolean; label: string; preferred: boolean } | null = null;
+  if (modelId) {
+    const result = detectPlugin(modelId);
+    if (result.supported) {
+      const { plugin } = result;
+      const supported = plugin.supportedDatasetTypes;
+      const preferred = plugin.preferredDatasetType;
+      if (supported && supported.length > 0) {
+        const isSupported = supported.includes(analysis.detected_type);
+        const isPreferred = preferred === analysis.detected_type;
+        pluginCompat = {
+          ok: isSupported,
+          preferred: isPreferred,
+          label: isPreferred
+            ? t('datasetUpload.analysisPreview.preferredType').replace('{name}', plugin.name)
+            : isSupported
+            ? t('datasetUpload.analysisPreview.compatible').replace('{name}', plugin.name)
+            : t('datasetUpload.analysisPreview.notRecommended')
+                .replace('{name}', plugin.name)
+                .replace('{types}', supported.map(t => DATASET_TYPE_LABELS[t]?.label ?? t).join(', ')),
+        };
+      }
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="text-2xl leading-none flex-shrink-0">{typeMeta.icon}</span>
+          <div>
+            <p className={`text-sm font-semibold ${typeMeta.color}`}>{typeMeta.label}</p>
+            <p className="text-gray-500 text-xs">{t('datasetUpload.analysisPreview.confidenceLabel').replace('{confidence}', String(analysis.confidence)).replace('{count}', String(analysis.file_count))}</p>
+          </div>
+        </div>
+        <div title={t('datasetUpload.analysisPreview.autoDetectedTooltip')}>
+          <Zap className="w-4 h-4 text-gray-600 flex-shrink-0 mt-0.5" />
+        </div>
+      </div>
+
+      {/* Plugin-Kompatibilität */}
+      {pluginCompat && (
+        <div className={`flex items-start gap-2 text-xs px-3 py-2 rounded-lg border ${
+          pluginCompat.preferred
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+            : pluginCompat.ok
+            ? 'bg-blue-500/10 border-blue-500/20 text-blue-300'
+            : 'bg-red-500/10 border-red-500/20 text-red-300'
+        }`}>
+          {pluginCompat.preferred
+            ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            : pluginCompat.ok
+            ? <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          }
+          <span>{pluginCompat.label}</span>
+        </div>
+      )}
+
+      {/* Pairing-Status */}
+      {analysis.pairing_status && (
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
+          analysis.pairing_status.is_paired
+            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+            : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+        }`}>
+          {analysis.pairing_status.is_paired ? (
+            <><CheckCircle className="w-3.5 h-3.5" /> {t('datasetUpload.analysisPreview.pairedCount').replace('{count}', String(analysis.pairing_status.paired_count))}</>
+          ) : (
+            <><AlertTriangle className="w-3.5 h-3.5" /> {t('datasetUpload.analysisPreview.orphanCount').replace('{count}', String(analysis.pairing_status.orphan_primaries.length))}</>
+          )}
+        </div>
+      )}
+
+      {/* Warnungen */}
+      {analysis.warnings.length > 0 && (
+        <div className="space-y-1">
+          {analysis.warnings.map((w, i) => (
+            <div key={i} className="flex items-start gap-1.5 text-xs text-amber-400/80">
+              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              <span>{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Extensions */}
+      {analysis.extensions.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {analysis.extensions.map(ext => (
+            <span key={ext} className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-gray-400 text-xs font-mono">{ext}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DatasetStructureGuide ────────────────────────────────────────────────
+
+const STRUCTURE_TYPES = [
+  {
+    id: 'yolo',
+    icon: '🎯',
+    labelKey: 'yolo',
+    color: 'text-orange-400',
+    hintKey: 'yolo',
+    hintColor: 'text-amber-400',
+    tree: [
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'images/',         indent: 1, bold: false, marker: '├─' },
+      { text: 'foto1.jpg',       indent: 2, bold: false, marker: '│  ├─' },
+      { text: 'foto2.jpg',       indent: 2, bold: false, marker: '│  └─' },
+      { text: 'labels/',         indent: 1, bold: false, marker: '└─' },
+      { text: 'foto1.txt',       indent: 2, bold: false, marker: '   ├─' },
+      { text: 'foto2.txt',       indent: 2, bold: false, marker: '   └─' },
+    ],
+  },
+  {
+    id: 'flatfile',
+    icon: '📄',
+    labelKey: 'flatfile',
+    color: 'text-violet-400',
+    hintKey: 'flatfile',
+    hintColor: 'text-gray-400',
+    tree: [
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'train.jsonl',     indent: 1, bold: false, marker: '├─' },
+      { text: 'val.jsonl',       indent: 1, bold: false, marker: '└─' },
+    ],
+  },
+  {
+    id: 'folderclass',
+    icon: '📁',
+    labelKey: 'folderclass',
+    color: 'text-blue-400',
+    hintKey: 'folderclass',
+    hintColor: 'text-gray-400',
+    tree: [
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'katze/',          indent: 1, bold: false, marker: '├─' },
+      { text: 'bild1.jpg',       indent: 2, bold: false, marker: '│  └─' },
+      { text: 'hund/',           indent: 1, bold: false, marker: '└─' },
+      { text: 'bild2.jpg',       indent: 2, bold: false, marker: '   └─' },
+    ],
+  },
+  {
+    id: 'audio',
+    icon: '🎙️',
+    labelKey: 'audio',
+    color: 'text-cyan-400',
+    hintKey: 'audio',
+    hintColor: 'text-gray-400',
+    tree: [
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'aufnahme1.wav',   indent: 1, bold: false, marker: '├─' },
+      { text: 'aufnahme1.txt',   indent: 1, bold: false, marker: '├─' },
+      { text: 'aufnahme2.mp3',   indent: 1, bold: false, marker: '├─' },
+      { text: 'aufnahme2.txt',   indent: 1, bold: false, marker: '└─' },
+    ],
+  },
+  {
+    id: 'pascal',
+    icon: '🗂️',
+    labelKey: 'pascal',
+    color: 'text-yellow-400',
+    hintKey: 'pascal',
+    hintColor: 'text-gray-400',
+    tree: [
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'images/',         indent: 1, bold: false, marker: '├─' },
+      { text: 'bild1.jpg',       indent: 2, bold: false, marker: '│  └─' },
+      { text: 'annotations/',    indent: 1, bold: false, marker: '└─' },
+      { text: 'bild1.xml',       indent: 2, bold: false, marker: '   └─' },
+    ],
+  },
+];
+
+function DatasetStructureGuide() {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState('yolo');
+  const current = STRUCTURE_TYPES.find(t => t.id === active)!;
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-all"
+      >
+        <span className="flex items-center gap-2 text-sm text-gray-400">
+          <span className="text-base">📂</span>
+          {t('datasetUpload.structureGuide.toggleLabel')}
+        </span>
+        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-white/10">
+          {/* Typ-Tabs */}
+          <div className="flex overflow-x-auto gap-1 p-2 border-b border-white/10 scrollbar-hide">
+            {STRUCTURE_TYPES.map(type => (
+              <button
+                key={type.id}
+                onClick={() => setActive(type.id)}
+                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  active === type.id
+                    ? 'bg-white/10 text-white'
+                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                <span>{type.icon}</span>
+                <span>{t(`datasetUpload.structureGuide.types.${type.id}.label`)}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Content */}
+          <div className="p-4 space-y-3">
+            {/* Ordner-Baum */}
+            <div className="rounded-lg bg-black/30 border border-white/5 p-3 font-mono text-xs space-y-0.5">
+              {current.tree.map((row, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <span className="text-gray-600 select-none">{row.marker}</span>
+                  <span className={row.bold ? `font-semibold ${current.color}` : 'text-gray-300'}>
+                    {row.text}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Hinweis */}
+            <div className={`flex items-start gap-2 text-xs ${current.hintColor}`}>
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span>{t(`datasetUpload.structureGuide.types.${current.id}.hint`)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Delete Dialog ──────────────────────────────────────────────────────────
 
 function DeleteDialog({ name, onConfirm, onCancel }: { name: string; onConfirm: () => void; onCancel: () => void }) {
+  const { t } = useLanguage();
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
@@ -89,15 +361,15 @@ function DeleteDialog({ name, onConfirm, onCancel }: { name: string; onConfirm: 
               <Trash2 className="w-5 h-5 text-red-400" />
             </div>
             <div>
-              <h2 className="text-white font-semibold text-lg">Dataset löschen?</h2>
+              <h2 className="text-white font-semibold text-lg">{t('datasetUpload.deleteDialog.title')}</h2>
               <p className="text-gray-400 text-sm mt-1.5 leading-relaxed">
-                <span className="text-white">„{name}"</span> und alle zugehörigen Dateien werden unwiderruflich entfernt.
+                {t('datasetUpload.deleteDialog.description').replace('{name}', name)}
               </p>
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={onCancel} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-all">Abbrechen</button>
-            <button onClick={onConfirm} className="flex-1 py-2.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 rounded-xl text-red-300 text-sm font-medium transition-all">Löschen</button>
+            <button onClick={onCancel} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-all">{t('datasetUpload.deleteDialog.cancelButton')}</button>
+            <button onClick={onConfirm} className="flex-1 py-2.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 rounded-xl text-red-300 text-sm font-medium transition-all">{t('datasetUpload.deleteDialog.confirmButton')}</button>
           </div>
         </div>
       </div>
@@ -105,30 +377,28 @@ function DeleteDialog({ name, onConfirm, onCancel }: { name: string; onConfirm: 
   );
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
+// ── Main Component ─────────────────────────────────────────────────────────
 
 export default function DatasetUpload() {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
   const { setCurrentPageContent } = usePageContext();
+  const { t } = useLanguage();
 
-  // Core state
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Delete
   const [deleteTarget, setDeleteTarget] = useState<DatasetInfo | null>(null);
-
-  // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>('local');
 
   // Local import
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [datasetName, setDatasetName] = useState('');
-  const [dirInfo, setDirInfo] = useState<{ size: number; files: number } | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<DatasetAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -140,27 +410,18 @@ export default function DatasetUpload() {
   const [hfDatasetName, setHfDatasetName] = useState('');
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{
-    status: string;
-    currentFile: string;
-    currentFileIndex: number;
-    totalFiles: number;
-    downloadedBytes: number;
-    totalBytes: number;
-    progressPercent: number;
-    speedMbs: number;
-    elapsedSecs: number;
-    etaSecs: number;
-    message: string;
+    status: string; currentFile: string; currentFileIndex: number;
+    totalFiles: number; downloadedBytes: number; totalBytes: number;
+    progressPercent: number; speedMbs: number; elapsedSecs: number;
+    etaSecs: number; message: string;
   } | null>(null);
 
-  // HF Filters
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [filterTask, setFilterTask] = useState('');
   const [filterLanguage, setFilterLanguage] = useState('');
   const [filterSize, setFilterSize] = useState('');
 
-  // Split modal
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [datasetToSplit, setDatasetToSplit] = useState<DatasetInfo | null>(null);
   const [trainRatio, setTrainRatio] = useState(0.8);
@@ -168,12 +429,10 @@ export default function DatasetUpload() {
   const [testRatio, setTestRatio] = useState(0.1);
   const [splitting, setSplitting] = useState(false);
 
-  // Halve modal
   const [showHalveModal, setShowHalveModal] = useState(false);
   const [datasetToHalve, setDatasetToHalve] = useState<DatasetInfo | null>(null);
   const [halving, setHalving] = useState(false);
 
-  // File manager
   const [fileManagerDataset, setFileManagerDataset] = useState<DatasetInfo | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -182,75 +441,113 @@ export default function DatasetUpload() {
   useEffect(() => { initLoad(); }, []);
   useEffect(() => { if (selectedModelId) loadDatasets(); }, [selectedModelId]);
 
-  // AI coach context
   useEffect(() => {
     const selModel = models.find(m => m.id === selectedModelId);
-    setCurrentPageContent([
+    const contextLines: string[] = [
       '=== FrameTrain Dataset-Manager ===',
-      `Modell: ${selModel?.name ?? 'keins'}`,
-      `Datasets: ${datasets.length}`,
-      ...datasets.map(d =>
-        `• ${d.name} | ${d.status === 'split' ? '✅ Split' : '⚠️ Kein Split'} | ${d.file_count} Dateien | ${formatBytes(d.size_bytes)}`
-      ),
-    ].join('\n'));
+      '',
+      '--- SEITENZWECK ---',
+      'Lade, verwalte und splitte Trainings-Datensätze für Machine Learning Models.',
+      'Wähle Modell → Lade Dataset → Prüfe Kompatibilität → Teile in Train/Val/Test → Trainiere.',
+      '',
+      '--- MODELL ---',
+    ];
+
+    if (!selModel) {
+      contextLines.push('❌ Kein Modell → Wähle aus Dropdown');
+    } else {
+      contextLines.push(`✓ Modell: ${selModel.name}`);
+    }
+
+    contextLines.push('');
+    contextLines.push('--- DATENSÄTZE ---');
+    contextLines.push(`Gesamt: ${datasets.length} Dataset${datasets.length !== 1 ? 's' : ''}`);
+
+    if (datasets.length > 0) {
+      contextLines.push('');
+      datasets.forEach(d => {
+        const typeMeta = d.dataset_type ? DATASET_TYPE_LABELS[d.dataset_type] : null;
+        contextLines.push(`• ${d.name}`);
+        if (typeMeta) contextLines.push(`  Type: ${typeMeta.label}`);
+        contextLines.push(`  Status: ${d.status === 'split' ? '✓ Split' : '⚠️ Nicht aufgeteilt'}`);
+        contextLines.push(`  Size: ${d.file_count} Dateien · ${formatBytes(d.size_bytes)}`);
+      });
+    } else {
+      contextLines.push('(Keine Datensätze → Lade eine Datei oben)');
+    }
+
+    contextLines.push('');
+    contextLines.push('--- UI LAYOUT ---');
+    contextLines.push('**OBEN (Header):**');
+    contextLines.push('  • [Modell Dropdown] (linke Seite)');
+    contextLines.push('');
+    contextLines.push('**OBEN RECHTS (Upload Area):**');
+    contextLines.push('  • 📤 Drag & Drop Zone (große Box: "Dateien hier ziehen")');
+    contextLines.push('  • [Datei durchsuchen Button]');
+    contextLines.push('  • Unterstützte Formate: CSV, JSON, JSONL, Parquet, Excel');
+    contextLines.push('');
+    contextLines.push('**MITTE (Dataset Liste):**');
+    contextLines.push('  • Tabelle mit Spalten: Name, Type, Status, Size, Dateien');
+    contextLines.push('  • Rechts von jedem Dataset: [Actions Icon ⋮]');
+    contextLines.push('    - Ansicht Details');
+    contextLines.push('    - Dataset aufteilen (Split)');
+    contextLines.push('    - Löschen');
+    contextLines.push('');
+    contextLines.push('**MODAL (wenn Dataset aufgeteilt wird):**');
+    contextLines.push('  • Train/Val/Test Ratio Slider (z.B. 70/15/15)');
+    contextLines.push('  • Seed Feld (für Reproduzierbarkeit)');
+    contextLines.push('  • [Split Button] (unten rechts)');
+    contextLines.push('');
+    contextLines.push('--- VERFÜGBARE AKTIONEN ---');
+    contextLines.push('1. **Dataset hochladen:**');
+    contextLines.push('   → Drag & Drop Datei in Upload Area ODER [Datei durchsuchen]');
+    contextLines.push('   → Wähle Modell oben (wird automatisch validiert)');
+    contextLines.push('');
+    contextLines.push('2. **Dataset aufteilen (Split):**');
+    contextLines.push('   → Klick [Actions ⋮] neben Dataset');
+    contextLines.push('   → Wähle "Dataset aufteilen"');
+    contextLines.push('   → Passe Ratio an (normalerweise 70/15/15)');
+    contextLines.push('   → Klick [Split Button]');
+    contextLines.push('');
+    contextLines.push('3. **Dataset Details:**');
+    contextLines.push('   → Klick Dataset Name');
+    contextLines.push('   → Sehe Datei-Vorschau, Spalten, Größe');
+    contextLines.push('');
+    contextLines.push('4. **Mit Training verwenden:**');
+    contextLines.push('   → Gehe zu Training Panel');
+    contextLines.push('   → Wähle [Dataset Dropdown]');
+    contextLines.push('   → Nur aufgeteilte Datensätze erscheinen');
+
+    setCurrentPageContent(contextLines.join('\n'));
   }, [models, selectedModelId, datasets, setCurrentPageContent]);
 
-  // ── Download Progress Listener ──
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-
-    const setupListener = async () => {
+    const setup = async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
         unlisten = await listen<{
-          status: string;
-          current_file: string;
-          current_file_index: number;
-          total_files: number;
-          downloaded_bytes: number;
-          total_bytes: number;
-          progress_percent: number;
-          speed_mbs: number;
-          elapsed_secs: number;
-          eta_secs: number;
-          message: string;
+          status: string; current_file: string; current_file_index: number;
+          total_files: number; downloaded_bytes: number; total_bytes: number;
+          progress_percent: number; speed_mbs: number; elapsed_secs: number;
+          eta_secs: number; message: string;
         }>('dataset-download-progress', (event) => {
-          const progress = event.payload;
+          const p = event.payload;
           setDownloadProgress({
-            status: progress.status,
-            currentFile: progress.current_file,
-            currentFileIndex: progress.current_file_index,
-            totalFiles: progress.total_files,
-            downloadedBytes: progress.downloaded_bytes,
-            totalBytes: progress.total_bytes,
-            progressPercent: progress.progress_percent,
-            speedMbs: progress.speed_mbs,
-            elapsedSecs: progress.elapsed_secs,
-            etaSecs: progress.eta_secs,
-            message: progress.message,
+            status: p.status, currentFile: p.current_file,
+            currentFileIndex: p.current_file_index, totalFiles: p.total_files,
+            downloadedBytes: p.downloaded_bytes, totalBytes: p.total_bytes,
+            progressPercent: p.progress_percent, speedMbs: p.speed_mbs,
+            elapsedSecs: p.elapsed_secs, etaSecs: p.eta_secs, message: p.message,
           });
-
-          if (progress.status === 'complete') {
-            setDownloading(false);
-          } else if (progress.status === 'error') {
-            setDownloading(false);
-          }
+          if (p.status === 'complete' || p.status === 'error') setDownloading(false);
         });
-      } catch {
-        // Fallback: keine Events verfügbar
-      }
+      } catch { /* ignore */ }
     };
-
-    setupListener();
-
-    return () => {
-      if (unlisten) {
-        unlisten();
-      }
-    };
+    setup();
+    return () => { if (unlisten) unlisten(); };
   }, []);
 
-  // Debounced HF search
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     if (hfQuery.trim().length < 2) { setHfResults([]); setHfSearching(false); return; }
@@ -259,8 +556,7 @@ export default function DatasetUpload() {
       try {
         const res = await invoke<HuggingFaceDataset[]>('search_huggingface_datasets', {
           query: hfQuery.trim(), limit: 15,
-          filterTask: filterTask || null,
-          filterLanguage: filterLanguage || null,
+          filterTask: filterTask || null, filterLanguage: filterLanguage || null,
           filterSize: filterSize || null,
         });
         setHfResults(res);
@@ -281,7 +577,7 @@ export default function DatasetUpload() {
         setFilterOptions(opts);
       } catch { /* optional */ }
     } catch (err: unknown) {
-      error('Fehler beim Laden der Modelle', String(err));
+      error(t('datasetUpload.notifications.loadModelsError'), String(err));
     } finally {
       setLoading(false);
     }
@@ -293,7 +589,7 @@ export default function DatasetUpload() {
       const list = await invoke<DatasetInfo[]>('list_datasets_for_model', { modelId: selectedModelId });
       setDatasets(list);
     } catch (err: unknown) {
-      error('Fehler beim Laden der Datasets', String(err));
+      error(t('datasetUpload.notifications.loadDatasetsError'), String(err));
     }
   };
 
@@ -302,24 +598,28 @@ export default function DatasetUpload() {
   const validateAndSetPath = async (path: string) => {
     setSelectedPath(path);
     setDatasetName(path.split(/[/\\]/).pop() ?? 'Dataset');
+    setAnalysisResult(null);
+    setAnalysisLoading(true);
     try {
-      const [size, files] = await invoke<[number, number]>('get_directory_size', { path });
-      setDirInfo({ size, files });
+      const analysis = await invoke<DatasetAnalysis>('analyze_dataset_path', { path });
+      setAnalysisResult(analysis);
     } catch {
-      setDirInfo(null);
+      // Analyse-Fehler ist nicht kritisch
+    } finally {
+      setAnalysisLoading(false);
     }
   };
 
   const handleBrowseFolder = async () => {
     try {
-      const sel = await open({ directory: true, multiple: false, title: 'Dataset-Ordner auswählen' });
+      const sel = await open({ directory: true, multiple: false, title: t('datasetUpload.importModal.local.browseFolderTitle') });
       if (sel && typeof sel === 'string') await validateAndSetPath(sel);
-    } catch (err: unknown) { error('Fehler', String(err)); }
+    } catch (err: unknown) { error(t('common.error'), String(err)); }
   };
 
   const handleLocalImport = async () => {
     if (!selectedPath || !datasetName.trim() || !selectedModelId) {
-      warning('Fehlende Angaben', 'Ordner, Name und Modell werden benötigt.');
+      warning(t('datasetUpload.importModal.local.missingFieldsTitle'), t('datasetUpload.importModal.local.missingFieldsDetail'));
       return;
     }
     setImporting(true);
@@ -327,25 +627,24 @@ export default function DatasetUpload() {
       const ds = await invoke<DatasetInfo>('import_local_dataset', {
         sourcePath: selectedPath, datasetName: datasetName.trim(), modelId: selectedModelId,
       });
-      success('Dataset importiert!', `„${ds.name}" wurde hinzugefügt.`);
+      success(t('datasetUpload.importModal.local.importSuccess'), t('datasetUpload.importModal.local.importSuccessDetail').replace('{name}', ds.name));
       closeModal();
       await loadDatasets();
     } catch (err: unknown) {
-      error('Import fehlgeschlagen', String(err));
+      error(t('datasetUpload.importModal.local.importError'), String(err));
     } finally {
       setImporting(false);
     }
   };
 
-  // Drag & Drop
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); }, []);
+  const handleDragOver  = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); }, []);
   const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); }, []);
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
     const file = e.dataTransfer.items?.[0]?.getAsFile?.();
     const path = file && (file as unknown as { path?: string }).path;
     if (path) await validateAndSetPath(path);
-    else info('Drag & Drop', 'Bitte nutze den „Ordner durchsuchen"-Button.');
+    else info(t('datasetUpload.importModal.local.dragDropInfoTitle'), t('datasetUpload.importModal.local.dragDropInfo'));
   }, []);
 
   // ── HuggingFace ──
@@ -357,32 +656,27 @@ export default function DatasetUpload() {
 
   const handleHfDownload = async () => {
     if (!selectedHfDataset || !hfDatasetName.trim() || !selectedModelId) {
-      warning('Fehlende Angaben', 'Dataset, Name und Modell werden benötigt.');
-      return;
+      warning(t('datasetUpload.importModal.hf.missingFieldsTitle'), t('datasetUpload.importModal.hf.missingFieldsDetail')); return;
     }
-    setDownloading(true);
-    setDownloadProgress(null);
-
+    setDownloading(true); setDownloadProgress(null);
     try {
       const ds = await invoke<DatasetInfo>('download_huggingface_dataset', {
         repoId: selectedHfDataset.id, datasetName: hfDatasetName.trim(), modelId: selectedModelId,
       });
-      success('Download abgeschlossen!', `„${ds.name}" wurde heruntergeladen.`);
-      setSelectedHfDataset(null); setHfDatasetName(''); setHfQuery(''); setHfResults([]);
-      setShowImportModal(false);
-      setDownloadProgress(null);
+      success(t('datasetUpload.importModal.hf.downloadSuccess'), t('datasetUpload.importModal.hf.downloadSuccessDetail').replace('{name}', ds.name));
+      setSelectedHfDataset(null); setHfDatasetName(''); setHfQuery('');
+      setHfResults([]); setShowImportModal(false); setDownloadProgress(null);
       await loadDatasets();
     } catch (err: unknown) {
-      error('Download fehlgeschlagen', String(err));
+      error(t('datasetUpload.importModal.hf.downloadError'), String(err));
     } finally {
       setDownloading(false);
     }
   };
 
-  const handleCancelDownload = async () => {
-    setDownloading(false);
-    setDownloadProgress(null);
-    info('Abgebrochen', 'Der Download wurde abgebrochen. Unvollständige Dateien werden gelöscht.');
+  const handleCancelDownload = () => {
+    setDownloading(false); setDownloadProgress(null);
+    info(t('datasetUpload.importModal.hf.cancelSuccess'), t('datasetUpload.importModal.hf.cancelDetail'));
   };
 
   // ── Split ──
@@ -396,18 +690,18 @@ export default function DatasetUpload() {
   const handleSplit = async () => {
     if (!datasetToSplit || !selectedModelId) return;
     if (Math.abs(trainRatio + valRatio + testRatio - 1) > 0.01) {
-      warning('Ungültige Aufteilung', 'Die Summe muss 100% ergeben.'); return;
+      warning(t('datasetUpload.splitModal.invalidRatioTitle'), t('datasetUpload.splitModal.invalidRatioDetail')); return;
     }
     setSplitting(true);
     try {
       await invoke('split_dataset', {
         datasetId: datasetToSplit.id, modelId: selectedModelId, trainRatio, valRatio, testRatio,
       });
-      success('Aufgeteilt!', `„${datasetToSplit.name}" wurde in Train/Val/Test aufgeteilt.`);
+      success(t('datasetUpload.splitModal.successTitle'), t('datasetUpload.splitModal.successDetail').replace('{name}', datasetToSplit.name));
       setShowSplitModal(false); setDatasetToSplit(null);
       await loadDatasets();
     } catch (err: unknown) {
-      error('Split fehlgeschlagen', String(err));
+      error(t('datasetUpload.splitModal.errorTitle'), String(err));
     } finally {
       setSplitting(false);
     }
@@ -422,11 +716,11 @@ export default function DatasetUpload() {
       const result = await invoke<{ dataset_a: DatasetInfo; dataset_b: DatasetInfo }>(
         'split_dataset_in_half', { datasetId: datasetToHalve.id, modelId: selectedModelId }
       );
-      success('Geteilt!', `„${result.dataset_a.name}" und „${result.dataset_b.name}" erstellt.`);
+      success(t('datasetUpload.halveModal.successTitle'), t('datasetUpload.halveModal.successDetail').replace('{a}', result.dataset_a.name).replace('{b}', result.dataset_b.name));
       setShowHalveModal(false); setDatasetToHalve(null);
       await loadDatasets();
     } catch (err: unknown) {
-      error('Halbieren fehlgeschlagen', String(err));
+      error(t('datasetUpload.halveModal.errorTitle'), String(err));
     } finally {
       setHalving(false);
     }
@@ -438,28 +732,24 @@ export default function DatasetUpload() {
     if (!deleteTarget) return;
     try {
       await invoke('delete_dataset', { datasetId: deleteTarget.id, modelId: deleteTarget.model_id });
-      success('Gelöscht', `„${deleteTarget.name}" wurde entfernt.`);
+      success(t('datasetUpload.notifications.deleteSuccess'), t('datasetUpload.notifications.deleteSuccessDetail').replace('{name}', deleteTarget.name));
       await loadDatasets();
     } catch (err: unknown) {
-      error('Löschen fehlgeschlagen', String(err));
+      error(t('datasetUpload.notifications.deleteError'), String(err));
     } finally {
       setDeleteTarget(null);
     }
   };
 
-  // ── Helpers ──
-
   const closeModal = () => {
     setShowImportModal(false);
-    setSelectedPath(null); setDatasetName(''); setDirInfo(null);
+    setSelectedPath(null); setDatasetName(''); setAnalysisResult(null);
     setSelectedHfDataset(null); setHfDatasetName('');
     setHfQuery(''); setHfResults([]); setDownloadProgress(null);
     setFilterTask(''); setFilterLanguage(''); setFilterSize('');
   };
 
   const selectedModel = models.find(m => m.id === selectedModelId);
-
-  // ── Early states ──
 
   if (loading) return (
     <div className="flex items-center justify-center py-24">
@@ -469,32 +759,29 @@ export default function DatasetUpload() {
 
   if (models.length === 0) return (
     <div className="space-y-6">
-      <div><h1 className="text-2xl font-bold text-white">Datasets</h1><p className="text-gray-400 mt-1">Verwalte deine Trainingsdaten</p></div>
+      <div><h1 className="text-2xl font-bold text-white">{t('datasetUpload.title')}</h1><p className="text-gray-400 mt-1">{t('datasetUpload.subtitleAlt')}</p></div>
       <div className="rounded-2xl border border-white/10 bg-white/5 p-16 text-center space-y-4">
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/5 border border-white/10">
           <Layers className="w-8 h-8 text-gray-500" />
         </div>
         <div>
-          <h3 className="text-white font-semibold text-lg">Kein Modell vorhanden</h3>
-          <p className="text-gray-400 text-sm mt-1">Füge zuerst ein Modell hinzu, bevor du Datasets importierst.</p>
+          <h3 className="text-white font-semibold text-lg">{t('datasetUpload.emptyState.noModel.title')}</h3>
+          <p className="text-gray-400 text-sm mt-1">{t('datasetUpload.emptyState.noModel.description')}</p>
         </div>
       </div>
     </div>
   );
 
-  // ── Main Render ──
-
   return (
     <div className="space-y-6">
 
-      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Datasets</h1>
-          <p className="text-gray-400 mt-1">Verwalte Trainingsdaten für deine Modelle</p>
+          <h1 className="text-2xl font-bold text-white">{t('datasetUpload.title')}</h1>
+          <p className="text-gray-400 mt-1">{t('datasetUpload.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={loadDatasets} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-all" title="Aktualisieren">
+          <button onClick={loadDatasets} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-all" title={t('datasetUpload.header.refreshTooltip')}>
             <RefreshCw className="w-4 h-4" />
           </button>
           <button
@@ -502,14 +789,14 @@ export default function DatasetUpload() {
             disabled={!selectedModelId}
             className={`flex items-center gap-2 px-4 py-2 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-xl text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-40`}
           >
-            <Upload className="w-4 h-4" /> Dataset hinzufügen
+            <Upload className="w-4 h-4" /> {t('datasetUpload.header.addButton')}
           </button>
         </div>
       </div>
 
-      {/* ── Model Selector ── */}
+      {/* Model Selector */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
-        <label className="block text-sm font-medium text-gray-300">Modell auswählen</label>
+        <label className="block text-sm font-medium text-gray-300">{t('datasetUpload.modelSelector.label')}</label>
         <div className="relative">
           <select
             value={selectedModelId ?? ''}
@@ -518,7 +805,7 @@ export default function DatasetUpload() {
           >
             {models.map(m => (
               <option key={m.id} value={m.id} className="bg-slate-900">
-                {m.name} ({m.source === 'huggingface' ? 'HF' : 'Lokal'})
+                {m.name} ({m.source === 'huggingface' ? t('datasetUpload.modelSelector.sourceHF') : t('datasetUpload.modelSelector.sourceLocal')})
               </option>
             ))}
           </select>
@@ -526,30 +813,28 @@ export default function DatasetUpload() {
         </div>
       </div>
 
-      {/* ── Dataset Grid ── */}
+      {/* Dataset Grid */}
       {datasets.length === 0 ? (
         <div className="rounded-2xl border border-white/10 bg-white/5 p-16 text-center space-y-4">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/5 border border-white/10">
             <Database className="w-8 h-8 text-gray-500" />
           </div>
           <div>
-            <h3 className="text-white font-semibold text-lg">Keine Datasets</h3>
-            <p className="text-gray-400 text-sm mt-1">Füge ein Dataset für „{selectedModel?.name}" hinzu.</p>
+            <h3 className="text-white font-semibold text-lg">{t('datasetUpload.emptyState.noDatasets.title')}</h3>
+            <p className="text-gray-400 text-sm mt-1">{t('datasetUpload.emptyState.noDatasets.description').replace('{model}', selectedModel?.name ?? '')}</p>
           </div>
           <button
             onClick={() => setShowImportModal(true)}
             className={`inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-xl text-white text-sm font-medium hover:opacity-90 transition-all`}
           >
-            <Upload className="w-4 h-4" /> Erstes Dataset hinzufügen
+            <Upload className="w-4 h-4" /> {t('datasetUpload.emptyState.noDatasets.addButton')}
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {datasets.map(ds => (
             <DatasetCard
-              key={ds.id}
-              dataset={ds}
-              gradientClass={currentTheme.colors.gradient}
+              key={ds.id} dataset={ds} gradientClass={currentTheme.colors.gradient}
               onDelete={() => setDeleteTarget(ds)}
               onSplit={() => openSplitModal(ds)}
               onHalve={() => { setDatasetToHalve(ds); setShowHalveModal(true); }}
@@ -561,16 +846,15 @@ export default function DatasetUpload() {
 
       {/* ── Modals ── */}
 
-      {/* Delete */}
       {deleteTarget && (
         <DeleteDialog name={deleteTarget.name} onConfirm={handleDeleteConfirm} onCancel={() => setDeleteTarget(null)} />
       )}
 
-      {/* File Manager */}
       {fileManagerDataset && (
         <DatasetFileManager
           datasetId={fileManagerDataset.id}
           datasetName={fileManagerDataset.name}
+          datasetType={fileManagerDataset.dataset_type}
           onClose={() => { setFileManagerDataset(null); loadDatasets(); }}
         />
       )}
@@ -581,7 +865,7 @@ export default function DatasetUpload() {
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
               <div>
-                <h2 className="text-xl font-bold text-white">Dataset aufteilen</h2>
+                <h2 className="text-xl font-bold text-white">{t('datasetUpload.splitModal.title')}</h2>
                 <p className="text-sm text-gray-400 mt-0.5">{datasetToSplit.name}</p>
               </div>
               <button onClick={() => { setShowSplitModal(false); setDatasetToSplit(null); }} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all">
@@ -589,19 +873,26 @@ export default function DatasetUpload() {
               </button>
             </div>
             <div className="p-6 space-y-6">
-              <p className="text-gray-400 text-sm">{datasetToSplit.file_count} Dateien in Train / Val / Test aufteilen.</p>
+              {/* Warn bei paired types */}
+              {datasetToSplit.dataset_type && ['yolo_bbox', 'pascal_voc', 'coco_json', 'audio_transcript'].includes(datasetToSplit.dataset_type) && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-amber-300">{t('datasetUpload.splitModal.pairedWarning').replace('{type}', DATASET_TYPE_LABELS[datasetToSplit.dataset_type]?.label ?? '')}</p>
+                </div>
+              )}
 
-              {/* Sliders */}
+              <p className="text-gray-400 text-sm">{t('datasetUpload.splitModal.fileCount').replace('{count}', String(datasetToSplit.file_count))}</p>
+
               {([
-                { label: 'Training', color: '#3b82f6', ratio: trainRatio, set: (v: number) => {
+                { label: t('datasetUpload.splitModal.labelTrain'), color: '#3b82f6', ratio: trainRatio, set: (v: number) => {
                   const r = 1 - v; const vp = valRatio / (valRatio + testRatio) || 0.5;
                   setTrainRatio(v); setValRatio(r * vp); setTestRatio(r * (1 - vp));
                 }},
-                { label: 'Validierung', color: '#a855f7', ratio: valRatio, set: (v: number) => {
+                { label: t('datasetUpload.splitModal.labelVal'), color: '#a855f7', ratio: valRatio, set: (v: number) => {
                   const r = 1 - v; const tp = trainRatio / (trainRatio + testRatio) || 0.5;
                   setValRatio(v); setTrainRatio(r * tp); setTestRatio(r * (1 - tp));
                 }},
-                { label: 'Test', color: '#10b981', ratio: testRatio, set: (v: number) => {
+                { label: t('datasetUpload.splitModal.labelTest'), color: '#10b981', ratio: testRatio, set: (v: number) => {
                   const r = 1 - v; const tp = trainRatio / (trainRatio + valRatio) || 0.5;
                   setTestRatio(v); setTrainRatio(r * tp); setValRatio(r * (1 - tp));
                 }},
@@ -611,21 +902,17 @@ export default function DatasetUpload() {
                     <span style={{ color }}>{label}</span>
                     <span className="text-white">{Math.round(ratio * 100)}%</span>
                   </div>
-                  <input
-                    type="range" min="0" max="100" value={Math.round(ratio * 100)}
+                  <input type="range" min="0" max="100" value={Math.round(ratio * 100)}
                     onChange={e => set(parseInt(e.target.value) / 100)}
-                    className="w-full"
-                    style={{ accentColor: color }}
-                  />
+                    className="w-full" style={{ accentColor: color }} />
                 </div>
               ))}
 
-              {/* Preview */}
               <div className="grid grid-cols-3 gap-2 text-center text-sm">
                 {[
-                  { label: 'Train', color: 'blue', count: Math.round(datasetToSplit.file_count * trainRatio) },
-                  { label: 'Val', color: 'purple', count: Math.round(datasetToSplit.file_count * valRatio) },
-                  { label: 'Test', color: 'green', count: Math.round(datasetToSplit.file_count * testRatio) },
+                  { label: t('datasetUpload.splitModal.labelTrain'), color: 'blue',   count: Math.round(datasetToSplit.file_count * trainRatio) },
+                  { label: t('datasetUpload.splitModal.labelVal'), color: 'purple', count: Math.round(datasetToSplit.file_count * valRatio) },
+                  { label: t('datasetUpload.splitModal.labelTest'), color: 'green',  count: Math.round(datasetToSplit.file_count * testRatio) },
                 ].map(({ label, color, count }) => (
                   <div key={label} className={`p-3 rounded-xl bg-${color}-500/10`}>
                     <div className={`text-${color}-400 font-bold text-lg`}>{count}</div>
@@ -634,12 +921,9 @@ export default function DatasetUpload() {
                 ))}
               </div>
 
-              <button
-                onClick={handleSplit}
-                disabled={splitting}
-                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50`}
-              >
-                {splitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Teile auf…</> : <><Scissors className="w-4 h-4" /> Dataset aufteilen</>}
+              <button onClick={handleSplit} disabled={splitting}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50`}>
+                {splitting ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('datasetUpload.splitModal.splittingButton')}</> : <><Scissors className="w-4 h-4" /> {t('datasetUpload.splitModal.splitButton')}</>}
               </button>
             </div>
           </div>
@@ -652,7 +936,7 @@ export default function DatasetUpload() {
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
               <div>
-                <h2 className="text-xl font-bold text-white">Dataset halbieren</h2>
+                <h2 className="text-xl font-bold text-white">{t('datasetUpload.halveModal.title')}</h2>
                 <p className="text-sm text-gray-400 mt-0.5">{datasetToHalve.name}</p>
               </div>
               <button onClick={() => { setShowHalveModal(false); setDatasetToHalve(null); }} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all">
@@ -661,27 +945,24 @@ export default function DatasetUpload() {
             </div>
             <div className="p-6 space-y-5">
               <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10">
-                <p className="text-amber-300 text-sm font-medium">⚠️ Wofür ist das?</p>
-                <p className="text-gray-300 text-sm mt-1">Wenn das Training mit einem RAM-Fehler abbricht, hilft es den Datensatz zu halbieren.</p>
+                <p className="text-amber-300 text-sm font-medium inline-flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  {t('datasetUpload.halveModal.whyTitle')}
+                </p>
+                <p className="text-gray-300 text-sm mt-1">{t('datasetUpload.halveModal.whyDescription')}</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: 'Hälfte 1', count: Math.ceil(datasetToHalve.file_count / 2) },
-                  { label: 'Hälfte 2', count: Math.floor(datasetToHalve.file_count / 2) },
-                ].map(({ label, count }) => (
+                {[{ label: t('datasetUpload.halveModal.halfLabel').replace('{n}', '1'), count: Math.ceil(datasetToHalve.file_count / 2) }, { label: t('datasetUpload.halveModal.halfLabel').replace('{n}', '2'), count: Math.floor(datasetToHalve.file_count / 2) }].map(({ label, count }) => (
                   <div key={label} className="p-3 rounded-xl bg-white/5 text-center">
                     <div className="text-white font-bold text-lg">{count}</div>
-                    <div className="text-gray-500 text-xs mt-0.5">Dateien ({label})</div>
+                    <div className="text-gray-500 text-xs mt-0.5">{t('datasetUpload.halveModal.filesLabel').replace('{label}', label)}</div>
                   </div>
                 ))}
               </div>
-              <p className="text-gray-500 text-xs">Das Original bleibt erhalten.</p>
-              <button
-                onClick={handleHalve}
-                disabled={halving}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50"
-              >
-                {halving ? <><Loader2 className="w-4 h-4 animate-spin" /> Teile auf…</> : <>½ In zwei Hälften teilen</>}
+              <p className="text-gray-500 text-xs">{t('datasetUpload.halveModal.originalNote')}</p>
+              <button onClick={handleHalve} disabled={halving}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50">
+                {halving ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('datasetUpload.halveModal.halvingButton')}</> : <>{t('datasetUpload.halveModal.halveButton')}</>}
               </button>
             </div>
           </div>
@@ -693,52 +974,75 @@ export default function DatasetUpload() {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
 
-            {/* Modal Header */}
             <div className="px-6 py-5 border-b border-white/10 flex items-start justify-between flex-shrink-0">
               <div>
-                <h2 className="text-xl font-bold text-white">Dataset hinzufügen</h2>
-                <p className="text-sm text-gray-400 mt-0.5">für: {selectedModel?.name}</p>
+                <h2 className="text-xl font-bold text-white">{t('datasetUpload.importModal.title')}</h2>
+                <p className="text-sm text-gray-400 mt-0.5">{t('datasetUpload.importModal.forModel').replace('{model}', selectedModel?.name ?? '')}</p>
               </div>
               <button onClick={closeModal} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Tabs */}
             <div className="flex border-b border-white/10 flex-shrink-0">
-              {([
-                { mode: 'local' as ImportMode, icon: <HardDrive className="w-4 h-4" />, label: 'Lokaler Ordner' },
-                { mode: 'huggingface' as ImportMode, icon: <Cloud className="w-4 h-4" />, label: 'Hugging Face' },
+                {([
+                { mode: 'local' as ImportMode, icon: <HardDrive className="w-4 h-4" />, label: t('datasetUpload.importModal.tabLocal') },
+                { mode: 'huggingface' as ImportMode, icon: <Cloud className="w-4 h-4" />, label: t('datasetUpload.importModal.tabHuggingFace') },
               ]).map(({ mode, icon, label }) => (
-                <button
-                  key={mode}
-                  onClick={() => setImportMode(mode)}
+                <button key={mode} onClick={() => setImportMode(mode)}
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-3.5 text-sm font-medium transition-all border-b-2 ${
                     importMode === mode ? 'text-white' : 'text-gray-400 hover:text-white border-transparent'
                   }`}
-                  style={importMode === mode ? { borderColor: currentTheme.colors.primary, color: currentTheme.colors.primary } : {}}
-                >
+                  style={importMode === mode ? { borderColor: currentTheme.colors.primary, color: currentTheme.colors.primary } : {}}>
                   {icon}{label}
                 </button>
               ))}
             </div>
 
-            {/* Body */}
             <div className="p-6 overflow-y-auto flex-1">
               {importMode === 'local' ? (
-                // ── Local ──
                 <div className="space-y-5">
-                  {/* Supported formats */}
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    {['.csv', '.jsonl', '.json', '.parquet', '.txt'].map(f => (
+                  {/* Struktur-Guide */}
+              <DatasetStructureGuide />
+
+              {/* Phase 7: Plugin-Empfehlung basierend auf ausgewähltem Modell */}
+              {selectedModelId && (() => {
+                const result = detectPlugin(selectedModelId);
+                if (!result.supported) return null;
+                const { plugin } = result;
+                const preferred = plugin.preferredDatasetType;
+                const supported = plugin.supportedDatasetTypes;
+                if (!preferred && (!supported || supported.length === 0)) return null;
+                const preferredMeta = preferred ? (DATASET_TYPE_LABELS[preferred] ?? null) : null;
+                return (
+                  <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-blue-500/8 border border-blue-500/20">
+                    <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-xs text-blue-300 space-y-0.5">
+                      <p className="font-medium">{plugin.name}</p>
+                      {preferredMeta && (
+                      <p>{t('datasetUpload.importModal.local.pluginPreferredType')} <span className={preferredMeta.color}>{preferredMeta.icon} {preferredMeta.label}</span></p>
+                      )}
+                      {supported && supported.length > 1 && (
+                        <p className="text-blue-400/60">{t('datasetUpload.importModal.local.pluginAlsoCompatible')} {supported
+                          .filter(t => t !== preferred)
+                          .map(t => DATASET_TYPE_LABELS[t]?.label ?? t)
+                          .join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                    {t('datasetUpload.importModal.local.supportedFormats').split(' ').map(f => (
                       <span key={f} className="px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-300 font-mono">{f}</span>
                     ))}
                   </div>
 
-                  {/* Drop Zone */}
                   <div
                     onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
-                    className={`border-2 border-dashed rounded-2xl p-10 text-center transition-all ${
+                    className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all ${
                       isDragging ? 'border-violet-500 bg-violet-500/10' :
                       selectedPath ? 'border-emerald-500/50 bg-emerald-500/5' :
                       'border-white/15 hover:border-white/30'
@@ -746,14 +1050,14 @@ export default function DatasetUpload() {
                   >
                     {selectedPath ? (
                       <div className="space-y-3">
-                        <CheckCircle className="w-12 h-12 text-emerald-400 mx-auto" />
+                        <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
                         <div>
-                          <p className="text-white font-medium">Ordner ausgewählt</p>
+                          <p className="text-white font-medium">{t('datasetUpload.importModal.local.folderSelected')}</p>
                           <p className="text-gray-400 text-sm mt-0.5 break-all">{selectedPath}</p>
                         </div>
-                        {dirInfo && <p className="text-gray-500 text-sm">{dirInfo.files} Dateien · {formatBytes(dirInfo.size)}</p>}
-                        <button onClick={() => { setSelectedPath(null); setDatasetName(''); setDirInfo(null); }} className="text-sm text-gray-400 hover:text-white underline transition-colors">
-                          Anderen Ordner wählen
+                        <button onClick={() => { setSelectedPath(null); setDatasetName(''); setAnalysisResult(null); }}
+                          className="text-sm text-gray-400 hover:text-white underline transition-colors">
+                          {t('datasetUpload.importModal.local.changeFolderLink')}
                         </button>
                       </div>
                     ) : (
@@ -762,63 +1066,63 @@ export default function DatasetUpload() {
                           <Upload className="w-7 h-7 text-gray-400" />
                         </div>
                         <div>
-                          <p className="text-white font-medium">{isDragging ? 'Ordner hier ablegen' : 'Dataset-Ordner hierher ziehen'}</p>
-                          <p className="text-gray-500 text-sm mt-1">oder Ordner manuell auswählen</p>
+                          <p className="text-white font-medium">{isDragging ? t('datasetUpload.importModal.local.dropzoneDragging') : t('datasetUpload.importModal.local.dropzoneIdle')}</p>
+                          <p className="text-gray-500 text-sm mt-1">{t('datasetUpload.importModal.local.dropzoneSubtitle')}</p>
                         </div>
                         <button onClick={handleBrowseFolder} className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white text-sm transition-all">
-                          <FolderOpen className="w-4 h-4" /> Ordner durchsuchen
+                          <FolderOpen className="w-4 h-4" /> {t('datasetUpload.importModal.local.browseButton')}
                         </button>
                       </div>
                     )}
                   </div>
 
+                  {/* Analyse-Ergebnis */}
+                  {analysisLoading && (
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{t('datasetUpload.importModal.local.analysisLoading')}</span>
+                    </div>
+                  )}
+                  {!analysisLoading && analysisResult && (
+                    <AnalysisPreview analysis={analysisResult} modelId={selectedModelId} />
+                  )}
+
                   {selectedPath && (
                     <>
                       <div className="space-y-1.5">
-                        <label className="block text-sm font-medium text-gray-300">Dataset-Name</label>
-                        <input
-                          type="text" value={datasetName} onChange={e => setDatasetName(e.target.value)}
-                          placeholder="z.&nbsp;B. xlm-roberta-keywords-v1"
-                          className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all"
-                        />
+                        <label className="block text-sm font-medium text-gray-300">{t('datasetUpload.importModal.local.nameLabel')}</label>
+                        <input type="text" value={datasetName} onChange={e => setDatasetName(e.target.value)}
+                          placeholder={t('datasetUpload.importModal.local.namePlaceholder')}
+                          className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all" />
                       </div>
-                      <button
-                        onClick={handleLocalImport} disabled={importing || !datasetName.trim()}
-                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50`}
-                      >
-                        {importing ? <><Loader2 className="w-4 h-4 animate-spin" /> Importiere…</> : <><Upload className="w-4 h-4" /> Dataset importieren</>}
+                      <button onClick={handleLocalImport} disabled={importing || !datasetName.trim()}
+                        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50`}>
+                        {importing ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('datasetUpload.importModal.local.importingButton')}</> : <><Upload className="w-4 h-4" /> {t('datasetUpload.importModal.local.importButton')}</>}
                       </button>
                     </>
                   )}
                 </div>
               ) : (
-                // ── HuggingFace ──
                 <div className="space-y-5">
-                  {/* Filters */}
                   <div className="space-y-3">
-                    <button
-                      onClick={() => setShowFilters(!showFilters)}
-                      className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-all"
-                    >
+                    <button onClick={() => setShowFilters(!showFilters)}
+                      className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-all">
                       <Filter className="w-4 h-4" />
-                      Filter {showFilters ? 'ausblenden' : 'anzeigen'}
+                      {showFilters ? t('datasetUpload.importModal.hf.filterToggleHide') : t('datasetUpload.importModal.hf.filterToggleShow')}
                       <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
                     </button>
                     {showFilters && filterOptions && (
                       <div className="grid grid-cols-3 gap-3">
                         {([
-                          { label: 'Task', val: filterTask, set: setFilterTask, opts: filterOptions.tasks },
-                          { label: 'Sprache', val: filterLanguage, set: setFilterLanguage, opts: filterOptions.languages.map(l => l.toUpperCase()) },
-                          { label: 'Größe', val: filterSize, set: setFilterSize, opts: filterOptions.sizes },
+                          { label: t('datasetUpload.importModal.hf.filterTask'), val: filterTask, set: setFilterTask, opts: filterOptions.tasks },
+                          { label: t('datasetUpload.importModal.hf.filterLanguage'), val: filterLanguage, set: setFilterLanguage, opts: filterOptions.languages.map(l => l.toUpperCase()) },
+                          { label: t('datasetUpload.importModal.hf.filterSize'), val: filterSize, set: setFilterSize, opts: filterOptions.sizes },
                         ] as const).map(({ label, val, set, opts }) => (
                           <div key={label} className="space-y-1">
                             <label className="block text-xs text-gray-500">{label}</label>
-                            <select
-                              value={val}
-                              onChange={e => (set as (v: string) => void)(e.target.value)}
-                              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none"
-                            >
-                              <option value="" className="bg-slate-900">Alle</option>
+                            <select value={val} onChange={e => (set as (v: string) => void)(e.target.value)}
+                              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none appearance-none">
+                              <option value="" className="bg-slate-900">{t('datasetUpload.importModal.hf.filterAll')}</option>
                               {opts.map(o => <option key={o} value={o} className="bg-slate-900">{o}</option>)}
                             </select>
                           </div>
@@ -827,40 +1131,37 @@ export default function DatasetUpload() {
                     )}
                   </div>
 
-                  {/* Search */}
                   <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-gray-300">Dataset suchen</label>
+                    <label className="block text-sm font-medium text-gray-300">{t('datasetUpload.importModal.hf.searchLabel')}</label>
                     <div className="relative">
                       <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="text" value={hfQuery} onChange={e => setHfQuery(e.target.value)}
-                        placeholder="z.&nbsp;B. squad, imdb, common_voice…"
-                        className="w-full pl-10 pr-10 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all"
-                      />
+                      <input type="text" value={hfQuery} onChange={e => setHfQuery(e.target.value)}
+                        placeholder={t('datasetUpload.importModal.hf.searchPlaceholder')}
+                        className="w-full pl-10 pr-10 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all" />
                       {hfSearching && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />}
                     </div>
-                    <p className="text-gray-600 text-xs">Mindestens 2 Zeichen eingeben</p>
+                    <p className="text-gray-600 text-xs">{t('datasetUpload.importModal.hf.searchHint')}</p>
                   </div>
 
-                  {/* Results */}
                   {hfResults.length > 0 && (
                     <div className="space-y-1.5">
-                      <p className="text-gray-500 text-xs">{hfResults.length} Datasets gefunden</p>
+                      <p className="text-gray-500 text-xs">{t('datasetUpload.importModal.hf.resultsCount').replace('{count}', String(hfResults.length))}</p>
                       <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                         {hfResults.map(ds => (
-                          <button
-                            key={ds.id} onClick={() => handleHfSelect(ds)}
+                          <button key={ds.id} onClick={() => handleHfSelect(ds)}
                             className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
-                              selectedHfDataset?.id === ds.id
-                                ? 'bg-violet-500/10 border-violet-500/40'
-                                : 'bg-white/5 border-white/10 hover:bg-white/10'
-                            }`}
-                          >
+                              selectedHfDataset?.id === ds.id ? 'bg-violet-500/10 border-violet-500/40' : 'bg-white/5 border-white/10 hover:bg-white/10'
+                            }`}>
                             <div className="min-w-0">
                               <p className="text-white text-sm font-medium truncate">{ds.id}</p>
                               <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
                                 <span>↓ {formatDownloads(ds.downloads)}</span>
-                                {ds.likes ? <span>♥ {formatDownloads(ds.likes)}</span> : null}
+                                {ds.likes ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Heart className="w-3.5 h-3.5" />
+                                    {formatDownloads(ds.likes)}
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                             {selectedHfDataset?.id === ds.id && <CheckCircle className="w-4 h-4 text-violet-400 flex-shrink-0 ml-2" />}
@@ -870,135 +1171,79 @@ export default function DatasetUpload() {
                     </div>
                   )}
 
-                  {/* Selected */}
                   {selectedHfDataset && (
                     <div className="space-y-4 p-4 rounded-2xl border border-white/10 bg-white/5">
                       <div className="flex items-center gap-3">
                         <Cloud className="w-5 h-5 text-gray-400" />
                         <div>
                           <p className="text-white font-medium text-sm">{selectedHfDataset.id}</p>
-                          <a
-                            href={`https://huggingface.co/datasets/${selectedHfDataset.id}`}
+                          <a href={`https://huggingface.co/datasets/${selectedHfDataset.id}`}
                             target="_blank" rel="noopener noreferrer"
-                            className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors"
-                          >
-                            Auf HuggingFace ansehen <ExternalLink className="w-3 h-3" />
+                            className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors">
+                            {t('datasetUpload.importModal.hf.viewOnHF')} <ExternalLink className="w-3 h-3" />
                           </a>
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <label className="block text-sm font-medium text-gray-300">Lokaler Name</label>
-                        <input
-                          type="text" value={hfDatasetName} onChange={e => setHfDatasetName(e.target.value)}
-                          placeholder="Name für lokale Speicherung"
-                          className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all"
-                        />
+                        <label className="block text-sm font-medium text-gray-300">{t('datasetUpload.importModal.hf.localNameLabel')}</label>
+                        <input type="text" value={hfDatasetName} onChange={e => setHfDatasetName(e.target.value)}
+                          placeholder={t('datasetUpload.importModal.hf.localNamePlaceholder')}
+                          className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all" />
                       </div>
 
-                      {/* Download Progress Display */}
                       {downloading && downloadProgress ? (
-                      <div className="space-y-3 p-3 rounded-xl bg-black/30 border border-white/5">
-
-                      {/* ── Phase 1: Vorbereitung / Python-Loading (kein echter Byte-Progress) ── */}
-                      {(downloadProgress.status === 'connecting' || downloadProgress.status === 'preparing' || (downloadProgress.status === 'downloading' && downloadProgress.totalFiles === 0)) ? (
-                      <div className="space-y-3">
-                      <div className="flex items-center gap-3">
-                          <Loader2 className="w-5 h-5 text-white animate-spin flex-shrink-0" />
-                          <div className="min-w-0">
-                              <p className="text-white text-sm font-medium truncate" title={downloadProgress.message}>
-                                    {downloadProgress.message || 'Verbinde…'}
-                              </p>
-                              <p className="text-gray-500 text-xs mt-0.5">
-                              Verstrichene Zeit: {formatTime(downloadProgress.elapsedSecs)}
-                          </p>
-                        </div>
-                        </div>
-                          {/* Indeterminate Progress Bar */}
-                              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full bg-gradient-to-r ${currentTheme.colors.gradient} rounded-full animate-pulse`}
-                            style={{ width: '60%' }}
-                        />
-                      </div>
-                      <p className="text-gray-600 text-xs text-center">
-                        Das Dataset wird geladen und konvertiert – dies kann einige Minuten dauern…
-                      </p>
-                                    </div>
-
-                      ) : (
-                            /* ── Phase 2: Echter Download (Bytes bekannt) ── */
-                        <div className="space-y-3">
-                          {/* Status & Percentage */}
-                        <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="w-4 h-4 text-white animate-spin" />
-                            <span className="text-white text-sm font-medium">{downloadProgress.progressPercent}%</span>
-                          </div>
-                        <span className="text-xs text-gray-400">
-                          {formatBytes(downloadProgress.downloadedBytes)} / {formatBytes(downloadProgress.totalBytes)}
-                          </span>
-                        </div>
-
-                      {/* Progress Bar */}
-                        <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div
-                                  className={`h-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all duration-300`}
-                              style={{ width: `${downloadProgress.progressPercent}%` }}
-                            />
-                        </div>
-
-                          {/* File Info */}
-                        <div className="flex items-center justify-between">
-                            <div className="min-w-0 flex-1">
-                                <p className="text-white text-xs truncate" title={downloadProgress.currentFile}>
-                                    {downloadProgress.currentFile || downloadProgress.message || 'Wird vorbereitet…'}
-                                  </p>
-                                  <p className="text-gray-500 text-xs">
-                                    Datei {downloadProgress.currentFileIndex} von {downloadProgress.totalFiles}
-                                  </p>
+                        <div className="space-y-3 p-3 rounded-xl bg-black/30 border border-white/5">
+                          {(downloadProgress.status === 'connecting' || downloadProgress.status === 'preparing' || (downloadProgress.status === 'downloading' && downloadProgress.totalFiles === 0)) ? (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-3">
+                                <Loader2 className="w-5 h-5 text-white animate-spin flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-white text-sm font-medium truncate">{downloadProgress.message || t('datasetUpload.importModal.hf.connectingLabel')}</p>
+                                  <p className="text-gray-500 text-xs mt-0.5">{t('datasetUpload.importModal.hf.elapsedLabel')}: {formatTime(downloadProgress.elapsedSecs)}</p>
                                 </div>
                               </div>
-
-                              {/* Speed & ETA */}
+                              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                <div className={`h-full bg-gradient-to-r ${currentTheme.colors.gradient} rounded-full animate-pulse`} style={{ width: '60%' }} />
+                              </div>
+                              <p className="text-gray-600 text-xs text-center">{t('datasetUpload.importModal.hf.waitingNote')}</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Loader2 className="w-4 h-4 text-white animate-spin" />
+                                  <span className="text-white text-sm font-medium">{downloadProgress.progressPercent}%</span>
+                                </div>
+                                <span className="text-xs text-gray-400">{formatBytes(downloadProgress.downloadedBytes)} / {formatBytes(downloadProgress.totalBytes)}</span>
+                              </div>
+                              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                <div className={`h-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all duration-300`} style={{ width: `${downloadProgress.progressPercent}%` }} />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <p className="text-white text-xs truncate">{downloadProgress.currentFile || downloadProgress.message}</p>
+                                <p className="text-gray-500 text-xs">{downloadProgress.currentFileIndex}/{downloadProgress.totalFiles}</p>
+                              </div>
                               <div className="grid grid-cols-3 gap-2">
-                                <div className="text-center">
-                                  <p className="text-gray-500 text-xs">Geschwindigkeit</p>
-                                  <p className="text-white text-sm font-medium">{downloadProgress.speedMbs.toFixed(1)} MB/s</p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-gray-500 text-xs">Verstrichene Zeit</p>
-                                  <p className="text-white text-sm font-medium">{formatTime(downloadProgress.elapsedSecs)}</p>
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-gray-500 text-xs">Verbleibend</p>
-                                  <p className="text-white text-sm font-medium">{downloadProgress.etaSecs > 0 ? formatTime(downloadProgress.etaSecs) : '—'}</p>
-                                </div>
+                                <div className="text-center"><p className="text-gray-500 text-xs">{t('datasetUpload.importModal.hf.speedLabel')}</p><p className="text-white text-sm font-medium">{downloadProgress.speedMbs.toFixed(1)} MB/s</p></div>
+                                <div className="text-center"><p className="text-gray-500 text-xs">{t('datasetUpload.importModal.hf.elapsedLabel')}</p><p className="text-white text-sm font-medium">{formatTime(downloadProgress.elapsedSecs)}</p></div>
+                                <div className="text-center"><p className="text-gray-500 text-xs">{t('datasetUpload.importModal.hf.remainingLabel')}</p><p className="text-white text-sm font-medium">{downloadProgress.etaSecs > 0 ? formatTime(downloadProgress.etaSecs) : '—'}</p></div>
                               </div>
                             </div>
                           )}
-
-                          {/* Cancel Button – immer sichtbar */}
-                          <button
-                            onClick={handleCancelDownload}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 text-sm transition-all"
-                          >
-                            <X className="w-4 h-4" /> Download abbrechen
+                          <button onClick={handleCancelDownload}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 text-sm transition-all">
+                            <X className="w-4 h-4" /> {t('datasetUpload.importModal.hf.cancelDownload')}
                           </button>
                         </div>
                       ) : (
                         <>
-                          <button
-                            onClick={handleHfDownload} disabled={!hfDatasetName.trim()}
+                          <button onClick={handleHfDownload} disabled={!hfDatasetName.trim()}
                             className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-white text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                               !hfDatasetName.trim() ? 'bg-white/5' : `bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90`
-                            }`}
-                          >
-                            <Download className="w-4 h-4" /> Dataset herunterladen
+                            }`}>
+                            <Download className="w-4 h-4" /> {t('datasetUpload.importModal.hf.downloadButton')}
                           </button>
-
-                          <p className="text-xs text-gray-600 text-center">
-                            Download-Dauer hängt von der Datenmenge ab
-                          </p>
+                          <p className="text-xs text-gray-600 text-center">{t('datasetUpload.importModal.hf.downloadNote')}</p>
                         </>
                       )}
                     </div>
@@ -1016,15 +1261,19 @@ export default function DatasetUpload() {
 // ── DatasetCard ────────────────────────────────────────────────────────────
 
 interface DatasetCardProps {
-  dataset: DatasetInfo;
+  dataset:       DatasetInfo;
   gradientClass: string;
-  onDelete: () => void;
-  onSplit: () => void;
-  onHalve: () => void;
-  onFiles: () => void;
+  onDelete:      () => void;
+  onSplit:       () => void;
+  onHalve:       () => void;
+  onFiles:       () => void;
 }
 
 function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFiles }: DatasetCardProps) {
+  const { t } = useLanguage();
+  const hasWarnings = (dataset.warnings?.length ?? 0) > 0;
+  const typeMeta = dataset.dataset_type ? DATASET_TYPE_LABELS[dataset.dataset_type] : null;
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/[0.07] transition-all group flex flex-col gap-4">
       {/* Top row */}
@@ -1035,32 +1284,71 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-white truncate" title={dataset.name}>{dataset.name}</h3>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
               <span className={`text-xs px-2 py-0.5 rounded-full ${
                 dataset.status === 'split' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'
               }`}>
-                {dataset.status === 'split' ? '✅ Aufgeteilt' : '⚠️ Kein Split'}
+                <span className="inline-flex items-center gap-1.5">
+                  {dataset.status === 'split'
+                    ? <CheckCircle className="w-3.5 h-3.5" />
+                    : <AlertTriangle className="w-3.5 h-3.5" />
+                  }
+                  <span>{dataset.status === 'split' ? t('datasetUpload.statusSplit') : t('datasetUpload.statusUnused')}</span>
+                </span>
               </span>
               {dataset.training_count > 0 && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400">
-                  {dataset.training_count}× benutzt
+                  {t('datasetUpload.card.usedCount').replace('{count}', String(dataset.training_count))}
                 </span>
               )}
             </div>
           </div>
         </div>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
-        >
+        <button onClick={onDelete} className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
+      {/* Dataset-Typ Badge */}
+      {typeMeta && dataset.dataset_type !== 'unknown' && (
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10">
+          <span className="text-base leading-none flex-shrink-0">{typeMeta.icon}</span>
+          <span className={`text-xs font-medium ${typeMeta.color}`}>{typeMeta.label}</span>
+          {dataset.pairing_status && (
+            <span className={`ml-auto text-xs ${dataset.pairing_status.is_paired ? 'text-emerald-400/70' : 'text-amber-400/70'}`}>
+              <span className="inline-flex items-center gap-1.5">
+                {dataset.pairing_status.is_paired ? (
+                  <CheckCircle className="w-3.5 h-3.5" />
+                ) : (
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {dataset.pairing_status.is_paired
+                    ? t('datasetUpload.card.pairedCount').replace('{count}', String(dataset.pairing_status.paired_count))
+                    : t('datasetUpload.card.orphanCount').replace('{count}', String(dataset.pairing_status.orphan_primaries.length))}
+                </span>
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Warnungen */}
+      {hasWarnings && (
+        <div className="space-y-1">
+          {dataset.warnings!.slice(0, 2).map((w, i) => (
+            <div key={i} className="flex items-start gap-1.5 text-xs text-amber-400/70">
+              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              <span className="truncate">{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Meta */}
       <div className="space-y-1.5 text-sm">
         <div className="flex items-center justify-between text-gray-400">
-          <span className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5" />{dataset.file_count} Dateien</span>
+          <span className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5" />{t('datasetUpload.card.filesLabel').replace('{count}', String(dataset.file_count))}</span>
           <span>{formatBytes(dataset.size_bytes)}</span>
         </div>
         <div className="flex items-center gap-1.5 text-gray-500 text-xs">
@@ -1068,7 +1356,18 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
         </div>
         {dataset.last_used_at && (
           <div className="flex items-center gap-1.5 text-gray-500 text-xs">
-            <CheckCircle className="w-3 h-3 text-cyan-500/60" /> Zuletzt: {formatDate(dataset.last_used_at)}
+            <CheckCircle className="w-3 h-3 text-cyan-500/60" /> {t('datasetUpload.card.lastUsed')} {formatDate(dataset.last_used_at)}
+          </div>
+        )}
+        {/* Extension chips */}
+        {dataset.extensions && dataset.extensions.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {dataset.extensions.slice(0, 4).map(ext => (
+              <span key={ext} className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-gray-500 text-[10px] font-mono">{ext}</span>
+            ))}
+            {dataset.extensions.length > 4 && (
+              <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-gray-600 text-[10px]">+{dataset.extensions.length - 4}</span>
+            )}
           </div>
         )}
       </div>
@@ -1077,9 +1376,9 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       {dataset.split_info && (
         <div className="grid grid-cols-3 gap-2 pt-1">
           {[
-            { label: 'Train', color: 'blue', count: dataset.split_info.train_count },
-            { label: 'Val', color: 'purple', count: dataset.split_info.val_count },
-            { label: 'Test', color: 'green', count: dataset.split_info.test_count },
+            { label: t('datasetUpload.card.splitTrain'), color: 'blue',   count: dataset.split_info.train_count },
+            { label: t('datasetUpload.card.splitVal'), color: 'purple', count: dataset.split_info.val_count },
+            { label: t('datasetUpload.card.splitTest'), color: 'green',  count: dataset.split_info.test_count },
           ].map(({ label, color, count }) => (
             <div key={label} className={`p-2 rounded-xl bg-${color}-500/10 text-center`}>
               <div className={`text-${color}-400 font-semibold text-sm`}>{count}</div>
@@ -1092,15 +1391,17 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       {/* Actions */}
       <div className="flex gap-2 pt-1">
         <button onClick={onFiles} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-xs transition-all">
-          <FileText className="w-3.5 h-3.5" /> Dateien
+          <FileText className="w-3.5 h-3.5" /> {t('datasetUpload.card.filesButton')}
         </button>
         {dataset.status === 'unused' && (
           <button onClick={onSplit} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-xs transition-all">
-            <Scissors className="w-3.5 h-3.5" /> Split
+            <Scissors className="w-3.5 h-3.5" /> {t('datasetUpload.card.splitButton')}
           </button>
         )}
-        <button onClick={onHalve} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/20 text-gray-400 hover:text-amber-400 text-xs transition-all" title="Bei RAM-Problemen halbieren">
-          ½ Halbieren
+        <button onClick={onHalve}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/20 text-gray-400 hover:text-amber-400 text-xs transition-all"
+          title={t('datasetUpload.card.halveTooltip')}>
+          {t('datasetUpload.card.halveButton')}
         </button>
       </div>
     </div>

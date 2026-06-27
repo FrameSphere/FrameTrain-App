@@ -6,11 +6,12 @@ import {
   Square, CheckCircle, AlertCircle, Loader2,
   Minimize2, Maximize2, ChevronDown, ChevronUp,
   X, Sparkles, Send, Copy, Check, Code2, Wrench,
-  Database, MemoryStick, Bug,
+  Database, MemoryStick, Bug, Rocket, Save, Info, XCircle,
 } from 'lucide-react';
 import type { TrainingConfig } from './TrainingPanel';
 import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // ── Session Storage ───────────────────────────────────────────────────────
 
@@ -62,31 +63,32 @@ export function getSession(id: string): TrainingSession | undefined {
 
 type ErrorCategory = 'memory' | 'dataset' | 'packages' | 'cuda' | 'config' | 'code' | 'unknown';
 
-function analyzeError(errorMsg: string): { category: ErrorCategory; title: string; hint: string } {
+function analyzeError(errorMsg: string, t: (key: string) => string): { category: ErrorCategory; title: string; hint: string } {
   const e = (errorMsg ?? '').toLowerCase();
   if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
-    return { category: 'memory', title: 'GPU/RAM Überlauf', hint: 'Batch-Größe reduzieren, FP16 oder LoRA aktivieren, Gradient Checkpointing einschalten.' };
+    return { category: 'memory', title: t('trainingDashboard.errorRecovery.memoryCategoryTitle'), hint: t('trainingDashboard.errorRecovery.memoryCategoryHint') };
   if (e.includes('cuda') || e.includes('mps') || e.includes('device'))
-    return { category: 'cuda', title: 'Hardware / Device Fehler', hint: 'Gerät nicht verfügbar oder inkompatibel. FP16 mit BF16 tauschen, oder auf CPU wechseln.' };
+    return { category: 'cuda', title: t('trainingDashboard.errorRecovery.cudaCategoryTitle'), hint: t('trainingDashboard.errorRecovery.cudaCategoryHint') };
   if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
-    return { category: 'dataset', title: 'Dataset / Pfad Fehler', hint: 'Dataset-Pfad prüfen, Dataset-Split ausführen, Dateirechte prüfen.' };
+    return { category: 'dataset', title: t('trainingDashboard.errorRecovery.datasetCategoryTitle'), hint: t('trainingDashboard.errorRecovery.datasetCategoryHint') };
   if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module'))
-    return { category: 'packages', title: 'Fehlende Python-Pakete', hint: 'pip install torch transformers datasets accelerate ausführen.' };
+    return { category: 'packages', title: t('trainingDashboard.errorRecovery.packagesCategoryTitle'), hint: t('trainingDashboard.errorRecovery.packagesCategoryHint') };
   if (e.includes('nan') || e.includes('inf') || e.includes('gradient') || e.includes('loss'))
-    return { category: 'config', title: 'Numerischer Fehler (NaN/Inf)', hint: 'Learning Rate zu hoch? Gradient Clipping (max_grad_norm) aktivieren, LR auf 1e-5 reduzieren.' };
+    return { category: 'config', title: t('trainingDashboard.errorRecovery.configCategoryTitle'), hint: t('trainingDashboard.errorRecovery.configCategoryHint') };
   if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror'))
-    return { category: 'code', title: 'Code-Fehler', hint: 'Syntax- oder Typfehler im Training-Skript. KI-Assistent kann den Fehler analysieren.' };
-  return { category: 'unknown', title: 'Unbekannter Fehler', hint: 'Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen.' };
+    return { category: 'code', title: t('trainingDashboard.errorRecovery.codeCategoryTitle'), hint: t('trainingDashboard.errorRecovery.codeCategoryHint') };
+  return { category: 'unknown', title: t('trainingDashboard.errorRecovery.unknownCategoryTitle'), hint: t('trainingDashboard.errorRecovery.unknownCategoryHint') };
 }
 
 // ── Big Loss Chart ────────────────────────────────────────────────────────
 
 function BigLossChart({ points }: { points: LossPoint[] }) {
+  const { t } = useLanguage();
   if (points.length < 2) {
     return (
       <div className="h-52 flex flex-col items-center justify-center gap-2">
         <Loader2 className="w-6 h-6 text-gray-600 animate-spin" />
-        <p className="text-gray-600 text-sm">Warte auf erste Loss-Werte…</p>
+        <p className="text-gray-600 text-sm">{t('trainingDashboard.chart.waitingForData')}</p>
       </div>
     );
   }
@@ -156,11 +158,11 @@ function BigLossChart({ points }: { points: LossPoint[] }) {
       <circle cx={toX(points.length - 1)} cy={toY(last.train_loss)} r="5" fill="#10b981" stroke="rgba(0,0,0,0.4)" strokeWidth="1.5" />
       <g transform={`translate(${PAD.l}, ${H - 10})`}>
         <circle cx="4" cy="-2" r="4" fill="#10b981" />
-        <text x="14" y="2" fill="rgba(255,255,255,0.45)" fontSize="10">Train Loss</text>
+        <text x="14" y="2" fill="rgba(255,255,255,0.45)" fontSize="10">{t('trainingDashboard.chart.legendTrain')}</text>
         {vals.length > 0 && (
           <>
             <line x1="90" y1="-2" x2="106" y2="-2" stroke="#a855f7" strokeWidth="2" strokeDasharray="4,2" />
-            <text x="112" y="2" fill="rgba(255,255,255,0.45)" fontSize="10">Val Loss</text>
+            <text x="112" y="2" fill="rgba(255,255,255,0.45)" fontSize="10">{t('trainingDashboard.chart.legendVal')}</text>
           </>
         )}
       </g>
@@ -171,30 +173,31 @@ function BigLossChart({ points }: { points: LossPoint[] }) {
 // ── Config Summary ────────────────────────────────────────────────────────
 
 function ConfigSummary({ config, mode }: { config?: Partial<TrainingConfig>; mode: 'standard' | 'dev' }) {
+  const { t } = useLanguage();
   if (mode === 'dev') {
-    return <p className="text-gray-600 text-xs italic">Dev Train Mode — kein strukturierter Config.</p>;
+    return <p className="text-gray-600 text-xs italic">{t('trainingDashboard.config.devMode')}</p>;
   }
   if (!config) {
-    return <p className="text-gray-600 text-xs italic">Konfiguration nicht verfügbar.</p>;
+    return <p className="text-gray-600 text-xs italic">{t('trainingDashboard.config.notAvailable')}</p>;
   }
   const rows: { label: string; value: string | number | boolean | undefined; color: string }[] = [
-    { label: 'Epochen',       value: config.epochs,                            color: 'text-emerald-400' },
-    { label: 'Batch Size',    value: config.batch_size,                        color: 'text-blue-400' },
-    { label: 'Learning Rate', value: config.learning_rate?.toExponential(2),   color: 'text-purple-400' },
-    { label: 'Max Seq Len',   value: config.max_seq_length,                    color: 'text-amber-400' },
-    { label: 'Warmup Ratio',  value: config.warmup_ratio,                      color: 'text-cyan-400' },
-    { label: 'Grad Accum',    value: config.gradient_accumulation_steps,       color: 'text-pink-400' },
-    { label: 'Optimizer',     value: config.optimizer,                         color: 'text-emerald-400' },
-    { label: 'Scheduler',     value: config.scheduler,                         color: 'text-blue-400' },
-    { label: 'Weight Decay',  value: config.weight_decay,                      color: 'text-purple-400' },
-    { label: 'Max Grad Norm', value: config.max_grad_norm,                     color: 'text-amber-400' },
-    { label: 'Dropout',       value: config.dropout,                           color: 'text-cyan-400' },
-    { label: 'Seed',          value: config.seed,                              color: 'text-gray-300' },
-    { label: 'FP16',          value: config.fp16 ? 'Ja' : 'Nein',             color: config.fp16 ? 'text-emerald-400' : 'text-gray-600' },
-    { label: 'BF16',          value: config.bf16 ? 'Ja' : 'Nein',             color: config.bf16 ? 'text-emerald-400' : 'text-gray-600' },
-    { label: 'LoRA',          value: config.use_lora ? `r=${config.lora_r}` : 'Nein', color: config.use_lora ? 'text-violet-400' : 'text-gray-600' },
-    { label: 'QLoRA (4bit)',  value: config.load_in_4bit ? 'Ja' : 'Nein',     color: config.load_in_4bit ? 'text-fuchsia-400' : 'text-gray-600' },
-    { label: 'Grad Checkpoint', value: config.gradient_checkpointing ? 'Ja' : 'Nein', color: config.gradient_checkpointing ? 'text-emerald-400' : 'text-gray-600' },
+    { label: t('trainingDashboard.config.epochs'),       value: config.epochs,                            color: 'text-emerald-400' },
+    { label: t('trainingDashboard.config.batchSize'),    value: config.batch_size,                        color: 'text-blue-400' },
+    { label: t('trainingDashboard.config.learningRate'), value: config.learning_rate?.toExponential(2),   color: 'text-purple-400' },
+    { label: t('trainingDashboard.config.maxSeqLen'),   value: config.max_seq_length,                    color: 'text-amber-400' },
+    { label: t('trainingDashboard.config.warmupRatio'),  value: config.warmup_ratio,                      color: 'text-cyan-400' },
+    { label: t('trainingDashboard.config.gradAccum'),    value: config.gradient_accumulation_steps,       color: 'text-pink-400' },
+    { label: t('trainingDashboard.config.optimizer'),     value: config.optimizer,                         color: 'text-emerald-400' },
+    { label: t('trainingDashboard.config.scheduler'),     value: config.scheduler,                         color: 'text-blue-400' },
+    { label: t('trainingDashboard.config.weightDecay'),  value: config.weight_decay,                      color: 'text-purple-400' },
+    { label: t('trainingDashboard.config.maxGradNorm'), value: config.max_grad_norm,                     color: 'text-amber-400' },
+    { label: t('trainingDashboard.config.dropout'),       value: config.dropout,                           color: 'text-cyan-400' },
+    { label: t('trainingDashboard.config.seed'),          value: config.seed,                              color: 'text-gray-300' },
+    { label: t('trainingDashboard.config.fp16'),          value: config.fp16 ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),             color: config.fp16 ? 'text-emerald-400' : 'text-gray-600' },
+    { label: t('trainingDashboard.config.bf16'),          value: config.bf16 ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),             color: config.bf16 ? 'text-emerald-400' : 'text-gray-600' },
+    { label: t('trainingDashboard.config.lora'),          value: config.use_lora ? `r=${config.lora_r}` : t('trainingDashboard.config.no'), color: config.use_lora ? 'text-violet-400' : 'text-gray-600' },
+    { label: t('trainingDashboard.config.qlora'),  value: config.load_in_4bit ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),     color: config.load_in_4bit ? 'text-fuchsia-400' : 'text-gray-600' },
+    { label: t('trainingDashboard.config.gradCheckpoint'), value: config.gradient_checkpointing ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'), color: config.gradient_checkpointing ? 'text-emerald-400' : 'text-gray-600' },
   ];
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
@@ -210,9 +213,14 @@ function ConfigSummary({ config, mode }: { config?: Partial<TrainingConfig>; mod
 
 // ── Event Log ─────────────────────────────────────────────────────────────
 
-const EVENT_ICONS: Record<string, string> = {
-  start: '🚀', epoch: '📊', checkpoint: '💾',
-  complete: '✅', error: '❌', stop: '⏹', info: 'ℹ️',
+const EVENT_ICONS: Record<string, React.ReactNode> = {
+  start: <Rocket className="w-3.5 h-3.5" />,
+  epoch: <BarChart3 className="w-3.5 h-3.5" />,
+  checkpoint: <Save className="w-3.5 h-3.5" />,
+  complete: <CheckCircle className="w-3.5 h-3.5" />,
+  error: <XCircle className="w-3.5 h-3.5" />,
+  stop: <Square className="w-3.5 h-3.5" />,
+  info: <Info className="w-3.5 h-3.5" />,
 };
 const EVENT_COLORS: Record<string, string> = {
   start: 'text-violet-400', epoch: 'text-blue-400', checkpoint: 'text-amber-400',
@@ -232,8 +240,9 @@ function ErrorRecoveryPanel({
   onSendCodeToKI?: (script: string, error: string) => void;
   devScript?: string;
 }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
-  const { category, title, hint } = analyzeError(errorMsg);
+  const { category, title, hint } = analyzeError(errorMsg, t);
 
   const categoryIcon = {
     memory: <MemoryStick className="w-4 h-4 text-red-400" />,
@@ -247,15 +256,15 @@ function ErrorRecoveryPanel({
 
   const buildDiagReport = () => {
     const lines = [
-      '=== FrameTrain Fehlerbericht ===',
-      `Modus: ${mode === 'dev' ? 'Dev Train' : 'Standard'}`,
-      `Fehler-Kategorie: ${title}`,
-      `Fehlermeldung: ${errorMsg}`,
+      t('trainingDashboard.errorRecovery.reportHeader'),
+      t('trainingDashboard.errorRecovery.reportMode').replace('{mode}', mode === 'dev' ? t('trainingDashboard.modeDev') : t('trainingDashboard.modeStandard')),
+      t('trainingDashboard.errorRecovery.reportCategory').replace('{category}', title),
+      t('trainingDashboard.errorRecovery.reportError').replace('{error}', errorMsg),
       '',
-      '--- Konfiguration ---',
-      ...(config ? Object.entries(config).map(([k, v]) => `${k}: ${v}`) : ['Dev Train (kein strukturierter Config)']),
+      t('trainingDashboard.errorRecovery.reportConfigSection'),
+      ...(config ? Object.entries(config).map(([k, v]) => `${k}: ${v}`) : [t('trainingDashboard.errorRecovery.reportConfigDev')]),
       '',
-      '--- Ende Bericht ---',
+      t('trainingDashboard.errorRecovery.reportEnd'),
     ];
     return lines.join('\n');
   };
@@ -286,7 +295,7 @@ function ErrorRecoveryPanel({
 
       {/* Actions */}
       <div className="p-3 space-y-2">
-        <p className="text-gray-500 text-[10px] uppercase tracking-wide font-medium mb-2">Optionen</p>
+        <p className="text-gray-500 text-[10px] uppercase tracking-wide font-medium mb-2">{t('trainingDashboard.errorRecovery.optionsTitle')}</p>
 
         {mode === 'standard' && (
           <>
@@ -298,8 +307,8 @@ function ErrorRecoveryPanel({
               >
                 <Sparkles className="w-4 h-4 text-violet-400 flex-shrink-0" />
                 <div>
-                  <p className="text-violet-300 text-xs font-medium">KI-Metriken anpassen</p>
-                  <p className="text-gray-500 text-[10px]">KI-Assistent analysiert die Konfiguration und schlägt Fixes vor</p>
+                  <p className="text-violet-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.kiMetricsButton')}</p>
+                  <p className="text-gray-500 text-[10px]">{t('trainingDashboard.errorRecovery.kiMetricsDesc')}</p>
                 </div>
               </button>
             )}
@@ -309,8 +318,8 @@ function ErrorRecoveryPanel({
               <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
                 <MemoryStick className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-amber-300 text-xs font-medium">RAM-Tipp</p>
-                  <p className="text-gray-400 text-[10px]">LoRA aktivieren (r=8), FP16 oder BF16 einschalten, Batch auf 2–4 reduzieren, Gradient Checkpointing aktivieren.</p>
+                  <p className="text-amber-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.ramTipTitle')}</p>
+                  <p className="text-gray-400 text-[10px]">{t('trainingDashboard.errorRecovery.ramTipDesc')}</p>
                 </div>
               </div>
             )}
@@ -320,8 +329,8 @@ function ErrorRecoveryPanel({
               <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
                 <Database className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-blue-300 text-xs font-medium">Dataset prüfen</p>
-                  <p className="text-gray-400 text-[10px]">Dataset im Dataset-Manager aufteilen (Split ausführen), Pfade und Dateirechte prüfen.</p>
+                  <p className="text-blue-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.datasetTipTitle')}</p>
+                  <p className="text-gray-400 text-[10px]">{t('trainingDashboard.errorRecovery.datasetTipDesc')}</p>
                 </div>
               </div>
             )}
@@ -334,9 +343,9 @@ function ErrorRecoveryPanel({
               {copied ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" /> : <Copy className="w-4 h-4 text-gray-400 flex-shrink-0" />}
               <div>
                 <p className={`text-xs font-medium ${copied ? 'text-emerald-300' : 'text-gray-300'}`}>
-                  {copied ? 'Fehlerbericht kopiert!' : 'Fehlerbericht kopieren'}
+                  {copied ? t('trainingDashboard.errorRecovery.copyReportCopied') : t('trainingDashboard.errorRecovery.copyReportButton')}
                 </p>
-                <p className="text-gray-600 text-[10px]">Vollständigen Bericht in Zwischenablage für FrameTrain-Support</p>
+                <p className="text-gray-600 text-[10px]">{t('trainingDashboard.errorRecovery.copyReportDesc')}</p>
               </div>
             </button>
 
@@ -345,8 +354,8 @@ function ErrorRecoveryPanel({
               <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/10">
                 <Send className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-gray-300 text-xs font-medium">An FrameTrain senden</p>
-                  <p className="text-gray-500 text-[10px]">Fehlerbericht kopieren und an das FrameTrain-Team schicken — der Fehler liegt wahrscheinlich in der Engine und wird behoben.</p>
+                  <p className="text-gray-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.sendToTeamTitle')}</p>
+                  <p className="text-gray-500 text-[10px]">{t('trainingDashboard.errorRecovery.sendToTeamDesc')}</p>
                 </div>
               </div>
             )}
@@ -363,8 +372,8 @@ function ErrorRecoveryPanel({
               >
                 <Code2 className="w-4 h-4 text-cyan-400 flex-shrink-0" />
                 <div>
-                  <p className="text-cyan-300 text-xs font-medium">Code mit KI korrigieren</p>
-                  <p className="text-gray-500 text-[10px]">Fehler + Python-Code an den KI-Assistenten senden — KI schlägt direkte Code-Fixes vor</p>
+                  <p className="text-cyan-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.codeFixButton')}</p>
+                  <p className="text-gray-500 text-[10px]">{t('trainingDashboard.errorRecovery.codeFixDesc')}</p>
                 </div>
               </button>
             )}
@@ -374,8 +383,8 @@ function ErrorRecoveryPanel({
               <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
                 <MemoryStick className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-amber-300 text-xs font-medium">Speicher-Fehler</p>
-                  <p className="text-gray-400 text-[10px]">Im Skript Batch-Größe reduzieren, FP16 / bfloat16 verwenden, oder gradient_checkpointing=True setzen.</p>
+                  <p className="text-amber-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.memoryHintTitle')}</p>
+                  <p className="text-gray-400 text-[10px]">{t('trainingDashboard.errorRecovery.memoryHintDesc')}</p>
                 </div>
               </div>
             )}
@@ -388,9 +397,9 @@ function ErrorRecoveryPanel({
               {copied ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" /> : <Copy className="w-4 h-4 text-gray-400 flex-shrink-0" />}
               <div>
                 <p className={`text-xs font-medium ${copied ? 'text-emerald-300' : 'text-gray-300'}`}>
-                  {copied ? 'Kopiert!' : 'Fehlerbericht kopieren'}
+                  {copied ? t('trainingDashboard.errorRecovery.copied') : t('trainingDashboard.errorRecovery.copyReportButton')}
                 </p>
-                <p className="text-gray-600 text-[10px]">Für FrameTrain-Support oder GitHub-Issue</p>
+                <p className="text-gray-600 text-[10px]">{t('trainingDashboard.errorRecovery.copyReportDevDesc')}</p>
               </div>
             </button>
           </>
@@ -432,6 +441,7 @@ export default function TrainingDashboard({
   completedVersionId, onNavigateToAnalysis,
   onOpenKIAssistant, devScript, onSendCodeToKI,
 }: TrainingDashboardProps) {
+  const { t } = useLanguage();
   const { currentTheme } = useTheme();
   const [elapsed, setElapsed] = useState(0);
   const [events, setEvents] = useState<SessionEvent[]>([]);
@@ -459,18 +469,18 @@ export default function TrainingDashboard({
       if (job.status === 'running' || job.status === 'pending') {
         const alreadyStarted = newEvents.some(e => e.type === 'start');
         if (!alreadyStarted) {
-          newEvents = [{ time: new Date().toISOString(), type: 'start', message: `Training gestartet — ${modelName}` }, ...newEvents];
+          newEvents = [{ time: new Date().toISOString(), type: 'start', message: t('trainingDashboard.eventLog.eventStart').replace('{model}', modelName) }, ...newEvents];
           changed = true;
         }
       } else if (job.status === 'completed') {
         const lastLoss = lossPoints[lossPoints.length - 1];
-        newEvents = [{ time: new Date().toISOString(), type: 'complete', message: `Abgeschlossen! Finaler Loss: ${lastLoss?.train_loss?.toFixed(4) ?? '—'}${lastLoss?.val_loss != null ? ` | Val: ${lastLoss.val_loss.toFixed(4)}` : ''}` }, ...newEvents];
+        newEvents = [{ time: new Date().toISOString(), type: 'complete', message: t('trainingDashboard.eventLog.eventComplete').replace('{loss}', lastLoss?.train_loss?.toFixed(4) ?? '—').concat(lastLoss?.val_loss != null ? t('trainingDashboard.eventLog.eventCompleteVal').replace('{val}', lastLoss.val_loss.toFixed(4)) : '') }, ...newEvents];
         changed = true;
       } else if (job.status === 'failed') {
-        newEvents = [{ time: new Date().toISOString(), type: 'error', message: `Fehler: ${job.error ?? 'Unbekannt'}` }, ...newEvents];
+        newEvents = [{ time: new Date().toISOString(), type: 'error', message: t('trainingDashboard.eventLog.eventError').replace('{error}', job.error ?? t('common.unknown')) }, ...newEvents];
         changed = true;
       } else if (job.status === 'stopped') {
-        newEvents = [{ time: new Date().toISOString(), type: 'stop', message: 'Training manuell gestoppt' }, ...newEvents];
+        newEvents = [{ time: new Date().toISOString(), type: 'stop', message: t('trainingDashboard.eventLog.eventStopped') }, ...newEvents];
         changed = true;
       }
     }
@@ -478,7 +488,7 @@ export default function TrainingDashboard({
     if (progress && progress.epoch !== prevEpochRef.current && progress.epoch > 0) {
       prevEpochRef.current = progress.epoch;
       const valStr = progress.val_loss != null ? ` · Val: ${progress.val_loss.toFixed(4)}` : '';
-      newEvents = [{ time: new Date().toISOString(), type: 'epoch', message: `Epoch ${progress.epoch}/${progress.total_epochs} — Train: ${progress.train_loss?.toFixed(4)}${valStr}` }, ...newEvents];
+      newEvents = [{ time: new Date().toISOString(), type: 'epoch', message: t('trainingDashboard.eventLog.eventEpoch').replace('{epoch}', String(progress.epoch)).replace('{total}', String(progress.total_epochs)).replace('{trainLoss}', progress.train_loss?.toFixed(4) ?? '—').concat(valStr ? t('trainingDashboard.eventLog.eventEpochVal').replace('{val}', progress.val_loss?.toFixed(4) ?? '—') : '') }, ...newEvents];
       changed = true;
     }
 
@@ -553,11 +563,11 @@ export default function TrainingDashboard({
         {isStopped   && <Square       className="w-4 h-4 text-gray-400 flex-shrink-0" />}
         <div className="min-w-0">
           <p className="text-white text-xs font-semibold">
-            {isRunning ? 'Training läuft…' : isCompleted ? 'Training abgeschlossen ✓' : isFailed ? 'Training fehlgeschlagen' : 'Training gestoppt'}
+            {isRunning ? t('trainingDashboard.statusRunning') : isCompleted ? t('trainingDashboard.statusCompleted') : isFailed ? t('trainingDashboard.statusFailed') : t('trainingDashboard.statusStopped')}
           </p>
           {progress && (
             <p className="text-gray-500 text-[10px]">
-              E{progress.epoch}/{progress.total_epochs} · Loss: {progress.train_loss?.toFixed(4)} · {formatDuration(elapsed)}
+              {t('trainingDashboard.minimized.epochInfo').replace('{epoch}', String(progress.epoch)).replace('{total}', String(progress.total_epochs)).replace('{loss}', progress.train_loss?.toFixed(4) ?? '—').replace('{duration}', formatDuration(elapsed))}
             </p>
           )}
         </div>
@@ -586,10 +596,10 @@ export default function TrainingDashboard({
             {isStopped   && <Square className="w-5 h-5 text-gray-400" />}
             <div>
               <h2 className="text-white font-bold text-sm">
-                {isRunning ? 'Training läuft' : isCompleted ? 'Training abgeschlossen' : isFailed ? 'Training fehlgeschlagen' : isStopped ? 'Training gestoppt' : 'Training Dashboard'}
+                {isRunning ? t('trainingDashboard.statusRunning') : isCompleted ? t('trainingDashboard.statusCompleted') : isFailed ? t('trainingDashboard.statusFailed') : isStopped ? t('trainingDashboard.statusStopped') : t('trainingDashboard.titleDefault')}
               </h2>
               <p className="text-gray-500 text-xs">
-                {modelName} · {datasetName} · {mode === 'dev' ? 'Dev Train' : 'Standard'}
+                {modelName} · {datasetName} · {mode === 'dev' ? t('trainingDashboard.modeDev') : t('trainingDashboard.modeStandard')}
                 {progress && ` · ${Math.round(progress.progress_percent)}%`}
               </p>
             </div>
@@ -597,15 +607,15 @@ export default function TrainingDashboard({
           <div className="flex items-center gap-2">
             {isRunning && (
               <button onClick={onStop} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 text-xs font-medium transition-all">
-                <Square className="w-3.5 h-3.5" /> Stoppen
+                <Square className="w-3.5 h-3.5" /> {t('trainingDashboard.header.stopButton')}
               </button>
             )}
-            <button onClick={onMinimize} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all" title="Minimieren">
+            <button onClick={onMinimize} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all" title={t('trainingDashboard.header.minimizeTooltip')}>
               <Minimize2 className="w-4 h-4" />
             </button>
             {/* Close button – nur wenn nicht am Laufen */}
             {isDone && onClose && (
-              <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all" title="Schließen">
+              <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all" title={t('trainingDashboard.header.closeTooltip')}>
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -617,10 +627,10 @@ export default function TrainingDashboard({
           {/* Metrics strip */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'Train Loss', value: progress?.train_loss?.toFixed(4) ?? '—', sub: lossImprovement != null ? `${lossImprovement > 0 ? '↓' : '↑'} ${Math.abs(lossImprovement).toFixed(1)}% seit Start` : undefined, icon: <TrendingDown className="w-4 h-4" />, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
-              { label: 'Val Loss',   value: progress?.val_loss?.toFixed(4) ?? '—', icon: <BarChart3 className="w-4 h-4" />, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
-              { label: 'Learning Rate', value: progress?.learning_rate?.toExponential(2) ?? (config?.learning_rate?.toExponential(2) ?? '—'), icon: <Zap className="w-4 h-4" />, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
-              { label: 'Laufzeit',  value: formatDuration(elapsed), sub: eta ? `ETA: ~${eta}` : (isCompleted ? 'Abgeschlossen' : isStopped ? 'Gestoppt' : undefined), icon: <Clock className="w-4 h-4" />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
+              { label: t('trainingDashboard.metrics.trainLoss'), value: progress?.train_loss?.toFixed(4) ?? '—', sub: lossImprovement != null ? `${lossImprovement > 0 ? '↓' : '↑'} ${Math.abs(lossImprovement).toFixed(1)}% ${t('trainingDashboard.metrics.trainLossSub').replace('{dir}', '').replace('{pct}', '')}` : undefined, icon: <TrendingDown className="w-4 h-4" />, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+              { label: t('trainingDashboard.metrics.valLoss'),   value: progress?.val_loss?.toFixed(4) ?? '—', icon: <BarChart3 className="w-4 h-4" />, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
+              { label: t('trainingDashboard.metrics.learningRate'), value: progress?.learning_rate?.toExponential(2) ?? (config?.learning_rate?.toExponential(2) ?? '—'), icon: <Zap className="w-4 h-4" />, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
+              { label: t('trainingDashboard.metrics.duration'),  value: formatDuration(elapsed), sub: eta ? t('trainingDashboard.metrics.eta').replace('{eta}', eta) : (isCompleted ? t('trainingDashboard.metrics.completed') : isStopped ? t('trainingDashboard.metrics.stopped') : undefined), icon: <Clock className="w-4 h-4" />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
             ].map(m => (
               <div key={m.label} className={`p-4 rounded-xl border ${m.bg} space-y-1`}>
                 <div className={`flex items-center gap-1.5 ${m.color}`}>{m.icon}<span className="text-xs">{m.label}</span></div>
@@ -634,7 +644,7 @@ export default function TrainingDashboard({
           {progress && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-gray-400">
-                <span>Epoch {progress.epoch} / {progress.total_epochs} · Step {progress.step} / {progress.total_steps}</span>
+                <span>{t('trainingDashboard.progress.epochStep').replace('{epoch}', String(progress.epoch)).replace('{totalEpochs}', String(progress.total_epochs)).replace('{step}', String(progress.step)).replace('{totalSteps}', String(progress.total_steps))}</span>
                 <span className="font-mono">{Math.round(progress.progress_percent)}%</span>
               </div>
               <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
@@ -659,7 +669,7 @@ export default function TrainingDashboard({
           {isStopped && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10">
               <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              <p className="text-gray-400 text-sm">Training wurde manuell gestoppt. Du kannst es jederzeit neu starten.</p>
+              <p className="text-gray-400 text-sm">{t('trainingDashboard.stopped.message')}</p>
             </div>
           )}
 
@@ -668,14 +678,14 @@ export default function TrainingDashboard({
             <div className="space-y-2">
               <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                 <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <p className="text-emerald-300 text-sm font-medium">Training erfolgreich abgeschlossen! 🎉</p>
+                <p className="text-emerald-300 text-sm font-medium">{t('trainingDashboard.completed.message')}</p>
               </div>
               {completedVersionId && onNavigateToAnalysis && (
                 <button
                   onClick={() => onNavigateToAnalysis(completedVersionId)}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:opacity-90 text-white font-semibold text-sm transition-all shadow-lg"
                 >
-                  <BarChart3 className="w-4 h-4" /> Analyse starten →
+                  <BarChart3 className="w-4 h-4" /> {t('trainingDashboard.completed.analyzeButton')}
                 </button>
               )}
             </div>
@@ -685,14 +695,14 @@ export default function TrainingDashboard({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-gray-400 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-emerald-400" /> Loss-Verlauf</p>
-                <span className="text-[10px] text-gray-600">{lossPoints.length} Punkte</span>
+                <p className="text-xs font-medium text-gray-400 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-emerald-400" /> {t('trainingDashboard.chart.title')}</p>
+                <span className="text-[10px] text-gray-600">{t('trainingDashboard.chart.points').replace('{count}', String(lossPoints.length))}</span>
               </div>
               <BigLossChart points={lossPoints} />
               {lossPoints.length >= 2 && (
                 <div className="flex items-center gap-4 text-[10px] text-gray-500 border-t border-white/8 pt-2">
-                  <span>Start: <span className="text-gray-300 font-mono">{firstLoss?.toFixed(4)}</span></span>
-                  <span>Aktuell: <span className="text-gray-300 font-mono">{lastLoss?.toFixed(4)}</span></span>
+                  <span>{t('trainingDashboard.chart.start')} <span className="text-gray-300 font-mono">{firstLoss?.toFixed(4)}</span></span>
+                  <span>{t('trainingDashboard.chart.current')} <span className="text-gray-300 font-mono">{lastLoss?.toFixed(4)}</span></span>
                   {lossImprovement != null && (
                     <span className={lossImprovement > 0 ? 'text-emerald-400' : 'text-red-400'}>
                       {lossImprovement > 0 ? '↓' : '↑'} {Math.abs(lossImprovement).toFixed(1)}%
@@ -703,7 +713,7 @@ export default function TrainingDashboard({
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
               <button className="w-full flex items-center justify-between text-xs font-medium text-gray-400 hover:text-white transition-all" onClick={() => setShowFullConfig(v => !v)}>
-                <span className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-blue-400" /> Konfiguration</span>
+                <span className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-blue-400" /> {t('trainingDashboard.config.title')}</span>
                 {showFullConfig ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
               <ConfigSummary config={config} mode={mode} />
@@ -714,18 +724,18 @@ export default function TrainingDashboard({
           <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/10">
               <Clock className="w-3.5 h-3.5 text-gray-500" />
-              <span className="text-xs font-medium text-gray-400">Trainings-Log</span>
-              <span className="ml-auto text-[10px] text-gray-600">{events.length} Einträge · wird in ft_training_sessions gespeichert</span>
+              <span className="text-xs font-medium text-gray-400">{t('trainingDashboard.eventLog.title')}</span>
+              <span className="ml-auto text-[10px] text-gray-600">{t('trainingDashboard.eventLog.entriesNote').replace('{count}', String(events.length))}</span>
             </div>
             <div className="max-h-40 overflow-y-auto p-3 space-y-1.5">
               {events.length === 0 ? (
-                <p className="text-gray-600 text-xs text-center py-4 italic">Warte auf Events…</p>
+                <p className="text-gray-600 text-xs text-center py-4 italic">{t('trainingDashboard.eventLog.waiting')}</p>
               ) : events.map((ev, i) => (
                 <div key={i} className="flex items-start gap-2 text-[11px]">
                   <span className="text-gray-600 tabular-nums flex-shrink-0 font-mono text-[10px]">
                     {new Date(ev.time).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
-                  <span className="flex-shrink-0 text-[13px] leading-[1.1]">{EVENT_ICONS[ev.type] ?? 'ℹ️'}</span>
+                  <span className="flex-shrink-0 text-[13px] leading-[1.1]">{EVENT_ICONS[ev.type] ?? EVENT_ICONS.info}</span>
                   <span className={`${EVENT_COLORS[ev.type] ?? 'text-gray-300'} leading-relaxed`}>{ev.message}</span>
                 </div>
               ))}

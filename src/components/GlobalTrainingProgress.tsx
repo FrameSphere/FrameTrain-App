@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Loader2, CheckCircle, AlertCircle, Square, Maximize2, TrendingDown } from 'lucide-react';
 import { useTrainingContext } from '../contexts/TrainingContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ActiveTraining {
   training_id: string;
@@ -86,11 +87,13 @@ export default function GlobalTrainingProgress({ onNavigateToTraining }: GlobalT
     return `${s}s`;
   };
 
+  const { t } = useLanguage();
+
   return (
     <div
       className="fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl cursor-pointer hover:bg-slate-800 transition-all group"
       onClick={onNavigateToTraining}
-      title="Zum Training"
+      title="t('globalTrainingProgress.tooltip')"
     >
       {isRunning   && <Loader2     className="w-4 h-4 text-emerald-400 animate-spin flex-shrink-0" />}
       {isCompleted && <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
@@ -99,10 +102,10 @@ export default function GlobalTrainingProgress({ onNavigateToTraining }: GlobalT
 
       <div className="min-w-0">
         <p className="text-white text-xs font-semibold">
-          {isRunning   ? 'Training läuft…'
-           : isCompleted ? 'Training abgeschlossen ✓'
-           : isFailed    ? 'Training fehlgeschlagen'
-           : 'Training gestoppt'}
+          {isRunning   ? t('globalTrainingProgress.statusRunning')
+           : isCompleted ? t('globalTrainingProgress.statusCompleted')
+           : isFailed    ? t('globalTrainingProgress.statusFailed')
+           : t('globalTrainingProgress.statusStopped')}
         </p>
         <p className="text-gray-500 text-[10px]">
           E{effectiveTraining.current_epoch}/{effectiveTraining.total_epochs}

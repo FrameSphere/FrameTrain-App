@@ -14,6 +14,9 @@ const xlmRobertaPlugin: ModelPlugin = {
   detect: detectXLMRoberta,
   TrainComponent: XLMRobertaTrainPlugin,
   TestComponent: XLMRobertaTestPlugin,
+  // Phase 7: Dataset-Kompatibilität
+  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],
+  preferredDatasetType: 'flat_file',
 };
 
 export default xlmRobertaPlugin;
