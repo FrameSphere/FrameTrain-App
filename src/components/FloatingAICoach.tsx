@@ -4,11 +4,12 @@ import {
   MessageSquare, Plus, Trash2, ChevronDown, ChevronRight, Brain,
   FileSearch, Cpu, Sparkles, ArrowLeft
 } from 'lucide-react';
-import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
+import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
+import GradientChatInput from './ui/GradientChatInput';
 import { PROVIDER_META } from '../ai/providerMeta';
 import { onOpenAICoach } from '../ai/aiCoachEvents';
 
@@ -122,6 +123,33 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
+
+    // ── Code Block (```...```) ──────────────────────────────────────────────
+    if (trimmed.startsWith('```')) {
+      const lang = trimmed.slice(3).trim(); // z.B. "python", "bash", ""
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // schließendes ``` überspringen
+      elements.push(
+        <div key={`cb-${i}`} className="my-2 rounded-xl overflow-hidden border border-white/10">
+          {lang && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.06] border-b border-white/10">
+              <span className="text-[10px] font-mono text-purple-300 font-medium">{lang}</span>
+            </div>
+          )}
+          <pre className="px-3 py-2.5 bg-black/40 overflow-x-auto">
+            <code className="text-[11px] font-mono text-emerald-300 leading-relaxed whitespace-pre">
+              {codeLines.join('\n')}
+            </code>
+          </pre>
+        </div>
+      );
+      continue;
+    }
 
     if (!trimmed) {
       elements.push(<div key={i} className="h-1.5" />);
@@ -424,6 +452,7 @@ function saveChatsForUser(chats: Chat[], userId?: string): void {
 
 export default function FloatingAICoach({ currentPageContent, userId }: FloatingAICoachProps) {
   const { settings } = useAISettings();
+  const budgetCfg = TOKEN_BUDGET_CONFIG[settings.tokenBudget ?? 'balanced'];
   const { language } = useLanguage();
   const { currentTheme } = useTheme();
   const { currentPageContent: ctxPageContent } = usePageContext();
@@ -454,6 +483,8 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
+  // Letzte fehlgeschlagene Nachricht — für "Erneut senden" nach Fehler
+  const lastFailedTextRef = useRef<string | null>(null);
 
   // Draggable/resizable state
   const [position, setPosition] = useState({ x: window.innerWidth - 390, y: window.innerHeight - 560 });
@@ -466,6 +497,8 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevMsgCountRef = useRef(0);
+  // Letzter Seitenkontext der dem Modell bekannt ist
+  const lastSentPageContentRef = useRef<string>('');
 
   // Load chats from localStorage on mount (only persisted ones)
   useEffect(() => {
@@ -611,51 +644,193 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
     }
   }, []);
 
-  // ── Build system prompt ──
-  const buildSystemPrompt = (): string => {
-    let prompt = `Du bist ein hilfreicher KI-Assistent in der FrameTrain Desktop-Anwendung für Machine Learning Training.\n\nAKTUELLE SEITE UND KONTEXT:`;
-    if (pageContent) {
-      prompt += `\n${pageContent}`;
-    } else {
-      prompt += `\nKein spezifischer Seitenkontext verfügbar.`;
+  // ── System Prompt ───────────────────────────────────────────────────────────
+  // isFirstMessage: Seitenkontext nur beim 1. Message einbetten.
+  // Danach ist er bereits in der History — spart 30-50% Input-Tokens.
+  const buildSystemPrompt = (isFirstMessage: boolean): string => {
+    const baseRole = `Du bist der FrameTrain AI Coach — ein präziser, freundlicher Assistent für Machine Learning Training in der FrameTrain Desktop-App.
+
+Deine Persönlichkeit:
+- Antworte knapp und direkt. Kein unnötiges Füllwort.
+- Bei technischen Fragen: konkret, mit Codebeispielen oder Zahlenwerten.
+- Bei Fehlern: Ursache + Fix, nicht nur Beschreibung.
+- Nutze Markdown: **fett** für Schlüsselbegriffe, Listen für Schritte, \`code\` für Werte.
+- Wenn du dir nicht sicher bist: sag es. Nicht raten.
+- Beziehe dich auf den Seiteninhalt wenn relevant — du weißt was der User gerade sieht.`;
+
+    const pageChanged = !isFirstMessage &&
+      pageContent &&
+      pageContent !== lastSentPageContentRef.current;
+
+    if (isFirstMessage && pageContent) {
+      lastSentPageContentRef.current = pageContent;
+      return `${baseRole}
+
+── AKTUELLE SEITE (nur einmal mitgeliefert, danach in der History) ──
+${pageContent}
+────────────────────────────────────────────────────────────────────────────────`;
     }
-    prompt += `\n\nANWEISUNGEN:\n- Antworte auf Deutsch, prägnant und hilfreich\n- Erkläre ML-Konzepte verständlich\n- Wenn du Fehler siehst, erkläre ihre Ursache und Lösung\n- Nutze Markdown-Formatierung: **fett** für wichtige Begriffe, Listen für Schritte\n- Beziehe dich konkret auf den Seiteninhalt wenn relevant`;
-    return prompt;
+
+    if (pageChanged) {
+      lastSentPageContentRef.current = pageContent;
+      return `${baseRole}
+
+── SEITE GEWECHSELT — NEUER KONTEXT ──
+${pageContent}
+────────────────────────────────────────────────────────────────────────────────`;
+    }
+
+    if (isFirstMessage) {
+      return `${baseRole}
+
+Kein Seitenkontext verfügbar — beantworte allgemeine FrameTrain-Fragen.`;
+    }
+
+    return baseRole;
   };
 
-  // Fix 2: Schritte sequenziell aufdecken — nur den aktuellen Schritt zeigen
-  const runThinkingAnimation = async (hasPageContent: boolean): Promise<ThinkingStep[]> => {
-    const steps: ThinkingStep[] = [
-      { id: 's1', label: 'Seite analysieren', icon: 'search', status: 'pending',
-        detail: hasPageContent ? pageContent.slice(0, 80) + '...' : 'Kein Kontext verfügbar' },
-      { id: 's2', label: 'Kontext verarbeiten', icon: 'brain', status: 'pending', detail: undefined },
-      { id: 's3', label: 'Antwort generieren', icon: 'sparkles', status: 'pending', detail: undefined },
-    ];
-
-    // Nur Step 1 sichtbar + aktiv
-    setThinkingSteps([{ ...steps[0], status: 'active' }]);
-    await new Promise(r => setTimeout(r, 400));
-
-    // Step 1 fertig, Step 2 wird sichtbar + aktiv
-    setThinkingSteps([
-      { ...steps[0], status: 'done' },
-      { ...steps[1], status: 'active' },
-    ]);
-    await new Promise(r => setTimeout(r, 350));
-
-    // Step 2 fertig, Step 3 wird sichtbar + aktiv
-    setThinkingSteps([
-      { ...steps[0], status: 'done' },
-      { ...steps[1], status: 'done' },
-      { ...steps[2], status: 'active' },
-    ]);
-
-    return steps.map(s => ({ ...s, status: 'done' as const }));
+  // ── Token-Budget für History ──────────────────────────────────────────────────
+  // Begrenzt die History auf ~2000 Tokens (neueste zuerst), statt blind slice(-10)
+  const buildTokenBudgetedHistory = (messages: Message[]): { role: 'user' | 'assistant'; content: string }[] => {
+    const MAX_TOKENS = budgetCfg.historyTokenBudget;
+    let budget = 0;
+    const selected: Message[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const estimated = Math.ceil(messages[i].content.length / 4);
+      if (budget + estimated > MAX_TOKENS && selected.length >= 2) break;
+      selected.unshift(messages[i]);
+      budget += estimated;
+    }
+    return selected.map(m => ({ role: m.role, content: m.content }));
   };
 
-  // ── Send message ──
-  const sendMessage = async () => {
-    const text = inputText.trim();
+  // ── Thinking Steps (erweiterter Flow) ──────────────────────────────────────
+  // Gibt die finalen done-Steps zurück für die Message-Persistenz.
+  const runThinkingAnimation = async ({
+    isFirstMessage,
+    hasPageContext,
+    historyLength,
+    userMessage,
+  }: {
+    isFirstMessage: boolean;
+    hasPageContext: boolean;
+    historyLength: number;
+    userMessage: string;
+  }): Promise<ThinkingStep[]> => {
+
+    // Wir bauen die Steps dynamisch basierend auf dem tatsächlichen Kontext
+    type StepDef = { id: string; label: string; detail?: string; icon: ThinkingStep['icon']; ms: number };
+    const defs: StepDef[] = [];
+
+    // Schritt 1: Kontext lesen — nur beim ersten Message ist das der Seiteninhalt
+    if (isFirstMessage && hasPageContext) {
+      defs.push({
+        id: 's_ctx',
+        label: t('aiCoach.thinking.analyzePage'),
+        detail: pageContent.split('\n').find(l => l.trim())?.trim()?.slice(0, 70) + '...',
+        icon: 'search',
+        ms: 420,
+      });
+    } else if (!isFirstMessage && pageContent && pageContent !== lastSentPageContentRef.current) {
+      // Seitenwechsel erkannt
+      defs.push({
+        id: 's_ctx',
+        label: t('aiCoach.thinking.pageChanged'),
+        detail: pageContent.split('\n').find(l => l.trim())?.trim()?.slice(0, 70) + '...',
+        icon: 'search',
+        ms: 380,
+      });
+    } else if (historyLength > 0) {
+      defs.push({
+        id: 's_ctx',
+        label: t('aiCoach.thinking.readingHistory').replace('{n}', String(historyLength)),
+        icon: 'cpu',
+        ms: 280,
+      });
+    }
+
+    // Schritt 2: Intent klassifizieren — was will der User?
+    const isErrorMsg     = /fehler|error|crash|oom|failed|kaputt|problem|nicht|can't|cannot/i.test(userMessage);
+    const isHowToMsg     = /wie|how|what|was|erkl|explain|versteh|help/i.test(userMessage);
+    const isConfigMsg    = /batch|lr|learning|epoch|lora|config|param|setting|einstellung/i.test(userMessage);
+    const intentLabel = isErrorMsg  ? t('aiCoach.thinking.intentError')
+                      : isConfigMsg ? t('aiCoach.thinking.intentConfig')
+                      : isHowToMsg  ? t('aiCoach.thinking.intentExplain')
+                      : t('aiCoach.thinking.intentGeneral');
+    defs.push({
+      id: 's_intent',
+      label: intentLabel,
+      icon: 'brain',
+      ms: 320,
+    });
+
+    // Schritt 3: Denken / Formulieren
+    defs.push({
+      id: 's_think',
+      label: t('aiCoach.thinking.formulating'),
+      icon: 'sparkles',
+      ms: 0, // läuft bis API antwortet — kein timeout hier
+    });
+
+    // Animation starten
+    const allDone: ThinkingStep[] = defs.map(d => ({
+      id: d.id, label: d.label, detail: d.detail, icon: d.icon, status: 'done' as const
+    }));
+
+    for (let i = 0; i < defs.length; i++) {
+      const def = defs[i];
+      // Vorherige als done markieren, aktuellen als active
+      setThinkingSteps([
+        ...defs.slice(0, i).map(d => ({ id: d.id, label: d.label, detail: d.detail, icon: d.icon, status: 'done' as const })),
+        { id: def.id, label: def.label, detail: def.detail, icon: def.icon, status: 'active' as const },
+      ]);
+      if (def.ms > 0) await new Promise(r => setTimeout(r, def.ms));
+    }
+
+    return allDone;
+  };
+
+  // ── AI-Titel generierung (feuert im Hintergrund nach erster Antwort) ────────────────
+  const generateAITitle = useCallback(async (chatId: string, userMessage: string, assistantResponse: string) => {
+    try {
+      const titlePrompt = `Generate a SHORT chat title (3-6 words max) for this conversation.
+User asked: "${userMessage.slice(0, 200)}"
+Assistant answered about: "${assistantResponse.slice(0, 200)}"
+
+Rules:
+- 3 to 6 words only
+- No punctuation at the end
+- No quotes
+- Capture the core topic
+- Same language as the user message
+- Examples: "YOLO Training Konfiguration", "Batch Size Fehler beheben", "LoRA vs Full Fine-Tuning"
+
+Reply with ONLY the title, nothing else.`;
+
+      const title = await callAIClient(settings, {
+        system: 'You generate concise chat titles. Reply with ONLY the title, no explanation, no quotes, no punctuation at end.',
+        messages: [{ role: 'user', content: titlePrompt }],
+        maxTokens: 20,
+        temperature: 0.4,
+      });
+
+      const cleanTitle = title.trim().replace(/^["']|["']$/g, '').replace(/\.$/, '').slice(0, 50);
+      if (!cleanTitle) return;
+
+      // Titel in chats und currentChat aktualisieren
+      setChats(prev => {
+        const updated = prev.map(c => c.id === chatId ? { ...c, title: cleanTitle } : c);
+        saveChatsForUser(updated, userId);
+        return updated;
+      });
+      setCurrentChat(prev => prev?.id === chatId ? { ...prev, title: cleanTitle } : prev);
+    } catch {
+      // Titel-Generierung ist optional — Fehler still ignorieren
+    }
+  }, [settings, userId]);
+
+  const sendMessage = async (overrideText?: string, isRetry = false) => {
+    const text = (overrideText ?? inputText).trim();
     if (!text || isLoading || !currentChat) return;
 
     if (!settings.enabled) {
@@ -670,27 +845,31 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
       timestamp: Date.now(),
     };
 
-    // Snapshot of currentChat before any async
     const chatSnapshot = currentChat;
-
-    setInputText('');
+    if (!isRetry) setInputText('');
     setError('');
+    lastFailedTextRef.current = text;
 
-    // Build updated chat with user message
-    const isFirstMessage = chatSnapshot.messages.length === 0;
-    const chatWithUserMsg: Chat = {
-      ...chatSnapshot,
-      messages: [...chatSnapshot.messages, userMsg],
-      title: isFirstMessage ? generateTitle(text) : chatSnapshot.title,
-      updatedAt: Date.now(),
-    };
+    // Retry: die User-Nachricht steht bereits im Chat — nicht doppelt anhängen
+    const lastMsg = chatSnapshot.messages[chatSnapshot.messages.length - 1];
+    const alreadyInChat = isRetry && lastMsg?.role === 'user' && lastMsg?.content === text;
 
-    // Persist if this is the first message
+    const isFirstMessage = alreadyInChat
+      ? chatSnapshot.messages.length === 1
+      : chatSnapshot.messages.length === 0;
+    const chatWithUserMsg: Chat = alreadyInChat
+      ? chatSnapshot
+      : {
+          ...chatSnapshot,
+          messages: [...chatSnapshot.messages, userMsg],
+          title: isFirstMessage ? generateTitle(text) : chatSnapshot.title,
+          updatedAt: Date.now(),
+        };
+
     if (isFirstMessage) {
       ensurePersisted(chatWithUserMsg);
     }
 
-    // Update local state immediately
     setCurrentChat(chatWithUserMsg);
     if (!isFirstMessage && currentChatPersistedRef.current) {
       setChats(prev => {
@@ -702,8 +881,13 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
 
     setIsLoading(true);
 
-    // Run thinking animation — get the final done-steps for later
-    const finalThinkingSteps = await runThinkingAnimation(!!pageContent);
+    // Thinking Animation starten (parallel zum API-Call)
+    const thinkingPromise = runThinkingAnimation({
+      isFirstMessage,
+      hasPageContext: !!pageContent,
+      historyLength: chatSnapshot.messages.length,
+      userMessage: text,
+    });
 
     try {
       const meta = PROVIDER_META[settings.provider];
@@ -711,15 +895,22 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
         throw new Error(t('aiCoach.apiKeyMissing'));
       }
 
-      const history = chatWithUserMsg.messages.slice(-10);
-      const systemPrompt = buildSystemPrompt();
-      const responseText = await callAIClient(settings, {
-        system: systemPrompt,
-        messages: history.map(m => ({ role: m.role, content: m.content })),
-        maxTokens: 1500,
-        temperature: 0.7,
-        responseLanguage: language,
-      });
+      // Token-budgetierte History
+      const history = buildTokenBudgetedHistory(chatWithUserMsg.messages);
+      // System Prompt: Seitenkontext nur beim ersten Message
+      const systemPrompt = buildSystemPrompt(isFirstMessage);
+
+      // API-Call und Thinking-Animation parallel — API-Call bestimmt wann Step 3 endet
+      const [responseText, finalThinkingSteps] = await Promise.all([
+        callAIClient(settings, {
+          system: systemPrompt,
+          messages: history,
+          maxTokens: budgetCfg.maxTokens,
+          temperature: 0.7,
+          responseLanguage: language,
+        }),
+        thinkingPromise,
+      ]);
 
       setThinkingSteps([]);
 
@@ -728,7 +919,6 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
         role: 'assistant',
         content: responseText,
         timestamp: Date.now(),
-        // Use the locally captured finalThinkingSteps (no stale closure!)
         thinkingSteps: finalThinkingSteps,
         thinkingCollapsed: true,
       };
@@ -746,12 +936,24 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
         return updated;
       });
 
+      // AI-Titel im Hintergrund generieren (nur nach erster Antwort)
+      if (isFirstMessage) {
+        generateAITitle(chatSnapshot.id, text, responseText);
+      }
+      lastFailedTextRef.current = null;
+
     } catch (e: any) {
       setThinkingSteps([]);
       setError(e?.message || t('aiCoach.unknownError'));
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const retryLastMessage = () => {
+    const text = lastFailedTextRef.current;
+    if (!text || isLoading) return;
+    sendMessage(text, true);
   };
 
   // ── Toggle thinking collapse for a specific message ──
@@ -999,9 +1201,19 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
 
         {error && (
           <div className="ft-coach-message flex justify-start">
-            <div className="max-w-[88%] px-3 py-2.5 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-start gap-2">
-              <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
-              <span className="text-red-300 text-xs leading-relaxed break-words">{error}</span>
+            <div className="max-w-[88%] px-3 py-2.5 rounded-2xl bg-red-500/10 border border-red-500/20 flex flex-col gap-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+                <span className="text-red-300 text-xs leading-relaxed break-words">{error}</span>
+              </div>
+              {lastFailedTextRef.current && !isLoading && (
+                <button
+                  onClick={retryLastMessage}
+                  className="self-start px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-medium transition-all"
+                >
+                  {t('aiCoach.retryButton')}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1011,42 +1223,18 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
 
       {/* Input */}
       <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-white/5 bg-black/10">
-        <div className="flex gap-2 items-end">
-          <textarea
-            ref={inputRef}
-            value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-            }}
-            placeholder={t('aiCoach.inputPlaceholder')}
-            disabled={isLoading}
-            rows={1}
-            className="flex-1 px-3 py-2 bg-white/[0.055] border border-white/10 rounded-xl text-white text-xs placeholder-gray-600 focus:outline-none disabled:opacity-50 resize-none leading-relaxed transition-all focus:bg-white/[0.075]"
-            onFocus={e => {
-              e.currentTarget.style.borderColor = `${safePrimary}66`;
-              e.currentTarget.style.boxShadow = `0 0 0 3px ${safePrimary}1f`;
-            }}
-            onBlur={e => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-            style={{ maxHeight: '80px' }}
-            onInput={e => {
-              const el = e.target as HTMLTextAreaElement;
-              el.style.height = 'auto';
-              el.style.height = Math.min(el.scrollHeight, 80) + 'px';
-            }}
-          />
-          <button
-            onClick={sendMessage}
-            disabled={isLoading || !inputText.trim()}
-            className="p-2 rounded-xl text-white flex-shrink-0 transition-all disabled:opacity-40 hover:opacity-95 hover:scale-105 active:scale-95"
-            style={{ background: themeGradient, boxShadow: `0 10px 26px ${safePrimary}25, inset 0 1px 0 rgba(255,255,255,.20)` }}
-          >
-            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          </button>
-        </div>
+        <GradientChatInput
+          ref={inputRef}
+          value={inputText}
+          onChange={setInputText}
+          onSend={sendMessage}
+          loading={isLoading}
+          placeholder={t('aiCoach.inputPlaceholder')}
+          size="sm"
+          gradient={themeGradient}
+          primaryColor={safePrimary}
+          sendTitle={t('aiCoach.inputPlaceholder')}
+        />
       </div>
     </div>
   );

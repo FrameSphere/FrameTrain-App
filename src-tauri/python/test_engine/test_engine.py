@@ -104,8 +104,31 @@ def is_oom(exc: Exception) -> bool:
     ])
 
 
+def is_torch_ecosystem_conflict(text: str) -> bool:
+    """torchvision/torchaudio passen nicht zur installierten torch-Version
+    (z. B. 'operator torchvision::nms does not exist' beim transformers-Import)."""
+    t = text.lower()
+    return (
+        "torchvision::nms" in t
+        or ("torchvision" in t and "does not exist" in t)
+        or ("torchvision" in t and "undefined symbol" in t)
+        or ("libtorchaudio" in t and ("symbol not found" in t or "could not load" in t))
+        or ("torchaudio" in t and "undefined symbol" in t)
+    )
+
+
 def handle_exception(exc: Exception) -> None:
     tb = traceback.format_exc()
+
+    if is_torch_ecosystem_conflict(tb) or is_torch_ecosystem_conflict(str(exc)):
+        TestProtocol.error(
+            "PyTorch/torchvision/torchaudio Versionskonflikt",
+            "Die installierte torchvision- bzw. torchaudio-Version passt nicht zur torch-Version.\n\n"
+            "Behebe mit:\n"
+            f"  {sys.executable} -m pip install --upgrade torch torchvision torchaudio\n\n"
+            f"Detail: {exc}\n\n{tb}"
+        )
+        return
 
     if is_oom(exc):
         TestProtocol.error(

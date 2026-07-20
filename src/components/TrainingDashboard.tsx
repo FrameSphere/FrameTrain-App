@@ -12,6 +12,7 @@ import type { TrainingConfig } from './TrainingPanel';
 import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { sendAppErrorReport } from '../utils/errorReport';
 
 // ── Session Storage ───────────────────────────────────────────────────────
 
@@ -71,9 +72,11 @@ function analyzeError(errorMsg: string, t: (key: string) => string): { category:
     return { category: 'cuda', title: t('trainingDashboard.errorRecovery.cudaCategoryTitle'), hint: t('trainingDashboard.errorRecovery.cudaCategoryHint') };
   if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
     return { category: 'dataset', title: t('trainingDashboard.errorRecovery.datasetCategoryTitle'), hint: t('trainingDashboard.errorRecovery.datasetCategoryHint') };
-  if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module'))
+  if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module')
+      || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
     return { category: 'packages', title: t('trainingDashboard.errorRecovery.packagesCategoryTitle'), hint: t('trainingDashboard.errorRecovery.packagesCategoryHint') };
-  if (e.includes('nan') || e.includes('inf') || e.includes('gradient') || e.includes('loss'))
+  // \b-Grenzen: sonst matchen deutsche Wörter wie "E**inf**ach" oder "Fi**nan**zen"
+  if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
     return { category: 'config', title: t('trainingDashboard.errorRecovery.configCategoryTitle'), hint: t('trainingDashboard.errorRecovery.configCategoryHint') };
   if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror'))
     return { category: 'code', title: t('trainingDashboard.errorRecovery.codeCategoryTitle'), hint: t('trainingDashboard.errorRecovery.codeCategoryHint') };
@@ -230,19 +233,43 @@ const EVENT_COLORS: Record<string, string> = {
 // ── Error Recovery Panel ──────────────────────────────────────────────────
 
 function ErrorRecoveryPanel({
-  mode, errorMsg, config,
+  mode, errorMsg, config, events,
   onOpenKIAssistant, onSendCodeToKI, devScript,
 }: {
   mode: 'standard' | 'dev';
   errorMsg: string;
   config?: Partial<TrainingConfig>;
+  events?: SessionEvent[];
   onOpenKIAssistant?: () => void;
   onSendCodeToKI?: (script: string, error: string) => void;
   devScript?: string;
 }) {
   const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
+  const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
   const { category, title, hint } = analyzeError(errorMsg, t);
+
+  // Fehler-Logs an das FrameTrain-Team senden
+  const handleSendReport = async () => {
+    if (sendState === 'sending' || sendState === 'sent') return;
+    setSendState('sending');
+    try {
+      const ok = await sendAppErrorReport({
+        error_type: `${mode === 'dev' ? 'devtrain' : 'training'}:${category}`,
+        title: t('trainingDashboard.errorRecovery.reportHeader'),
+        message: errorMsg,
+        details: buildDiagReport(),
+        logs: (events ?? []).slice(0, 50).map(ev => `${ev.time} [${ev.type}] ${ev.message}`).join('\n'),
+        ...(mode === 'dev' && devScript ? { script_full: devScript } : {}),
+        error_analysis: category,
+        error_category: title,
+        ...(config ? { config: config as Record<string, unknown> } : {}),
+      });
+      setSendState(ok ? 'sent' : 'failed');
+    } catch {
+      setSendState('failed');
+    }
+  };
 
   const categoryIcon = {
     memory: <MemoryStick className="w-4 h-4 text-red-400" />,
@@ -276,6 +303,33 @@ function ErrorRecoveryPanel({
       setTimeout(() => setCopied(false), 2000);
     } catch { /* ignore */ }
   };
+
+  // Echter "An FrameTrain senden"-Button (Standard- und Dev-Modus)
+  const sendReportButton = (
+    <button
+      onClick={handleSendReport}
+      disabled={sendState === 'sending' || sendState === 'sent'}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/25 transition-all text-left disabled:cursor-default"
+    >
+      {sendState === 'sending'
+        ? <Loader2 className="w-4 h-4 text-blue-400 animate-spin flex-shrink-0" />
+        : sendState === 'sent'
+          ? <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          : <Send className="w-4 h-4 text-blue-400 flex-shrink-0" />}
+      <div>
+        <p className={`text-xs font-medium ${sendState === 'sent' ? 'text-emerald-300' : sendState === 'failed' ? 'text-red-300' : 'text-blue-300'}`}>
+          {sendState === 'sent'
+            ? t('trainingDashboard.errorRecovery.sendReportSent')
+            : sendState === 'sending'
+              ? t('trainingDashboard.errorRecovery.sendReportSending')
+              : sendState === 'failed'
+                ? t('trainingDashboard.errorRecovery.sendReportFailed')
+                : t('trainingDashboard.errorRecovery.sendToTeamTitle')}
+        </p>
+        <p className="text-gray-500 text-[10px]">{t('trainingDashboard.errorRecovery.sendToTeamDesc')}</p>
+      </div>
+    </button>
+  );
 
   return (
     <div className="rounded-xl border border-red-500/30 bg-red-500/[0.06] overflow-hidden">
@@ -335,7 +389,7 @@ function ErrorRecoveryPanel({
               </div>
             )}
 
-            {/* Send to FrameTrain */}
+            {/* Report kopieren */}
             <button
               onClick={handleCopyReport}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left"
@@ -349,16 +403,8 @@ function ErrorRecoveryPanel({
               </div>
             </button>
 
-            {/* Engine/unknown: recommend FrameTrain team */}
-            {(category === 'unknown' || category === 'packages') && (
-              <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/10">
-                <Send className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-gray-300 text-xs font-medium">{t('trainingDashboard.errorRecovery.sendToTeamTitle')}</p>
-                  <p className="text-gray-500 text-[10px]">{t('trainingDashboard.errorRecovery.sendToTeamDesc')}</p>
-                </div>
-              </div>
-            )}
+            {/* Error-Logs an das FrameTrain-Team senden */}
+            {sendReportButton}
           </>
         )}
 
@@ -402,6 +448,9 @@ function ErrorRecoveryPanel({
                 <p className="text-gray-600 text-[10px]">{t('trainingDashboard.errorRecovery.copyReportDevDesc')}</p>
               </div>
             </button>
+
+            {/* Error-Logs an das FrameTrain-Team senden */}
+            {sendReportButton}
           </>
         )}
       </div>
@@ -659,6 +708,7 @@ export default function TrainingDashboard({
               mode={mode}
               errorMsg={job.error}
               config={config}
+              events={events}
               onOpenKIAssistant={onOpenKIAssistant}
               devScript={devScript}
               onSendCodeToKI={onSendCodeToKI}

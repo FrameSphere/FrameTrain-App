@@ -432,6 +432,8 @@ export default function DatasetUpload() {
   const [showHalveModal, setShowHalveModal] = useState(false);
   const [datasetToHalve, setDatasetToHalve] = useState<DatasetInfo | null>(null);
   const [halving, setHalving] = useState(false);
+  // Halbieren: train/val/test-Struktur an beide Hälften vererben (Standard: an)
+  const [inheritSplits, setInheritSplits] = useState(true);
 
   const [fileManagerDataset, setFileManagerDataset] = useState<DatasetInfo | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -714,7 +716,7 @@ export default function DatasetUpload() {
     setHalving(true);
     try {
       const result = await invoke<{ dataset_a: DatasetInfo; dataset_b: DatasetInfo }>(
-        'split_dataset_in_half', { datasetId: datasetToHalve.id, modelId: selectedModelId }
+        'split_dataset_in_half', { datasetId: datasetToHalve.id, modelId: selectedModelId, preserveSplits: inheritSplits }
       );
       success(t('datasetUpload.halveModal.successTitle'), t('datasetUpload.halveModal.successDetail').replace('{a}', result.dataset_a.name).replace('{b}', result.dataset_b.name));
       setShowHalveModal(false); setDatasetToHalve(null);
@@ -837,7 +839,7 @@ export default function DatasetUpload() {
               key={ds.id} dataset={ds} gradientClass={currentTheme.colors.gradient}
               onDelete={() => setDeleteTarget(ds)}
               onSplit={() => openSplitModal(ds)}
-              onHalve={() => { setDatasetToHalve(ds); setShowHalveModal(true); }}
+              onHalve={() => { setDatasetToHalve(ds); setInheritSplits(true); setShowHalveModal(true); }}
               onFiles={() => setFileManagerDataset(ds)}
             />
           ))}
@@ -873,13 +875,40 @@ export default function DatasetUpload() {
               </button>
             </div>
             <div className="p-6 space-y-6">
-              {/* Warn bei paired types */}
-              {datasetToSplit.dataset_type && ['yolo_bbox', 'pascal_voc', 'coco_json', 'audio_transcript'].includes(datasetToSplit.dataset_type) && (
-                <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-amber-300">{t('datasetUpload.splitModal.pairedWarning').replace('{type}', DATASET_TYPE_LABELS[datasetToSplit.dataset_type]?.label ?? '')}</p>
+              {/* Erklärung was der Split macht */}
+              {datasetToSplit.dataset_type && ['coco_json', 'common_voice'].includes(datasetToSplit.dataset_type) ? (
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/20">
+                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-red-300 space-y-1">
+                    <p className="font-medium">{t('datasetUpload.splitModal.notSplittableTitle')}</p>
+                    <p>{datasetToSplit.dataset_type === 'coco_json'
+                      ? t('datasetUpload.splitModal.notSplittableCoco')
+                      : t('datasetUpload.splitModal.notSplittableCommonVoice')}</p>
+                  </div>
                 </div>
-              )}
+              ) : datasetToSplit.dataset_type && ['flat_file', 'multi_shard'].includes(datasetToSplit.dataset_type) ? (
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                  <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-blue-300 space-y-1">
+                    <p className="font-medium">{t('datasetUpload.splitModal.rowSplitTitle')}</p>
+                    <p>{t('datasetUpload.splitModal.rowSplitDesc')}</p>
+                  </div>
+                </div>
+              ) : datasetToSplit.dataset_type && ['yolo_bbox', 'pascal_voc', 'audio_transcript'].includes(datasetToSplit.dataset_type) ? (
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-300 space-y-1">
+                    <p className="font-medium">{t('datasetUpload.splitModal.pairedSplitTitle')}</p>
+                    <p>{t('datasetUpload.splitModal.pairedWarning').replace('{type}', DATASET_TYPE_LABELS[datasetToSplit.dataset_type]?.label ?? '')}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Allgemeine Warnung: Datei-Sicherheit */}
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-red-500/8 border border-red-500/15">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-300">{t('datasetUpload.splitModal.dataIntegrityWarning')}</p>
+              </div>
 
               <p className="text-gray-400 text-sm">{t('datasetUpload.splitModal.fileCount').replace('{count}', String(datasetToSplit.file_count))}</p>
 
@@ -908,21 +937,31 @@ export default function DatasetUpload() {
                 </div>
               ))}
 
-              <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                {[
-                  { label: t('datasetUpload.splitModal.labelTrain'), color: 'blue',   count: Math.round(datasetToSplit.file_count * trainRatio) },
-                  { label: t('datasetUpload.splitModal.labelVal'), color: 'purple', count: Math.round(datasetToSplit.file_count * valRatio) },
-                  { label: t('datasetUpload.splitModal.labelTest'), color: 'green',  count: Math.round(datasetToSplit.file_count * testRatio) },
-                ].map(({ label, color, count }) => (
-                  <div key={label} className={`p-3 rounded-xl bg-${color}-500/10`}>
-                    <div className={`text-${color}-400 font-bold text-lg`}>{count}</div>
-                    <div className="text-gray-500 text-xs">{label}</div>
+              {(() => {
+                // Bei zeilenbasiertem Split (Flat File/Parquet) beziehen sich die Anteile auf
+                // Zeilen, nicht auf Dateien — Datei-Zahlen wären hier irreführend (z.B. "1/0/0").
+                const isRowSplit = !!datasetToSplit.dataset_type && ['flat_file', 'multi_shard'].includes(datasetToSplit.dataset_type);
+                return (
+                  <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                    {[
+                      { label: t('datasetUpload.splitModal.labelTrain'), color: 'blue',   ratio: trainRatio },
+                      { label: t('datasetUpload.splitModal.labelVal'),   color: 'purple', ratio: valRatio },
+                      { label: t('datasetUpload.splitModal.labelTest'),  color: 'green',  ratio: testRatio },
+                    ].map(({ label, color, ratio }) => (
+                      <div key={label} className={`p-3 rounded-xl bg-${color}-500/10`}>
+                        <div className={`text-${color}-400 font-bold text-lg`}>
+                          {isRowSplit ? `${Math.round(ratio * 100)}%` : Math.round(datasetToSplit.file_count * ratio)}
+                        </div>
+                        <div className="text-gray-500 text-xs">{label}</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
 
-              <button onClick={handleSplit} disabled={splitting}
-                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50`}>
+              <button onClick={handleSplit}
+                disabled={splitting || (!!datasetToSplit.dataset_type && ['coco_json', 'common_voice'].includes(datasetToSplit.dataset_type))}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient} text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed`}>
                 {splitting ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('datasetUpload.splitModal.splittingButton')}</> : <><Scissors className="w-4 h-4" /> {t('datasetUpload.splitModal.splitButton')}</>}
               </button>
             </div>
@@ -959,6 +998,20 @@ export default function DatasetUpload() {
                   </div>
                 ))}
               </div>
+              {datasetToHalve.status === 'split' && (
+                <label className="flex items-start gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/[0.07] transition-all">
+                  <input
+                    type="checkbox"
+                    checked={inheritSplits}
+                    onChange={e => setInheritSplits(e.target.checked)}
+                    className="mt-0.5 accent-emerald-500 cursor-pointer"
+                  />
+                  <span>
+                    <span className="text-sm text-white">{t('datasetUpload.halveModal.inheritSplitsLabel')}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">{t('datasetUpload.halveModal.inheritSplitsHint')}</span>
+                  </span>
+                </label>
+              )}
               <p className="text-gray-500 text-xs">{t('datasetUpload.halveModal.originalNote')}</p>
               <button onClick={handleHalve} disabled={halving}
                 className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50">
@@ -1362,9 +1415,41 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
         {/* Extension chips */}
         {dataset.extensions && dataset.extensions.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-0.5">
-            {dataset.extensions.slice(0, 4).map(ext => (
-              <span key={ext} className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-gray-500 text-[10px] font-mono">{ext}</span>
-            ))}
+            {dataset.extensions.slice(0, 4).map(ext => {
+              const EXT_LABELS: Record<string, string> = {
+                '.parquet': 'Parquet (HF)',
+                '.arrow':   'Arrow',
+                '.jsonl':   'JSONL',
+                '.json':    'JSON',
+                '.csv':     'CSV',
+                '.tsv':     'TSV',
+                '.txt':     'TXT',
+                '.jpg':     'JPEG',
+                '.jpeg':    'JPEG',
+                '.png':     'PNG',
+                '.wav':     'WAV',
+                '.mp3':     'MP3',
+                '.xml':     'XML (VOC)',
+                '.yaml':    'YAML',
+                '.yml':     'YAML',
+              };
+              const EXT_TOOLTIPS: Record<string, string> = {
+                '.parquet': 'Apache Parquet — bin\u00e4res Spaltenformat, standard beim HuggingFace-Download',
+                '.arrow':   'Apache Arrow — bin\u00e4res Spaltenformat',
+                '.jsonl':   'JSON Lines — eine JSON-Zeile pro Beispiel',
+                '.xml':     'Pascal VOC XML-Annotationen',
+                '.yaml':    'YOLO dataset.yaml Konfiguration',
+              };
+              const label   = EXT_LABELS[ext] ?? ext;
+              const tooltip = EXT_TOOLTIPS[ext];
+              return (
+                <span
+                  key={ext}
+                  className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-gray-500 text-[10px] font-mono cursor-default"
+                  title={tooltip}
+                >{label}</span>
+              );
+            })}
             {dataset.extensions.length > 4 && (
               <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-gray-600 text-[10px]">+{dataset.extensions.length - 4}</span>
             )}
@@ -1373,20 +1458,26 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       </div>
 
       {/* Split preview */}
-      {dataset.split_info && (
-        <div className="grid grid-cols-3 gap-2 pt-1">
-          {[
-            { label: t('datasetUpload.card.splitTrain'), color: 'blue',   count: dataset.split_info.train_count },
-            { label: t('datasetUpload.card.splitVal'), color: 'purple', count: dataset.split_info.val_count },
-            { label: t('datasetUpload.card.splitTest'), color: 'green',  count: dataset.split_info.test_count },
-          ].map(({ label, color, count }) => (
-            <div key={label} className={`p-2 rounded-xl bg-${color}-500/10 text-center`}>
-              <div className={`text-${color}-400 font-semibold text-sm`}>{count}</div>
-              <div className="text-gray-600 text-[11px]">{label}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      {(() => {
+        // split_info aus DB verwenden wenn vorhanden,
+        // sonst bei PreSplit/HF-Downloads die echten Ordner-Counts anzeigen
+        const info = dataset.split_info;
+        if (!info) return null;
+        return (
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            {[
+              { label: t('datasetUpload.card.splitTrain'), color: 'blue',   count: info.train_count },
+              { label: t('datasetUpload.card.splitVal'),   color: 'purple', count: info.val_count },
+              { label: t('datasetUpload.card.splitTest'),  color: 'green',  count: info.test_count },
+            ].map(({ label, color, count }) => (
+              <div key={label} className={`p-2 rounded-xl bg-${color}-500/10 text-center`}>
+                <div className={`text-${color}-400 font-semibold text-sm`}>{count}</div>
+                <div className="text-gray-600 text-[11px]">{label}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Actions */}
       <div className="flex gap-2 pt-1">
@@ -1398,11 +1489,16 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
             <Scissors className="w-3.5 h-3.5" /> {t('datasetUpload.card.splitButton')}
           </button>
         )}
-        <button onClick={onHalve}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/20 text-gray-400 hover:text-amber-400 text-xs transition-all"
-          title={t('datasetUpload.card.halveTooltip')}>
-          {t('datasetUpload.card.halveButton')}
-        </button>
+        {/* Halbieren auch für gesplittete Datasets: die train/val/test-Struktur
+            wird dabei standardmäßig an beide Hälften vererbt (Checkbox im Modal) —
+            kein Data-Leakage, keine Vermischung der Splits. */}
+        {(dataset.status === 'unused' || dataset.status === 'split') && (
+          <button onClick={onHalve}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/20 text-gray-400 hover:text-amber-400 text-xs transition-all"
+            title={t('datasetUpload.card.halveTooltip')}>
+            {t('datasetUpload.card.halveButton')}
+          </button>
+        )}
       </div>
     </div>
   );

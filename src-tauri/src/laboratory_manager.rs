@@ -32,6 +32,8 @@ pub struct LabServer {
     pub receiver:   std::sync::mpsc::Receiver<String>,
     pub version_id: String,
     pub model_path: String,
+    /// Canvas-Modell (DynamicGraphModule) statt HuggingFace — anderes Request-Format
+    pub is_canvas:  bool,
 }
 
 #[derive(Default)]
@@ -84,11 +86,28 @@ fn get_python_path() -> String {
         }
     }
     candidates.sort_by(|a, b| b.version.cmp(&a.version));
-    candidates.dedup_by(|a, b| a.version == b.version);
+    // Nur echte Duplikate (Symlink auf dieselbe Binärdatei) entfernen
+    candidates.dedup_by(|a, b| {
+        match (std::fs::canonicalize(&a.path), std::fs::canonicalize(&b.path)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => a.path == b.path,
+        }
+    });
+    // torch + torchvision/torchaudio (falls installiert) müssen zusammenpassen
+    let torch_check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
+    for c in &candidates {
+        let ok = Command::new(&c.path).args(["-c", torch_check]).output()
+            .map(|o| o.status.success()).unwrap_or(false);
+        if ok { return c.path.clone(); }
+    }
+    // Fallback: torch vorhanden, torchvision/torchaudio defekt
     for c in &candidates {
         let ok = Command::new(&c.path).args(["-c", "import torch"]).output()
             .map(|o| o.status.success()).unwrap_or(false);
-        if ok { return c.path.clone(); }
+        if ok {
+            println!("[Python] ⚠️ torchvision/torchaudio defekt/inkompatibel bei {} — Fix: pip install --upgrade torch torchvision torchaudio", c.path);
+            return c.path.clone();
+        }
     }
     candidates.first().map(|c| c.path.clone())
         .unwrap_or_else(|| if cfg!(target_os = "windows") { "python".to_string() } else { "python3".to_string() })
@@ -126,16 +145,42 @@ fn get_model_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::Pat
 }
 
 fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) -> Result<String, String> {
+    get_version_info(app_handle, version_id).map(|(p, _)| p)
+}
+
+/// Liefert (Versions-Pfad, model_id) — model_id wird für Canvas-Modelle gebraucht,
+/// deren Inferenz-Dateien im Modell-Ordner liegen (nicht zwingend im Versions-Pfad).
+fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) -> Result<(String, String), String> {
     let db_path = app_handle.path().app_data_dir()
         .map_err(|e| format!("AppDataDir: {}", e))?
         .join("frametrain.db");
     let conn = rusqlite::Connection::open(&db_path)
         .map_err(|e| format!("DB: {}", e))?;
     conn.query_row(
-        "SELECT path FROM model_versions_new WHERE id = ?1",
+        "SELECT path, model_id FROM model_versions_new WHERE id = ?1",
         [version_id],
-        |r| r.get(0),
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
     ).map_err(|e| format!("Version nicht gefunden: {}", e))
+}
+
+/// Script für Canvas-Modelle (gleiches stdin/stdout-Protokoll wie model_server.py)
+fn get_canvas_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let rel = std::path::Path::new("python").join("train_engine").join("plugins")
+        .join("canvas").join("canvas_inference_server.py");
+    let candidates = vec![
+        app_handle.path().resource_dir().ok().map(|p| p.join(&rel)),
+        Some(std::path::PathBuf::from("src-tauri").join(&rel)),
+        Some(std::path::PathBuf::from(
+            "/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app/src-tauri"
+        ).join(&rel)),
+    ];
+    for p in candidates.into_iter().flatten() {
+        if p.exists() {
+            println!("[LabServer] Canvas-Script gefunden: {:?}", p);
+            return Ok(p);
+        }
+    }
+    Err("canvas_inference_server.py nicht gefunden".to_string())
 }
 
 // ============ Commands ============
@@ -161,8 +206,8 @@ pub async fn lab_start_model_server(
 
     let _ = app_handle.emit("lab-server-status", serde_json::json!({ "status": "loading" }));
 
-    let model_path = match get_version_path(&app_handle, &version_id) {
-        Ok(p) => p,
+    let (version_path, model_id) = match get_version_info(&app_handle, &version_id) {
+        Ok(v) => v,
         Err(e) => {
             let _ = app_handle.emit("lab-server-status",
                 serde_json::json!({ "status": "error", "message": e }));
@@ -172,8 +217,77 @@ pub async fn lab_start_model_server(
         }
     };
 
+    let fail = |msg: String| -> Result<(), String> {
+        let _ = app_handle.emit("lab-server-status",
+            serde_json::json!({ "status": "error", "message": msg.clone() }));
+        if let Ok(mut s) = state.lock() { s.status = ServerStatus::Error; }
+        Err(msg)
+    };
+
+    // ── Preflight + Server-Typ bestimmen (HuggingFace vs. Canvas) ─────────
+    let vp = std::path::PathBuf::from(&version_path);
+    let models_root = app_handle.path().app_data_dir()
+        .map(|d| d.join("models"))
+        .unwrap_or_default();
+    let canvas_model_dir = models_root.join(&model_id);
+
+    let is_canvas = model_id.starts_with("canvas_")
+        || vp.join("graph_metadata.json").exists()
+        || canvas_model_dir.join("graph_metadata.json").exists();
+
+    let (model_path, is_canvas) = if is_canvas {
+        // Canvas braucht graph_metadata.json + model.pt im selben Ordner.
+        // Versions-Pfad bevorzugen, sonst der Modell-Ordner (dorthin kopiert
+        // das Training die Gewichte für list_canvas_models_with_pt).
+        let dir = if vp.join("graph_metadata.json").exists() && vp.join("model.pt").exists() {
+            vp.clone()
+        } else {
+            canvas_model_dir.clone()
+        };
+        if !dir.join("graph_metadata.json").exists() {
+            return fail(format!(
+                "Canvas-Modell: graph_metadata.json nicht gefunden in {} — \
+                 Modell im Synapse Builder erneut speichern.", dir.display()
+            ));
+        }
+        if !dir.join("model.pt").exists() {
+            return fail(
+                "Canvas-Modell ist noch nicht trainiert (kein model.pt). \
+                 Trainiere es zuerst im Synapse Builder oder Training-Panel — \
+                 danach kann es hier geladen werden.".to_string()
+            );
+        }
+        (dir.to_string_lossy().to_string(), true)
+    } else {
+        if !vp.exists() {
+            return fail(format!(
+                "Versions-Pfad existiert nicht: {} — das Modell wurde evtl. verschoben oder gelöscht.",
+                version_path
+            ));
+        }
+        if !vp.join("config.json").exists() {
+            let contents: Vec<String> = std::fs::read_dir(&vp).ok().into_iter().flatten().flatten()
+                .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+                .filter(|n| !n.starts_with('.'))
+                .take(8)
+                .collect();
+            return fail(format!(
+                "Keine config.json in {} — kein HuggingFace-Format. \
+                 Die Lab-Inferenz benötigt ein HF-Klassifikationsmodell. \
+                 Vorhandene Dateien: {}",
+                version_path,
+                if contents.is_empty() { "(leer)".to_string() } else { contents.join(", ") }
+            ));
+        }
+        (version_path.clone(), false)
+    };
+
     let python        = get_python_path();
-    let server_script = match get_model_server_path(&app_handle) {
+    let server_script = match if is_canvas {
+        get_canvas_server_path(&app_handle)
+    } else {
+        get_model_server_path(&app_handle)
+    } {
         Ok(p) => p,
         Err(e) => {
             let _ = app_handle.emit("lab-server-status",
@@ -189,13 +303,16 @@ pub async fn lab_start_model_server(
     let ah        = app_handle.clone();
     let vid       = version_id.clone();
     let mp        = model_path.clone();
+    let canvas    = is_canvas;
+    // Canvas-Server erwartet --model-dir, HF-Server --model-path
+    let path_arg  = if is_canvas { "--model-dir" } else { "--model-path" };
 
     std::thread::spawn(move || {
-        println!("[LabServer] Starte Python: {} --model-path {}", python, mp);
+        println!("[LabServer] Starte Python: {} {} {} (canvas={})", python, path_arg, mp, canvas);
 
         let mut child = match Command::new(&python)
             .arg(server_script.to_string_lossy().to_string())
-            .arg("--model-path").arg(&mp)
+            .arg(path_arg).arg(&mp)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -300,6 +417,7 @@ pub async fn lab_start_model_server(
                     receiver: rx,
                     version_id: vid.clone(),
                     model_path: mp,
+                    is_canvas: canvas,
                 });
                 s.status = ServerStatus::Ready;
             }
@@ -326,7 +444,21 @@ pub fn lab_infer_sample(
         let server = s.server.as_mut()
             .ok_or_else(|| "Kein Modell geladen. Bitte warte bis das Modell fertig geladen ist.".to_string())?;
 
-        let req = serde_json::json!({ "text": text }).to_string();
+        // Canvas-Modelle erwarten einen Zahlen-Tensor statt Text
+        let req = if server.is_canvas {
+            let nums: Vec<f64> = text
+                .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.parse::<f64>())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "Canvas-Modell erwartet numerische Eingaben, z.B. \"0.5, 1.2, 3.0\" — freier Text wird nicht unterstützt.".to_string())?;
+            if nums.is_empty() {
+                return Err("Keine Zahlen in der Eingabe. Canvas-Modelle erwarten einen Feature-Vektor, z.B. \"0.5, 1.2, 3.0\".".to_string());
+            }
+            serde_json::json!({ "input": nums, "input_type": "tensor" }).to_string()
+        } else {
+            serde_json::json!({ "text": text }).to_string()
+        };
         writeln!(server.stdin, "{}", req).map_err(|e| format!("Schreibfehler: {}", e))?;
         server.stdin.flush().map_err(|e| format!("Flush-Fehler: {}", e))?;
 

@@ -211,15 +211,45 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelSizeGb: number }) {
   const { t } = useLanguage();
-  const isFp16 = config.fp16 || config.bf16;
-  const isQuantized = config.load_in_4bit || config.load_in_8bit;
-  const quantFactor = config.load_in_4bit ? 0.25 : config.load_in_8bit ? 0.5 : 1.0;
-  const weightRam = modelSizeGb * quantFactor * (isFp16 ? 0.5 : 1.0);
-  const gradRam = config.use_lora ? modelSizeGb * 0.05 : modelSizeGb;
-  const optimizerRam = config.use_lora ? modelSizeGb * 0.1 : modelSizeGb * 2;
-  const activationBase = modelSizeGb > 1.5 ? 1.0 : 0.4;
-  const activationRam = (config.batch_size / 8) * activationBase * (isFp16 ? 0.5 : 1.0) * (config.gradient_checkpointing ? 0.4 : 1.0);
-  const total = weightRam + gradRam + optimizerRam + activationRam + 0.4;
+  const isFp16      = config.fp16 || config.bf16;
+  const is4bit      = config.load_in_4bit;
+  const is8bit      = config.load_in_8bit;
+  const isQuantized = is4bit || is8bit;
+
+  // 1. Gewichte: FP32-Cast = 2×, FP16 = 1×, 4-bit = 0.25× + 5% LoRA-Adapter, 8-bit = 0.5×
+  let weightRam: number;
+  if (is4bit)       { weightRam = modelSizeGb * 0.25 + (config.use_lora ? modelSizeGb * 0.05 : 0); }
+  else if (is8bit)  { weightRam = modelSizeGb * 0.5; }
+  else if (isFp16)  { weightRam = modelSizeGb; }
+  else              { weightRam = modelSizeGb * 2; }
+
+  // 2. Gradienten: LoRA/QLoRA nur Adapter (~5%), FP16 Full = 1×, FP32 Full = 2×
+  let gradRam: number;
+  if (config.use_lora || isQuantized)  { gradRam = modelSizeGb * 0.05; }
+  else if (isFp16)                     { gradRam = modelSizeGb; }
+  else                                 { gradRam = modelSizeGb * 2; }
+
+  // 3. AdamW Optimizer: FP16 Mixed = 4× trainierte Params (Master-Copy+m+v), FP32 = 2× (m+v)
+  //    Adafactor: ~0.5-1×. LoRA: nur 5% der Params trainiert.
+  const trainedFraction = (config.use_lora || isQuantized) ? 0.05 : 1.0;
+  const trainedGb       = modelSizeGb * trainedFraction;
+  let optimizerRam: number;
+  if (config.optimizer === 'adafactor') {
+    optimizerRam = trainedGb * (isFp16 ? 1.0 : 0.5);
+  } else {
+    optimizerRam = isFp16 ? trainedGb * 4 : trainedGb * 2;
+  }
+
+  // 4. Aktivierungen: ~0.30 GB/Sample bei 128 Tokens (FP32), ~0.15 GB (FP16)
+  //    Gradient Checkpointing spart ~70% (nur Checkpoint-Schichten gehalten)
+  const seqFactor      = config.max_seq_length / 128;
+  const bytesPerSample = isFp16 ? 0.15 : 0.30;
+  const activationRam  = config.batch_size * seqFactor * bytesPerSample * (config.gradient_checkpointing ? 0.3 : 1.0);
+
+  // 5. Framework-Overhead (CUDA-Runtime, PyTorch Caches, Tokenizer)
+  const overhead = 1.2;
+
+  const total = weightRam + gradRam + optimizerRam + activationRam + overhead;
   const color = total > 20 ? 'text-red-400' : total > 12 ? 'text-amber-400' : total > 6 ? 'text-yellow-400' : 'text-emerald-400';
 
   return (
@@ -227,15 +257,15 @@ function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelS
       <div className="flex items-center gap-2">
         <MemoryStick className="w-4 h-4 text-blue-400" />
         <span className="text-sm font-medium text-white">{t('trainingPanel.ramCalculator.title')}</span>
-        <span className="text-xs text-gray-500">{t('trainingPanel.ramCalculator.subtitle').replace('{sizeGb}', modelSizeGb.toFixed(2)).replace('{lora}', config.use_lora ? t('trainingPanel.ramCalculator.loraLabel') : '').replace('{quant}', isQuantized ? t('trainingPanel.ramCalculator.quantLabel').replace('{bits}', config.load_in_4bit ? '4' : '8') : '')}</span>
+        <span className="text-xs text-gray-500">{t('trainingPanel.ramCalculator.subtitle').replace('{sizeGb}', modelSizeGb.toFixed(2)).replace('{lora}', config.use_lora ? t('trainingPanel.ramCalculator.loraLabel') : '').replace('{quant}', isQuantized ? t('trainingPanel.ramCalculator.quantLabel').replace('{bits}', is4bit ? '4' : '8') : '')}</span>
       </div>
       <div className="space-y-1.5 text-xs">
         {[
           [t('trainingPanel.ramCalculator.weights'), weightRam],
-          [config.use_lora ? t('trainingPanel.ramCalculator.gradientsLora') : t('trainingPanel.ramCalculator.gradients'), gradRam],
-          [config.use_lora ? t('trainingPanel.ramCalculator.optimizerLora') : t('trainingPanel.ramCalculator.optimizer'), optimizerRam],
+          [config.use_lora || isQuantized ? t('trainingPanel.ramCalculator.gradientsLora') : t('trainingPanel.ramCalculator.gradients'), gradRam],
+          [config.use_lora || isQuantized ? t('trainingPanel.ramCalculator.optimizerLora') : t('trainingPanel.ramCalculator.optimizer'), optimizerRam],
           [t('trainingPanel.ramCalculator.activations').replace('{batch}', String(config.batch_size)).replace('{gradCkpt}', config.gradient_checkpointing ? t('trainingPanel.ramCalculator.gradCkptLabel') : ''), activationRam],
-          [t('trainingPanel.ramCalculator.misc'), 0.4],
+          [t('trainingPanel.ramCalculator.misc'), overhead],
         ].map(([l, v]) => (
           <div key={l as string} className="flex justify-between"><span className="text-gray-400">{l as string}</span><span className="text-gray-300 tabular-nums">{(v as number).toFixed(2)} GB</span></div>
         ))}
@@ -244,13 +274,13 @@ function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelS
       {!isFp16 && !config.use_lora && total > 8 && (
         <p className="text-amber-400 text-xs bg-amber-500/10 rounded-lg px-3 py-2 flex items-center gap-2">
           <Lightbulb className="w-3.5 h-3.5 flex-shrink-0" />
-          {t('trainingPanel.ramCalculator.fp16Tip').replace('{save}', (gradRam * 0.5 + activationRam * 0.5).toFixed(1))}
+          {t('trainingPanel.ramCalculator.fp16Tip').replace('{save}', (gradRam * 0.5 + activationRam * 0.5 + optimizerRam * 0.5).toFixed(1))}
         </p>
       )}
       {!config.use_lora && total > 12 && (
         <p className="text-violet-300 text-xs bg-violet-500/10 rounded-lg px-3 py-2 flex items-center gap-2">
           <Lightbulb className="w-3.5 h-3.5 flex-shrink-0" />
-          {t('trainingPanel.ramCalculator.loraTip').replace('{save}', (total * 0.15).toFixed(1))}
+          {t('trainingPanel.ramCalculator.loraTip').replace('{save}', (total * 0.85).toFixed(1))}
         </p>
       )}
       {total > 20 && <div className="text-red-300 text-xs bg-red-500/10 rounded-lg px-3 py-2 space-y-1"><p className="font-medium">{t('trainingPanel.ramCalculator.highRamTitle')}</p><p>{t('trainingPanel.ramCalculator.highRamDesc')}</p></div>}
@@ -294,7 +324,12 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
   const [showSaveForm, setShowSaveForm] = useState(false);
   const { success, error } = useNotification();
 
-  useEffect(() => { invoke<MetricsTemplate[]>('get_metrics_templates').then(setUserTemplates).catch(() => {}); }, []);
+  useEffect(() => {
+    invoke<MetricsTemplate[]>('get_metrics_templates')
+      // Backend liefert lora_target_modules als Array → UI-Form (Komma-String)
+      .then((list) => setUserTemplates(list.map((tp) => ({ ...tp, config: fromBackendConfig(tp.config) }))))
+      .catch(() => {});
+  }, []);
 
   const handleDelete = async (id: string) => {
     try { await invoke('delete_metrics_template', { templateId: id }); setUserTemplates(t => t.filter(x => x.id !== id)); success(t('trainingPanel.templates.deleteSuccess'), ''); }
@@ -389,7 +424,54 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
   );
 }
 
+// ── Backend-Konvertierung ──────────────────────────────────────────────────
+// Rust erwartet lora_target_modules als Vec<String>; die UI hält einen
+// Komma-String. Der Start-Pfad konvertiert bereits — Templates brauchen
+// dieselbe Übersetzung in BEIDE Richtungen (speichern + laden).
+
+function toBackendConfig(cfg: TrainingConfig): Record<string, unknown> {
+  const mods = cfg.lora_target_modules as unknown;
+  return {
+    ...cfg,
+    lora_target_modules: typeof mods === 'string'
+      ? mods.split(',').map((m) => m.trim()).filter(Boolean)
+      : Array.isArray(mods) ? mods : [],
+  };
+}
+
+function fromBackendConfig<T extends Partial<TrainingConfig>>(cfg: T): T {
+  const mods = (cfg as Record<string, unknown>).lora_target_modules;
+  if (Array.isArray(mods)) {
+    return { ...cfg, lora_target_modules: mods.join(',') } as T;
+  }
+  return cfg;
+}
+
 // ── AI Metric Assistant ────────────────────────────────────────────────────
+
+/**
+ * Typisiert die vom AI-Modell gelieferten JSON-Werte anhand von DEFAULT_CONFIG.
+ * Modelle liefern gern "4" statt 4, "true" statt true oder Arrays statt
+ * Komma-Strings — das ließ vorher das streng typisierte save_metrics_template
+ * (und teils das Anwenden) still scheitern. Unbekannte Felder werden verworfen.
+ */
+function sanitizeAIConfig(raw: Record<string, unknown>): Partial<TrainingConfig> {
+  const out: Record<string, unknown> = {};
+  const defaults = DEFAULT_CONFIG as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(raw)) {
+    if (!(k in defaults)) continue;
+    const d = defaults[k];
+    if (typeof d === 'number') {
+      const n = typeof v === 'number' ? v : parseFloat(String(v));
+      if (Number.isFinite(n)) out[k] = n;
+    } else if (typeof d === 'boolean') {
+      out[k] = v === true || String(v).toLowerCase() === 'true';
+    } else {
+      out[k] = Array.isArray(v) ? v.join(',') : String(v);
+    }
+  }
+  return out as Partial<TrainingConfig>;
+}
 
 const KI_CONFIG_FIELDS = `
 ALLE VERFÜGBAREN METRIKEN (du kannst ALLE davon in deinem JSON verwenden):
@@ -450,7 +532,7 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
   config: TrainingConfig; datasetName: string; datasetSize: number; modelName: string;
   onApply: (patch: Partial<TrainingConfig>) => void;
   onClose: () => void;
-  onSaveAsTemplate: (cfg: Partial<TrainingConfig>) => void;
+  onSaveAsTemplate: (cfg: Partial<TrainingConfig>) => Promise<boolean>;
   initialGoal?: string;
 }) {
   const { t } = useLanguage();
@@ -462,6 +544,7 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
   const [parsed, setParsed] = useState<Partial<TrainingConfig> | null>(null);
   const [applied, setApplied] = useState(false);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
+  const [askFailed, setAskFailed] = useState(false);
   const [phase, setPhase] = useState<'input' | 'result'>(initialGoal ? 'input' : 'input');
 
   // Auto-trigger analysis if initialGoal provided (e.g. from error recovery)
@@ -471,36 +554,54 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
 
   const ask = async () => {
     setLoading(true); setSuggestion(null); setParsed(null); setApplied(false); setSavedAsTemplate(false);
+    setAskFailed(false);
     setPhase('result');
-    const prompt = `Du bist ein ML-Experte für HuggingFace Fine-Tuning.
+    // Antwortsprache folgt der App-Einstellung — vorher war "Antworte auf
+    // Deutsch" hart im Prompt und hat die Spracheinstellung überschrieben.
+    const en = (language ?? '').toLowerCase().startsWith('en');
+    const prompt = `${en ? 'You are an ML expert for HuggingFace fine-tuning.' : 'Du bist ein ML-Experte für HuggingFace Fine-Tuning.'}
 
-AKTUELLE KONFIGURATION:
+${en ? 'CURRENT CONFIGURATION' : 'AKTUELLE KONFIGURATION'}:
 ${Object.entries(config).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 
-KONTEXT:
-- Modell: ${modelName}
-- Dataset: ${datasetName} (${datasetSize} Dateien)
-${goalText ? `\nZIEL / PROBLEM DES USERS:\n${goalText}` : ''}
+${en ? 'CONTEXT' : 'KONTEXT'}:
+- ${en ? 'Model' : 'Modell'}: ${modelName}
+- Dataset: ${datasetName} (${datasetSize} ${en ? 'files' : 'Dateien'})
+${goalText ? `\n${en ? "USER'S GOAL / PROBLEM" : 'ZIEL / PROBLEM DES USERS'}:\n${goalText}` : ''}
 
 ${KI_CONFIG_FIELDS}
 
-AUFGABE:
+${en ? `TASK:
+1. Briefly analyze the current configuration (3-4 sentences in English)
+2. Take the user's goal / problem into account if provided
+3. Produce optimized hyperparameters
+
+IMPORTANT: End with ONE valid JSON object containing ALL metrics you want to change.
+Only fields that should change. Example: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}
+No markdown code block — only the raw JSON object at the end.` : `AUFGABE:
 1. Analysiere die aktuelle Konfiguration kurz (3-4 Sätze auf Deutsch)
 2. Berücksichtige das Ziel / Problem des Users falls angegeben
 3. Erstelle optimierte Hyperparameter
 
 WICHTIG: Gib am Ende EIN valides JSON-Objekt mit ALLEN Metriken die du ändern möchtest.
 Nur Felder die sich ändern sollen. Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}
-Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
+Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`}`;
+
+    const system = en
+      ? 'You are a precise ML expert. Answer in English. Output exactly one valid JSON object at the end.'
+      : 'Du bist ein präziser ML-Experte. Antworte auf Deutsch. Gib am Ende exakt ein valides JSON-Objekt aus.';
 
     try {
-      const text = await callAI(aiSettings, 'Du bist ein präziser ML-Experte. Antworte auf Deutsch. Gib am Ende exakt ein valides JSON-Objekt aus.', prompt, undefined, language);
+      const text = await callAI(aiSettings, system, prompt, undefined, language);
       setSuggestion(text);
       const matches = [...text.matchAll(/\{[^{}]*\}/g)];
       if (matches.length > 0) {
-        try { setParsed(JSON.parse(matches[matches.length - 1][0])); } catch { /* ignore */ }
+        try {
+          const sanitized = sanitizeAIConfig(JSON.parse(matches[matches.length - 1][0]));
+          setParsed(Object.keys(sanitized).length > 0 ? sanitized : null);
+        } catch { /* ignore */ }
       }
-    } catch (err) { setSuggestion(`Fehler: ${String(err)}`); } finally { setLoading(false); }
+    } catch (err) { setSuggestion(`${t('common.error')}: ${String(err)}`); setParsed(null); setAskFailed(true); } finally { setLoading(false); }
   };
 
   const textOnly = suggestion?.replace(/\{[^{}]*\}/g, '').trim() ?? '';
@@ -522,8 +623,8 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                   {[
                     ['Epochs', config.epochs], ['Batch', config.batch_size], ['LR', config.learning_rate],
                     ['Seq Len', config.max_seq_length], ['Optimizer', config.optimizer], ['Scheduler', config.scheduler],
-                    ['FP16', config.fp16 ? 'ja' : 'nein'], ['GradAcc', config.gradient_accumulation_steps],
-                    ['LoRA', config.use_lora ? `r=${config.lora_r}` : 'nein'],
+                    ['FP16', config.fp16 ? '✓' : '—'], ['GradAcc', config.gradient_accumulation_steps],
+                    ['LoRA', config.use_lora ? `r=${config.lora_r}` : '—'],
                   ].map(([k, v]) => (
                     <div key={k as string} className="flex items-center gap-2 text-xs">
                       <span className="text-gray-500">{k}:</span>
@@ -569,7 +670,19 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
               ) : (
                 <>
                   {textOnly && (
-                    <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/20 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{textOnly}</div>
+                    <div className={`p-4 rounded-xl border text-sm leading-relaxed whitespace-pre-wrap ${
+                      askFailed
+                        ? 'bg-red-500/10 border-red-500/25 text-red-200'
+                        : 'bg-violet-500/10 border-violet-500/20 text-gray-300'
+                    }`}>{textOnly}</div>
+                  )}
+                  {askFailed && (
+                    <button
+                      onClick={ask}
+                      className="px-4 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-sm font-medium transition-all"
+                    >
+                      {t('aiCoach.retryButton')}
+                    </button>
                   )}
                   {parsed && Object.keys(parsed).length > 0 && (
                     <div className="space-y-3">
@@ -610,7 +723,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                               <Check className="w-3.5 h-3.5" /> {t('trainingPanel.aiAssistant.savedAsTemplateLabel')}
                             </div>
                           ) : (
-                            <button onClick={() => { onSaveAsTemplate(parsed); setSavedAsTemplate(true); }}
+                            <button onClick={async () => { if (await onSaveAsTemplate(parsed)) setSavedAsTemplate(true); }}
                               className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"
                             >
                               <BookOpen className="w-3.5 h-3.5" /> {t('trainingPanel.aiAssistant.saveAsTemplateButton')}
@@ -622,9 +735,12 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`;
                           <button
                             onClick={() => {
                               const payload = JSON.stringify(parsed, null, 2);
+                              const enCoach = (language ?? '').toLowerCase().startsWith('en');
                               openAICoach({
                                 newChat: true,
-                                prefill: `Ich habe im Training-Panel folgende KI-vorgeschlagene Metriken übernommen:\n\n\`\`\`json\n${payload}\n\`\`\`\n\nZiel: ${goalText || '(kein Ziel angegeben)'}\n\nBitte schlage mir als nächstes ein kleines Experiment-Setup vor (2–3 Varianten), inkl. worauf ich in der Analyse achten soll.`,
+                                prefill: enCoach
+                                  ? `I applied the following AI-suggested metrics in the training panel:\n\n\`\`\`json\n${payload}\n\`\`\`\n\nGoal: ${goalText || '(no goal specified)'}\n\nPlease suggest a small experiment setup next (2-3 variants), including what to look for in the analysis.`
+                                  : `Ich habe im Training-Panel folgende KI-vorgeschlagene Metriken übernommen:\n\n\`\`\`json\n${payload}\n\`\`\`\n\nZiel: ${goalText || '(kein Ziel angegeben)'}\n\nBitte schlage mir als nächstes ein kleines Experiment-Setup vor (2–3 Varianten), inkl. worauf ich in der Analyse achten soll.`,
                                 titleHint: 'Training-Metriken-Followup',
                               });
                             }}
@@ -669,6 +785,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     setShowDashboard: setShowDashboardContext,
     setIsDashMinimized: setIsDashMinimizedContext,
     setCurrentJob: setCurrentJobContext,
+    updateJobStatus: updateJobStatusContext,
     addLossPoint: addLossPointContext,
     setLossPoints: setLossPointsContext,
     setSessionId: setSessionIdContext,
@@ -764,14 +881,10 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     } catch { setModelSizeGb(0.56); }
   };
 
-  // Wenn wir auf die Trainingsseite zurückkommen, kann im Context noch ein laufender Job stecken
-  // (z.B. TrainingDashboard minimiert). In diesem Fall darf das lokale `currentJob` (initial null)
-  // den Context nicht "weg-null-en".
-  useEffect(() => {
-    if (currentJob == null && trainingState.currentJob != null) return;
-    setCurrentJobContext(currentJob);
-  }, [currentJob, setCurrentJobContext, trainingState.currentJob]);
-
+  // Wenn wir auf die Trainingsseite zurückkommen, kann im Context noch ein laufender Job
+  // stecken (Dashboard minimiert) — lokalen State daraus initialisieren.
+  // Der umgekehrte Push (lokal → Context) ist entfernt: der TrainingContext hält
+  // sich jetzt selbst über die globalen Event-Listener aktuell.
   useEffect(() => {
     if (currentJob == null && trainingState.currentJob != null) {
       setCurrentJob(trainingState.currentJob as unknown as TrainingJob);
@@ -780,42 +893,58 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
   // Refs to keep latest callback functions without triggering effect re-runs
   const successRef = useRef(success);
-  const addLossPointContextRef = useRef(addLossPointContext);
-  const setCompletedVersionIdContextRef = useRef(setCompletedVersionIdContext);
-
   useEffect(() => {
     successRef.current = success;
-    addLossPointContextRef.current = addLossPointContext;
-    setCompletedVersionIdContextRef.current = setCompletedVersionIdContext;
-  }, [success, addLossPointContext, setCompletedVersionIdContext]);
+  }, [success]);
 
-  // Register event listeners only once
+  // Register event listeners only once — aktualisieren NUR den lokalen State
+  // dieser Seite. Den globalen TrainingContext füttern die Listener im
+  // TrainingContextProvider (laufen app-weit, auch wenn diese Seite unmountet).
   useEffect(() => {
-    let u1: (() => void) | undefined, u2: (() => void) | undefined, u3: (() => void) | undefined;
-    listen<{ data: TrainingProgress }>('training-progress', e => {
+    let u1: (() => void) | undefined, u2: (() => void) | undefined, u3: (() => void) | undefined,
+        u4: (() => void) | undefined, u5: (() => void) | undefined;
+    // Dev-Trainings (DevTrainPanel) emittieren dieselben Event-Namen mit job_id "dev_…" —
+    // die dürfen den normalen Trainings-State hier nicht beeinflussen.
+    const isDevJob = (jobId?: string) => jobId?.startsWith('dev_') ?? false;
+    listen<{ job_id?: string; data: TrainingProgress }>('training-progress', e => {
+      if (isDevJob(e.payload.job_id)) return;
       const d = e.payload.data;
       setCurrentJob(j => (j ? { ...j, status: 'running', progress: d } : null));
       if (d.train_loss != null) {
-        const newPoint = { step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined };
-        setLossPoints(pts => [...pts, newPoint]);
-        addLossPointContextRef.current(newPoint);
+        setLossPoints(pts => [...pts, { step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined }]);
       }
     }).then(fn => { u1 = fn; });
-    listen<{ new_version_id?: string }>('training-complete', e => {
+    listen<{ job_id?: string; new_version_id?: string }>('training-complete', e => {
+      if (isDevJob(e.payload.job_id)) return;
       setCurrentJob(j => (j ? { ...j, status: 'completed' } : null));
       invoke('disable_prevent_sleep').catch(() => {});
       successRef.current(t('trainingPanel.notifications.trainingComplete'), t('trainingPanel.notifications.trainingCompleteDetail'));
-      // Version-ID im Context speichern → TrainingDashboard zeigt "Analyse starten"-Button
-      if (e.payload.new_version_id) {
-        setCompletedVersionIdContextRef.current(e.payload.new_version_id);
-      }
-      // Kein automatisches onNavigateToAnalysis mehr – User entscheidet selbst über Dashboard-Button
     }).then(fn => { u2 = fn; });
-    listen<{ data?: { error?: string } }>('training-error', e => {
-      setCurrentJob(j => (j ? { ...j, status: 'failed', error: e.payload.data?.error ?? t('common.error') } : null));
+    listen<{ job_id?: string; data?: { error?: string; details?: string } }>('training-error', e => {
+      if (isDevJob(e.payload.job_id)) return;
+      // details (Traceback/Fix-Hinweise) mitnehmen — sonst sieht der User nur den Kurztitel
+      const err = e.payload.data?.error ?? t('common.error');
+      const det = e.payload.data?.details;
+      setCurrentJob(j => (j ? { ...j, status: 'failed', error: det ? `${err}\n${det}` : err } : null));
       invoke('disable_prevent_sleep').catch(() => {});
     }).then(fn => { u3 = fn; });
-    return () => { u1?.(); u2?.(); u3?.(); };
+    // Gestopptes Training mit gespeichertem Checkpoint
+    listen<{ version_id?: string; message?: string }>('training-stopped-with-checkpoint', e => {
+      setCurrentJob(j => (j ? { ...j, status: 'stopped' } : null));
+      if (e.payload.version_id) {
+        successRef.current(
+          t('trainingPanel.notifications.stoppedWithCheckpoint'),
+          t('trainingPanel.notifications.stoppedWithCheckpointDetail'),
+        );
+      }
+    }).then(fn => { u4 = fn; });
+    // Gestopptes Training OHNE Checkpoint (z. B. Canvas oder Stop vor dem ersten
+    // Checkpoint) — vorher gab es dafür keinen Listener und der Status blieb "running"
+    listen<{ job_id?: string; message?: string }>('training-stopped', e => {
+      if (isDevJob(e.payload.job_id)) return;
+      setCurrentJob(j => (j ? { ...j, status: 'stopped' } : null));
+    }).then(fn => { u5 = fn; });
+    return () => { u1?.(); u2?.(); u3?.(); u4?.(); u5?.(); };
   }, []);
 
   useEffect(() => {
@@ -968,17 +1097,38 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   };
 
   const handleStopTraining = async () => {
-    try { await invoke('stop_training'); invoke('disable_prevent_sleep').catch(() => {}); success(t('trainingPanel.notifications.stopped'), ''); } catch (err: unknown) { error(t('trainingPanel.notifications.stopFailed'), String(err)); }
+    try {
+      await invoke('stop_training');
+      invoke('disable_prevent_sleep').catch(() => {});
+      // Sofortiges UI-Feedback — nicht auf das (optionale) Stop-Event warten
+      setCurrentJob(j => (j && (j.status === 'running' || j.status === 'pending') ? { ...j, status: 'stopped' } : j));
+      updateJobStatusContext('stopped');
+      success(t('trainingPanel.notifications.stopped'), '');
+    } catch (err: unknown) {
+      error(t('trainingPanel.notifications.stopFailed'), String(err));
+    }
   };
 
   const handleSaveTemplate = async (name: string, desc: string) => {
-    try { await invoke('save_metrics_template', { name, description: desc, config, source: 'user' }); success(t('trainingPanel.notifications.templateSaved'), name); }
+    try { await invoke('save_metrics_template', { name, description: desc, config: toBackendConfig(config), source: 'user' }); success(t('trainingPanel.notifications.templateSaved'), name); }
     catch (err: unknown) { error(t('common.error'), String(err)); }
   };
 
-  const handleSaveAIAsTemplate = async (cfg: Partial<TrainingConfig>) => {
-    try { await invoke('save_metrics_template', { name: `KI-Vorschlag ${new Date().toLocaleDateString('de-DE')}`, description: 'Automatisch vom KI-Assistenten erstellt.', config: { ...DEFAULT_CONFIG, ...cfg }, source: 'ai' }); success(t('trainingPanel.notifications.aiTemplateSaved'), t('trainingPanel.notifications.aiTemplateSavedDetail')); }
-    catch { /* ignore */ }
+  const handleSaveAIAsTemplate = async (cfg: Partial<TrainingConfig>): Promise<boolean> => {
+    try {
+      await invoke('save_metrics_template', {
+        name: `KI-Vorschlag ${new Date().toLocaleDateString('de-DE')}`,
+        description: 'Automatisch vom KI-Assistenten erstellt.',
+        config: toBackendConfig({ ...DEFAULT_CONFIG, ...cfg }),
+        source: 'ai',
+      });
+      success(t('trainingPanel.notifications.aiTemplateSaved'), t('trainingPanel.notifications.aiTemplateSavedDetail'));
+      return true;
+    } catch (err) {
+      // Vorher still verschluckt — der Button wirkte dann "tot"
+      error(t('common.error'), String(err));
+      return false;
+    }
   };
 
   const handleOpenHistory = async () => {

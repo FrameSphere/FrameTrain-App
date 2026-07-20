@@ -294,20 +294,65 @@ class Plugin:
 
     # ─── Dataset-Loader ───────────────────────────────────────────────────
 
-    def _load_samples(self, path: Path) -> List[Dict[str, Any]]:
-        """Lädt Samples aus JSON/JSONL/CSV in eine einheitliche Struktur."""
+    SUPPORTED_DATA_EXTS = (".jsonl", ".ndjson", ".json", ".csv", ".parquet", ".pq")
 
-        # Falls der Pfad ein Verzeichnis ist, suche darin nach einer unterstützten Datei
+    def _find_dataset_file(self, root: Path) -> Path:
+        """Wählt die richtige Datei aus einem Dataset-Verzeichnis.
+
+        WICHTIG: Bei gesplitteten Datasets MUSS der test-Split bevorzugt werden --
+        sonst würde die Accuracy auf Trainingsdaten gemessen (Data Leakage).
+        Priorität: test/ > val/ > Root-Dateien > alles andere (train/ zuletzt).
+        """
+        META_NAMES = {"dataset_infos.json", "metadata.json", "config.json", "dataset.yaml"}
+
+        def files_in(d: Path, recursive: bool = False) -> List[Path]:
+            it = d.rglob("*") if recursive else d.iterdir()
+            found = [
+                f for f in it
+                if f.is_file()
+                and f.suffix.lower() in self.SUPPORTED_DATA_EXTS
+                and f.name.lower() not in META_NAMES
+            ]
+            # Innerhalb einer Kandidatenmenge: Dateien mit "test" im Namen zuerst,
+            # danach deterministisch alphabetisch.
+            found.sort(key=lambda f: (0 if "test" in f.stem.lower() else 1, str(f)))
+            return found
+
+        # 1. Split-Ordner nach Priorität
+        for sub in ("test", "testing", "val", "validation", "valid"):
+            d = root / sub
+            if d.is_dir():
+                candidates = files_in(d, recursive=True)
+                if candidates:
+                    return candidates[0]
+
+        # 2. Dateien direkt im Root
+        candidates = files_in(root)
+        if candidates:
+            return candidates[0]
+
+        # 3. Letzter Ausweg: rekursiv, aber train/-Pfade ans Ende sortieren
+        all_files = [f for f in root.rglob("*") if f.is_file() and f.suffix.lower() in self.SUPPORTED_DATA_EXTS]
+        all_files.sort(key=lambda f: (1 if "train" in str(f.relative_to(root)).lower() else 0, str(f)))
+        if all_files:
+            return all_files[0]
+
+        raise ValueError(
+            f"Kein unterstütztes Dataset (jsonl/json/csv/parquet) in Verzeichnis: {root}"
+        )
+
+    def _load_samples(self, path: Path) -> List[Dict[str, Any]]:
+        """Lädt Samples aus JSON/JSONL/CSV/Parquet in eine einheitliche Struktur."""
+
+        # Falls der Pfad ein Verzeichnis ist: richtige Split-Datei wählen (test bevorzugt)
         if path.is_dir():
-            for ext_try in (".jsonl", ".ndjson", ".json", ".csv"):
-                for candidate in path.rglob(f"*{ext_try}"):
-                    if candidate.is_file():
-                        path = candidate
-                        break
-                if path.is_file():
-                    break
-            else:
-                raise ValueError(f"Kein unterstütztes Dataset (jsonl/json/csv) in Verzeichnis: {path}")
+            root = path
+            path = self._find_dataset_file(root)
+            try:
+                rel = path.relative_to(root)
+            except ValueError:
+                rel = path.name
+            TestProtocol.status("loading", f"Verwende Datei: {rel}")
 
         ext = path.suffix.lower()
 
@@ -335,6 +380,11 @@ class Plugin:
             with open(path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 raw_rows = list(reader)
+        elif ext in (".parquet", ".pq"):
+            # HuggingFace-Downloads liegen standardmäßig als Parquet vor.
+            import pandas as pd
+            df = pd.read_parquet(path)
+            raw_rows = json.loads(df.to_json(orient="records", date_format="iso", default_handler=str))
         else:
             raise ValueError(f"Nicht unterstütztes Dataset-Format: {ext}")
 

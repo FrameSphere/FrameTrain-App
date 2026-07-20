@@ -72,6 +72,12 @@ class CanvasInferenceServer:
 
         result = self.loaded.predict(x)
         result["type"] = "result"
+        # Key-Aliase für den Lab-Server (gleiche Felder wie model_server.py):
+        # predicted_class → predicted, inference_ms → inference_time (Sekunden)
+        if "predicted" not in result and "predicted_class" in result:
+            result["predicted"] = str(result["predicted_class"])
+        if "inference_time" not in result and "inference_ms" in result:
+            result["inference_time"] = float(result["inference_ms"]) / 1000.0
         return result
 
     def run(self):

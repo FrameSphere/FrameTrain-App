@@ -21,6 +21,7 @@ import type { ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI } from './TrainingPanel';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
+import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
 import DiffViewer from './DiffViewer';
 import OpenLibraryModal from './OpenLibraryModal';
 
@@ -28,11 +29,13 @@ import OpenLibraryModal from './OpenLibraryModal';
 
 interface SavedScript { id: string; name: string; script: string; savedAt: string; }
 
-const SCRIPTS_KEY = 'ft_saved_test_scripts';
-const loadScripts  = (): SavedScript[] => { try { return JSON.parse(localStorage.getItem(SCRIPTS_KEY) ?? '[]'); } catch { return []; } };
-const saveScript   = (name: string, script: string) => { const all = loadScripts(); all.unshift({ id: `sc_${Date.now()}`, name, script, savedAt: new Date().toISOString() }); localStorage.setItem(SCRIPTS_KEY, JSON.stringify(all.slice(0, 50))); };
-const deleteScript = (id: string) => localStorage.setItem(SCRIPTS_KEY, JSON.stringify(loadScripts().filter(s => s.id !== id)));
-const updateScript = (id: string, script: string) => { const all = loadScripts(); const idx = all.findIndex(s => s.id === id); if (idx >= 0) { all[idx] = { ...all[idx], script, savedAt: new Date().toISOString() }; localStorage.setItem(SCRIPTS_KEY, JSON.stringify(all)); } };
+// User-getrennt (vorher globaler Key für ALLE Accounts auf dem Gerät!) —
+// Legacy-Migration übernimmt utils/devScriptStorage beim ersten Laden.
+const getScriptsKey = (userId?: string) => userId ? `ft_saved_test_scripts_${userId}` : 'ft_saved_test_scripts';
+const loadScripts  = (userId?: string): SavedScript[] => { try { return JSON.parse(localStorage.getItem(getScriptsKey(userId)) ?? '[]'); } catch { return []; } };
+const saveScript   = (name: string, script: string, userId?: string) => { const all = loadScripts(userId); all.unshift({ id: `sc_${Date.now()}`, name, script, savedAt: new Date().toISOString() }); localStorage.setItem(getScriptsKey(userId), JSON.stringify(all.slice(0, 50))); };
+const deleteScript = (id: string, userId?: string) => localStorage.setItem(getScriptsKey(userId), JSON.stringify(loadScripts(userId).filter(s => s.id !== id)));
+const updateScript = (id: string, script: string, userId?: string) => { const all = loadScripts(userId); const idx = all.findIndex(s => s.id === id); if (idx >= 0) { all[idx] = { ...all[idx], script, savedAt: new Date().toISOString() }; localStorage.setItem(getScriptsKey(userId), JSON.stringify(all)); } };
 
 // ── Edit Parsing ──────────────────────────────────────────────────────────
 // Zentralisiert in src/ai/codeEdits.ts
@@ -159,19 +162,19 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
 
 // ── Script Library Modal ──────────────────────────────────────────────────
 
-function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; }) {
+function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; userId?: string; }) {
   const { t } = useLanguage();
   const [scripts, setScripts] = useState<SavedScript[]>([]);
   const [saveName, setSaveName] = useState('');
   const [showSaveForm, setShowForm] = useState(false);
   const { success } = useNotification();
 
-  useEffect(() => { setScripts(loadScripts()); }, []);
+  useEffect(() => { setScripts(loadScripts(userId)); }, [userId]);
 
   const handleSave = () => {
     if (!saveName.trim()) return;
-    saveScript(saveName.trim(), currentScript);
-    setScripts(loadScripts());
+    saveScript(saveName.trim(), currentScript, userId);
+    setScripts(loadScripts(userId));
     setSaveName(''); setShowForm(false);
     success(t('devTestPanel.notifications.savedNew'), t('devTestPanel.notifications.savedNewDetail').replace('{name}', saveName));
   };
@@ -198,7 +201,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose }: { currentScript:
                   <pre className="text-gray-600 text-[10px] mt-1.5 font-mono truncate">{s.script.split('\n').slice(0, 2).join(' · ')}</pre>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
-                  <button onClick={() => { deleteScript(s.id); setScripts(loadScripts()); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => { deleteScript(s.id, userId); setScripts(loadScripts(userId)); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
                   <button onClick={() => { onLoad(s); onClose(); }} className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all">{t('devTestPanel.library.loadButton')}</button>
                 </div>
               </div>
@@ -273,6 +276,8 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   const [currentMessageWithEdits, setCurrentMessageWithEdits] = useState<AiMessage | null>(null);
   const [isApplyingEdits, setIsApplyingEdits] = useState(false);
   const [appliedEdits, setAppliedEdits] = useState<AppliedEditInfo[]>([]);
+  // Text der letzten fehlgeschlagenen Anfrage — für "Erneut senden"
+  const [retryText, setRetryText] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const lastPrefillRef = useRef<string>('');
 
@@ -318,12 +323,14 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
     saveChatSessions([ns, ...sessions]);
     setCurrentSessionId(id); setSessionTitle(t('devTestPanel.chat.newChatTitle')); setMessages([]);
     setAppliedEdits([]); setCurrentMessageWithEdits(null); setIsReadonly(false); setShowHistory(false);
+    setRetryText(null);
     onClearHighlights?.();
   };
 
   const switchToSession = (session: ChatSession) => {
     setCurrentSessionId(session.id); setSessionTitle(session.title); setMessages(session.messages);
     setAppliedEdits([]); setCurrentMessageWithEdits(null); setIsReadonly(true); setShowHistory(false);
+    setRetryText(null);
     onClearHighlights?.();
   };
 
@@ -395,19 +402,29 @@ ANFORDERUNGEN:
     t('devTestPanel.aiSidebar.suggestions.batchInference'),
   ];
 
-  const send = async () => {
-    if (!input.trim() || loading || isReadonly) return;
-    const userMsg: AiMessage = { role: 'user', content: input.trim() };
-    if (messages.length === 0) {
-      const title = makeSessionTitle(input.trim());
+  const send = async (retryTextArg?: string) => {
+    const isRetry = typeof retryTextArg === 'string';
+    const text = (isRetry ? retryTextArg : input).trim();
+    if (!text || loading || isReadonly) return;
+    const userMsg: AiMessage = { role: 'user', content: text };
+    if (!isRetry && messages.length === 0) {
+      const title = makeSessionTitle(text);
       setSessionTitle(title);
       const sessions = loadChatSessions();
       const idx = sessions.findIndex(s => s.id === currentSessionIdRef.current);
       if (idx >= 0) { sessions[idx].title = title; saveChatSessions(sessions); }
     }
-    setMessages(m => [...m, userMsg]); setInput(''); setLoading(true);
+    // Retry: letzte (Fehler-)Antwort entfernen — User-Nachricht ist schon im Verlauf
+    const base = isRetry && messages[messages.length - 1]?.role === 'assistant'
+      ? messages.slice(0, -1)
+      : messages;
+    const withUser = isRetry ? base : [...base, userMsg];
+    setMessages(withUser);
+    if (!isRetry) setInput('');
+    setRetryText(null);
+    setLoading(true);
     try {
-      const history = [...messages, userMsg].map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      const history = withUser.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
       const last = history.pop()!;
       const response = await callAI(aiSettings, systemPrompt, last.content, history, language);
       const { action, cleaned } = parseAutoAction(response);
@@ -418,6 +435,7 @@ ANFORDERUNGEN:
       setMessages(m => [...m, { role: 'assistant', content: finalContent, edits, action }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', content: `Fehler: ${String(err)}` }]);
+      setRetryText(text);
     } finally { setLoading(false); }
   };
 
@@ -711,6 +729,16 @@ ANFORDERUNGEN:
               <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10"><Loader2 className="w-4 h-4 text-violet-400 animate-spin" /></div>
             </div>
           )}
+          {retryText && !loading && (
+            <div className="pl-8">
+              <button
+                onClick={() => send(retryText)}
+                className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-[10px] font-medium transition-all"
+              >
+                {t('aiCoach.retryButton')}
+              </button>
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 
@@ -768,7 +796,7 @@ ANFORDERUNGEN:
               className={`flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder:text-gray-600 focus:outline-none focus:border-white/20 resize-none transition-opacity ${
                 isReadonly ? 'opacity-40 cursor-not-allowed' : ''
               }`} />
-            <button onClick={send} disabled={!input.trim() || loading || isReadonly}
+            <button onClick={() => send()} disabled={!input.trim() || loading || isReadonly}
               className="p-2.5 rounded-xl border transition-all disabled:opacity-40 bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/30 text-purple-200">
               <Send className="w-4 h-4" />
             </button>
@@ -965,6 +993,8 @@ interface DevTestPanelProps {
 }
 
 export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets, userData }: DevTestPanelProps) {
+  // Globale Legacy-Scripts einmalig in den User-Key übernehmen
+  useEffect(() => { migrateLegacyDevScripts(userData?.userId); }, [userData?.userId]);
   const { currentTheme } = useTheme();
   const { success, error } = useNotification();
   const { settings: aiSettings } = useAISettings();
@@ -1256,7 +1286,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
 
   const handleSave = () => {
     if (currentScriptId) {
-      updateScript(currentScriptId, script);
+      updateScript(currentScriptId, script, userData?.userId);
       setSavedScript(script); setIsDirty(false);
     success(t('devTestPanel.notifications.updatedTitle'), t('devTestPanel.notifications.updatedDetail'));
     } else {
@@ -1267,8 +1297,8 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
 
   const handleSaveWithName = (name: string) => {
     if (!name.trim()) return;
-    saveScript(name.trim(), script);
-    const newScript = loadScripts()[0];
+    saveScript(name.trim(), script, userData?.userId);
+    const newScript = loadScripts(userData?.userId)[0];
     if (newScript) setCurrentScriptId(newScript.id);
     setSavedScript(script); setIsDirty(false); setShowSaveDialog(false); setSaveName('');
     success(t('devTestPanel.notifications.savedTitle'), t('devTestPanel.notifications.savedDetail').replace('{name}', name));
@@ -1819,7 +1849,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
       </div>
 
       {showLibrary && (
-        <ScriptLibraryModal currentScript={script} onLoad={s => {
+        <ScriptLibraryModal currentScript={script} userId={userData?.userId} onLoad={s => {
           setScript(s.script); setSavedScript(s.script); setCurrentScriptId(s.id);
           setIsDirty(false); setFileOpen(true);
         }} onClose={() => setShowLib(false)} />

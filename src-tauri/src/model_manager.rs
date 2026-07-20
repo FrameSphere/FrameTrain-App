@@ -37,6 +37,31 @@ pub struct ModelDownloadProgress {
 
 // ============ Interne Helfer ============
 
+/// IDs dürfen nur aus [A-Za-z0-9_-] bestehen — verhindert Path-Traversal
+/// (z.B. model_id = "../../andere_daten" bei delete_model).
+pub fn is_safe_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// HF-Repo-IDs haben das Format "name" oder "owner/name" (Buchstaben, Ziffern, ., _, -).
+/// Verhindert, dass manipulierte IDs die Download-URL umbiegen.
+pub fn is_safe_repo_id(repo_id: &str) -> bool {
+    let parts: Vec<&str> = repo_id.split('/').collect();
+    (1..=2).contains(&parts.len()) && parts.iter().all(|p| {
+        !p.is_empty() && *p != "." && *p != ".."
+            && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    })
+}
+
+/// Prüft, dass ein (relativer) Dateiname aus der HF-API keine Traversal-Segmente enthält.
+fn is_safe_relative_filename(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('/')
+        && !name.starts_with('\\')
+        && !name.contains("..")
+        && !name.contains(':')
+}
+
 fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data_dir = app_handle.path().app_data_dir()
         .map_err(|e| format!("AppDataDir: {}", e))?;
@@ -235,11 +260,45 @@ pub async fn import_local_model(
 }
 
 #[tauri::command]
+pub fn rename_model(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+    new_name: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    if !is_safe_id(&model_id) { return Err("Ungültige Modell-ID".to_string()); }
+    let name = new_name.trim();
+    if name.is_empty() { return Err("Name darf nicht leer sein".to_string()); }
+
+    {
+        let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+        db.conn.execute("UPDATE models SET name = ?1 WHERE id = ?2", [name, model_id.as_str()])
+            .map_err(|e| format!("Umbenennen: {}", e))?;
+    }
+
+    // Metadata JSON synchron halten
+    let models_dir = get_models_dir(&app_handle)?;
+    let meta = models_dir.join("models_metadata.json");
+    if meta.exists() {
+        let mut models: Vec<ModelInfo> = serde_json::from_str(
+            &fs::read_to_string(&meta).unwrap_or_default()
+        ).unwrap_or_default();
+        for m in models.iter_mut() {
+            if m.id == model_id { m.name = name.to_string(); }
+        }
+        fs::write(&meta, serde_json::to_string_pretty(&models).unwrap_or_default()).ok();
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_model(
     app_handle: tauri::AppHandle,
     model_id: String,      // Frontend: modelId
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
+    if !is_safe_id(&model_id) { return Err("Ungültige Modell-ID".to_string()); }
     let models_dir = get_models_dir(&app_handle)?;
     let model_path = models_dir.join(&model_id);
     if model_path.exists() {
@@ -372,6 +431,7 @@ pub async fn search_huggingface_models(
 pub async fn get_huggingface_model_files(
     repo_id: String,
 ) -> Result<Vec<HuggingFaceFile>, String> {
+    if !is_safe_repo_id(&repo_id) { return Err("Ungültige Repo-ID".to_string()); }
     let url = format!("https://huggingface.co/api/models/{}/tree/main", repo_id);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -399,6 +459,7 @@ pub async fn download_huggingface_model(
     use std::time::Instant;
     use tokio::io::AsyncWriteExt;
 
+    if !is_safe_repo_id(&repo_id) { return Err("Ungültige Repo-ID".to_string()); }
     let models_dir = get_models_dir(&app_handle)?;
     let model_id   = format!("hf_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
     let target     = models_dir.join(&model_id);
@@ -430,14 +491,26 @@ pub async fn download_huggingface_model(
     let mut total: u64 = 0;
     let mut count: usize = 0;
 
-    // Nur relevante Dateien (keine Verzeichnisse, keine riesigen Shards)
+    // Nur relevante Dateien (keine Verzeichnisse, keine Git-Metadaten).
+    // WICHTIG: Alle gängigen Gewichts-Formate abdecken — sonst kommen z.B.
+    // YOLO- (.pt), GGUF- oder ONNX-Repos ohne Gewichte an.
     let relevant: Vec<&HuggingFaceFile> = files.iter().filter(|f| {
         if let Some(ref t) = f.file_type { if t == "directory" { return false; } }
         let n = f.filename.to_lowercase();
         n.ends_with(".json") || n.ends_with(".txt") || n.ends_with(".md")
             || n.ends_with(".safetensors") || n.ends_with(".bin")
             || n.ends_with(".model") || n.contains("config")
+            || n.ends_with(".pt") || n.ends_with(".pth") || n.ends_with(".ckpt")
+            || n.ends_with(".gguf") || n.ends_with(".ggml") || n.ends_with(".onnx")
+            || n.ends_with(".h5") || n.ends_with(".keras") || n.ends_with(".tflite")
+            || n.ends_with(".msgpack") || n.ends_with(".npz") || n.ends_with(".pb")
+            || n.ends_with(".vocab") || n.ends_with(".spm") || n.ends_with(".merges")
     }).collect();
+
+    if relevant.is_empty() {
+        let _ = fs::remove_dir_all(&target);
+        return Err(format!("Repo '{}' enthält keine unterstützten Modell-Dateien.", repo_id));
+    }
 
     // Gesamtgröße für ETA und Prozentanzeige
     let total_size: u64 = relevant.iter().map(|f| f.size.unwrap_or(0)).sum();
@@ -451,9 +524,18 @@ pub async fn download_huggingface_model(
     const EMIT_INTERVAL_MS: u128 = 200;
 
     for (idx, file) in relevant.iter().enumerate() {
+        // Sicherheit: keine Traversal-Dateinamen aus der API übernehmen
+        if !is_safe_relative_filename(&file.filename) {
+            eprintln!("[HF Download] ⚠️ Unsicherer Dateiname übersprungen: {}", file.filename);
+            continue;
+        }
+        // Pfad-Segmente einzeln encodieren, damit Unterordner (a/b.json) korrekt aufgelöst werden
+        let encoded_path: String = file.filename.split('/')
+            .map(|seg| urlencoding::encode(seg).into_owned())
+            .collect::<Vec<_>>().join("/");
         let url = format!(
             "https://huggingface.co/{}/resolve/main/{}",
-            repo_id, urlencoding::encode(&file.filename)
+            repo_id, encoded_path
         );
         println!("[HF Download] [{}/{}] ← {}", idx + 1, total_files, file.filename);
 
@@ -574,6 +656,14 @@ pub async fn download_huggingface_model(
                     message: format!("{} ✓ ({} MB)", file.filename, file_bytes / 1_048_576),
                 });
             }
+        } else {
+            // FIX: Fehlgeschlagene Datei nicht mehr still überspringen — sonst entsteht
+            // ein unvollständiges (kaputtes) Modell ohne jede Fehlermeldung.
+            let _ = fs::remove_dir_all(&target);
+            return Err(format!(
+                "Download fehlgeschlagen für '{}': HTTP {}. Modell wurde nicht gespeichert.",
+                file.filename, resp.status()
+            ));
         }
     }
 
@@ -630,6 +720,7 @@ pub fn cleanup_incomplete_download(
     app_handle: tauri::AppHandle,
     model_id: String,
 ) -> Result<(), String> {
+    if !is_safe_id(&model_id) { return Err("Ungültige Modell-ID".to_string()); }
     let models_dir = get_models_dir(&app_handle)?;
     let target = models_dir.join(&model_id);
 

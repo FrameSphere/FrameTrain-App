@@ -11,7 +11,7 @@ import {
   Trash2, RotateCcw, Download, Eye, Sparkles, Terminal,
   ThumbsUp, ThumbsDown, Minus, TrendingUp, TrendingDown,
   ClipboardList, Save, FolderOpen, Bot, Send, Pencil,
-  Check, Wand2, Copy, Maximize2, Minimize2,
+  Check, Wand2, Copy, Maximize2, Minimize2, Zap,
 } from 'lucide-react';
 import { detectPlugin } from '../plugins/registry';
 import { useNotification } from '../contexts/NotificationContext';
@@ -19,6 +19,22 @@ import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { usePageContext } from '../contexts/PageContext';
 import { callAI } from './TrainingPanel';
+import OpenLibraryModal from './OpenLibraryModal';
+import { readUserDevScripts } from '../utils/devScriptStorage';
+
+// ── Eigene Dev-Scripts (DevTrain + DevTest) — strikt user-getrennt ───────────
+interface LabSavedScript { id: string; name: string; script: string; savedAt: string; source: 'train' | 'test'; }
+
+function loadAllSavedScripts(userId?: string): LabSavedScript[] {
+  const { train, test } = readUserDevScripts(userId);
+  const seen = new Set<string>();
+  return [
+    ...train.map(s => ({ ...s, source: 'train' as const })),
+    ...test.map(s => ({ ...s, source: 'test' as const })),
+  ]
+    .filter(s => s && s.id && s.script && !seen.has(s.id) && (seen.add(s.id), true))
+    .sort((a, b) => (b.savedAt ?? '').localeCompare(a.savedAt ?? ''));
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -755,9 +771,15 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   // Engine
   const [engineMode, setEngineMode] = useState<'engine' | 'dev'>('engine');
   const [devScript, setDevScript] = useState('');
+  // Script-Quellen für den Dev-Modus: eigene Bibliothek + Open Library
+  const [showMyScripts, setShowMyScripts] = useState(false);
+  const [myScripts, setMyScripts] = useState<LabSavedScript[]>([]);
+  const [showOpenLib, setShowOpenLib] = useState(false);
 
   // Model Server Status
   const [serverStatus, setServerStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  // Konkrete Fehlermeldung vom Server-Start (inline sichtbar, nicht nur als Toast)
+  const [serverErrorMsg, setServerErrorMsg] = useState<string | null>(null);
   const [serverVersionId, setServerVersionId] = useState<string | null>(null);
   const serverStatusRef = useRef<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
@@ -841,18 +863,18 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     setSelectedVersionId([...m.versions].sort((a, b) => b.version_number - a.version_number)[0].id);
   }, [selectedModelId, modelsWithVersions]);
 
-  // ── Model Server: starten wenn Version wechselt ─────────────────────────
+  // ── Model Server: Laden erst nach expliziter Bestätigung durch den User ──
+  // (vorher wurde bei jedem Versions-Wechsel sofort automatisch geladen)
 
-  useEffect(() => {
-    if (!selectedVersionId || engineMode !== 'engine' || !detectedPlugin) return;
-    if (serverVersionId === selectedVersionId) return; // schon geladen
-
+  const handleLoadModel = useCallback(() => {
+    if (!selectedVersionId) return;
+    setServerErrorMsg(null);
     setServerStatus('loading');
     serverStatusRef.current = 'loading';
     invoke('lab_start_model_server', { versionId: selectedVersionId }).catch(e => {
       console.error('[Lab] lab_start_model_server:', e);
     });
-  }, [selectedVersionId, engineMode, detectedPlugin]);
+  }, [selectedVersionId]);
 
   useEffect(() => {
     const unlisten = listen<{ status: string; version_id?: string; message?: string }>(
@@ -863,8 +885,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         setServerStatus(status as typeof serverStatus);
         serverStatusRef.current = status as typeof serverStatus;
         if (status === 'ready' && version_id) setServerVersionId(version_id);
-        if (status === 'error') setServerVersionId(null);
-        if (status === 'error' && message) error(t('laboratoryPanel.setup.notifications.modelLoadError'), message);
+        if (status === 'error') {
+          setServerVersionId(null);
+          setServerErrorMsg(message ?? null);
+          if (message) error(t('laboratoryPanel.setup.notifications.modelLoadError'), message);
+        }
       }
     );
     return () => { unlisten.then(fn => fn()); };
@@ -1443,6 +1468,18 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             <CheckCircle className="w-3.5 h-3.5 text-amber-400" />
                             <span className="text-amber-300 text-xs">{t('laboratoryPanel.setup.pluginDetected', { name: detectedPlugin.name })}</span>
                           </div>
+                          {/* Modell laden — erst nach expliziter Bestätigung */}
+                          {serverStatus !== 'loading' && !(serverStatus === 'ready' && serverVersionId === selectedVersionId) && selectedVersionId && (
+                            <button
+                              onClick={handleLoadModel}
+                              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-xs font-medium transition-all"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              {serverStatus === 'error'
+                                ? t('laboratoryPanel.setup.loadModelRetryButton')
+                                : t('laboratoryPanel.setup.loadModelButton')}
+                            </button>
+                          )}
                           {/* Server-Status Badge */}
                           {serverStatus === 'loading' && (
                             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
@@ -1457,19 +1494,44 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             </div>
                           )}
                           {serverStatus === 'error' && (
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
-                              <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
-                              <span className="text-red-300 text-xs">{t('laboratoryPanel.setup.serverError')}</span>
+                            <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
+                              <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+                              <span className="text-red-300 text-xs whitespace-pre-wrap">
+                                {serverErrorMsg ?? t('laboratoryPanel.setup.serverError')}
+                              </span>
                             </div>
+                          )}
+                          {/* Canvas-Modell: Eingabe-Hinweis */}
+                          {selectedModelId?.startsWith('canvas_') && (
+                            <p className="text-[10px] text-gray-500 px-1">
+                              {t('laboratoryPanel.setup.canvasInputHint')}
+                            </p>
                           )}
                         </div>
                       )}
 
                       {engineMode === 'dev' && (
-                        <DevScriptEditor
-                          script={devScript} onChange={setDevScript}
-                          modelPath={modelPath} datasets={dsRefs} outputPath={outputPath}
-                        />
+                        <div className="space-y-2">
+                          {/* Script-Quellen: eigene Bibliothek + Open Library */}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => { setMyScripts(loadAllSavedScripts(userId)); setShowMyScripts(true); }}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs transition-all"
+                            >
+                              <FolderOpen className="w-3.5 h-3.5" /> {t('laboratoryPanel.devScripts.myScriptsButton')}
+                            </button>
+                            <button
+                              onClick={() => setShowOpenLib(true)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs transition-all"
+                            >
+                              <Download className="w-3.5 h-3.5" /> {t('laboratoryPanel.devScripts.openLibButton')}
+                            </button>
+                          </div>
+                          <DevScriptEditor
+                            script={devScript} onChange={setDevScript}
+                            modelPath={modelPath} datasets={dsRefs} outputPath={outputPath}
+                          />
+                        </div>
                       )}
                     </div>
 
@@ -1593,6 +1655,14 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       ? t('laboratoryPanel.testing.serverBannerError')
                       : t('laboratoryPanel.testing.serverBannerIdle')}
                   </span>
+                  {(serverStatus === 'idle' || serverStatus === 'error') && selectedVersionId && (
+                    <button
+                      onClick={handleLoadModel}
+                      className="ml-auto flex-shrink-0 px-3 py-1.5 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-xs font-medium transition-all"
+                    >
+                      {t('laboratoryPanel.setup.loadModelButton')}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1832,6 +1902,67 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
       {/* Sessions Modal */}
       {showSessions && <SessionsModal onLoad={handleLoadSession} onClose={() => setShowSessions(false)} userId={userId} />}
+
+      {/* ── Eigene Dev-Scripts (aus DevTrain/DevTest gespeichert) ── */}
+      {showMyScripts && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowMyScripts(false)}>
+          <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-pink-400" />
+                <h2 className="text-base font-bold text-white">{t('laboratoryPanel.devScripts.modalTitle')}</h2>
+              </div>
+              <button onClick={() => setShowMyScripts(false)} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {myScripts.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-10 leading-relaxed">
+                  {t('laboratoryPanel.devScripts.empty')}
+                </p>
+              ) : myScripts.map(s => (
+                <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 transition-all">
+                  <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-md border ${
+                    s.source === 'train'
+                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                      : 'bg-blue-500/10 border-blue-500/25 text-blue-300'
+                  }`}>
+                    {s.source === 'train' ? 'Train' : 'Test'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm truncate">{s.name}</p>
+                    <p className="text-gray-600 text-[10px]">{new Date(s.savedAt).toLocaleString('de-DE')}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setDevScript(s.script);
+                      setShowMyScripts(false);
+                      success(t('laboratoryPanel.devScripts.loadedToast'), s.name);
+                    }}
+                    className="flex-shrink-0 px-3 py-1.5 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-xs font-medium transition-all"
+                  >
+                    {t('laboratoryPanel.devScripts.loadButton')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Open Library: Community-Scripts ── */}
+      {showOpenLib && (
+        <OpenLibraryModal
+          mode="test"
+          onClose={() => setShowOpenLib(false)}
+          onLoadScript={(content, name) => {
+            setDevScript(content);
+            setShowOpenLib(false);
+            success(t('laboratoryPanel.devScripts.loadedToast'), name);
+          }}
+        />
+      )}
     </div>
   );
 }

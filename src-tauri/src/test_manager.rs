@@ -133,11 +133,28 @@ fn get_python_path() -> String {
         }
     }
     candidates.sort_by(|a,b| b.version.cmp(&a.version));
-    candidates.dedup_by(|a,b| a.version == b.version);
+    // Nur echte Duplikate (Symlink auf dieselbe Binärdatei) entfernen
+    candidates.dedup_by(|a, b| {
+        match (std::fs::canonicalize(&a.path), std::fs::canonicalize(&b.path)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => a.path == b.path,
+        }
+    });
+    // torch + torchvision/torchaudio (falls installiert) müssen zusammenpassen
+    let torch_check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
+    for c in &candidates {
+        let ok = Command::new(&c.path).args(["-c", torch_check]).output()
+            .map(|o| o.status.success()).unwrap_or(false);
+        if ok { return c.path.clone(); }
+    }
+    // Fallback: torch vorhanden, torchvision/torchaudio defekt
     for c in &candidates {
         let ok = Command::new(&c.path).args(["-c","import torch"]).output()
             .map(|o| o.status.success()).unwrap_or(false);
-        if ok { return c.path.clone(); }
+        if ok {
+            println!("[Python] ⚠️ torchvision/torchaudio defekt/inkompatibel bei {} — Fix: pip install --upgrade torch torchvision torchaudio", c.path);
+            return c.path.clone();
+        }
     }
     candidates.first().map(|c| c.path.clone())
         .unwrap_or_else(|| if cfg!(target_os="windows") { "python".to_string() } else { "python3".to_string() })

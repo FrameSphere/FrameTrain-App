@@ -76,6 +76,18 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
   const [loadingContent, setLoadingContent] = useState(false);
   const [activeTab, setActiveTab] = useState<'files' | 'yaml'>('files');
 
+  // Parquet-Preview State
+  interface ParquetColumn { name: string; dtype: string; }
+  interface ParquetPreview {
+    columns: ParquetColumn[];
+    rows: Record<string, unknown>[];
+    total_rows: number;
+    total_cols: number;
+    shown_rows: number;
+  }
+  const [parquetPreview, setParquetPreview] = useState<ParquetPreview | null>(null);
+  const [parquetError, setParquetError] = useState<string | null>(null);
+
   // YAML Editor State
   interface YamlData { exists: boolean; train_path: string; val_path: string; nc: number; names: string[]; yaml_path?: string; }
   const [yamlData, setYamlData] = useState<YamlData | null>(null);
@@ -148,12 +160,24 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
   const viewFile = async (filePath: string) => {
     setLoadingContent(true);
     setViewingFile(filePath);
+    setParquetPreview(null);
+    setParquetError(null);
+    const isParquet = filePath.toLowerCase().endsWith('.parquet');
     try {
-      const content = await invoke<string>('read_dataset_file', { filePath });
-      setFileContent(content);
+      if (isParquet) {
+        const preview = await invoke<ParquetPreview>('preview_parquet_file', { filePath, maxRows: 50 });
+        setParquetPreview(preview);
+      } else {
+        const content = await invoke<string>('read_dataset_file', { filePath });
+        setFileContent(content);
+      }
     } catch (err: unknown) {
-      error(t('datasetFileManager.notifications.readError'), String(err));
-      setViewingFile(null);
+      if (isParquet) {
+        setParquetError(String(err));
+      } else {
+        error(t('datasetFileManager.notifications.readError'), String(err));
+        setViewingFile(null);
+      }
     } finally {
       setLoadingContent(false);
     }
@@ -196,8 +220,8 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
       const selected = await open({ multiple: true, title: t('datasetFileManager.toolbar.addDialogTitle') });
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected];
-        const count = await invoke<number>('add_files_to_dataset', { datasetId, filePaths: paths });
-        success(t('datasetFileManager.notifications.addSuccess').replace('{count}', String(count)), '');
+        const result = await invoke<{ added: number }>('add_files_to_dataset', { datasetId, filePaths: paths });
+        success(t('datasetFileManager.notifications.addSuccess').replace('{count}', String(result.added ?? paths.length)), '');
         loadFiles();
       }
     } catch (err: unknown) {
@@ -593,7 +617,7 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
         {viewingFile && (
           <div className="absolute inset-0 z-20 bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 rounded-2xl">
             <div
-              className="w-full max-w-4xl h-full rounded-2xl flex flex-col border bg-[rgb(13,20,38)]"
+              className={`w-full h-full rounded-2xl flex flex-col border bg-[rgb(13,20,38)] ${parquetPreview ? 'max-w-6xl' : 'max-w-4xl'}`}
               style={{ borderColor: currentTheme.colors.primary + '40' }}
             >
               <div
@@ -612,6 +636,77 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
                 {loadingContent ? (
                   <div className="flex items-center justify-center h-full">
                     <Loader2 className="w-7 h-7 animate-spin" style={{ color: currentTheme.colors.primary }} />
+                  </div>
+                ) : parquetError ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
+                    <FileText className="w-10 h-10 text-red-400/60" />
+                    <p className="text-red-300 text-sm font-medium">{t('datasetFileManager.parquet.previewErrorTitle')}</p>
+                    <p className="text-gray-500 text-xs max-w-md">{parquetError}</p>
+                    <p className="text-gray-600 text-xs">{t('datasetFileManager.parquet.previewErrorHint')}</p>
+                  </div>
+                ) : parquetPreview ? (
+                  <div className="space-y-3">
+                    {/* Meta-Info Bar */}
+                    <div className="flex items-center gap-4 text-xs text-gray-400 pb-3 border-b border-white/10">
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-violet-400 font-semibold">{parquetPreview.total_rows.toLocaleString()}</span>
+                        {t('datasetFileManager.parquet.totalRows')}
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-violet-400 font-semibold">{parquetPreview.total_cols}</span>
+                        {t('datasetFileManager.parquet.totalCols')}
+                      </span>
+                      <span className="text-gray-600">
+                        {t('datasetFileManager.parquet.showingRows').replace('{count}', String(parquetPreview.shown_rows))}
+                      </span>
+                    </div>
+
+                    {/* Spalten-Schema */}
+                    <div className="flex flex-wrap gap-1.5 pb-1">
+                      {parquetPreview.columns.map(col => (
+                        <span key={col.name} className="px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-300 text-[11px] font-mono">
+                          {col.name} <span className="text-violet-400/50">·{col.dtype}</span>
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Tabelle */}
+                    <div className="overflow-auto rounded-xl border border-white/10">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[rgb(13,20,38)] z-10">
+                          <tr className="border-b border-white/10">
+                            <th className="text-left p-2 text-gray-600 font-medium w-10">#</th>
+                            {parquetPreview.columns.map(col => (
+                              <th key={col.name} className="text-left p-2 text-gray-400 font-medium whitespace-nowrap">{col.name}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {parquetPreview.rows.map((row, i) => (
+                            <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+                              <td className="p-2 text-gray-600 tabular-nums">{i}</td>
+                              {parquetPreview.columns.map(col => {
+                                const val = row[col.name];
+                                const display = val === null || val === undefined ? '—'
+                                  : typeof val === 'object' ? JSON.stringify(val)
+                                  : String(val);
+                                return (
+                                  <td key={col.name} className="p-2 text-gray-300 max-w-xs truncate" title={display}>
+                                    {display.length > 120 ? display.slice(0, 120) + '…' : display}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {parquetPreview.total_rows > parquetPreview.shown_rows && (
+                      <p className="text-gray-600 text-[11px] text-center pt-1">
+                        {t('datasetFileManager.parquet.moreRowsNote').replace('{count}', String(parquetPreview.total_rows - parquetPreview.shown_rows))}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <pre className="text-sm font-mono whitespace-pre-wrap break-words text-gray-300 leading-relaxed">

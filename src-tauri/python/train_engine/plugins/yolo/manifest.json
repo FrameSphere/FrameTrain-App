@@ -1,0 +1,11 @@
+{
+  "task_type": "detect",
+  "name": "YOLO Object Detection (Ultralytics)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "YOLOPlugin",
+  "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle fuer Bounding-Box-Erkennung via Ultralytics.",
+  "supported_architectures": ["yolov5", "yolov8", "yolov9", "yolo11", "yolo"],
+  "dataset_formats": ["yolo_bbox", "pascal_voc", "pre_split"],
+  "metrics": ["mAP50", "mAP50-95", "precision", "recall", "box_loss", "cls_loss"]
+}

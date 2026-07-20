@@ -33,7 +33,7 @@
     "submit": "Sign In",
     "submitting": "Authenticating...",
     "footer": "Secure authentication via FrameTrain servers",
-    "dashboardLink": "Go to Dashboard \u2192 Set Desktop App Password",
+    "dashboardLink": "Go to Dashboard → Set Desktop App Password",
     "errors": {
       "apiKeyInvalid": "API key must start with \"ft_\" and be at least 24 characters long",
       "passwordShort": "Password must be at least 6 characters long",
@@ -113,6 +113,8 @@
     },
     "notifications": {
       "title": "Desktop Notifications",
+      "stoppedWithCheckpoint": "Training stopped — checkpoint saved",
+      "stoppedWithCheckpointDetail": "The last checkpoint has been saved as a new version in the model library.",
       "trainingComplete": "Training Complete",
       "trainingCompleteDesc": "Notify when training is finished",
       "errors": "Errors and Warnings",
@@ -143,6 +145,31 @@
       "ollamaInstallStep3": "3. Ollama then runs in the background",
       "globalNote": "These settings apply globally",
       "globalNoteDesc": "The AI provider and model are used for all AI features: Quick Chat, training analyses, and lab assistance.",
+      "tokenBudget": {
+        "title": "Token Budget",
+        "subtitle": "Controls response length and history depth for AI Coach and Synapse Magic.",
+        "active": "Active",
+        "minimalDesc": "Very short responses, minimal usage. Best for Groq Free Tier.",
+        "balancedDesc": "Good balance of quality and token usage. Recommended for most users.",
+        "qualityDesc": "Detailed responses with more context. Recommended for Claude / GPT-4.",
+        "maxDesc": "Maximum quality and depth. Only for paid APIs with high rate limits.",
+        "previewTitle": "Preview",
+        "previewCoach": "AI Coach response",
+        "previewSynapse": "Synapse Magic",
+        "previewHistory": "Chat history",
+        "previewCostLabel": "Est. cost",
+        "previewCostFree": "Free",
+        "previewCostPerMsg": "per message",
+        "previewGroqLimit": "Groq rate limit",
+        "previewGroqMsgs": "msg/min",
+        "previewGroqPerMin": "on free tier (6k TPM)",
+        "previewQuality": "Response quality",
+        "qualityConcise": "Concise",
+        "qualityBalanced": "Balanced",
+        "qualityDetailed": "Detailed",
+        "qualityMax": "Maximum",
+        "groqWarning": "Quality / Max may hit Groq Free Tier rate limits (6k TPM). Consider Balanced or Minimal."
+      },
       "show": "Show",
       "hide": "Hide"
     },
@@ -249,223 +276,242 @@
       "website": "Website",
       "docs": "Documentation",
       "github": "GitHub",
-      "copyright": "© 2025 FrameTrain. All rights reserved."
+      "copyright": "© 2026 FrameTrain. All rights reserved."
     }
   },
   "globalTrainingProgress": {
     "tooltip": "Go to Training",
-    "statusRunning": "Training running\u2026",
+    "statusRunning": "Training running…",
     "statusCompleted": "Training completed",
     "statusFailed": "Training failed",
     "statusStopped": "Training stopped"
   },
-
   "firstLaunch": {
-      "language": {
-        "headline": "Welcome to FrameTrain",
-        "sub": "Choose your language to get started.",
-        "btn": "Continue",
-        "selectedLabel": "Ausgew\u00e4hlt / Selected"
+    "language": {
+      "headline": "Welcome to FrameTrain",
+      "sub": "Choose your language to get started.",
+      "btn": "Continue",
+      "selectedLabel": "Ausgewählt / Selected"
+    },
+    "theme": {
+      "headline": "Choose Your Design",
+      "sub": "Pick the color scheme you like best — you can change it anytime later in Settings.",
+      "btn": "Continue"
+    },
+    "aiSetup": {
+      "headline": "Set Up AI Assistant",
+      "sub": "Optionally configure your AI provider — you can change this anytime later in Settings.",
+      "skip": "Skip",
+      "btn": "Continue"
+    },
+    "python": {
+      "setupTitle": "Setting Up FrameTrain",
+      "setupSubtitle": "Installing required Python packages...",
+      "checkingTitle": "Checking Dependencies",
+      "checkingDesc": "Checking Python packages...",
+      "installingTitle": "Installing Python Packages",
+      "installingDesc": "This may take 5–10 minutes...",
+      "installingPackage": "Installing...",
+      "installDontClose": "Please don't close the app during installation",
+      "errorTitle": "Setup could not be completed",
+      "errorSubtitle": "Error during Python configuration",
+      "nextSteps": "Next steps:",
+      "step1": "Install Python 3.8 or newer",
+      "step2": "Restart the app after installation",
+      "step3": "If errors persist, check the logs",
+      "restart": "Restart App",
+      "pythonNotInstalled": "Python is not installed or not available in PATH.\n\nSolutions:\n1. Install Python 3.8+ from python.org\n2. Or use a package manager:\n   - macOS: brew install python3\n   - Windows: choco install python\n   - Linux: apt install python3\n\nAfter installation, please restart the app."
+    },
+    "plugins": {
+      "title": "Welcome to FrameTrain",
+      "subtitle": "Choose the AI capabilities to install",
+      "builtInBadge": "Built-in",
+      "skip": "Skip",
+      "install": "Install Selected ({count})",
+      "selected": "plugins selected",
+      "downloadSize": "Download Size",
+      "installTime": "Installation Time",
+      "footerNote": "Additional plugins can be installed later in Settings",
+      "installing": "Installing Dependencies",
+      "installingDesc": "AI/ML packages are being installed. PyTorch alone is several GB in size.",
+      "estimatedTime": "⏱️ Estimated time: 10–30 minutes depending on internet speed",
+      "doNotClose": "⏸️ Do NOT close the app during installation.",
+      "waitNote": "If the browser shows \"Page Unresponsive\", please wait a bit longer — the installation continues in the background.",
+      "progressComplete": "Complete",
+      "progressFailed": "Failed",
+      "progressInstalling": "Installing"
+    },
+    "pluginRegistry": {
+      "seq_classification": {
+        "name": "Text Classification (HuggingFace)",
+        "description": "Trains encoder-based models (XLM-RoBERTa, BERT, DeBERTa) for text classification, sentiment analysis, spam detection, and more."
       },
-
-      "python": {
-        "setupTitle": "Setting Up FrameTrain",
-        "setupSubtitle": "Installing required Python packages...",
-        "checkingTitle": "Checking Dependencies",
-        "checkingDesc": "Checking Python packages...",
-        "installingTitle": "Installing Python Packages",
-        "installingDesc": "This may take 5–10 minutes...",
-        "installingPackage": "Installing...",
-        "installDontClose": "Please don't close the app during installation",
-        "errorTitle": "Setup could not be completed",
-        "errorSubtitle": "Error during Python configuration",
-        "nextSteps": "Next steps:",
-        "step1": "Install Python 3.8 or newer",
-        "step2": "Restart the app after installation",
-        "step3": "If errors persist, check the logs",
-        "restart": "Restart App",
-        "pythonNotInstalled": "Python is not installed or not available in PATH.\n\nSolutions:\n1. Install Python 3.8+ from python.org\n2. Or use a package manager:\n   - macOS: brew install python3\n   - Windows: choco install python\n   - Linux: apt install python3\n\nAfter installation, please restart the app."
+      "yolo": {
+        "name": "YOLO Object Detection (Ultralytics)",
+        "description": "Trains YOLOv5/v8/v9/YOLO11 models for bounding box detection. Requires Ultralytics."
+      }
+    }
+  },
+  "aiCoach": {
+    "openTitle": "Open AI Coach",
+    "chatHistory": "Chat History",
+    "newChat": "New Chat",
+    "newChatStart": "Start New Chat",
+    "back": "Back",
+    "noChats": "No chats yet",
+    "noChatsHint": "Start a new chat and write a message.",
+    "messagesCount": "messages",
+    "greeting": "Hi! I'm your AI coach.",
+    "greetingWithContext": "I know the content of your current page and I'm happy to help.",
+    "greetingNoContext": "Ask me a question about FrameTrain.",
+    "loadedContext": "Loaded Context",
+    "inputPlaceholder": "Ask a question... (Enter to send)",
+    "thinking": {
+      "analyzePage": "Reading page context",
+      "processContext": "Processing context",
+      "generateResponse": "Generating response",
+      "noContext": "No context available",
+      "readingHistory": "Reading {n} previous messages",
+      "pageChanged": "New page context detected",
+      "intentError": "Diagnosing error",
+      "intentConfig": "Analyzing configuration",
+      "intentExplain": "Preparing explanation",
+      "intentGeneral": "Understanding question",
+      "formulating": "Formulating response"
+    },
+    "hadThought": "Thought it through",
+    "steps": "Steps",
+    "thinkingAnalyze": "Analyzing page",
+    "thinkingProcess": "Processing context",
+    "thinkingGenerate": "Generating response",
+    "disabledError": "AI assistant is disabled. Please enable it in Settings.",
+    "apiKeyMissing": "API key missing. Please configure it in Settings.",
+    "unknownError": "Unknown error",
+    "retryButton": "↻ Resend",
+    "deleteChat": "Delete Chat",
+    "justNow": "Just now",
+    "minutesAgo": "{n} min ago",
+    "hoursAgo": "{n} hr ago",
+    "daysAgo": "{n} day ago",
+    "daysAgoPlural": "{n} days ago",
+    "currentArea": "Current Area"
+  },
+  "modelManager": {
+    "title": "Models",
+    "subtitle": "Manage local and HuggingFace models",
+    "refreshTooltip": "Refresh",
+    "addButton": "Add Model",
+    "noPlugin": "No Plugin",
+    "loading": "Loading...",
+    "noModels": "No models available",
+    "noModelsHint": "Add your first model to start training.",
+    "local": "Local Folder",
+    "huggingface": "Hugging Face",
+    "hfDownload": "Download Model",
+    "defaultModelName": "Model",
+    "emptyState": {
+      "title": "No models available",
+      "description": "Add your first model to start training.",
+      "addButton": "Add First Model"
+    },
+    "card": {
+      "sourceHuggingFace": "Hugging Face",
+      "sourceLocal": "Local",
+      "sourceSynapse": "Synapse Builder",
+      "deleteTooltip": "Delete",
+      "pluginLabel": "Plugin Detection:",
+      "filesLabel": "{count} files",
+      "viewOnHF": "View on HuggingFace"
+    },
+    "deleteDialog": {
+      "title": "Delete model?",
+      "description": "„{name}“ and all associated versions, datasets, and training data will be permanently deleted.",
+      "cancelButton": "Cancel",
+      "confirmButton": "Delete"
+    },
+    "importModal": {
+      "title": "Add Model",
+      "tabLocal": "Local Folder",
+      "tabHuggingFace": "Hugging Face",
+      "local": {
+        "dropzoneIdle": "Drag model folder here",
+        "dropzoneDragging": "Drop folder here",
+        "dropzoneSubtitle": "or select a folder manually",
+        "browseButton": "Browse Folder",
+        "browseFolderTitle": "Select Model Folder",
+        "folderSelectedTitle": "Folder Selected",
+        "folderFilesSummary": "{files} files · {size}",
+        "noModelFilesWarning": "No standard model files detected",
+        "changeFolderLink": "Choose a Different Folder",
+        "nameLabel": "Model Name",
+        "namePlaceholder": "e.g. xlm-roberta-base",
+        "importButton": "Import Model",
+        "importingButton": "Importing…"
       },
-
-      "plugins": {
-        "title": "Welcome to FrameTrain",
-        "subtitle": "Choose the AI capabilities to install",
-        "builtInBadge": "Built-in",
-        "skip": "Skip",
-        "install": "Install Selected ({count})",
-        "selected": "plugins selected",
-        "downloadSize": "Download Size",
-        "installTime": "Installation Time",
-        "footerNote": "Additional plugins can be installed later in Settings",
-        "installing": "Installing Dependencies",
-        "installingDesc": "AI/ML packages are being installed. PyTorch alone is several GB in size.",
-        "estimatedTime": "\u23f1\ufe0f Estimated time: 10–30 minutes depending on internet speed",
-        "doNotClose": "\u23f8\ufe0f Do NOT close the app during installation.",
-        "waitNote": "If the browser shows \"Page Unresponsive\", please wait a bit longer — the installation continues in the background.",
-        "progressComplete": "Complete",
-        "progressFailed": "Failed",
-        "progressInstalling": "Installing"
-      },
-
-      "pluginRegistry": {
-        "seq_classification": {
-          "name": "Text Classification (HuggingFace)",
-          "description": "Trains encoder-based models (XLM-RoBERTa, BERT, DeBERTa) for text classification, sentiment analysis, spam detection, and more."
-        },
-        "yolo": {
-          "name": "YOLO Object Detection (Ultralytics)",
-          "description": "Trains YOLOv5/v8/v9/YOLO11 models for bounding box detection. Requires Ultralytics."
-        }
+      "hf": {
+        "searchLabel": "Search Model",
+        "searchPlaceholder": "e.g. xlm-roberta, bert, mistral…",
+        "searchHint": "Enter at least 2 characters",
+        "resultsCount": "{count} models found",
+        "viewOnHF": "View on HuggingFace",
+        "localNameLabel": "Local Name",
+        "localNamePlaceholder": "Name for local storage",
+        "downloadButton": "Download Model",
+        "downloadNote": "Download duration depends on model size",
+        "cancelDownload": "Cancel Download",
+        "preparingFile": "Preparing…",
+        "fileProgress": "File {current} of {total}",
+        "speedLabel": "Speed",
+        "elapsedLabel": "Elapsed Time",
+        "remainingLabel": "Remaining"
       }
     },
-    "aiCoach": {
-      "openTitle": "Open AI Coach",
-      "chatHistory": "Chat History",
-      "newChat": "New Chat",
-      "newChatStart": "Start New Chat",
-      "back": "Back",
-      "noChats": "No chats yet",
-      "noChatsHint": "Start a new chat and write a message.",
-      "messagesCount": "messages",
-      "greeting": "Hi! I'm your AI coach.",
-      "greetingWithContext": "I know the content of your current page and I'm happy to help.",
-      "greetingNoContext": "Ask me a question about FrameTrain.",
-      "loadedContext": "Loaded Context",
-      "inputPlaceholder": "Ask a question... (Enter to send)",
-      "thinking": "Thinking...",
-      "hadThought": "Thought it through",
-      "steps": "Steps",
-      "thinkingAnalyze": "Analyzing page",
-      "thinkingProcess": "Processing context",
-      "thinkingGenerate": "Generating response",
-      "disabledError": "AI assistant is disabled. Please enable it in Settings.",
-      "apiKeyMissing": "API key missing. Please configure it in Settings.",
-      "unknownError": "Unknown error",
-      "deleteChat": "Delete Chat",
-      "justNow": "Just now",
-      "minutesAgo": "{n} min ago",
-      "hoursAgo": "{n} hr ago",
-      "daysAgo": "{n} day ago",
-      "daysAgoPlural": "{n} days ago",
-      "currentArea": "Current Area"
-    },
-    "modelManager": {
-      "title": "Models",
-      "subtitle": "Manage local and HuggingFace models",
-      "refreshTooltip": "Refresh",
-      "addButton": "Add Model",
-      "noPlugin": "No Plugin",
-      "loading": "Loading...",
-      "noModels": "No models available",
-      "noModelsHint": "Add your first model to start training.",
-      "local": "Local Folder",
-      "huggingface": "Hugging Face",
-      "hfDownload": "Download Model",
-      "defaultModelName": "Model",
-      "emptyState": {
-        "title": "No models available",
-        "description": "Add your first model to start training.",
-        "addButton": "Add First Model"
-      },
-      "card": {
-        "sourceHuggingFace": "Hugging Face",
-        "sourceLocal": "Local",
-        "sourceSynapse": "Synapse Builder",
-        "deleteTooltip": "Delete",
-        "pluginLabel": "Plugin Detection:",
-        "filesLabel": "{count} files",
-        "viewOnHF": "View on HuggingFace"
-      },
-      "deleteDialog": {
-        "title": "Delete model?",
-        "description": "\u201e{name}\u201c and all associated versions, datasets, and training data will be permanently deleted.",
-        "cancelButton": "Cancel",
-        "confirmButton": "Delete"
-      },
-      "importModal": {
-        "title": "Add Model",
-        "tabLocal": "Local Folder",
-        "tabHuggingFace": "Hugging Face",
-        "local": {
-          "dropzoneIdle": "Drag model folder here",
-          "dropzoneDragging": "Drop folder here",
-          "dropzoneSubtitle": "or select a folder manually",
-          "browseButton": "Browse Folder",
-          "browseFolderTitle": "Select Model Folder",
-          "folderSelectedTitle": "Folder Selected",
-          "folderFilesSummary": "{files} files \u00b7 {size}",
-          "noModelFilesWarning": "No standard model files detected",
-          "changeFolderLink": "Choose a Different Folder",
-          "nameLabel": "Model Name",
-          "namePlaceholder": "e.g. xlm-roberta-base",
-          "importButton": "Import Model",
-          "importingButton": "Importing\u2026"
-        },
-        "hf": {
-          "searchLabel": "Search Model",
-          "searchPlaceholder": "e.g. xlm-roberta, bert, mistral\u2026",
-          "searchHint": "Enter at least 2 characters",
-          "resultsCount": "{count} models found",
-          "viewOnHF": "View on HuggingFace",
-          "localNameLabel": "Local Name",
-          "localNamePlaceholder": "Name for local storage",
-          "downloadButton": "Download Model",
-          "downloadNote": "Download duration depends on model size",
-          "cancelDownload": "Cancel Download",
-          "preparingFile": "Preparing\u2026",
-          "fileProgress": "File {current} of {total}",
-          "speedLabel": "Speed",
-          "elapsedLabel": "Elapsed Time",
-          "remainingLabel": "Remaining"
-        }
-      },
-      "notifications": {
-        "loadError": "Error Loading",
-        "validationWarning": "No Valid Model",
-        "validationWarningDetail": "The folder doesn't contain any recognizable model files.",
-        "validationError": "Validation Error",
-        "missingFields": "Missing Information",
-        "missingFieldsLocal": "Folder and name are required.",
-        "missingFieldsHF": "Model and name are required.",
-        "importSuccess": "Model Imported!",
-        "importSuccessDetail": "\u201e{name}\u201c was added successfully.",
-        "importError": "Import Failed",
-        "downloadSuccess": "Download Complete!",
-        "downloadSuccessDetail": "\u201e{name}\u201c was downloaded.",
-        "downloadError": "Download Failed",
-        "cancelInfo": "Cancelled",
-        "cancelInfoDetail": "The download was cancelled. Incomplete files will be deleted.",
-        "dragDropInfo": "Drag & Drop",
-        "dragDropInfoDetail": "Please use the \u201eBrowse Folder\u201c button.",
-        "deleteSuccess": "Deleted",
-        "deleteSuccessDetail": "\u201e{name}\u201c was removed.",
-        "deleteFailed": "Delete Failed"
-      }
-    },
-    "diffViewer": {
-      "title": "Code Changes",
-      "removedLines": "{count} lines",
-      "addedLines": "{count} lines",
-      "changesCount": "{count} change",
-      "changesCountPlural": "{count} changes",
-      "appliedCount": "{count} applied",
-      "readyCount": "{count} ready to apply",
-      "allApplied": "All changes applied",
-      "closeButton": "Close",
-      "applyAllButton": "Apply All",
-      "copyTooltip": "Copy New Version",
-      "removeLabel": "Remove ({count} lines)",
-      "addLabel": "Add ({count} lines)",
-      "appliedLabel": "Applied",
-      "failedLabel": "Text Not Found",
-      "applyButton": "Apply"
-    },
-"devTrainPanel": {
+    "notifications": {
+      "loadError": "Error Loading",
+      "validationWarning": "No Valid Model",
+      "validationWarningDetail": "The folder doesn't contain any recognizable model files.",
+      "validationError": "Validation Error",
+      "missingFields": "Missing Information",
+      "missingFieldsLocal": "Folder and name are required.",
+      "missingFieldsHF": "Model and name are required.",
+      "importSuccess": "Model Imported!",
+      "importSuccessDetail": "„{name}“ was added successfully.",
+      "importError": "Import Failed",
+      "downloadSuccess": "Download Complete!",
+      "downloadSuccessDetail": "„{name}“ was downloaded.",
+      "downloadError": "Download Failed",
+      "cancelInfo": "Cancelled",
+      "cancelInfoDetail": "The download was cancelled. Incomplete files will be deleted.",
+      "dragDropInfo": "Drag & Drop",
+      "dragDropInfoDetail": "Please use the „Browse Folder“ button.",
+      "deleteSuccess": "Deleted",
+      "deleteSuccessDetail": "„{name}“ was removed.",
+      "deleteFailed": "Delete Failed"
+    }
+  },
+  "diffViewer": {
+    "title": "Code Changes",
+    "removedLines": "{count} lines",
+    "addedLines": "{count} lines",
+    "changesCount": "{count} change",
+    "changesCountPlural": "{count} changes",
+    "appliedCount": "{count} applied",
+    "readyCount": "{count} ready to apply",
+    "allApplied": "All changes applied",
+    "closeButton": "Close",
+    "applyAllButton": "Apply All",
+    "copyTooltip": "Copy New Version",
+    "removeLabel": "Remove ({count} lines)",
+    "addLabel": "Add ({count} lines)",
+    "appliedLabel": "Applied",
+    "failedLabel": "Text Not Found",
+    "applyButton": "Apply"
+  },
+  "devTrainPanel": {
     "infoBanner": {
       "title": "Dev Train Mode",
       "description": "Custom Python script with full access to all paths. Same live loss curves as standard training."
     },
-
     "paths": {
       "toggleLabel": "Configure Paths",
       "modelTitle": "Model",
@@ -480,7 +526,6 @@
       "copyTooltip": "Copy",
       "copied": "Copied!"
     },
-
     "editor": {
       "noDocument": "No Document",
       "fileName": "train.py",
@@ -489,16 +534,16 @@
       "saveTooltip": "Save",
       "maximizeTooltip": "Maximize",
       "minimizeTooltip": "Minimize",
-      "saveButton": "Save (\u2318S)",
+      "saveButton": "Save (⌘S)",
       "libraryButton": "Library",
       "openLibraryButton": "Open Library",
       "aiButton": "AI",
-      "searchButton": "\u2318F",
+      "searchButton": "⌘F",
       "newFileButton": "New File",
       "loadFileButton": "Load File",
       "stopButton": "Stop",
       "runButton": "Start Training",
-      "searchPlaceholder": "Search\u2026",
+      "searchPlaceholder": "Search…",
       "emptyTitle": "Open or create a file to get started",
       "emptyNewFile": "New File",
       "emptyNewFileHint": "Type ! + Space for template",
@@ -512,7 +557,6 @@
       "noModelForTemplateDetail": "Please select a model first to generate a template.",
       "placeholder": "# Start typing...\n# Type '! ' + Space to load the template"
     },
-
     "emptyState": {
       "description": "Open or create a file to get started",
       "newFile": "New File",
@@ -522,9 +566,8 @@
       "openLib": "Open Library",
       "openLibHint": "Community scripts"
     },
-
     "progress": {
-      "running": "Training running\u2026",
+      "running": "Training running…",
       "statusLabel": "Status: {status}",
       "epochLabel": "Epoch {current}/{total}",
       "trainLossLabel": "Train Loss",
@@ -532,12 +575,11 @@
       "lrLabel": "LR",
       "lossHistory": "Loss History",
       "outputLabel": "Output",
-      "waitingForOutput": "Waiting for Python output\u2026",
-      "trainingStarted": "\ud83d\ude80 Training started (Job: {id})...\n",
-      "trainingComplete": "\u2705 Training complete!",
-      "trainingStopped": "\u23f9\ufe0f  Training stopped."
+      "waitingForOutput": "Waiting for Python output…",
+      "trainingStarted": "🚀 Training started (Job: {id})...\n",
+      "trainingComplete": "✅ Training complete!",
+      "trainingStopped": "⏹️  Training stopped."
     },
-
     "saveDialog": {
       "title": "Save Script",
       "description": "Enter a name for your script. It will then be saved in the library.",
@@ -545,15 +587,13 @@
       "saveButton": "Save",
       "cancelButton": "Cancel"
     },
-
     "library": {
       "title": "Script Library",
       "empty": "No scripts saved yet.",
       "loadButton": "Load",
       "saveCurrentButton": "Save Current Script",
-      "namePlaceholder": "Script name\u2026"
+      "namePlaceholder": "Script name…"
     },
-
     "aiSidebar": {
       "title": "Code Assistant",
       "autoBadge": "Auto",
@@ -566,15 +606,15 @@
       "continueButton": "Continue",
       "sessionSuffix": " (Continued)",
       "readonlyBadge": "Read-only",
-      "readonlyHint": "Read-only \u2013 chat not active",
-      "sendHint": "Enter = send \u00b7 Shift+Enter = new line",
-      "inputPlaceholder": "Goal / issue / desired change\u2026",
-      "readonlyPlaceholder": "Start a new chat to write \u2192 \u25a1 top right",
+      "readonlyHint": "Read-only – chat not active",
+      "sendHint": "Enter = send · Shift+Enter = new line",
+      "inputPlaceholder": "Goal / issue / desired change…",
+      "readonlyPlaceholder": "Start a new chat to write → □ top right",
       "startNewChatButton": "Start New Chat",
       "replaceCodeButton": "Replace",
       "editChange": "Change {n}",
       "undoButton": "Undo",
-      "viewDiffLink": "\u2192 View Diff",
+      "viewDiffLink": "→ View Diff",
       "editSummaryReady": "Ready:",
       "applyButton": "Apply",
       "detailsButton": "Details",
@@ -583,39 +623,58 @@
         "paths": "Use paths correctly (DATASET_PATH/OUTPUT_PATH)",
         "performance": "Improve performance / stability"
       },
-      "emptySidebarHint": "Describe your goal/issue \u2014 I'll provide direct edits or a rewrite."
+      "emptySidebarHint": "Describe your goal/issue — I'll provide direct edits or a rewrite."
     },
-
     "errorModal": {
       "title": "Training Failed",
-      "hintLabel": "\ud83d\udca1 Hint:",
+      "hintLabel": "💡 Hint:",
       "errorLabel": "Error Message:",
       "detailsLabel": "Details:",
       "copyButton": "Copy Error",
       "copied": "Copied!",
       "sendToFrameTrainButton": "Send to FrameTrain",
-      "sendingButton": "Sending\u2026",
+      "sendingButton": "Sending…",
       "sentButton": "Sent!",
       "sendToAIButton": "Send to AI",
       "closeButton": "Close",
       "errorCategories": {
-        "memory":   { "title": "\ud83e\udde0 RAM/GPU Overflow",            "hint": "Reduce batch size, enable FP16 or LoRA, turn on gradient checkpointing." },
-        "cuda":     { "title": "\u2699\ufe0f Hardware/Device Error",         "hint": "Device unavailable or incompatible. Try CPU or different device settings." },
-        "dataset":  { "title": "\ud83d\udcc1 Dataset/Path Error",            "hint": "Check dataset path, verify file permissions, does the dataset still exist?" },
-        "packages": { "title": "\ud83d\udce6 Missing Python Packages",       "hint": "Missing dependencies. Check which modules are imported in the script." },
-        "config":   { "title": "\ud83d\udcca Numerical Error (NaN/Inf)",     "hint": "Learning rate too high? Enable gradient clipping (max_grad_norm), reduce LR." },
-        "code":     { "title": "\ud83d\udc1b Code Error",                    "hint": "Syntax, type, or name error. The AI assistant can help you." },
-        "unknown":  { "title": "\u2753 Unknown Error",                       "hint": "Send the error to the FrameTrain team or use the AI assistant for analysis." }
+        "memory": {
+          "title": "🧠 RAM/GPU Overflow",
+          "hint": "Reduce batch size, enable FP16 or LoRA, turn on gradient checkpointing."
+        },
+        "cuda": {
+          "title": "⚙️ Hardware/Device Error",
+          "hint": "Device unavailable or incompatible. Try CPU or different device settings."
+        },
+        "dataset": {
+          "title": "📁 Dataset/Path Error",
+          "hint": "Check dataset path, verify file permissions, does the dataset still exist?"
+        },
+        "packages": {
+          "title": "📦 Missing Python Packages",
+          "hint": "Missing dependencies. Check which modules are imported in the script."
+        },
+        "config": {
+          "title": "📊 Numerical Error (NaN/Inf)",
+          "hint": "Learning rate too high? Enable gradient clipping (max_grad_norm), reduce LR."
+        },
+        "code": {
+          "title": "🐛 Code Error",
+          "hint": "Syntax, type, or name error. The AI assistant can help you."
+        },
+        "unknown": {
+          "title": "❓ Unknown Error",
+          "hint": "Send the error to the FrameTrain team or use the AI assistant for analysis."
+        }
       }
     },
-
     "notifications": {
       "unsavedChangesTitle": "Unsaved Changes",
       "unsavedChangesDetail": "Please save your script first with Cmd+S or the Save button.",
       "noModelOrScript": "Error",
       "noModelOrScriptDetail": "No model selected or script is empty.",
       "startSuccess": "Started!",
-      "startSuccessDetail": "Dev training running\u2026",
+      "startSuccessDetail": "Dev training running…",
       "startError": "Error",
       "timeout": "Timeout",
       "timeoutDetail": "Training did not respond within 5 minutes.",
@@ -631,15 +690,37 @@
       "sendErrorFailDetail": "Could not send error. Check your internet connection.",
       "networkError": "Network error:"
     },
-
     "relativeTime": {
       "justNow": "just now",
       "minutesAgo": "{n} min ago",
       "hoursAgo": "{n} hr ago",
       "daysAgo": "{n} days ago"
+    },
+    "toolbar": {
+      "aiButton": "AI",
+      "aiDisabledDetail": "Please enable the AI in the settings first.",
+      "aiDisabledTitle": "AI not enabled",
+      "aiDisabledTooltip": "AI not configured – enable it in the settings",
+      "closeFileTooltip": "Close file",
+      "closeSearchTooltip": "Close (Esc)",
+      "findTooltip": "Find (Cmd/Ctrl+F)",
+      "libraryButton": "Library",
+      "loadFileButton": "Load file",
+      "maximizeTooltip": "Full screen",
+      "minimizeTooltip": "Minimize",
+      "newFileButton": "New file",
+      "nextSearchTooltip": "Next (Enter)",
+      "noDocument": "No document",
+      "openLibraryButton": "Open Library",
+      "prevSearchTooltip": "Previous (Shift+Enter)",
+      "runButton": "Start training",
+      "saveButton": "Save (⌘S)",
+      "saveTooltip": "Save",
+      "searchPlaceholder": "Search…",
+      "stopButton": "Stop",
+      "unsavedChangesTooltip": "Unsaved changes"
     }
   },
-
   "devTestPanel": {
     "banner": {
       "title": "Dev Test Mode",
@@ -652,7 +733,11 @@
       "outputTitle": "Output",
       "notSet": "not set",
       "copyTooltip": "Copy",
-      "copied": "Copied!"
+      "copied": "Copied!",
+      "datasetPathLabel": "Dataset path",
+      "modelPathLabel": "Model path",
+      "outputPathLabel": "Output path",
+      "versionFallback": "No version"
     },
     "toolbar": {
       "unsavedChangesTooltip": "Unsaved Changes",
@@ -688,20 +773,47 @@
       "openLibraryHint": "Community test scripts"
     },
     "editor": {
+      "noDocument": "No Document",
+      "fileName": "test.py",
+      "unsavedChangesTooltip": "Unsaved Changes",
+      "closeTooltip": "Close File",
+      "saveTooltip": "Save",
+      "maximizeTooltip": "Maximize",
+      "minimizeTooltip": "Minimize",
+      "saveButton": "Save (⌘S)",
+      "libraryButton": "Library",
+      "openLibraryButton": "Open Library",
+      "aiButton": "AI",
+      "searchButton": "⌘F",
+      "newFileButton": "New File",
+      "loadFileButton": "Load File",
+      "stopButton": "Stop",
+      "runButton": "Start Test",
+      "searchPlaceholder": "Search…",
+      "emptyTitle": "Open or create a file to get started",
+      "emptyNewFile": "New File",
+      "emptyNewFileHint": "Type ! + Space for template",
+      "emptyLoadFile": "Load File",
+      "emptyLoadFileHint": "From your library",
+      "emptyOpenLib": "Open Library",
+      "emptyOpenLibHint": "Community test scripts",
+      "placeholderLine1": "# Start typing…",
+      "placeholderLine2": "# Type '! ' + Space to load the template",
+      "aiNotEnabled": "AI Not Enabled",
+      "aiNotEnabledDetail": "Please enable AI in Settings first.",
       "placeholder": "# Start typing…\n# Type '! ' + Space to load the template"
     },
     "output": {
       "running": "Test running…",
       "success": "Test successful",
       "failed": "Test failed",
-      "label": "Output",
+      "outputLabel": "Output",
       "clearButton": "Clear",
-      "panelLabel": "Output",
-      "waiting": "Waiting for Python output…",
-      "started": "🚀 Test started…",
-      "complete": "✅ Test complete!",
-      "errorPrefix": "❌",
-      "stopped": "⏹️  Test stopped."
+      "waitingForOutput": "Waiting for Python output…",
+      "testStarted": "🚀 Test started…",
+      "testComplete": "✅ Test complete!",
+      "testStopped": "⏹️  Test stopped.",
+      "exitCodeError": "Process exited with exit code {code}"
     },
     "chat": {
       "title": "AI Assistant",
@@ -731,18 +843,21 @@
       "startNewChatButton": "Start New Chat"
     },
     "notifications": {
-      "unsavedTitle": "Unsaved Changes",
-      "unsavedDetail": "Please save first (⌘S).",
-      "noModelOrScriptTitle": "Error",
+      "unsavedChangesTitle": "Unsaved Changes",
+      "unsavedChangesDetail": "Please save first (⌘S).",
+      "noModelOrScript": "Error",
       "noModelOrScriptDetail": "No model selected or script is empty.",
-      "startedTitle": "Started!",
-      "startedDetail": "Dev test running…",
-      "updatedTitle": "Updated",
-      "updatedDetail": "Test script updated!",
-      "savedTitle": "Saved",
-      "savedDetail": "Test script \"{name}\" saved!",
+      "startSuccess": "Started!",
+      "startSuccessDetail": "Dev test running…",
+      "startError": "Error",
+      "savedUpdated": "Updated",
+      "savedUpdatedDetail": "Test script updated!",
       "savedNew": "Saved",
-      "savedNewDetail": "Test script \"{name}\" saved!"
+      "savedNewDetail": "Test script \"{name}\" saved!",
+      "libraryScriptSaved": "Saved",
+      "libraryScriptSavedDetail": "Test script \"{name}\" saved.",
+      "openLibLoaded": "Loaded!",
+      "openLibLoadedDetail": "„{name}“ was loaded into the editor."
     },
     "pageContext": {
       "title": "=== FrameTrain – Dev Test Mode ===",
@@ -757,7 +872,6 @@
       "title": "Dev Test Mode",
       "description": "Custom Python script for inference, evaluation, and testing. Full access to model and dataset paths."
     },
-
     "pathsSection": {
       "toggleLabel": "Configure Paths",
       "modelTitle": "Model",
@@ -767,51 +881,6 @@
       "copyTooltip": "Copy",
       "copied": "Copied!"
     },
-
-    "editor": {
-      "noDocument": "No Document",
-      "fileName": "test.py",
-      "unsavedChangesTooltip": "Unsaved Changes",
-      "closeTooltip": "Close File",
-      "saveTooltip": "Save",
-      "maximizeTooltip": "Maximize",
-      "minimizeTooltip": "Minimize",
-      "saveButton": "Save (\u2318S)",
-      "libraryButton": "Library",
-      "openLibraryButton": "Open Library",
-      "aiButton": "AI",
-      "searchButton": "\u2318F",
-      "newFileButton": "New File",
-      "loadFileButton": "Load File",
-      "stopButton": "Stop",
-      "runButton": "Start Test",
-      "searchPlaceholder": "Search\u2026",
-      "emptyTitle": "Open or create a file to get started",
-      "emptyNewFile": "New File",
-      "emptyNewFileHint": "Type ! + Space for template",
-      "emptyLoadFile": "Load File",
-      "emptyLoadFileHint": "From your library",
-      "emptyOpenLib": "Open Library",
-      "emptyOpenLibHint": "Community test scripts",
-      "placeholderLine1": "# Start typing\u2026",
-      "placeholderLine2": "# Type '! ' + Space to load the template",
-      "aiNotEnabled": "AI Not Enabled",
-      "aiNotEnabledDetail": "Please enable AI in Settings first."
-    },
-
-    "output": {
-      "running": "Test running\u2026",
-      "success": "Test successful",
-      "failed": "Test failed",
-      "outputLabel": "Output",
-      "clearButton": "Clear",
-      "waitingForOutput": "Waiting for Python output\u2026",
-      "testStarted": "\ud83d\ude80 Test started\u2026",
-      "testComplete": "\u2705 Test complete!",
-      "testStopped": "\u23f9\ufe0f  Test stopped.",
-      "exitCodeError": "Process exited with exit code {code}"
-    },
-
     "saveDialog": {
       "title": "Save Script",
       "description": "Enter a name for your test script.",
@@ -819,15 +888,13 @@
       "saveButton": "Save",
       "cancelButton": "Cancel"
     },
-
     "library": {
       "title": "Test Script Library",
       "empty": "No test scripts saved yet.",
       "loadButton": "Load",
       "saveCurrentButton": "Save Current Script",
-      "namePlaceholder": "Script name\u2026"
+      "namePlaceholder": "Script name…"
     },
-
     "aiSidebar": {
       "title": "AI Assistant",
       "autoBadge": "Auto",
@@ -840,16 +907,16 @@
       "continueButton": "Continue",
       "sessionSuffix": " (Continued)",
       "readonlyBadge": "Read-only",
-      "readonlyHint": "Read-only \u2013 chat not active",
-      "sendHint": "Enter = send \u00b7 Shift+Enter = new line",
-      "inputPlaceholder": "Goal / issue / desired change\u2026",
-      "readonlyPlaceholder": "Start a new chat to write \u2192 \u25a1 top right",
+      "readonlyHint": "Read-only – chat not active",
+      "sendHint": "Enter = send · Shift+Enter = new line",
+      "inputPlaceholder": "Goal / issue / desired change…",
+      "readonlyPlaceholder": "Start a new chat to write → □ top right",
       "startNewChatButton": "Start New Chat",
       "autoBadgeLabel": "Auto",
       "replaceCodeButton": "Replace",
       "editChange": "Change {n}",
       "undoButton": "Undo",
-      "viewDiffLink": "\u2192 View Diff",
+      "viewDiffLink": "→ View Diff",
       "editSummaryReady": "Ready:",
       "applyButton": "Apply",
       "detailsButton": "Details",
@@ -858,9 +925,8 @@
         "addMetric": "Add eval/metric (F1/accuracy)",
         "batchInference": "Make batch inference robust"
       },
-      "emptySidebarHint": "Describe your goal/issue \u2014 I'll provide direct edits or a rewrite."
+      "emptySidebarHint": "Describe your goal/issue — I'll provide direct edits or a rewrite."
     },
-
     "errorModal": {
       "title": "Test Failed",
       "errorLabel": "Error Message:",
@@ -870,25 +936,6 @@
       "sendToAIButton": "Send to AI",
       "closeButton": "Close"
     },
-
-    "notifications": {
-      "unsavedChangesTitle": "Unsaved Changes",
-      "unsavedChangesDetail": "Please save first (\u2318S).",
-      "noModelOrScript": "Error",
-      "noModelOrScriptDetail": "No model selected or script is empty.",
-      "startSuccess": "Started!",
-      "startSuccessDetail": "Dev test running\u2026",
-      "startError": "Error",
-      "savedUpdated": "Updated",
-      "savedUpdatedDetail": "Test script updated!",
-      "savedNew": "Saved",
-      "savedNewDetail": "Test script \"{name}\" saved!",
-      "libraryScriptSaved": "Saved",
-      "libraryScriptSavedDetail": "Test script \"{name}\" saved.",
-      "openLibLoaded": "Loaded!",
-      "openLibLoadedDetail": "\u201e{name}\u201c was loaded into the editor."
-    },
-
     "relativeTime": {
       "justNow": "just now",
       "minutesAgo": "{n} min ago",
@@ -904,17 +951,14 @@
     "titleDefault": "Training Dashboard",
     "modeDev": "Dev Train",
     "modeStandard": "Standard",
-
     "minimized": {
       "epochInfo": "E{epoch}/{total} · Loss: {loss} · {duration}"
     },
-
     "header": {
       "stopButton": "Stop",
       "minimizeTooltip": "Minimize",
       "closeTooltip": "Close"
     },
-
     "metrics": {
       "trainLoss": "Train Loss",
       "trainLossSub": "{dir} {pct}% since start",
@@ -925,20 +969,16 @@
       "completed": "Completed",
       "stopped": "Stopped"
     },
-
     "progress": {
       "epochStep": "Epoch {epoch} / {totalEpochs} · Step {step} / {totalSteps}"
     },
-
     "stopped": {
       "message": "Training was stopped manually. You can restart it at any time."
     },
-
     "completed": {
       "message": "Training completed successfully!",
       "analyzeButton": "Start Analysis →"
     },
-
     "chart": {
       "title": "Loss History",
       "points": "{count} points",
@@ -948,7 +988,6 @@
       "start": "Start:",
       "current": "Current:"
     },
-
     "config": {
       "title": "Configuration",
       "devMode": "Dev Train Mode — no structured config.",
@@ -956,7 +995,6 @@
       "yes": "Yes",
       "no": "No"
     },
-
     "eventLog": {
       "title": "Training Log",
       "entriesNote": "{count} entries · saved in ft_training_sessions",
@@ -969,7 +1007,6 @@
       "eventEpoch": "Epoch {epoch}/{total} — Train: {trainLoss}",
       "eventEpochVal": " · Val: {val}"
     },
-
     "errorRecovery": {
       "optionsTitle": "Options",
       "memoryCategoryTitle": "GPU/RAM Overflow",
@@ -986,32 +1023,26 @@
       "codeCategoryHint": "Syntax or type error in the training script. The AI assistant can analyze the error.",
       "unknownCategoryTitle": "Unknown Error",
       "unknownCategoryHint": "Send the error to the FrameTrain team or use the AI assistant for analysis.",
-
       "kiMetricsButton": "Adjust with AI",
       "kiMetricsDesc": "AI assistant analyzes the configuration and suggests fixes",
-
       "ramTipTitle": "RAM Tip",
       "ramTipDesc": "Enable LoRA (r=8), turn on FP16 or BF16, reduce batch to 2–4, enable gradient checkpointing.",
-
       "datasetTipTitle": "Check Dataset",
       "datasetTipDesc": "Split the dataset in the Dataset Manager (run split), check paths and file permissions.",
-
       "copyReportButton": "Copy Error Report",
       "copyReportDesc": "Copy full report to clipboard for FrameTrain support",
       "copyReportCopied": "Error report copied!",
-
       "sendToTeamTitle": "Send to FrameTrain",
-      "sendToTeamDesc": "Copy the error report and send it to the FrameTrain team — the error is likely in the engine and will be fixed.",
-
+      "sendToTeamDesc": "Send the error report with logs directly to the FrameTrain team — the error will be analyzed and fixed.",
+      "sendReportSending": "Sending…",
+      "sendReportSent": "✓ Sent to FrameTrain — thanks!",
+      "sendReportFailed": "Sending failed — try again",
       "codeFixButton": "Fix Code with AI",
       "codeFixDesc": "Send error + Python code to the AI assistant — AI suggests direct code fixes",
-
       "memoryHintTitle": "Memory Error",
       "memoryHintDesc": "Reduce batch size in the script, use FP16 / bfloat16, or set gradient_checkpointing=True.",
-
       "copyReportDevDesc": "For FrameTrain support or GitHub issue",
       "copied": "Copied!",
-
       "reportHeader": "=== FrameTrain Error Report ===",
       "reportMode": "Mode: {mode}",
       "reportModeStandard": "Standard",
@@ -1021,19 +1052,38 @@
       "reportConfigSection": "--- Configuration ---",
       "reportConfigDev": "Dev Train (no structured config)",
       "reportEnd": "--- End of Report ---",
-
       "categories": {
-        "memory":   { "title": "GPU/RAM Overflow",              "hint": "Reduce batch size, enable FP16 or LoRA, turn on gradient checkpointing." },
-        "cuda":     { "title": "Hardware / Device Error",        "hint": "Device unavailable or incompatible. Swap FP16 for BF16, or switch to CPU." },
-        "dataset":  { "title": "Dataset / Path Error",           "hint": "Check dataset path, run dataset split, check file permissions." },
-        "packages": { "title": "Missing Python Packages",        "hint": "Run pip install torch transformers datasets accelerate." },
-        "config":   { "title": "Numerical Error (NaN/Inf)",      "hint": "Learning rate too high? Enable gradient clipping (max_grad_norm), reduce LR to 1e-5." },
-        "code":     { "title": "Code Error",                     "hint": "Syntax or type error in the training script. The AI assistant can analyze the error." },
-        "unknown":  { "title": "Unknown Error",                  "hint": "Send the error to the FrameTrain team or use the AI assistant for analysis." }
+        "memory": {
+          "title": "GPU/RAM Overflow",
+          "hint": "Reduce batch size, enable FP16 or LoRA, turn on gradient checkpointing."
+        },
+        "cuda": {
+          "title": "Hardware / Device Error",
+          "hint": "Device unavailable or incompatible. Swap FP16 for BF16, or switch to CPU."
+        },
+        "dataset": {
+          "title": "Dataset / Path Error",
+          "hint": "Check dataset path, run dataset split, check file permissions."
+        },
+        "packages": {
+          "title": "Missing Python Packages",
+          "hint": "Run pip install torch transformers datasets accelerate."
+        },
+        "config": {
+          "title": "Numerical Error (NaN/Inf)",
+          "hint": "Learning rate too high? Enable gradient clipping (max_grad_norm), reduce LR to 1e-5."
+        },
+        "code": {
+          "title": "Code Error",
+          "hint": "Syntax or type error in the training script. The AI assistant can analyze the error."
+        },
+        "unknown": {
+          "title": "Unknown Error",
+          "hint": "Send the error to the FrameTrain team or use the AI assistant for analysis."
+        }
       }
     }
   },
-
   "synapse": {
     "builder": {
       "title": "Synapse Builder",
@@ -1138,12 +1188,11 @@
       }
     }
   },
-
   "synapseAI": {
     "panel": {
       "canvasHint": "Canvas stays visible — the assistant builds live on the graph",
       "title": "Synapse Magic",
-      "subtitleShapeMode": "Shape fix — template ready",
+      "subtitleShapeMode": "Shape fix mode — AI can fix the errors",
       "subtitleStep": "{tool}…",
       "stepCount": "{done}/{total} steps",
       "subtitleIdle": "Build a network using language",
@@ -1158,14 +1207,19 @@
       "liveCanvasLabel": "LIVE ON CANVAS",
       "thinkingLabel": "Thinking",
       "resumeButton": "Resume",
-      "shapeSendButton": "Send shape fix (Enter)",
+      "retryButton": "↻ Resend",
+      "shapeSendButton": "Insert fix template",
+      "shapeActiveLabel": "{count} node(s) with shape errors",
+      "shapeContextHint": "When sending, all diagnostic details (node IDs, parameters, error messages) are automatically attached for the AI",
+      "shapeFixRequestMessage": "Fix the shape errors in the network ({nodes})",
       "affectedLabel": "Marked:",
-      "inputPlaceholderShapeMode": "Shape fix template — Enter to send",
+      "inputPlaceholderShapeMode": "Or your own instruction… (Enter to send)",
       "inputPlaceholder": "Describe your network… (Enter to send)",
       "abortButton": "■",
       "sendButton": "↑",
       "abortTooltip": "Cancel",
-      "sendTooltip": "Send"
+      "sendTooltip": "Send",
+      "subtitleSteps": "{done}/{total} steps"
     },
     "toolLabels": {
       "add_node": "Add Node",
@@ -1186,13 +1240,15 @@
       "question1": "What are the issues?",
       "question2": "Fix shape errors",
       "question3": "What should I change?",
+      "question4": "How should the dataset be structured?",
+      "inputPlaceholder": "Ask me anything about the error… (Enter to send)",
+      "aiUnavailableNote": "⚠ AI currently unavailable — this was the rule-based quick answer. Retry with ↻.",
       "suggestedActionsLabel": "SUGGESTED ACTIONS:",
       "inspectOnlyNote": "ℹ️ For information only - no automatic changes",
       "applyButton": "Apply",
-      "footerHint": "Ask me about training results or fix suggestions."
+      "footerHint": "Ask me anything about the error — I answer with full training and graph context."
     }
   },
-
   "aiClient": {
     "errorDisabled": "AI assistant disabled. Please enable it in Settings.",
     "errorMissingKey": "API key for {provider} missing.",
@@ -1202,18 +1258,15 @@
     "title": "Versions",
     "subtitle": "Manage model versions and training histories",
     "refreshTooltip": "Refresh",
-
     "emptyState": {
       "title": "No models available",
       "description": "Add models first on the Models page."
     },
-
     "modelCard": {
       "versionsLabel": "{count} version",
       "versionsLabelPlural": "{count} versions",
       "showVersionsButton": "Show Versions"
     },
-
     "versionsModal": {
       "versionsCount": "{count} version",
       "versionsCountPlural": "{count} versions",
@@ -1232,7 +1285,6 @@
       "deleteConfirm": "Do you really want to delete version \"{name}\"?",
       "closeButton": "Close"
     },
-
     "filesPanel": {
       "loading": "Loading files...",
       "errorTitle": "Failed to load files",
@@ -1241,7 +1293,6 @@
       "fileCountPlural": "{count} files",
       "folderCount": "{count} folders"
     },
-
     "exportModal": {
       "title": "Export Version",
       "description": "Choose an export option for this version:",
@@ -1252,7 +1303,6 @@
       "sphereNetSoon": "Coming Soon",
       "cancelButton": "Cancel"
     },
-
     "notifications": {
       "loadError": "Error Loading",
       "loadVersionsError": "Error loading versions",
@@ -1267,7 +1317,6 @@
       "exportFailed": "Export Failed"
     }
   },
-
   "updateChecker": {
     "title": "New Update Available",
     "versionAvailable": "Version v{version} is available",
@@ -1278,7 +1327,7 @@
     "guideTitle": "Update Guide:",
     "step1": "Click \"Go to Dashboard\" to download the new version",
     "step2": "Completely uninstall the old FrameTrain app:",
-    "step2detail": "Go to Applications \u2192 FrameTrain \u2192 Move to Trash",
+    "step2detail": "Go to Applications → FrameTrain → Move to Trash",
     "step3": "Install the new version:",
     "step3detail": "Open the downloaded .dmg and drag FrameTrain into Applications",
     "step4": "Launch the new FrameTrain app",
@@ -1286,63 +1335,51 @@
     "dashboardButton": "Go to Dashboard",
     "closeButton": "Close"
   },
-
   "testPanel": {
     "title": "Tests",
     "subtitleEngine": "Choose a model – the matching test plugin loads automatically",
     "subtitleDev": "Custom Python script for inference and evaluation",
-
     "modeEngine": "Test Engine",
     "modeDev": "Dev Test",
-
     "noModel": {
       "title": "No model available",
       "description": "Add a model in the Model Manager first."
     },
-
     "modelSelector": {
       "modelLabel": "Model",
       "versionLabel": "Version",
       "versionLatest": " (latest)",
       "noVersions": "No Versions"
     },
-
     "pluginBadge": {
       "supported": "{name} – {description}",
       "unsupportedTitle": "Model not yet supported for testing",
       "devModeLink": "Dev Test Mode →"
     },
-
     "startButton": "Start Test →",
     "changeModelButton": "← Choose Different Model / Version",
-
     "pluginBanner": {
       "pluginLabel": "Plugin:",
       "activeLabel": "Active"
     },
-
     "unsupported": {
       "title": "Model not yet supported",
       "description": "Testing is currently only supported for XLM-RoBERTa. Use Dev Test Mode for your own scripts.",
       "devModeLink": "Dev Test Mode"
     }
   },
-
-"trainingPanel": {
+  "trainingPanel": {
     "title": "Training",
     "subtitle": "Train sequence classification models",
-
     "header": {
       "historyButton": "History",
       "modeTraining": "Training",
       "modeDev": "Dev Train"
     },
-
     "noModels": {
       "title": "No model available",
       "description": "Add a model in the Model Manager first."
     },
-
     "modelBlock": {
       "modelLabel": "Model",
       "versionLabel": "Version",
@@ -1352,7 +1389,6 @@
       "pluginUnsupported": "Not yet supported",
       "devModeButton": "Dev Train Mode →"
     },
-
     "datasetBlock": {
       "label": "Dataset",
       "noDataset": "No dataset for this model.",
@@ -1361,7 +1397,6 @@
       "noSplitWarning": "No split – split it in the Dataset Manager first.",
       "canvasBadge": "⚡ Canvas model — supports any dataset type (images, CSV, text)"
     },
-
     "requirements": {
       "notReadyTitle": "Python environment not ready",
       "python": "Python",
@@ -1369,13 +1404,11 @@
       "transformers": "Transformers",
       "cudaMps": "CUDA/MPS"
     },
-
     "toolbar": {
       "templatesButton": "Templates",
       "aiButton": "AI Assistant",
       "resetButton": "Reset"
     },
-
     "sections": {
       "basic": "Basic Parameters",
       "optimizer": "Optimizer & Scheduler",
@@ -1384,7 +1417,6 @@
       "loraActiveBadge": "Active",
       "ram": "RAM Calculator"
     },
-
     "fields": {
       "epochs": "Epochs",
       "epochsTooltip": "Number of training epochs.",
@@ -1444,21 +1476,18 @@
       "loraTargetModulesPlaceholder": "q_proj,v_proj",
       "loraHint": "Enable LoRA to massively reduce RAM usage — ideal for models >1B parameters. QLoRA (4-bit) cuts requirements by ~75%."
     },
-
     "optimizerOptions": {
       "adamw": "AdamW",
       "adam": "Adam",
       "sgd": "SGD",
       "adafactor": "Adafactor"
     },
-
     "schedulerOptions": {
       "linear": "Linear",
       "cosine": "Cosine",
       "constant": "Constant",
       "polynomial": "Polynomial"
     },
-
     "ramCalculator": {
       "title": "RAM Estimate",
       "subtitle": "({sizeGb} GB model{lora}{quant})",
@@ -1478,13 +1507,11 @@
       "highRamTitle": "Reduce RAM:",
       "highRamDesc": "• LoRA r=8, 4-bit QLoRA, batch 2–4, FP16 + gradient checkpointing"
     },
-
     "lossChart": {
       "waitingForData": "Waiting for training data…",
       "legendTrain": "Train",
       "legendVal": "Val"
     },
-
     "templates": {
       "title": "Metrics Templates",
       "tabBuiltin": "Built-in",
@@ -1499,15 +1526,32 @@
       "saveButton": "Save",
       "cancelButton": "Cancel",
       "builtinTemplates": {
-        "standard": { "name": "Standard", "description": "Balanced for most tasks." },
-        "small":    { "name": "Small Dataset (<5k)", "description": "More epochs, higher LR." },
-        "large":    { "name": "Large Dataset (>50k)", "description": "Fewer epochs, larger batch." },
-        "lowram":   { "name": "Low RAM", "description": "Gradient accumulation + FP16." },
-        "lora":     { "name": "LoRA (RAM-saving)", "description": "LoRA r=8, ideal for large models." },
-        "qlora":    { "name": "QLoRA 4-bit", "description": "QLoRA for maximum RAM savings." }
+        "standard": {
+          "name": "Standard",
+          "description": "Balanced for most tasks."
+        },
+        "small": {
+          "name": "Small Dataset (<5k)",
+          "description": "More epochs, higher LR."
+        },
+        "large": {
+          "name": "Large Dataset (>50k)",
+          "description": "Fewer epochs, larger batch."
+        },
+        "lowram": {
+          "name": "Low RAM",
+          "description": "Gradient accumulation + FP16."
+        },
+        "lora": {
+          "name": "LoRA (RAM-saving)",
+          "description": "LoRA r=8, ideal for large models."
+        },
+        "qlora": {
+          "name": "QLoRA 4-bit",
+          "description": "QLoRA for maximum RAM savings."
+        }
       }
     },
-
     "aiAssistant": {
       "title": "AI Metrics Assistant",
       "configTitle": "Current Configuration",
@@ -1530,26 +1574,22 @@
       "backButton": "← Back",
       "reanalyzeButton": "Re-analyze"
     },
-
     "progress": {
       "title": "Training running…",
       "statusLabel": "Status: {status}",
       "openDashboardButton": "Open Dashboard",
       "lossHistory": "Loss History"
     },
-
     "actions": {
       "startButton": "Start Training",
       "stopButton": "Stop Training",
       "noSplitWarning": "The dataset must be split in the Dataset Manager first."
     },
-
     "unsupported": {
       "title": "Model not yet supported",
       "description": "Use Dev Train Mode.",
       "devModeButton": "Open Dev Train Mode"
     },
-
     "history": {
       "title": "Training History",
       "entries": "Entries",
@@ -1570,7 +1610,6 @@
       "lossLabel": "Loss:",
       "valLabel": "Val:"
     },
-
     "notifications": {
       "missingSelection": "Missing Selection",
       "missingSelectionDetail": "Please select a model and dataset.",
@@ -1589,7 +1628,6 @@
       "trainingComplete": "Training Complete!",
       "trainingCompleteDetail": "The model has been saved."
     },
-
     "pageContext": {
       "title": "=== FrameTrain Training Panel ===",
       "purposeTitle": "--- PAGE PURPOSE ---",
@@ -1652,13 +1690,11 @@
   "analysisPanel": {
     "title": "Training Analysis",
     "subtitle": "Metrics · Graphs · AI Evaluation · Parameter Templates",
-
     "header": {
       "templatesButton": "Templates ({count})",
       "exportButton": "Export",
       "refreshButton": "Refresh"
     },
-
     "emptyState": {
       "noModel": {
         "title": "No model available",
@@ -1669,7 +1705,6 @@
         "description": "This version hasn't been trained yet, or the logs weren't saved."
       }
     },
-
     "modelSelector": {
       "modelLabel": "Model",
       "versionLabel": "Version",
@@ -1677,7 +1712,6 @@
       "versionOriginalSuffix": " (v0)",
       "versionSuffix": " (v{n})"
     },
-
     "metricCards": {
       "finalTrainLoss": "Final Train Loss",
       "valLabel": "Val: {value}",
@@ -1688,7 +1722,6 @@
       "status": "Status",
       "statusDone": "Done"
     },
-
     "derivedStats": {
       "title": "Derived Statistics",
       "lossReduction": "Loss Reduction",
@@ -1696,12 +1729,10 @@
       "avgGradNorm": "Avg. Grad Norm",
       "logEntries": "Log Entries"
     },
-
     "smoothing": {
       "label": "Smoothing (Moving Average)",
       "description": "Reduces noise in loss curves"
     },
-
     "charts": {
       "common": {
         "chartMissing": "Chart element not found",
@@ -1756,15 +1787,12 @@
         "title": "Training Duration per Epoch"
       }
     },
-
     "hardware": {
       "title": "Hardware"
     },
-
     "datasetModel": {
       "title": "Dataset & Model"
     },
-
     "epochTable": {
       "title": "Epoch Summary ({count} Epochs)",
       "colEpoch": "Epoch",
@@ -1774,7 +1802,6 @@
       "colDuration": "Duration",
       "colSteps": "Steps"
     },
-
     "logTable": {
       "title": "Training Logs ({count} Entries)",
       "colEpoch": "E",
@@ -1785,7 +1812,6 @@
       "colGradNorm": "Grad Norm",
       "colTime": "Time"
     },
-
     "aiAnalysis": {
       "title": "AI Training Analysis",
       "reanalyzeButton": "Re-analyze",
@@ -1795,7 +1821,6 @@
       "notEnabledTitle": "AI Assistant Not Enabled",
       "notEnabledDescription": "Enable an AI provider under Settings → AI Assistant.",
       "noJsonNote": "AI didn't generate a JSON parameter block · Manual templates can be saved above.",
-
       "recommendedParams": {
         "title": "Recommended Parameters for Next Training",
         "countLabel": "{count} parameters recommended",
@@ -1803,19 +1828,16 @@
         "saveButton": "Save as Training Template",
         "savingButton": "Saving…"
       },
-
       "chat": {
         "toggleShow": "Chat with AI about the training",
         "toggleHide": "Hide Chat",
         "emptyHint": "Ask questions about the training, the parameters, or optimization strategies.",
         "inputPlaceholder": "Ask a question about the training…"
       },
-
       "coach": {
         "button": "Continue in AI Coach"
       }
     },
-
     "templates": {
       "title": "Saved Parameter Templates",
       "emptyText": "No templates yet. Generate an AI analysis and save the recommended parameters.",
@@ -1832,7 +1854,6 @@
     "title": "Datasets",
     "subtitle": "Manage training data for your models",
     "subtitleAlt": "Manage your training data",
-
     "emptyState": {
       "noModel": {
         "title": "No model available",
@@ -1840,26 +1861,25 @@
       },
       "noDatasets": {
         "title": "No Datasets",
-        "description": "Add a dataset for \u201e{model}\u201c.",
+        "description": "Add a dataset for „{model}“.",
         "addButton": "Add First Dataset"
       }
     },
-
     "header": {
       "refreshTooltip": "Refresh",
       "addButton": "Add Dataset"
     },
-
     "modelSelector": {
       "label": "Select Model",
       "sourceHF": "HF",
       "sourceLocal": "Local"
     },
-
+    "statusSplit": "Split",
+    "statusUnused": "No Split",
     "card": {
       "statusSplit": "Split",
       "statusNoSplit": "No Split",
-      "usedCount": "used {count}\u00d7",
+      "usedCount": "used {count}×",
       "pairedCount": "{count} pairs",
       "orphanCount": "{count} orphans",
       "filesLabel": "{count} files",
@@ -1870,33 +1890,37 @@
       "splitTrain": "Train",
       "splitVal": "Val",
       "splitTest": "Test",
-      "halveButton": "\u00bd Halve",
+      "halveButton": "½ Halve",
       "halveTooltip": "Halve in case of RAM issues"
     },
-
     "deleteDialog": {
       "title": "Delete dataset?",
-      "description": "\u201e{name}\u201c and all associated files will be permanently removed.",
+      "description": "„{name}“ and all associated files will be permanently removed.",
       "cancelButton": "Cancel",
       "confirmButton": "Delete"
     },
-
     "splitModal": {
       "title": "Split Dataset",
-      "pairedWarning": "Structured dataset ({type}). Only root files are split \u2013 for paired datasets, primary and label files must be split separately.",
+      "pairedWarning": "Structured dataset ({type}). Only root files are split – for paired datasets, primary and label files must be split separately.",
+      "rowSplitTitle": "Row-level split (inside each file)",
+      "rowSplitDesc": "Each file will be split by rows/samples internally. Headers and schema are preserved in every resulting file. Files are moved into train/, val/ and test/ subfolders.",
+      "pairedSplitTitle": "Paired file split",
+      "dataIntegrityWarning": "The original files will be moved into train/, val/ and test/ subfolders. This cannot be undone. Make a backup if needed.",
       "fileCount": "Splitting {count} files.",
       "labelTrain": "Training",
       "labelVal": "Validation",
       "labelTest": "Test",
       "splitButton": "Split Dataset",
-      "splittingButton": "Splitting\u2026",
+      "splittingButton": "Splitting…",
       "successTitle": "Split Complete!",
-      "successDetail": "\u201e{name}\u201c was split into Train/Val/Test.",
+      "successDetail": "„{name}“ was split into Train/Val/Test.",
       "errorTitle": "Split Failed",
       "invalidRatioTitle": "Invalid Split",
-      "invalidRatioDetail": "The total must equal 100%."
+      "invalidRatioDetail": "The total must equal 100%.",
+      "notSplittableTitle": "Automatic split not possible",
+      "notSplittableCoco": "COCO JSON references images by ID inside annotations.json – splitting the files would break these links. Alternatives: use the dataset without a split, split it with a dedicated COCO tool, or convert it to YOLO format first.",
+      "notSplittableCommonVoice": "Common Voice ships with its own splits (metadata.tsv/validated.tsv). An additional automatic split is not needed."
     },
-
     "halveModal": {
       "title": "Halve Dataset",
       "whyTitle": "What's this for?",
@@ -1904,44 +1928,43 @@
       "halfLabel": "Half {n}",
       "filesLabel": "Files ({label})",
       "originalNote": "The original is preserved.",
-      "halveButton": "\u00bd Split into Two Halves",
-      "halvingButton": "Splitting\u2026",
+      "inheritSplitsLabel": "Inherit split structure (train/val/test)",
+      "inheritSplitsHint": "Both halves keep their train/val/test split and are directly trainable. Disable to merge the data unsplit — then re-split before training.",
+      "halveButton": "½ Split into Two Halves",
+      "halvingButton": "Splitting…",
       "successTitle": "Split Complete!",
-      "successDetail": "\u201e{a}\u201c and \u201e{b}\u201c created.",
+      "successDetail": "„{a}“ and „{b}“ created.",
       "errorTitle": "Halving Failed"
     },
-
     "importModal": {
       "title": "Add Dataset",
       "forModel": "for: {model}",
       "tabLocal": "Local Folder",
       "tabHuggingFace": "Hugging Face",
-
       "local": {
         "supportedFormats": ".csv .jsonl .json .parquet .txt YOLO/ COCO/ Pascal VOC/ Audio+TXT",
         "dropzoneIdle": "Drag dataset folder here",
         "dropzoneDragging": "Drop folder here",
-        "dropzoneSubtitle": "Flat files, YOLO, COCO, Pascal VOC, audio/transcript, \u2026",
+        "dropzoneSubtitle": "Flat files, YOLO, COCO, Pascal VOC, audio/transcript, …",
         "browseButton": "Browse Folder",
         "browseFolderTitle": "Select Dataset Folder",
         "folderSelected": "Folder Selected",
         "changeFolderLink": "Choose a Different Folder",
-        "analysisLoading": "Analyzing dataset type\u2026",
+        "analysisLoading": "Analyzing dataset type…",
         "nameLabel": "Dataset Name",
         "namePlaceholder": "e.g. my-dataset-v1",
         "importButton": "Import Dataset",
-        "importingButton": "Importing\u2026",
+        "importingButton": "Importing…",
         "importSuccess": "Dataset Imported!",
-        "importSuccessDetail": "\u201e{name}\u201c was added.",
+        "importSuccessDetail": "„{name}“ was added.",
         "importError": "Import Failed",
         "missingFieldsTitle": "Missing Information",
         "missingFieldsDetail": "Folder, name, and model are required.",
-        "dragDropInfo": "Please use the \u201eBrowse Folder\u201c button.",
+        "dragDropInfo": "Please use the „Browse Folder“ button.",
         "dragDropInfoTitle": "Drag & Drop",
         "pluginPreferredType": "Preferred type:",
         "pluginAlsoCompatible": "Also compatible:"
       },
-
       "hf": {
         "filterToggleShow": "Show Filters",
         "filterToggleHide": "Hide Filters",
@@ -1950,7 +1973,7 @@
         "filterSize": "Size",
         "filterAll": "All",
         "searchLabel": "Search Dataset",
-        "searchPlaceholder": "e.g. squad, imdb, common_voice\u2026",
+        "searchPlaceholder": "e.g. squad, imdb, common_voice…",
         "searchHint": "Enter at least 2 characters",
         "resultsCount": "{count} datasets found",
         "viewOnHF": "View on HuggingFace",
@@ -1962,45 +1985,56 @@
         "cancelSuccess": "Cancelled",
         "cancelDetail": "The download was cancelled.",
         "downloadSuccess": "Download Complete!",
-        "downloadSuccessDetail": "\u201e{name}\u201c was downloaded.",
+        "downloadSuccessDetail": "„{name}“ was downloaded.",
         "downloadError": "Download Failed",
         "missingFieldsTitle": "Missing Information",
         "missingFieldsDetail": "Dataset, name, and model are required.",
-        "connectingLabel": "Connecting\u2026",
-        "waitingNote": "Loading dataset \u2013 this may take a few minutes\u2026",
+        "connectingLabel": "Connecting…",
+        "waitingNote": "Loading dataset – this may take a few minutes…",
         "speedLabel": "Speed",
         "elapsedLabel": "Elapsed",
         "remainingLabel": "Remaining"
       }
     },
-
     "structureGuide": {
       "toggleLabel": "How should my dataset folder be structured?",
       "types": {
-        "yolo":        { "label": "YOLO (Image + Labels)",     "hint": "Select the folder that contains BOTH subfolders \u2013 not images/ or labels/ directly." },
-        "flatfile":    { "label": "Flat File (Text/CSV/JSONL)", "hint": "Select the folder containing the files. Multiple files are allowed." },
-        "folderclass": { "label": "Folder Classification",     "hint": "Each subfolder is a class. Contains images or text files." },
-        "audio":       { "label": "Audio + Transcript",        "hint": "Same filename for audio and transcript \u2013 only the extension differs." },
-        "pascal":      { "label": "Pascal VOC",                "hint": "Same basename in images/ and annotations/ \u2013 e.g. image1.jpg \u2194 image1.xml." }
+        "yolo": {
+          "label": "YOLO (Image + Labels)",
+          "hint": "Select the folder that contains BOTH subfolders – not images/ or labels/ directly."
+        },
+        "flatfile": {
+          "label": "Flat File (Text/CSV/JSONL)",
+          "hint": "Select the folder containing the files. Multiple files are allowed."
+        },
+        "folderclass": {
+          "label": "Folder Classification",
+          "hint": "Each subfolder is a class. Contains images or text files."
+        },
+        "audio": {
+          "label": "Audio + Transcript",
+          "hint": "Same filename for audio and transcript – only the extension differs."
+        },
+        "pascal": {
+          "label": "Pascal VOC",
+          "hint": "Same basename in images/ and annotations/ – e.g. image1.jpg ↔ image1.xml."
+        }
       }
     },
-
     "analysisPreview": {
-      "confidenceLabel": "{confidence}% confidence \u00b7 {count} files",
+      "confidenceLabel": "{confidence}% confidence · {count} files",
       "autoDetectedTooltip": "Auto-detected",
       "pairedCount": "{count} pairs complete",
       "orphanCount": "{count} files without a partner"
     },
-
     "notifications": {
       "loadModelsError": "Error loading models",
       "loadDatasetsError": "Error loading datasets",
       "deleteSuccess": "Deleted",
-      "deleteSuccessDetail": "\u201e{name}\u201c was removed.",
+      "deleteSuccessDetail": "„{name}“ was removed.",
       "deleteError": "Delete Failed"
     }
   },
-
   "datasetFileManager": {
     "pairedHints": {
       "yolo_bbox": "YOLO: images/ + labels/ – primary and label files must have the same basename.",
@@ -2008,7 +2042,6 @@
       "audio_transcript": "Audio+Transcript: .wav + .txt same basename, split separately.",
       "coco_json": "COCO: annotations.json references images by ID – don't split line by line."
     },
-
     "header": {
       "totalFiles": "{count} files total",
       "statTrain": "Train: {count}",
@@ -2016,19 +2049,16 @@
       "statTest": "Test: {count}",
       "statUnsplit": "Unsplit: {count}"
     },
-
     "tabs": {
       "files": "Files",
       "yaml": "dataset.yaml"
     },
-
     "toolbar": {
       "searchPlaceholder": "Search files…",
       "filterAll": "All",
       "addButton": "Add",
       "addDialogTitle": "Add Files"
     },
-
     "selection": {
       "selectedCount": "{count} selected",
       "moveToTrain": "→ train",
@@ -2036,7 +2066,6 @@
       "moveToTest": "→ test",
       "deleteButton": "Delete"
     },
-
     "table": {
       "colName": "Name",
       "colFolder": "Folder",
@@ -2044,7 +2073,6 @@
       "viewTooltip": "View",
       "noFiles": "No files found"
     },
-
     "notifications": {
       "loadError": "Error Loading",
       "readError": "Error Reading",
@@ -2055,7 +2083,14 @@
       "addSuccess": "{count} file(s) added",
       "addError": "Error"
     },
-
+    "parquet": {
+      "totalRows": "rows",
+      "totalCols": "columns",
+      "showingRows": "showing first {count}",
+      "moreRowsNote": "+ {count} more rows not shown",
+      "previewErrorTitle": "Could not preview this file",
+      "previewErrorHint": "Requires Python with pandas/pyarrow installed."
+    },
     "yaml": {
       "description": "The dataset.yaml is read directly by Ultralytics/YOLO. Enter the paths and classes here – everything is saved in the correct format.",
       "sectionPaths": "Paths",
@@ -2082,7 +2117,6 @@
       "yamlError": "YAML Error"
     }
   },
-
   "datasetCompatBadge": {
     "noModelSelected": "No Model Selected",
     "checking": "Checking dataset…",
@@ -2091,13 +2125,19 @@
   "laboratoryPanel": {
     "title": "Laboratory",
     "subtitle": "Test samples, rate them, and analyze weaknesses",
-
     "header": {
       "analysisButton": "Analysis",
       "continueTestingButton": "Continue Testing",
       "sessionsButton": "Sessions"
     },
-
+    "devScripts": {
+      "myScriptsButton": "My scripts",
+      "openLibButton": "Open Library",
+      "modalTitle": "Saved dev scripts",
+      "empty": "No saved scripts yet.\nScripts you save in Dev Train or Dev Test will appear here.",
+      "loadButton": "Load",
+      "loadedToast": "Script loaded"
+    },
     "sessionsModal": {
       "title": "Lab Sessions",
       "empty": "No sessions saved yet.",
@@ -2108,45 +2148,39 @@
       "loadButton": "Load",
       "deleteSuccess": "Session deleted"
     },
-
     "setup": {
       "title": "Configuration",
-      "configSummary": "{model} \u00b7 {engine} \u00b7 {count} samples from \u201e{file}\u201c",
+      "configSummary": "{model} · {engine} · {count} samples from „{file}“",
       "noModelsTitle": "No model available",
       "noModelsDesc": "Add a model in the Model Manager first.",
-
       "modelLabel": "Model",
       "versionLabel": "Version",
       "versionLatest": " (latest)",
       "noVersions": "No Versions",
-
       "engineLabel": "Test Engine",
       "engineStandard": "Train Engine",
       "engineDev": "Dev Script",
-
       "engineNotSupported": "This model isn't yet supported by the Test Engine. Use Dev Script mode.",
-      "pluginDetected": "{name} \u2013 plugin detected",
-      "serverLoading": "Model is loading\u2026 Please wait.",
-      "serverReady": "Model loaded \u2013 ready for inference",
-      "serverError": "Failed to load \u2013 switch versions or restart",
-
+      "pluginDetected": "{name} – plugin detected",
+      "serverLoading": "Model is loading… Please wait.",
+      "serverReady": "Model loaded – ready for inference",
+      "serverError": "Failed to load – switch versions or restart",
+      "loadModelButton": "Load model for inference",
+      "loadModelRetryButton": "Try again",
+      "canvasInputHint": "Canvas model: expects numeric feature inputs, e.g. \"0.5, 1.2, 3.0\" — free text is not supported.",
       "datasetLabel": "Sample Dataset",
-      "datasetPlaceholder": "\u2013 select dataset \u2013",
+      "datasetPlaceholder": "– select dataset –",
       "datasetFileCount": "{count} files",
-      "datasetSplitSuffix": " \u00b7 split",
+      "datasetSplitSuffix": " · split",
       "noDatasetWarning": "No dataset available for this model. Please upload a dataset first.",
-
       "splitAll": "All",
-
       "loadSamplesButton": "Load Samples",
-      "loadingSamplesButton": "Loading samples\u2026",
-      "samplesLoaded": "{count} samples loaded \u00b7 {file}",
+      "loadingSamplesButton": "Loading samples…",
+      "samplesLoaded": "{count} samples loaded · {file}",
       "samplesPreviewTitle": "Preview ({count} samples)",
-      "samplesPreviewMore": "+ {count} more\u2026",
+      "samplesPreviewMore": "+ {count} more…",
       "samplesRemove": "Remove",
-
       "startButton": "Start Lab Session ({count} samples)",
-
       "notifications": {
         "engineNotSupported": "Not Supported",
         "engineNotSupportedDetail": "This model isn't yet supported by the Test Engine. Use Dev Script mode.",
@@ -2160,99 +2194,84 @@
         "loadSuccessDetail": "{count} samples loaded from {fileCount} file(s).",
         "loadError": "Error Loading",
         "fileLoadSuccess": "Loaded",
-        "fileLoadSuccessDetail": "{count} samples loaded from \u201e{name}\u201c.",
+        "fileLoadSuccessDetail": "{count} samples loaded from „{name}“.",
         "fileEmpty": "Empty",
         "fileEmptyDetail": "No samples found.",
         "modelLoadError": "Model Load Error"
       }
     },
-
     "devScript": {
       "title": "Dev Script",
       "clearButton": "Clear",
       "templateButton": "Template",
       "aiButton": "AI",
-      "placeholder": "# Enter script here or load a template\u2026\n# Tip: click the Template button!",
+      "placeholder": "# Enter script here or load a template…\n# Tip: click the Template button!",
       "footerNote": "The script runs separately for each sample. Output must be a JSON object with \"predicted\".",
-
       "aiSidebar": {
         "title": "AI Assistant",
         "titleShort": "AI",
-        "emptyHint": "Ask about the script\u2026",
+        "emptyHint": "Ask about the script…",
         "codeTakenLabel": "[Code was applied]",
-        "inputPlaceholder": "Question\u2026"
+        "inputPlaceholder": "Question…"
       }
     },
-
     "testing": {
-      "serverBannerLoading": "Model is loading\u2026 Testing will be available shortly.",
+      "serverBannerLoading": "Model is loading… Testing will be available shortly.",
       "serverBannerError": "Model could not be loaded. Please switch versions.",
-      "serverBannerIdle": "No model loaded.",
-
+      "serverBannerIdle": "No model loaded — click \"Load model for inference\" on the left.",
       "progressLabel": "Sample {current} of {total}",
-
       "sampleTitle": "Sample #{index} / {total}",
       "sampleCardTitle": "Sample #{index}",
       "rawDataToggle": "Show Raw Data",
       "testButton": "Test",
-      "testingButton": "Testing\u2026",
+      "testingButton": "Testing…",
       "alreadyRatedLabel": "Already rated as",
       "skipButton": "Skip",
-
       "resultTitle": "Result",
-      "idleHint": "Press \u201eTest\u201c to see the result",
-      "inferenceRunning": "Inference running\u2026",
+      "idleHint": "Press „Test“ to see the result",
+      "inferenceRunning": "Inference running…",
       "matchLabel": "Matches expected label",
-      "mismatchLabel": "Mismatch \u2014 expected:",
+      "mismatchLabel": "Mismatch — expected:",
       "allClassesLabel": "All Classes",
       "addNoteButton": "Add Note",
-      "notePlaceholder": "Note about this sample\u2026",
+      "notePlaceholder": "Note about this sample…",
       "correctButton": "Correct",
       "wrongButton": "Wrong",
-
       "sessionSummaryTitle": "Current Session",
       "correctLabel": "{count} correct",
       "wrongLabel": "{count} wrong",
       "skippedLabel": "{count} skipped",
       "openAnalysisButton": "Open Analysis",
-
       "allDoneTitle": "All samples rated!",
       "toAnalysisButton": "Go to Analysis"
     },
-
     "analysis": {
       "exportButton": "Export CSV",
       "statsRated": "Rated",
       "statsCorrect": "Correct",
       "statsWrong": "Wrong",
       "statsSkipped": "Skipped",
-
       "donutCorrectLabel": "Correct",
       "donutWrongLabel": "Wrong",
       "donutSkipLabel": "Skipped",
       "donutCenterLabel": "Correct",
-
       "avgConfidenceTitle": "Avg. Confidence",
       "avgConfCorrect": "Correct",
       "avgConfWrong": "Wrong",
       "accuracyLabel": "Accuracy (rated)",
-
       "topWrongTitle": "Most Common Error Classes",
       "topWrongEmpty": "No errors found",
-      "topWrongSuffix": "{count}\u00d7",
-
+      "topWrongSuffix": "{count}×",
       "resultsTitle": "Results ({count})",
       "filterAll": "All",
       "filterCorrect": "Correct",
       "filterWrong": "Wrong",
       "filterSkipped": "Skipped",
       "noEntries": "No entries.",
-
       "detailInput": "Input:",
       "detailPredicted": "Predicted:",
       "detailExpected": "Expected:",
       "detailNote": "Note:",
-
       "csvHeaderIndex": "Index",
       "csvHeaderInput": "Input",
       "csvHeaderExpected": "Expected",
@@ -2260,7 +2279,15 @@
       "csvHeaderConfidence": "Confidence",
       "csvHeaderRating": "Rating",
       "csvHeaderNote": "Note",
-      "csvHeaders": ["Index", "Input", "Expected", "Predicted", "Confidence", "Rating", "Note"]
+      "csvHeaders": [
+        "Index",
+        "Input",
+        "Expected",
+        "Predicted",
+        "Confidence",
+        "Rating",
+        "Note"
+      ]
     }
   },
   "openLibrary": {
@@ -2298,17 +2325,14 @@
     "addAnyway": "Add Anyway",
     "cancel": "Cancel",
     "details": "Details →",
-
     "verifiedInfoTitle": "Verified Script",
     "verifiedInfoBody": "This script has been reviewed by FrameTrain for safety and functionality. It contains no harmful operations and runs reliably.",
     "unverifiedInfoTitle": "Community Upload (Unreviewed)",
     "unverifiedInfoBody": "This script hasn't been reviewed by FrameTrain yet. Check the code contents before running it.",
-
     "scriptPreviewTitle": "Script Preview",
     "scriptPreviewLines": "({count} lines)",
     "copyButton": "Copy",
     "copiedButton": "Copied!",
-
     "upload": {
       "infoBannerTitle": "Contribute a Script to the Community Library",
       "infoBannerBody": "Choose a script from your private library. It will be submitted, reviewed, and then receive a Verified badge.",
@@ -2346,19 +2370,32 @@
       "successDetail": "Your script was submitted and will be reviewed soon."
     }
   },
-
   "canvasInferenceTab": {
     "modelSelectPlaceholder": "— Select Model —",
     "inputPlaceholder": "0.1, 0.5, 0.3 …",
     "invalidInput": "Invalid input – enter comma-separated numbers, e.g. 0.1, 0.5, 0.3"
   },
-
   "synapseBuilder": {
     "title": "Synapse Builder",
     "subtitle": "Visual Model Pipeline Builder",
     "addNode": "Add Node",
-    "exportGraphTooltip": "Export graph as a new model in the FrameTrain library",
-    "sessionsModelsButton": "Sessions & Models",
+    "exportGraphTooltip": "Save graph as a new model in the FrameTrain library",
+    "saveButton": "Save",
+    "saveTooltipUpdate": "Save changes to \"{name}\"",
+    "sessionsModelsButton": "Library",
+    "autosaveRestored": "[Synapse] Last working state restored automatically ({count} nodes) — discard via Clear",
+    "saveDialog": {
+      "title": "Save model",
+      "description": "The model is stored in your library and can be trained in the Training panel.",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "confirmClear": {
+      "title": "Clear canvas?",
+      "body": "The current graph has unsaved changes — they will be lost.",
+      "discard": "Discard & clear",
+      "cancel": "Cancel"
+    },
     "aiAssistantButton": "AI Assistant",
     "clearCanvas": "Clear Canvas",
     "export": "Export",
@@ -2385,7 +2422,8 @@
       "step3": "3️⃣ Add dataset & start training",
       "step4": "4️⃣ After training: model.pt appears in versions",
       "confirmButton": "Got it"
-    }
+    },
+    "modelsButton": "Models"
   },
   "datasetCompat": {
     "noModelSelected": "No Model Selected",
@@ -2413,12 +2451,15 @@
       "unknown": "Unknown"
     }
   },
-
   "pluginRegistry": {
     "noModelPath": "No model path specified.",
     "notSupported": "This model isn't supported yet. Currently available: {plugins}."
   },
-
+  "contextMenu": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "askCoach": "Discuss with AI Coach"
+  },
   "common": {
     "loading": "Loading...",
     "error": "Error",

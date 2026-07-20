@@ -93,7 +93,7 @@ export default function GlobalTrainingProgress({ onNavigateToTraining }: GlobalT
     <div
       className="fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl cursor-pointer hover:bg-slate-800 transition-all group"
       onClick={onNavigateToTraining}
-      title="t('globalTrainingProgress.tooltip')"
+      title={t('globalTrainingProgress.tooltip')}
     >
       {isRunning   && <Loader2     className="w-4 h-4 text-emerald-400 animate-spin flex-shrink-0" />}
       {isCompleted && <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />}

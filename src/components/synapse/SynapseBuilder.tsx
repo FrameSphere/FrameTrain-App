@@ -22,8 +22,6 @@ import { listen } from "@tauri-apps/api/event";
 import { NodeLibrary } from "./NodeLibrary";
 import { PropertyPanel } from "./PropertyPanel";
 import { TrainingConsole, TrainingConfig, TrainingMetrics, TrainingStatus } from "./TrainingConsole";
-import { SessionLibrary } from "./SessionLibrary";
-import type { SavedSession } from "./SessionLibrary";
 import { NODE_DEFINITIONS, NodeDefinition } from "./nodeTypes";
 import { SynapseNodeComponent } from "./nodes/SynapseNodeComponent";
 import { dragState } from "./dragState";
@@ -40,7 +38,6 @@ import {
 import { ShapeErrorBanner } from "./ShapeErrorBanner";
 import {
   buildShapeAgentPrompt,
-  buildShapeUserGuide,
   applyShapeHighlightsToNodes,
   applyShapeHighlightsToEdges,
   clearShapeHighlights,
@@ -62,6 +59,7 @@ import { SynapseAIPanel } from "./ai/SynapseAIPanel";
 import "./ai/synapseAIPanel.css";
 import { useAISettings } from "../../contexts/AISettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { callAI } from "../../ai/aiClient";
 import type { ChatMessage } from "../../ai/aiClient";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -139,7 +137,6 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [fullscreen, setFullscreen]         = useState(false);
   const [showLibrary, setShowLibrary]         = useState(false);
-  const [libraryTab, setLibraryTab]           = useState<"sessions" | "models">("sessions");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [completedVersionId, setCompletedVersionId] = useState<string | null>(null);
   const [showAICoach, setShowAICoach]         = useState(false);
@@ -159,10 +156,20 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   const [shapeErrors, setShapeErrors]       = useState<ValidationError[]>([]);
   const [shapeIssueSource, setShapeIssueSource] = useState<ShapeIssueSource | null>(null);
   const [shapeBannerVisible, setShapeBannerVisible] = useState(false);
+  const [shapeExtraContext, setShapeExtraContext] = useState<string | null>(null);
   const aiAbortRef                          = useRef<AbortController | null>(null);
+  const lastAiRequestRef                    = useRef<{ text: string; displayText?: string } | null>(null);
+  // Rollierende Chat-Komprimierung: Zusammenfassung älterer Nachrichten
+  // + Index, bis wohin der Verlauf bereits komprimiert wurde.
+  const aiChatSummaryRef                    = useRef<string | null>(null);
+  const aiSummaryCoveredRef                 = useRef(0);
 
   // ── Export-Erfolg Modal ─────────────────────────────────────────────
   const [exportModal, setExportModal] = useState<{ modelId: string; name: string } | null>(null);
+  // Namensdialog beim ersten Speichern (statt Auto-Name "Synapse <Datum>")
+  const [saveDialogName, setSaveDialogName] = useState<string | null>(null);
+  // Bestätigung vor "Clear" bei ungespeicherten Änderungen
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [activeCanvasModelId, setActiveCanvasModelId] = useState<string | null>(null);
   const [activeModelName,     setActiveModelName]     = useState<string | null>(null);
   // Training state
@@ -190,9 +197,56 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   }, []);
 
   // ── Track unsaved changes ─────────────────────────────────────────────
+  // skipDirtyRef: programmatische Änderungen (Modell/Session laden, Autosave-
+  // Restore, Shape-Markierungen) sind KEINE User-Änderungen und dürfen den
+  // "Ungespeichert"-Status nicht setzen.
+  const skipDirtyRef = useRef(false);
   useEffect(() => {
+    if (skipDirtyRef.current) { skipDirtyRef.current = false; return; }
     if (nodes.length > 0 || edges.length > 0) setHasUnsavedChanges(true);
   }, [nodes, edges]);
+
+  // ── Autosave: Arbeitsstand überlebt App-Neustart ──────────────────────
+  const autosaveKey = `synapse_autosave_${userId}`;
+  useEffect(() => {
+    if (nodes.length === 0 && edges.length === 0) return;
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(autosaveKey, JSON.stringify({
+          nodes, edges,
+          viewport: rfRef.current?.getViewport(),
+          activeCanvasModelId, activeModelName,
+          dirty: hasUnsavedChanges,
+          savedAt: Date.now(),
+        }));
+      } catch { /* quota */ }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [nodes, edges, activeCanvasModelId, activeModelName, hasUnsavedChanges, autosaveKey]);
+
+  // Beim Öffnen: letzten Arbeitsstand wiederherstellen (Canvas ist beim Mount leer)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(autosaveKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!Array.isArray(saved?.nodes) || saved.nodes.length === 0) return;
+      skipDirtyRef.current = true;
+      setNodes(saved.nodes);
+      setEdges(saved.edges ?? []);
+      setActiveCanvasModelId(saved.activeCanvasModelId ?? null);
+      setActiveModelName(saved.activeModelName ?? null);
+      setHasUnsavedChanges(saved.dirty ?? true);
+      setLogLines((p) => [
+        ...p,
+        t('synapseBuilder.autosaveRestored').replace('{count}', String(saved.nodes.length)),
+      ]);
+      setTimeout(() => {
+        if (saved.viewport) rfRef.current?.setViewport(saved.viewport, { duration: 0 });
+      }, 120);
+    } catch { /* defektes Autosave ignorieren */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (nodes.length === 0) return;
     if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
@@ -217,14 +271,20 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   const clearShapeIssues = useCallback(() => {
     setShapeErrors([]);
     setShapeIssueSource(null);
+    setShapeExtraContext(null);
     setShapeBannerVisible(false);
+    skipDirtyRef.current = true; // Markierungen entfernen ist keine User-Änderung
     setNodes((nds) => clearShapeHighlights(nds, edges).nodes);
     setEdges((eds) => clearShapeHighlights(nodes, eds).edges);
   }, [nodes, edges, setNodes, setEdges]);
 
+  // "Zoom to Nodes": Canvas auf die fehlerhaften Nodes zoomen und die erste
+  // betroffene Node selektieren, damit das Property Panel sie direkt zeigt.
   const focusShapeNodesByErrors = useCallback((errs: ValidationError[]) => {
     const ids = collectAffectedNodeIds(errs);
     if (ids.size === 0 || !rfRef.current) return;
+    const first = errs[0]?.targetNodeId ?? errs[0]?.sourceNodeId;
+    if (first && ids.has(first)) setSelectedNodeId(first);
     rfRef.current.fitView({
       nodes: [...ids].map((id) => ({ id })),
       duration: 500,
@@ -233,45 +293,29 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     });
   }, []);
 
+  // Shape-Fehler melden: Nodes/Edges markieren + Banner zeigen. Mehr nicht —
+  // AI-Chat und Zoom passieren erst auf expliziten Klick im Banner.
   const reportShapeIssues = useCallback(
     (
       errors: ValidationError[],
       source: ShapeIssueSource,
-      currentNodes: Node[],
-      currentEdges: Edge[],
-      opts?: { openPanel?: boolean; extraContext?: string }
+      opts?: { extraContext?: string }
     ) => {
       const errOnly = errors.filter((e) => e.severity === "error");
       if (errOnly.length === 0) return;
 
       setShapeErrors(errOnly);
       setShapeIssueSource(source);
+      setShapeExtraContext(opts?.extraContext ?? null);
       setShapeBannerVisible(true);
+      skipDirtyRef.current = true; // Fehler-Markierungen sind keine User-Änderung
       setNodes((nds) => applyShapeHighlightsToNodes(nds, errOnly));
       setEdges((eds) => applyShapeHighlightsToEdges(eds, errOnly));
 
       const msgs = errOnly.map(formatValidationError).join("\n");
       setLogLines((p) => [...p, `[Shape] ${msgs}`]);
-
-      if (opts?.openPanel !== false) {
-        setShowAiPanel(true);
-        setAiInput(
-          buildShapeAgentPrompt(
-            errOnly,
-            currentNodes,
-            currentEdges,
-            source,
-            opts?.extraContext
-          )
-        );
-      }
-
-      const focusId = errOnly[0]?.targetNodeId ?? errOnly[0]?.sourceNodeId;
-      if (focusId) setSelectedNodeId(focusId);
-
-      setTimeout(() => focusShapeNodesByErrors(errOnly), 80);
     },
-    [setNodes, setEdges, focusShapeNodesByErrors]
+    [setNodes, setEdges]
   );
 
   // ── Connections (Phase 3: shape validation) ─────────────────────────────
@@ -282,7 +326,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         c.source, c.target, nodes, NODE_DEFINITIONS
       );
       if (!valid) {
-        reportShapeIssues(errors, "connection", nodes, edges, { openPanel: false });
+        reportShapeIssues(errors, "connection");
         return;
       }
       setEdges((eds) =>
@@ -346,9 +390,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
           queueMicrotask(() => clearShapeIssues());
         } else if (shapeErrors.length > 0) {
           queueMicrotask(() =>
-            reportShapeIssues(check.errors, shapeIssueSource ?? "graph", next, edges, {
-              openPanel: false,
-            })
+            reportShapeIssues(check.errors, shapeIssueSource ?? "graph")
           );
         }
         return next;
@@ -390,7 +432,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         clearShapeIssues();
         setLogLines((p) => [
           ...p,
-          `[Synapse] ✅ Auto-Fix: Dense inputSize ${expected} → ${actual}`,
+          `[Synapse] ✓ Auto-Fix: Dense inputSize ${expected} → ${actual}`,
         ]);
         setTrainingStatus("idle");
       }
@@ -438,9 +480,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
           const fixed = autoFixShapeError(diag);
           if (!fixed) {
             const errs = validationErrorsFromRuntimeDiag(diag, nodes);
-            reportShapeIssues(errs, "runtime", nodes, edges, {
+            reportShapeIssues(errs, "runtime", {
               extraContext: String(diag.raw_error ?? ""),
-              openPanel: false,
             });
           }
         }
@@ -464,17 +505,30 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
           .map(formatValidationError);
         setLogLines(["[Shape] Graph ungültig — Training abgebrochen:", ...msgs]);
         setTrainingStatus("error");
-        reportShapeIssues(graphCheck.errors, "graph", nodes, edges, { openPanel: false });
+        reportShapeIssues(graphCheck.errors, "graph");
         return;
       }
       clearShapeIssues();
 
       const datasetPath = await resolveDatasetPath(config.selectedDatasetId);
-      if (config.selectedDatasetId && !datasetPath) {
+
+      // Graph mit Daten-Loader braucht zwingend ein ausgewähltes Dataset —
+      // sonst früher klarer Abbruch statt kryptischem Engine-Fehler.
+      const loaderNode = nodes.find((n) => {
+        const t = (n.data as any)?._def?.type ?? (n.data as any)?.nodeType;
+        return t === "image_loader" || t === "csv_loader" || t === "parquet_loader";
+      });
+      if (loaderNode && !datasetPath) {
+        const loaderType = (loaderNode.data as any)?._def?.type ?? "data";
         setLogLines((p) => [
           ...p,
-          `[Warnung] Dataset "${config.selectedDatasetName ?? config.selectedDatasetId}" — Pfad nicht gefunden, nutze Dummy-Daten.`,
+          config.selectedDatasetId
+            ? `[Error] Dataset "${config.selectedDatasetName ?? config.selectedDatasetId}" — Pfad konnte nicht aufgelöst werden.`
+            : `[Error] Der Graph enthält einen ${loaderType}-Node, aber es ist kein Dataset ausgewählt.`,
+          `[Error] Bitte unten in der Trainingsleiste ein passendes Dataset wählen (${loaderType === "image_loader" ? "Bilder in Klassen-Ordnern" : loaderType === "csv_loader" ? "CSV-Datei" : "Parquet-Dateien"}) und erneut starten.`,
         ]);
+        setTrainingStatus("error");
+        return;
       }
 
       const canvasGraph = buildCanvasGraphIR(nodes, edges, config);
@@ -567,11 +621,12 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
                         severity: "error" as const,
                         sourceNodeId: nodes[0]?.id ?? "graph",
                         message: full.slice(0, 500),
-                        suggestion:
-                          "Parameter mit set_param anpassen (inputSize, inChannels, normalizedShape, embedDim)",
+                        suggestion: /outputs BD.*expects BTC/i.test(full)
+                          ? "Rang-Problem (2D → 3D): set_param hilft NICHT — reshape-Node einfügen (shape \"1, <features>\") oder Attention/Transformer entfernen"
+                          : "Parameter mit set_param anpassen (inputSize, inChannels, normalizedShape, embedDim)",
                       } satisfies ValidationError,
                     ];
-              reportShapeIssues(errs, "training", nodes, edges, { extraContext: full, openPanel: false });
+              reportShapeIssues(errs, "training", { extraContext: full });
             } else {
               setShowAICoach(true);
               setTrainingResult({
@@ -650,7 +705,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     [nodes, edges, setNodes, setEdges]
   );
 
-  const handleSaveToModelLibrary = useCallback(async () => {
+  // Eigentliches Speichern: Update des aktiven Modells oder Neuanlage mit Name.
+  const performSave = useCallback(async (newModelName?: string) => {
     const graphConfig = generateModelConfigFromGraph(nodes, edges, NODE_DEFINITIONS);
     if (!graphConfig) {
       setLogLines((p) => [...p, "[Error] Kein gültiger Graph zum Speichern."]);
@@ -673,7 +729,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     };
 
     // ── UPDATE: bestehendes Modell überschreiben ────────────────────────────────
-    if (activeCanvasModelId) {
+    if (activeCanvasModelId && !newModelName) {
       try {
         await updateCanvasNetworkModel(activeCanvasModelId, graphConfig, pythonCode, graphIR);
         await writeModelDesign(activeCanvasModelId, design);
@@ -686,7 +742,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     }
 
     // ── NEU: neues Modell anlegen ───────────────────────────────────────────────
-    const name = `Synapse ${new Date().toLocaleDateString("de-DE")}`;
+    const name = (newModelName ?? "").trim() || `Synapse ${new Date().toLocaleDateString("de-DE")}`;
     try {
       const result = await exportCanvasNetworkToModelLibrary(graphConfig, pythonCode, name, graphIR);
       await writeModelDesign(result.modelId, design);
@@ -699,6 +755,40 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       setLogLines((p) => [...p, `[Error] Speichern fehlgeschlagen: ${e}`]);
     }
   }, [nodes, edges, activeCanvasModelId, activeModelName]);
+
+  // Klick auf Speichern: aktives Modell → direkt updaten;
+  // sonst Namensdialog öffnen (vorbefüllt, Enter = speichern).
+  const handleSaveToModelLibrary = useCallback(() => {
+    if (nodes.length === 0) {
+      setLogLines((p) => [...p, "[Error] Kein Graph zum Speichern — füge zuerst Nodes hinzu."]);
+      return;
+    }
+    if (activeCanvasModelId) {
+      void performSave();
+    } else {
+      setSaveDialogName(`Synapse ${new Date().toLocaleDateString("de-DE")}`);
+    }
+  }, [nodes.length, activeCanvasModelId, performSave]);
+
+  // "Clear" mit Guard: bei ungespeicherten Änderungen erst bestätigen
+  const performClear = useCallback(() => {
+    skipDirtyRef.current = true;
+    setNodes([]);
+    setEdges([]);
+    setSelectedNodeId(null);
+    setActiveCanvasModelId(null);
+    setActiveModelName(null);
+    setHasUnsavedChanges(false);
+    setConfirmClearOpen(false);
+    clearShapeIssues();
+    try { localStorage.removeItem(autosaveKey); } catch { /* ignore */ }
+  }, [setNodes, setEdges, clearShapeIssues, autosaveKey]);
+
+  const requestClear = useCallback(() => {
+    if (nodes.length === 0 && edges.length === 0) return;
+    if (hasUnsavedChanges) setConfirmClearOpen(true);
+    else performClear();
+  }, [nodes.length, edges.length, hasUnsavedChanges, performClear]);
 
   const handleStopTraining = useCallback(() => {
     cancelRef.current = true;
@@ -735,8 +825,81 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     }
   }, []);
 
+  // ── Rollierende Chat-Komprimierung ────────────────────────────────────────
+  // Ab SUMMARY_TRIGGER Nachrichten werden ältere Nachrichten (alles außer den
+  // letzten KEEP_VERBATIM) in eine kompakte Fakten-Zusammenfassung komprimiert.
+  // Die läuft inkrementell mit ("immer wieder"): bestehende Zusammenfassung +
+  // neue alte Nachrichten → neue Zusammenfassung. Läuft im Hintergrund nach
+  // jeder Antwort und blockiert nie das Senden; Fehler sind still (alte
+  // Zusammenfassung bleibt dann einfach gültig).
+  const SUMMARY_TRIGGER = 8;
+  const KEEP_VERBATIM   = 4;
+
+  const maybeUpdateChatSummary = useCallback(async (msgs: ChatMessage[]) => {
+    if (!aiSettings.enabled) return;
+    if (msgs.length < SUMMARY_TRIGGER) return;
+    const upTo = msgs.length - KEEP_VERBATIM;
+    if (upTo <= aiSummaryCoveredRef.current) return; // nichts Neues zu komprimieren
+
+    const fresh = msgs
+      .slice(aiSummaryCoveredRef.current, upTo)
+      .map((m) => `${m.role}: ${m.content.slice(0, 400)}`)
+      .join('\n');
+    const prev = aiChatSummaryRef.current;
+
+    const en = (language ?? '').toLowerCase().startsWith('en');
+    const system = en
+      ? `You compress the history of a chat between a user and a canvas AI assistant that builds neural networks.
+Produce a compact factual summary (max ~150 words, bullet points). ALWAYS keep:
+- the user's goals and decisions that were made
+- concrete node IDs, node types and parameter values that were discussed or changed
+- open problems / unresolved issues
+No filler, facts only.`
+      : `Du komprimierst den Verlauf eines Chats zwischen User und einem Canvas-AI-Assistenten, der neuronale Netze baut.
+Erstelle eine kompakte Fakten-Zusammenfassung (max. ~150 Wörter, Stichpunkte). Behalte IMMER:
+- Ziele des Users und getroffene Entscheidungen
+- konkrete Node-IDs, Node-Typen und Parameterwerte, die besprochen oder geändert wurden
+- offene Probleme / Ungeklärtes
+Keine Floskeln, nur Fakten.`;
+
+    const content = prev
+      ? `${en ? 'Existing summary' : 'Bisherige Zusammenfassung'}:\n${prev}\n\n${en ? 'New messages to merge in' : 'Neue Nachrichten zum Einarbeiten'}:\n${fresh}`
+      : fresh;
+
+    try {
+      const summary = await callAI(aiSettings, {
+        system,
+        messages: [{ role: 'user', content }],
+        maxTokens: 300,
+        temperature: 0.2,
+        responseLanguage: language,
+      });
+      if (summary.trim()) {
+        aiChatSummaryRef.current = summary.trim();
+        aiSummaryCoveredRef.current = upTo;
+      }
+    } catch (e) {
+      console.warn('[Synapse] Chat-Komprimierung übersprungen:', e);
+    }
+  }, [aiSettings, language]);
+
+  // Panel ersetzt den Verlauf (Chat-Wechsel / neuer Chat) → Zusammenfassung
+  // gehört zum alten Chat und wird verworfen.
+  const handlePanelMessagesChange = useCallback((msgs: ChatMessage[]) => {
+    aiChatSummaryRef.current = null;
+    aiSummaryCoveredRef.current = 0;
+    setAiMessages(msgs);
+  }, []);
+
   // ── AI Send ───────────────────────────────────────────────────────────────
-  const aiSend = useCallback(async (msg?: string, resume?: AgentResumeState) => {
+  // opts.displayText: kompakte Nachricht für die Chat-Anzeige, während der
+  //   volle Text (z. B. Shape-Diagnose-Prompt) an den Agenten geht.
+  // opts.isRetry: Nachricht steht bereits im Chat — nicht erneut anhängen.
+  const aiSend = useCallback(async (
+    msg?: string,
+    resume?: AgentResumeState,
+    opts?: { displayText?: string; isRetry?: boolean }
+  ) => {
     const text = (msg ?? aiInput).trim();
     if (!text && !resume) return;
     if (aiLoading) { aiAbortRef.current?.abort(); return; }
@@ -746,11 +909,25 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     setAiError(null);
     setAiSteps([]);
     setAiResumeState(null);
+    if (!resume) {
+      lastAiRequestRef.current = { text: text || 'Resume', displayText: opts?.displayText };
+    }
 
-    const userMsg: ChatMessage = { role: 'user', content: text || 'Resume' };
-    const nextMessages = [...aiMessages, userMsg];
+    const userMsg: ChatMessage = { role: 'user', content: opts?.displayText ?? (text || 'Resume') };
+    const nextMessages = opts?.isRetry ? [...aiMessages] : [...aiMessages, userMsg];
     setAiMessages(nextMessages);
     setAiInput("");
+
+    // Aktive Shape-Fehler: vollen Diagnose-Prompt unsichtbar an den Agenten
+    // anhängen — im Chat bleibt nur die kompakte User-Nachricht sichtbar.
+    const shapeDiagnostic = !resume && shapeErrors.length > 0
+      ? buildShapeAgentPrompt(
+          shapeErrors, nodes, edges, shapeIssueSource ?? "graph", shapeExtraContext ?? undefined
+        )
+      : null;
+    const agentText = shapeDiagnostic && text
+      ? `${text}\n\n${shapeDiagnostic}`
+      : (text || 'Resume');
 
     const graphCtx = buildSynapseGraphContext(nodes, edges, selectedNodeId, NODE_DEFINITIONS);
     const executor = createToolExecutor({
@@ -764,7 +941,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
 
     try {
       const result = await runSynapseAgent({
-        userMessage: text || 'Resume',
+        userMessage: agentText,
         chatHistory: nextMessages,
         aiSettings,
         responseLanguage: language,
@@ -776,6 +953,24 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         onStepsUpdate: setAiSteps,
         signal: aiAbortRef.current.signal,
         resumeState: resume,
+        chatSummary: aiChatSummaryRef.current ?? undefined,
+        // Review-Runde: nur echte Shape-/Dimensions-Fehler zurückmelden —
+        // ein bewusst unvollständiger Graph (User baut inkrementell) löst
+        // keine ungewollten "Reparaturen" aus.
+        getValidationReport: () => {
+          const st = executor.getState();
+          const check = validateFullGraph(st.nodes, st.edges, NODE_DEFINITIONS);
+          const errs = check.errors.filter(
+            (e) =>
+              e.severity === "error" &&
+              (e.type === ValidationErrorType.SHAPE_MISMATCH ||
+               e.type === ValidationErrorType.DIMENSION_ERROR)
+          );
+          return {
+            valid: errs.length === 0,
+            report: errs.map(formatValidationError).join("\n"),
+          };
+        },
       });
 
       // Sync final graph state
@@ -790,6 +985,9 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
 
       setAiMessages(prev => [...prev, { role: 'assistant', content: assistantContent }]);
 
+      // Verlauf im Hintergrund komprimieren (blockiert nichts, Fehler still)
+      void maybeUpdateChatSummary([...nextMessages, { role: 'assistant', content: assistantContent }]);
+
       if (result.error) setAiError(result.error);
       if (result.canResume && result.resumeState) setAiResumeState(result.resumeState);
 
@@ -798,8 +996,14 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         finalState.edges,
         NODE_DEFINITIONS
       );
-      if (!result.error && graphCheck.valid) {
-        clearShapeIssues();
+      if (!result.error) {
+        if (graphCheck.valid) {
+          clearShapeIssues();
+        } else if (shapeErrors.length > 0) {
+          // Agent hat den Graph verändert, aber Fehler bleiben →
+          // Markierungen/Chip auf den aktuellen Stand bringen
+          reportShapeIssues(graphCheck.errors, shapeIssueSource ?? "graph");
+        }
       }
     } catch (e: any) {
       setAiError(String(e?.message ?? e));
@@ -818,28 +1022,52 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     setEdges,
     handleGraphMutation,
     clearShapeIssues,
+    reportShapeIssues,
+    shapeErrors,
+    shapeIssueSource,
+    shapeExtraContext,
+    maybeUpdateChatSummary,
   ]);
 
-  // ── Session load ───────────────────────────────────────────────────────
-  const handleLoadSession = useCallback(
-    (session: SavedSession) => {
-      setNodes(session.nodes);
-      setEdges(session.edges);
-      setSelectedNodeId(null);
-      setTimeout(() => {
-        if (session.viewport && rfRef.current) {
-          rfRef.current.setViewport(session.viewport, { duration: 300 });
-        } else {
-          rfRef.current?.fitView({ duration: 400, padding: 0.18 });
-        }
-      }, 50);
-    },
-    [setNodes, setEdges]
-  );
+  // ── Fehlgeschlagene AI-Anfrage erneut senden ──────────────────────────────
+  const aiRetry = useCallback(() => {
+    const last = lastAiRequestRef.current;
+    if (!last || aiLoading) return;
+    aiSend(last.text, undefined, { displayText: last.displayText, isRetry: true });
+  }, [aiSend, aiLoading]);
 
-  // ── Delete node with keyboard ──────────────────────────────────────────
+  // ── "Fix with AI": Panel öffnen und Fix-Vorlage in die Chat-Eingabe legen ──
+  // Der User schickt sie mit Enter ab; der volle Diagnose-Kontext wird beim
+  // Senden automatisch angehängt (siehe aiSend). Über einen Ref, damit der
+  // verzögerte Aufruf (nach Panel-Initialisierung) den aktuellen State sieht.
+  const shapeFixSenderRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    shapeFixSenderRef.current = () => {
+      if (shapeErrors.length === 0) return;
+      const affected = getAffectedNodes(shapeErrors, nodes)
+        .map((a) => a.label || a.id)
+        .join(", ");
+      setAiInput(
+        t('synapseAI.panel.shapeFixRequestMessage').replace('{nodes}', affected || '—')
+      );
+    };
+  });
+
+  const requestShapeFixWithAI = useCallback(() => {
+    setShowAiPanel(true);
+    // Kurz warten, bis das Panel seine Chat-Auswahl initialisiert hat
+    // (die setzt beim Öffnen u. a. die Eingabe zurück)
+    window.setTimeout(() => shapeFixSenderRef.current(), 150);
+  }, []);
+
+  // ── Keyboard: Delete = Node löschen, Cmd/Ctrl+S = Speichern ────────────
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        handleSaveToModelLibrary();
+        return;
+      }
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
         selectedNodeId &&
@@ -852,7 +1080,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         setSelectedNodeId(null);
       }
     },
-    [selectedNodeId, setNodes, setEdges]
+    [selectedNodeId, setNodes, setEdges, handleSaveToModelLibrary]
   );
 
   // ─── Render ─────────────────────────────────────────────────────────────
@@ -915,14 +1143,22 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
               maxWidth: 160,
             }}
             title={activeCanvasModelId
-              ? `Änderungen an „${activeModelName}“ speichern`
-              : t('synapseBuilder.exportGraphTooltip')}
+              ? `${t('synapseBuilder.saveTooltipUpdate').replace('{name}', activeModelName ?? '')} (⌘S)`
+              : `${t('synapseBuilder.exportGraphTooltip')} (⌘S)`}
           >
-            {hasUnsavedChanges
-              ? activeCanvasModelId ? `● ↻ ${(activeModelName ?? "Modell").slice(0, 12)}` : t('synapseBuilder.modelsButton')
-              : activeCanvasModelId ? `↻ ${(activeModelName ?? "Modell").slice(0, 14)}`      : t('synapseBuilder.modelsButton')}
+            {activeCanvasModelId ? (
+              `${hasUnsavedChanges ? "● " : "✓ "}${(activeModelName ?? "Modell").slice(0, 13)}`
+            ) : (
+              <>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M6 1.5v5.5M3.5 5L6 7.5 8.5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M1.5 8.5v1a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
+                {t('synapseBuilder.saveButton')}
+              </>
+            )}
           </button>
-          <button onClick={() => { setLibraryTab("sessions"); setShowLibrary(true); }} style={btnStyle} title={t('synapseBuilder.sessionsModelsButton')}>
+          <button onClick={() => setShowLibrary(true)} style={btnStyle} title={t('synapseBuilder.sessionsModelsButton')}>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
               <rect x="1"   y="1"   width="4.5" height="4.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
               <rect x="6.5" y="1"   width="4.5" height="4.5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
@@ -951,11 +1187,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
             AI
           </button>
 
-          {/* Clear */}
-          <button
-            onClick={() => { setNodes([]); setEdges([]); setSelectedNodeId(null); setActiveCanvasModelId(null); setActiveModelName(null); }}
-            style={btnStyle}
-          >
+          {/* Clear — mit Bestätigung bei ungespeicherten Änderungen */}
+          <button onClick={requestClear} style={btnStyle}>
             Clear
           </button>
 
@@ -1025,13 +1258,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
                   }
                   affected={getAffectedNodes(shapeErrors, nodes)}
                   onDismiss={clearShapeIssues}
-                  onOpenAI={() => {
-                    if (!shapeIssueSource) return;
-                    // Neuer Chat — vorherige Nachrichten löschen
-                    setAiMessages([]);
-                    // Panel öffnen + Fix-Prompt einfüllen
-                    reportShapeIssues(shapeErrors, shapeIssueSource, nodes, edges, { openPanel: true });
-                  }}
+                  onOpenAI={requestShapeFixWithAI}
                   onFocusNodes={() => focusShapeNodesByErrors(shapeErrors)}
                 />
               </Panel>
@@ -1068,24 +1295,13 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         userId={userId}
       />
 
-      {showLibrary && libraryTab === "sessions" && (
-        <SessionLibrary
-          isOpen={showLibrary}
-          onClose={() => setShowLibrary(false)}
-          currentNodes={nodes}
-          currentEdges={edges}
-          currentViewport={rfRef.current?.getViewport()}
-          onLoad={handleLoadSession}
-          onSwitchToModels={() => setLibraryTab("models")}
-        />
-      )}
-
-      {showLibrary && libraryTab === "models" && (
+      {showLibrary && (
         <ModelLibrary
           isOpen={showLibrary}
           onClose={() => setShowLibrary(false)}
           userId={userId}
           onLoad={(model) => {
+            skipDirtyRef.current = true; // Laden ist keine User-Änderung
             setNodes(model.nodes);
             setEdges(model.edges);
             setSelectedNodeId(null);
@@ -1100,12 +1316,11 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
               }
             }, 50);
           }}
-          onSwitchToSessions={() => setLibraryTab("sessions")}
         />
       )}
 
       {showAICoach && trainingResult && (
-        <div style={{ position: "absolute", right: showAiPanel ? 420 : 0, bottom: 200, zIndex: 600 }}>
+        <div style={{ position: "absolute", right: showAiPanel ? 434 : 16, bottom: 216, zIndex: 600 }}>
           <SynapseAICoachPanel
             trainingResult={trainingResult}
             nodes={nodes}
@@ -1125,7 +1340,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         onClose={() => setShowAiPanel(false)}
         userId={userId}
         messages={aiMessages}
-        onMessagesChange={setAiMessages}
+        onMessagesChange={handlePanelMessagesChange}
         input={aiInput}
         onInputChange={setAiInput}
         onSend={aiSend}
@@ -1134,14 +1349,126 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
         steps={aiSteps}
         resumeState={aiResumeState}
         onAbort={() => aiAbortRef.current?.abort()}
+        onRetry={aiRetry}
+        onShapeFix={requestShapeFixWithAI}
+        activeCanvasModelId={activeCanvasModelId}
+        canvasHasNodes={nodes.length > 0}
         shapeMode={shapeErrors.length > 0}
-        shapeUserGuide={
-          shapeIssueSource
-            ? buildShapeUserGuide(shapeErrors, nodes, shapeIssueSource)
-            : undefined
-        }
         affectedNodes={getAffectedNodes(shapeErrors, nodes)}
       />
+
+      {/* ── Namensdialog beim ersten Speichern ────────────────────────── */}
+      {saveDialogName !== null && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9000,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        }} onClick={() => setSaveDialogName(null)}>
+          <div style={{
+            background: "#0d1117", border: "1px solid #6366f1",
+            borderRadius: 12, padding: "24px 28px", maxWidth: 380, width: "90%",
+            boxShadow: "0 0 40px rgba(99,102,241,0.3)",
+          }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
+              {t('synapseBuilder.saveDialog.title')}
+            </h3>
+            <p style={{ color: "#64748b", fontSize: 11, marginBottom: 14, lineHeight: 1.6 }}>
+              {t('synapseBuilder.saveDialog.description')}
+            </p>
+            <input
+              autoFocus
+              value={saveDialogName}
+              onChange={(e) => setSaveDialogName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const n = saveDialogName;
+                  setSaveDialogName(null);
+                  void performSave(n);
+                }
+                if (e.key === "Escape") setSaveDialogName(null);
+              }}
+              onFocus={(e) => e.target.select()}
+              style={{
+                width: "100%", boxSizing: "border-box",
+                background: "#111827", border: "1px solid #334155",
+                borderRadius: 8, color: "#e2e8f0", fontSize: 13,
+                padding: "9px 12px", outline: "none", fontFamily: "inherit",
+                marginBottom: 14,
+              }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setSaveDialogName(null)}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 6,
+                  background: "transparent", border: "1px solid #334155",
+                  color: "#94a3b8", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t('synapseBuilder.saveDialog.cancel')}
+              </button>
+              <button
+                onClick={() => {
+                  const n = saveDialogName;
+                  setSaveDialogName(null);
+                  void performSave(n);
+                }}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 6,
+                  background: "linear-gradient(135deg, #6366f1, #a78bfa)", border: "none",
+                  color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t('synapseBuilder.saveDialog.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Clear-Bestätigung bei ungespeicherten Änderungen ──────────── */}
+      {confirmClearOpen && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9000,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        }} onClick={() => setConfirmClearOpen(false)}>
+          <div style={{
+            background: "#0d1117", border: "1px solid #7f1d1d",
+            borderRadius: 12, padding: "24px 28px", maxWidth: 380, width: "90%",
+            boxShadow: "0 0 40px rgba(239,68,68,0.2)",
+          }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ color: "#fecaca", fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
+              ⚠ {t('synapseBuilder.confirmClear.title')}
+            </h3>
+            <p style={{ color: "#94a3b8", fontSize: 12, marginBottom: 16, lineHeight: 1.6 }}>
+              {t('synapseBuilder.confirmClear.body')}
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setConfirmClearOpen(false)}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 6,
+                  background: "transparent", border: "1px solid #334155",
+                  color: "#94a3b8", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t('synapseBuilder.confirmClear.cancel')}
+              </button>
+              <button
+                onClick={performClear}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 6,
+                  background: "rgba(239,68,68,0.18)", border: "1px solid #7f1d1d",
+                  color: "#fca5a5", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t('synapseBuilder.confirmClear.discard')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Export-Erfolg-Modal ───────────────────────────────────────── */}
       {exportModal && (
@@ -1155,7 +1482,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
             borderRadius: 12, padding: "28px 32px", maxWidth: 400, width: "90%",
             boxShadow: "0 0 40px rgba(99,102,241,0.3)",
           }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 28, marginBottom: 8, textAlign: "center" }}>✅</div>
+            <div style={{ fontSize: 26, marginBottom: 8, textAlign: "center", color: "#34d399" }}>✓</div>
             <h3 style={{ color: "#e2e8f0", fontSize: 15, fontWeight: 700, textAlign: "center", marginBottom: 6 }}>
               {t('synapseBuilder.exportModal.title')}
             </h3>

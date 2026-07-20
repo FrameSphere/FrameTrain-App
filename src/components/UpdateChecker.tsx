@@ -96,10 +96,10 @@ export function UpdateChecker() {
   }
 
   function openDashboard() {
-    openUrl('https://frametrain.vercel.app/dashboard').catch((err) => {
+    openUrl('https://frame-train.com/dashboard').catch((err) => {
       console.error('Failed to open URL:', err);
       // Fallback: Versuche window.open als Backup
-      window.open('https://frametrain.vercel.app/dashboard', '_blank');
+      window.open('https://frame-train.com/dashboard', '_blank');
     });
   }
 
@@ -178,7 +178,7 @@ export function UpdateChecker() {
               className="text-blue-400 underline cursor-pointer hover:text-blue-300 transition-colors text-sm font-semibold"
               onClick={openDashboard}
             >
-              frametrain.vercel.app/dashboard
+              frame-train.com/dashboard
             </p>
           </div>
 

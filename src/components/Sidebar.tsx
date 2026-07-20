@@ -26,7 +26,13 @@ interface SidebarProps {
 export default function Sidebar({ currentView, onViewChange, userEmail, onLogout }: SidebarProps) {
   const { currentTheme } = useTheme();
   const { t } = useLanguage();
-  
+
+  // Wenn der Synapse Builder aktiv ist, übernimmt die Sidebar dessen dunkles
+  // Design (Navy + Violet/Indigo-Akzente) mit sanftem Übergang. Verlässt man
+  // den Synapse Builder wieder, geht es zurück zur normalen Theme-Farbe.
+  const isSynapse = currentView === 'synapse';
+  const synapseActiveGradient = 'linear-gradient(to right, #6366f1, #a78bfa)';
+
   const menuItems = [
     { id: 'models',     label: t('sidebar.nav.models'),    icon: Layers },
     { id: 'dataset',    label: t('sidebar.nav.datasets'),  icon: Upload },
@@ -39,9 +45,18 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
   ];
 
   return (
-    <div className="w-64 bg-black/20 backdrop-blur-lg border-r border-white/10 flex flex-col">
+    <div
+      className="w-64 backdrop-blur-lg flex flex-col transition-colors duration-500 ease-in-out"
+      style={{
+        backgroundColor: isSynapse ? '#0a0e17' : 'rgba(0, 0, 0, 0.2)',
+        borderRight: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}`,
+      }}
+    >
       {/* Header */}
-      <div className="p-6 border-b border-white/10">
+      <div
+        className="p-6 transition-colors duration-500 ease-in-out"
+        style={{ borderBottom: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}` }}
+      >
         <h1 className="text-2xl font-bold text-white">FrameTrain</h1>
         <p className="text-gray-400 text-sm mt-1">{t('sidebar.tagline')}</p>
       </div>
@@ -56,21 +71,36 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
             <button
               key={item.id}
               onClick={() => onViewChange(item.id)}
-              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-500 ease-in-out ${
                 isActive
-                  ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
+                  ? isSynapse
+                    ? 'text-white shadow-lg'
+                    : `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
                   : 'text-gray-300 hover:bg-white/5 hover:text-white'
               }`}
+              style={isActive && isSynapse ? { backgroundImage: synapseActiveGradient } : undefined}
             >
               <Icon className="w-5 h-5" />
-              <span className="font-medium">{item.label}</span>
+              <span className="font-medium flex items-center gap-1.5">
+                {item.label}
+                {(item.id === 'synapse' || item.id === 'laboratory') && (
+                  <span className={`text-[8px] font-bold px-1 py-0.5 rounded tracking-wide leading-none ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                  }`}>BETA</span>
+                )}
+              </span>
             </button>
           );
         })}
       </nav>
 
       {/* Bottom Section */}
-      <div className="p-4 border-t border-white/10 space-y-2">
+      <div
+        className="p-4 space-y-2 transition-colors duration-500 ease-in-out"
+        style={{ borderTop: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}` }}
+      >
         {/* User Info */}
         <div className="px-4 py-2 mb-2">
           <div className="flex items-center space-x-2 text-gray-400">
@@ -82,7 +112,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
         {/* Settings Button */}
         <button
           onClick={() => onViewChange('settings')}
-          className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
+          className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-500 ease-in-out ${
             currentView === 'settings'
               ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
               : 'text-gray-300 hover:bg-white/5 hover:text-white'

@@ -13,6 +13,37 @@ from layer_factory import SKIP_TYPES, create_layer, is_layer_node, is_op_node
 from ops import run_op
 
 
+def _truthy(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in ("true", "1", "yes")
+    return False
+
+
+def _apply_dense_initializer(mod: nn.Module, params: Dict) -> None:
+    """UI-Param 'initializer' des Dense-Nodes auf nn.Linear anwenden."""
+    name = str((params or {}).get("initializer", "") or "").lower()
+    w = getattr(mod, "weight", None)
+    if w is None or not name:
+        return
+    try:
+        if name == "xavier_uniform":
+            nn.init.xavier_uniform_(w)
+        elif name == "xavier_normal":
+            nn.init.xavier_normal_(w)
+        elif name == "kaiming_uniform":
+            nn.init.kaiming_uniform_(w)
+        elif name == "kaiming_normal":
+            nn.init.kaiming_normal_(w)
+        elif name == "zeros":
+            nn.init.zeros_(w)
+        elif name == "ones":
+            nn.init.ones_(w)
+    except Exception:
+        pass  # unbekannter/inkompatibler Initializer — PyTorch-Default behalten
+
+
 class DynamicGraphModule(nn.Module):
     """
     Runtime nn.Module built from Canvas Graph IR.
@@ -32,6 +63,8 @@ class DynamicGraphModule(nn.Module):
             if is_layer_node(node.type):
                 mod = create_layer(node.type, node.params)
                 if mod is not None:
+                    if node.type == "dense":
+                        _apply_dense_initializer(mod, node.params)
                     layers_dict[node.id] = mod
         self.layers = nn.ModuleDict(layers_dict)
 
@@ -115,7 +148,16 @@ class DynamicGraphModule(nn.Module):
         if ntype == "attention":
             if v0.dim() == 2:
                 v0 = v0.unsqueeze(1)
-            out, _ = layer(v0, v0, v0)
+            # Causal-Maske (UI-Param): jede Position sieht nur sich selbst + Vergangenheit
+            attn_mask = None
+            node = self.node_map.get(node_id)
+            if node and _truthy(node.params.get("causal")) and v0.size(1) > 1:
+                seq_len = v0.size(1)
+                attn_mask = torch.triu(
+                    torch.ones(seq_len, seq_len, device=v0.device, dtype=torch.bool),
+                    diagonal=1,
+                )
+            out, _ = layer(v0, v0, v0, attn_mask=attn_mask)
             return out.squeeze(1) if out.dim() == 3 and out.size(1) == 1 else out
 
         if ntype == "transformer_block":

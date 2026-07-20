@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
-import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
+import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
 import { getVersion } from '@tauri-apps/api/app';
@@ -690,7 +690,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   try {
                     // Prüfe auf Duplikate
                     try {
-                      const res = await fetch(`https://frame-train.vercel.app/api/library/authors/${encodeURIComponent(communityNameInput.trim())}/exists`);
+                      const res = await fetch(`https://frame-train.com/api/library/authors/${encodeURIComponent(communityNameInput.trim())}/exists`);
                       const data = await res.json();
                       if (data.exists && communityNameInput.trim() !== communityName) {
                         console.warn('[Settings] Community name already exists');
@@ -703,7 +703,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     }
                     
                     // Update User.communityName in DB
-                    const response = await fetch(`https://frame-train.vercel.app/api/user/community-name`, {
+                    const response = await fetch(`https://frame-train.com/api/user/community-name`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ 
@@ -781,7 +781,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         
         <div className="space-y-3">
           <a
-            href="https://frame-train.vercel.app/dashboard"
+            href="https://frame-train.com/dashboard"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
@@ -791,7 +791,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </a>
 
           <a
-            href="https://frame-train.vercel.app/dashboard"
+            href="https://frame-train.com/dashboard"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
@@ -1005,6 +1005,164 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 </div>
               </div>
             )}
+
+            {/* Token Budget */}
+            <div className="bg-white/5 rounded-xl p-6 border border-white/10 space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-1">{t('settings.ai.tokenBudget.title')}</h3>
+                <p className="text-sm text-gray-400">{t('settings.ai.tokenBudget.subtitle')}</p>
+              </div>
+
+              {/* Budget Stufen */}
+              <div className="grid grid-cols-2 gap-3">
+                {(Object.entries(TOKEN_BUDGET_CONFIG) as [TokenBudget, typeof TOKEN_BUDGET_CONFIG[TokenBudget]][]).map(([key, cfg]) => {
+                  const active = (aiSettings.tokenBudget ?? 'balanced') === key;
+                  const colors: Record<TokenBudget, string> = {
+                    minimal:  'border-emerald-500/50 bg-emerald-500/10 text-emerald-300',
+                    balanced: 'border-blue-500/50 bg-blue-500/10 text-blue-300',
+                    quality:  'border-purple-500/50 bg-purple-500/10 text-purple-300',
+                    max:      'border-amber-500/50 bg-amber-500/10 text-amber-300',
+                  };
+                  const iconComponents: Record<TokenBudget, React.ReactNode> = {
+                    minimal:  <Leaf      className="w-4 h-4 text-emerald-400" />,
+                    balanced: <Scale     className="w-4 h-4 text-blue-400" />,
+                    quality:  <Star      className="w-4 h-4 text-purple-400" />,
+                    max:      <Flame     className="w-4 h-4 text-amber-400" />,
+                  };
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => updateAISettings({ tokenBudget: key })}
+                      className={`flex flex-col gap-2 p-4 rounded-xl border-2 text-left transition-all ${
+                        active ? colors[key] : 'border-white/10 bg-white/[0.03] text-gray-400 hover:bg-white/5 hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{iconComponents[key]}</span>
+                        {active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-white/20">{t('settings.ai.tokenBudget.active')}</span>}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-sm">{cfg.label}</div>
+                        <div className="text-xs opacity-70 mt-0.5 leading-relaxed">{t(`settings.ai.tokenBudget.${key}Desc`)}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Live-Vorschau */}
+              {(() => {
+                const budget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
+                const provMeta = PROVIDER_META[aiSettings.provider];
+
+                // Kosten-Schätzung pro Nachricht (Input + Output)
+                // Grobe Durchschnittswerte ($ per 1M tokens)
+                const pricing: Record<string, { input: number; output: number }> = {
+                  'claude-opus-4-5':         { input: 15,   output: 75 },
+                  'claude-sonnet-4-5':       { input: 3,    output: 15 },
+                  'claude-haiku-4-5':        { input: 0.8,  output: 4  },
+                  'gpt-4o':                  { input: 2.5,  output: 10 },
+                  'gpt-4o-mini':             { input: 0.15, output: 0.6 },
+                  'llama-3.3-70b-versatile': { input: 0,    output: 0  }, // Groq Free
+                  'llama-3.1-8b-instant':    { input: 0,    output: 0  }, // Groq Free
+                  'ollama':                  { input: 0,    output: 0  },
+                };
+                const model = aiSettings.provider === 'ollama'
+                  ? 'ollama'
+                  : (aiSettings.selectedModel || provMeta.models[0]);
+                const p = pricing[model] ?? { input: 1, output: 5 };
+
+                // Geschätzte Input-Tokens pro Nachricht: System (~300) + History-Budget + User-Message (~80)
+                const estimatedInput  = 300 + budget.historyTokenBudget + 80;
+                const estimatedOutput = budget.maxTokens * 0.7; // ~70% Ausnutzung
+                const costPerMsg = ((estimatedInput * p.input) + (estimatedOutput * p.output)) / 1_000_000;
+
+                // Groq Rate-Limit-Indikator (6000 TPM Free Tier)
+                const isGroq = aiSettings.provider === 'groq';
+                const groqTpm = estimatedInput + estimatedOutput;
+                const groqMsgsPerMinute = Math.floor(6000 / groqTpm);
+
+                const budgetBarWidth: Record<TokenBudget, string> = {
+                  minimal: 'w-1/4', balanced: 'w-2/4', quality: 'w-3/4', max: 'w-full'
+                };
+                const budgetBarColor: Record<TokenBudget, string> = {
+                  minimal: 'bg-emerald-400', balanced: 'bg-blue-400',
+                  quality: 'bg-purple-400',  max: 'bg-amber-400',
+                };
+
+                return (
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+                    <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">{t('settings.ai.tokenBudget.previewTitle')}</p>
+
+                    {/* Token-Balken */}
+                    <div className="space-y-2">
+                      {([
+                        [t('settings.ai.tokenBudget.previewCoach'),   budget.maxTokens,        1500],
+                        [t('settings.ai.tokenBudget.previewSynapse'), budget.synapseMaxTokens, 8000],
+                        [t('settings.ai.tokenBudget.previewHistory'), budget.historyTokenBudget, 4000],
+                      ] as [string, number, number][]).map(([label, val, max]) => (
+                        <div key={label}>
+                          <div className="flex justify-between text-xs text-gray-400 mb-1">
+                            <span>{label}</span>
+                            <span className="font-mono text-gray-300">{val.toLocaleString()} tokens</span>
+                          </div>
+                          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${budgetBarColor[aiSettings.tokenBudget ?? 'balanced']}`}
+                              style={{ width: `${Math.min((val / max) * 100, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Kosten + Rate-Limit */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{t('settings.ai.tokenBudget.previewCostLabel')}</p>
+                        <p className="text-sm font-semibold text-white">
+                          {costPerMsg < 0.0001
+                            ? t('settings.ai.tokenBudget.previewCostFree')
+                            : `~${costPerMsg.toFixed(4)}`}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">{t('settings.ai.tokenBudget.previewCostPerMsg')}</p>
+                      </div>
+                      {isGroq ? (
+                        <div className={`rounded-lg p-3 ${
+                          groqMsgsPerMinute >= 3 ? 'bg-emerald-500/10' : groqMsgsPerMinute >= 1 ? 'bg-amber-500/10' : 'bg-red-500/10'
+                        }`}>
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{t('settings.ai.tokenBudget.previewGroqLimit')}</p>
+                          <p className={`text-sm font-semibold ${
+                            groqMsgsPerMinute >= 3 ? 'text-emerald-300' : groqMsgsPerMinute >= 1 ? 'text-amber-300' : 'text-red-300'
+                          }`}>
+                            ~{groqMsgsPerMinute} {t('settings.ai.tokenBudget.previewGroqMsgs')}
+                          </p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">{t('settings.ai.tokenBudget.previewGroqPerMin')}</p>
+                        </div>
+                      ) : (
+                        <div className="bg-white/5 rounded-lg p-3">
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{t('settings.ai.tokenBudget.previewQuality')}</p>
+                          <p className="text-sm font-semibold text-white">
+                            {(aiSettings.tokenBudget ?? 'balanced') === 'minimal'  ? t('settings.ai.tokenBudget.qualityConcise') :
+                             (aiSettings.tokenBudget ?? 'balanced') === 'balanced' ? t('settings.ai.tokenBudget.qualityBalanced') :
+                             (aiSettings.tokenBudget ?? 'balanced') === 'quality'  ? t('settings.ai.tokenBudget.qualityDetailed') :
+                                                                                     t('settings.ai.tokenBudget.qualityMax')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Groq-Warning */}
+                    {isGroq && (aiSettings.tokenBudget === 'quality' || aiSettings.tokenBudget === 'max') && (
+                      <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                        <p className="text-xs text-amber-300">{t('settings.ai.tokenBudget.groqWarning')}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
 
             {/* Info Box */}
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-300 flex items-start gap-3">
@@ -1362,7 +1520,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* Main Docs Link */}
       <a
-        href="https://frame-train.vercel.app/docs"
+        href="https://frame-train.com/docs"
         target="_blank"
         rel="noopener noreferrer"
         className="block bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-500/30 rounded-xl p-6 transition-all hover:shadow-lg"
@@ -1380,7 +1538,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       {/* AI Training Guide */}
       <a
-        href="https://frame-train.vercel.app/docs/ai-training-guide"
+        href="https://frame-train.com/docs/ai-training-guide"
         target="_blank"
         rel="noopener noreferrer"
         className="block bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/30 rounded-xl p-6 transition-all hover:shadow-lg"
@@ -1869,7 +2027,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         
         <div className="space-y-3">
           <a
-            href="https://frame-train.vercel.app/"
+            href="https://frame-train.com/"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
@@ -1879,7 +2037,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </a>
 
           <a
-            href="https://frame-train.vercel.app/docs"
+            href="https://frame-train.com/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"

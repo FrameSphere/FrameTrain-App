@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from '@tauri-apps/api/event';
-import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
+import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain } from 'lucide-react';
+import { useTheme, type Theme, type ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
+import AIAssistantSettingsPanel from './AIAssistantSettingsPanel';
 
 interface PluginInfo {
   id: string;
@@ -55,7 +56,7 @@ interface PreFlightCheck {
 }
 
 const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
-  const { currentTheme } = useTheme();
+  const { currentTheme, setTheme, themes: allThemes } = useTheme();
   const { language, setLanguage, t } = useLanguage();
 
   // Screen 0: Sprachauswahl — kommt vor Python-Check
@@ -65,6 +66,12 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
     setLanguage(lang);
     setLanguageSelected(true);
   };
+
+  // Screen 0.5: Design-Auswahl — direkt nach der Sprachauswahl
+  const [themeSelected, setThemeSelected] = useState(false);
+
+  // Screen 0.75: KI-Einstellungen — direkt nach der Design-Auswahl (überspringbar)
+  const [aiSetupDone, setAiSetupDone] = useState(false);
 
   // Screen 1: Pre-Flight-Check
   const [preFlightDone, setPreFlightDone] = useState(false);
@@ -88,13 +95,15 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
     }
   };
 
-  // Pre-Flight starten sobald Sprache gewählt
+  // Pre-Flight starten sobald Sprache, Design und KI-Setup abgeschlossen sind
   useEffect(() => {
-    if (languageSelected && !preFlightResult) {
+    if (aiSetupDone && !preFlightResult) {
       runPreFlight();
     }
-  }, [languageSelected]);
+  }, [aiSetupDone]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginsLoadError, setPluginsLoadError] = useState<string | null>(null);
+  const [pluginsLoading, setPluginsLoading] = useState(false);
   const [selectedPlugins, setSelectedPlugins] = useState<Set<string>>(new Set(['text']));
   const [installing, setInstalling] = useState(false);
   const [installProgress, setInstallProgress] = useState<Map<string, InstallProgress>>(new Map());
@@ -189,6 +198,8 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   }, [pythonSetupPhase]);
   
   const loadPlugins = async () => {
+    setPluginsLoading(true);
+    setPluginsLoadError(null);
     try {
       const pluginList = await invoke<PluginInfo[]>('get_available_plugins');
       setPlugins(pluginList);
@@ -203,26 +214,40 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
       setSelectedPlugins(preSelected);
     } catch (error) {
       console.error('Failed to load plugins:', error);
+      setPluginsLoadError(String(error));
+    } finally {
+      setPluginsLoading(false);
     }
   };
   
-  const setupListeners = async () => {
-    await listen<InstallProgress>('plugin-install-progress', (event) => {
+  const setupListeners = async (): Promise<() => void> => {
+    const unlistenProgress = await listen<InstallProgress>('plugin-install-progress', (event) => {
       const progress = event.payload;
       setInstallProgress(prev => new Map(prev).set(progress.plugin_id, progress));
     });
-    
-    await listen('plugin-install-complete', () => {
+
+    const unlistenComplete = await listen('plugin-install-complete', () => {
       setInstalling(false);
       onComplete();
     });
+
+    return () => {
+      unlistenProgress();
+      unlistenComplete();
+    };
   };
   
-  // When plugins are loaded, setup listeners for plugin installation
+  // Listener werden NICHT mehr ans Laden der Plugins gekoppelt -- sie wuerden sonst
+  // erst NACH dem install_plugins()-Aufruf registriert, und ein sehr schneller
+  // Installationsdurchlauf (z.B. alle Pakete schon vorhanden) kann das
+  // plugin-install-complete Event verpassen, bevor der Listener aktiv ist.
+  // Stattdessen registrieren wir die Listener einmalig sobald die Plugin-Liste
+  // geladen wurde, unabhaengig vom Installationsstart.
   useEffect(() => {
-    if (pythonSetupPhase === 'complete' && plugins.length > 0) {
-      setupListeners();
-    }
+    if (pythonSetupPhase !== 'complete' || plugins.length === 0) return;
+    let cleanup: (() => void) | undefined;
+    setupListeners().then(fn => { cleanup = fn; });
+    return () => { cleanup?.(); };
   }, [pythonSetupPhase, plugins.length]);
   
   const togglePlugin = (pluginId: string) => {
@@ -296,8 +321,38 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
           />
         )}
 
-        {/* Screen 1: Python Setup */}
-        {languageSelected && pythonSetupPhase !== 'complete' && (
+        {/* Screen 0.5: Design-Auswahl */}
+        {languageSelected && !themeSelected && (
+          <ThemeSelectScreen
+            currentTheme={currentTheme}
+            allThemes={allThemes}
+            onSelectTheme={setTheme}
+            onContinue={() => setThemeSelected(true)}
+          />
+        )}
+
+        {/* Screen 0.75: KI-Einstellungen (überspringbar) */}
+        {languageSelected && themeSelected && !aiSetupDone && (
+          <AISetupScreen
+            currentTheme={currentTheme}
+            onContinue={() => setAiSetupDone(true)}
+            onSkip={() => setAiSetupDone(true)}
+          />
+        )}
+
+        {/* Screen 1: Pre-Flight-Check */}
+        {languageSelected && themeSelected && aiSetupDone && !preFlightDone && (
+          <PreFlightScreen
+            loading={preFlightLoading}
+            result={preFlightResult}
+            currentTheme={currentTheme}
+            onContinue={() => setPreFlightDone(true)}
+            onRetry={runPreFlight}
+          />
+        )}
+
+        {/* Screen 2: Python Setup */}
+        {languageSelected && themeSelected && aiSetupDone && preFlightDone && pythonSetupPhase !== 'complete' && (
           <PythonSetupScreen 
             phase={pythonSetupPhase}
             dependencyStatus={dependencyStatus}
@@ -307,10 +362,13 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
           />
         )}
         
-        {/* Screen 2: Plugin-Auswahl */}
-        {languageSelected && pythonSetupPhase === 'complete' && (
+        {/* Screen 3: Plugin-Auswahl */}
+        {languageSelected && themeSelected && aiSetupDone && preFlightDone && pythonSetupPhase === 'complete' && (
           <PluginSelectionScreen
             plugins={plugins}
+            pluginsLoading={pluginsLoading}
+            pluginsLoadError={pluginsLoadError}
+            onRetryLoadPlugins={loadPlugins}
             selectedPlugins={selectedPlugins}
             installing={installing}
             installProgress={installProgress}
@@ -326,6 +384,156 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
         )}
       </div>
     </div>
+  );
+};
+
+// ============ Sub-Component: Pre-Flight Screen ============
+interface PreFlightScreenProps {
+  loading: boolean;
+  result: PreFlightCheck | null;
+  currentTheme: any;
+  onContinue: () => void;
+  onRetry: () => void;
+}
+
+const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
+  loading, result, currentTheme, onContinue, onRetry
+}) => {
+  const { t } = useLanguage();
+  const hasErrors   = (result?.errors?.length ?? 0) > 0;
+  const hasWarnings = (result?.warnings?.length ?? 0) > 0;
+
+  const CheckRow: React.FC<{ label: string; ok: boolean; detail?: string }> = ({ label, ok, detail }) => (
+    <div className={`flex items-start gap-3 p-3 rounded-lg border ${
+      ok ? 'bg-green-500/10 border-green-500/20' : 'bg-red-500/10 border-red-500/20'
+    }`}>
+      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${
+        ok ? 'bg-green-500/30' : 'bg-red-500/30'
+      }`}>
+        {ok
+          ? <Check className="w-3.5 h-3.5 text-green-400" strokeWidth={3} />
+          : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+      </div>
+      <div>
+        <span className={`font-medium ${ ok ? 'text-green-300' : 'text-red-300'}`}>{label}</span>
+        {detail && <p className="text-xs text-gray-400 mt-0.5">{detail}</p>}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex-shrink-0 p-8 border-b border-white/10">
+        <div className="flex items-center gap-4">
+          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
+            <ShieldCheck className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white">System Check</h1>
+            <p className="text-gray-300">Checking your system before installation</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto">
+        <div className="w-full max-w-xl">
+
+          {/* Loading */}
+          {loading && (
+            <div className="text-center">
+              <Loader2 className="w-14 h-14 text-blue-400 animate-spin mx-auto mb-4" />
+              <p className="text-gray-300">Scanning system...</p>
+            </div>
+          )}
+
+          {/* Results */}
+          {!loading && result && (
+            <div className="space-y-3">
+              <CheckRow
+                label={result.python_found
+                  ? `Python ${result.python_version ?? ''}`
+                  : 'Python not found'}
+                ok={result.python_found && result.python_version_ok}
+                detail={!result.python_found
+                  ? 'Install Python 3.8+ from python.org'
+                  : !result.python_version_ok
+                  ? `Version ${result.python_version} is too old. Python 3.8+ required.`
+                  : undefined}
+              />
+              <CheckRow
+                label={result.pip_found ? 'pip available' : 'pip not found'}
+                ok={result.pip_found}
+                detail={!result.pip_found ? 'Run: python3 -m ensurepip --upgrade' : undefined}
+              />
+              <CheckRow
+                label={result.free_gb > 0
+                  ? `${result.free_gb.toFixed(1)} GB free disk space`
+                  : 'Disk space unknown'}
+                ok={result.free_gb_ok || result.free_gb === 0}
+                detail={!result.free_gb_ok && result.free_gb > 0
+                  ? 'At least 6 GB required for PyTorch + models'
+                  : undefined}
+              />
+              <CheckRow
+                label={result.gpu_info.has_nvidia_gpu
+                  ? `GPU: ${result.gpu_info.gpu_name ?? 'NVIDIA'} — CUDA ${result.gpu_info.cuda_version ?? '?'} → torch+${result.gpu_info.recommended_torch_index}`
+                  : 'No NVIDIA GPU — CPU mode'}
+                ok={true}
+                detail={!result.gpu_info.has_nvidia_gpu
+                  ? 'Training works on CPU, but is slower. Apple Silicon (MPS) is supported.'
+                  : undefined}
+              />
+
+              {/* Errors */}
+              {hasErrors && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+                  <p className="text-red-300 font-semibold mb-2 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" /> Issues to fix before continuing:
+                  </p>
+                  {result.errors.map((e, i) => (
+                    <p key={i} className="text-red-300 text-sm mt-1">{e}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Warnings */}
+              {hasWarnings && (
+                <div className="mt-2 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                  {result.warnings.map((w, i) => (
+                    <p key={i} className="text-yellow-300 text-sm">{w}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 p-6 border-t border-white/10 bg-black/20">
+        <div className="flex justify-between items-center">
+          <button
+            onClick={onRetry}
+            disabled={loading}
+            className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/20 disabled:opacity-40"
+          >
+            Re-check
+          </button>
+          <button
+            onClick={onContinue}
+            disabled={loading || hasErrors}
+            className={`px-8 py-3 rounded-xl font-semibold text-white transition-all flex items-center gap-2 ${
+              loading || hasErrors
+                ? 'bg-gray-600 opacity-40 cursor-not-allowed'
+                : `bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 shadow-lg`
+            }`}
+          >
+            Continue →
+          </button>
+        </div>
+      </div>
+    </>
   );
 };
 
@@ -424,6 +632,149 @@ const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
   );
 };
 
+// ============ Sub-Component: Theme/Design Select Screen ============
+interface ThemeSelectScreenProps {
+  currentTheme: Theme;
+  allThemes: Record<ThemeId, Theme>;
+  onSelectTheme: (id: ThemeId) => void;
+  onContinue: () => void;
+}
+
+const ThemeSelectScreen: React.FC<ThemeSelectScreenProps> = ({
+  currentTheme,
+  allThemes,
+  onSelectTheme,
+  onContinue,
+}) => {
+  const { t } = useLanguage();
+
+  const isLightTheme = (themeId: string) => themeId === 'light-gray' || themeId === 'pure-white';
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex-shrink-0 p-8 border-b border-white/10">
+        <div className="flex items-center gap-4">
+          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
+            <Palette className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.theme.headline')}</h1>
+            <p className="text-gray-300 mt-1">{t('firstLaunch.theme.sub')}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="grid grid-cols-3 gap-4 max-w-4xl mx-auto">
+          {Object.values(allThemes).map((theme) => {
+            const isLight = isLightTheme(theme.id);
+            const textColor = isLight ? 'text-slate-900' : 'text-white';
+            const descColor = isLight ? 'text-slate-600' : 'text-gray-400';
+            const active = currentTheme.id === theme.id;
+
+            return (
+              <button
+                key={theme.id}
+                onClick={() => onSelectTheme(theme.id)}
+                className={`relative p-5 bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
+                  active
+                    ? 'border-white/40 shadow-lg ring-2 ring-white/20'
+                    : 'border-white/10 hover:border-white/20'
+                }`}
+              >
+                {active && (
+                  <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-lg">
+                    <Check className="w-4 h-4 text-slate-900" />
+                  </div>
+                )}
+
+                <div className="flex justify-center mb-3 space-x-2">
+                  <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${theme.colors.gradient} shadow-md`} />
+                  <div className="w-7 h-7 rounded-full shadow-md" style={{ backgroundColor: theme.colors.accent }} />
+                </div>
+
+                <div className="text-center">
+                  <div className={`${textColor} font-semibold text-sm mb-1`}>{theme.name}</div>
+                  <div className={`text-xs ${descColor}`}>{theme.description}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 p-6 border-t border-white/10 bg-black/20">
+        <div className="flex justify-end">
+          <button
+            onClick={onContinue}
+            className={`px-8 py-3 rounded-xl font-semibold text-white bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 transition-all shadow-lg flex items-center gap-2`}
+          >
+            {t('firstLaunch.theme.btn')}
+            <span className="text-lg">→</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ Sub-Component: AI Setup Screen (überspringbar) ============
+interface AISetupScreenProps {
+  currentTheme: Theme;
+  onContinue: () => void;
+  onSkip: () => void;
+}
+
+const AISetupScreen: React.FC<AISetupScreenProps> = ({ currentTheme, onContinue, onSkip }) => {
+  const { t } = useLanguage();
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex-shrink-0 p-8 border-b border-white/10">
+        <div className="flex items-center gap-4">
+          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
+            <Brain className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.aiSetup.headline')}</h1>
+            <p className="text-gray-300 mt-1">{t('firstLaunch.aiSetup.sub')}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="max-w-3xl mx-auto">
+          <AIAssistantSettingsPanel />
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 p-6 border-t border-white/10 bg-black/20">
+        <div className="flex justify-between items-center">
+          <button
+            onClick={onSkip}
+            className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/20"
+          >
+            {t('firstLaunch.aiSetup.skip')}
+          </button>
+          <button
+            onClick={onContinue}
+            className={`px-8 py-3 rounded-xl font-semibold text-white bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 transition-all shadow-lg flex items-center gap-2`}
+          >
+            {t('firstLaunch.aiSetup.btn')}
+            <span className="text-lg">→</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
 // ============ Sub-Component: Python Setup Screen ============
 interface PythonSetupScreenProps {
   phase: 'checking' | 'installing' | 'error';
@@ -459,7 +810,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
       </div>
       
       {/* Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8">
+      <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto">
         <div className="w-full max-w-2xl">
           {phase === 'checking' && (
             <>
@@ -555,6 +906,9 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
 // ============ Sub-Component: Plugin Selection Screen ============
 interface PluginSelectionScreenProps {
   plugins: PluginInfo[];
+  pluginsLoading: boolean;
+  pluginsLoadError: string | null;
+  onRetryLoadPlugins: () => void;
   selectedPlugins: Set<string>;
   installing: boolean;
   installProgress: Map<string, InstallProgress>;
@@ -570,6 +924,9 @@ interface PluginSelectionScreenProps {
 
 const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
   plugins,
+  pluginsLoading,
+  pluginsLoadError,
+  onRetryLoadPlugins,
   selectedPlugins,
   installing,
   installProgress,
@@ -602,6 +959,37 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
         <>
           {/* Plugin List - Scrollable */}
           <div className="flex-1 overflow-y-auto p-6">
+            {pluginsLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
+                <p className="text-gray-400 text-sm">Loading available plugins...</p>
+              </div>
+            ) : pluginsLoadError ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-4 px-8 text-center">
+                <AlertCircle className="w-10 h-10 text-red-400" />
+                <div>
+                  <p className="text-red-300 font-medium mb-1">Could not load plugins</p>
+                  <p className="text-gray-500 text-xs max-w-md font-mono break-words">{pluginsLoadError}</p>
+                </div>
+                <button
+                  onClick={onRetryLoadPlugins}
+                  className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/20 text-sm"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : plugins.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <Package className="w-10 h-10 text-gray-500" />
+                <p className="text-gray-400 text-sm">No plugins found.</p>
+                <button
+                  onClick={onRetryLoadPlugins}
+                  className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/20 text-sm"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
             <div className="grid gap-3">
               {plugins.map(plugin => {
                 const isSelected = selectedPlugins.has(plugin.id);
@@ -678,6 +1066,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                 );
               })}
             </div>
+            )}
           </div>
           
           {/* Footer with Summary and Actions */}

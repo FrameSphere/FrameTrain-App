@@ -32,8 +32,14 @@ export interface IRTrainingSpec {
   learningRate: number;
   weightDecay: number;
   optimizer: string;
+  /** Gradient-Clipping (max grad norm); 0 = aus */
+  clipGrad: number;
   loss: string;
+  lossReduction: string;
+  labelSmoothing: number;
   scheduler: string;
+  warmupSteps: number;
+  minLr: number;
   numClasses: number;
   taskType: string;
   precision: "fp32" | "fp16" | "bf16";
@@ -96,7 +102,13 @@ export function buildCanvasGraphIR(
   // silent=true: Zyklus-Warnings bereits in SynapseBuilder gezeigt, hier kein Duplikat
   const execution_order = computeExecutionOrder(nodes, edges, true);
 
-  const dataNode = nodes.find((n) => getCategory(n) === "data");
+  // Datenquelle: echte Loader-Nodes haben Vorrang vor dem generischen "input"-
+  // Platzhalter — sonst würde bei input + image_loader im Graph zufällig
+  // "input" als data_type in der Engine landen (→ "wird nicht unterstützt").
+  const LOADER_TYPES = new Set(["image_loader", "csv_loader", "parquet_loader"]);
+  const dataNode =
+    nodes.find((n) => LOADER_TYPES.has(getSynapseNodeType(n)))
+    ?? nodes.find((n) => getCategory(n) === "data");
   const trainNodes = nodes.filter((n) => getCategory(n) === "training");
 
   const optimNode = trainNodes.find((n) => getSynapseNodeType(n) === "optimizer");
@@ -120,8 +132,13 @@ export function buildCanvasGraphIR(
       learningRate: config.learningRate ?? Number(op.lr ?? 0.001),
       weightDecay: Number(op.weightDecay ?? 0.01),
       optimizer: String(op.type ?? "adamw"),
+      clipGrad: Number(op.clipGrad ?? 1.0),
       loss: String(lp.type ?? "cross_entropy"),
+      lossReduction: String(lp.reduction ?? "mean"),
+      labelSmoothing: Number(lp.labelSmoothing ?? 0),
       scheduler: String(sp.type ?? "cosine"),
+      warmupSteps: Number(sp.warmupSteps ?? 0),
+      minLr: Number(sp.minLr ?? 0),
       numClasses: Number(xp.numClasses ?? 10),
       taskType: String(xp.taskType ?? "classification"),
       precision: config.precision ?? "fp32",

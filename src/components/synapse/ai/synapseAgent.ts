@@ -4,6 +4,7 @@
 
 import { callAI } from '../../../ai/aiClient';
 import type { AISettings } from '../../../contexts/AISettingsContext';
+import { TOKEN_BUDGET_CONFIG } from '../../../contexts/AISettingsContext';
 import type { ChatMessage } from '../../../ai/aiClient';
 import { PLAN_TOOLS } from './synapseAgentTools';
 import type { AgentStep, ToolExecutorHandle } from './synapseAgentTools';
@@ -40,6 +41,10 @@ export type AgentRunOptions = {
   onStepsUpdate: (steps: AgentStep[]) => void;
   signal?: AbortSignal;
   resumeState?: AgentResumeState;
+  /** Rollierende Zusammenfassung älterer Chat-Nachrichten (komprimierter Langzeit-Kontext) */
+  chatSummary?: string;
+  /** Lokale Graph-Validierung nach der Ausführung — löst bei Fehlern EINE Review-Runde aus */
+  getValidationReport?: () => { valid: boolean; report: string };
 };
 
 function isEnglish(responseLanguage?: string): boolean {
@@ -159,17 +164,24 @@ function parsePlan(text: string): ToolCall[] | null {
   return calls.length > 0 ? calls : null;
 }
 
-// --- Token budget constants --------------------------------------------------
+// --- Token budget — aus AISettings.tokenBudget ----------------------------
 //
 // Groq free tier: 10k TPM
-// Call 1 (Plan):  ~900 input  + 2000 output = 2900
-// Call 2 (Fix):   ~600 input  + 1000 output = 1600
-// Total worst-case: ~4500 / 10000 → comfortable headroom
+// Budget 'balanced': Plan ~3000 + Fix ~1000 = 4000 → comfortable
+// Budget 'max':      Plan ~8000 + Fix ~2000 = 10000 → tight on Groq free
 //
-const PLAN_MAX_TOKENS = 2000;
-const FIX_MAX_TOKENS  = 1000;
+function getPlanMaxTokens(aiSettings: AISettings): number {
+  const budget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
+  // Synapse Plan bekommt ~60% des synapseMaxTokens, Fix ~25%
+  return Math.floor(budget.synapseMaxTokens * 0.6);
+}
+function getFixMaxTokens(aiSettings: AISettings): number {
+  const budget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
+  return Math.floor(budget.synapseMaxTokens * 0.25);
+}
+
 const CHAT_CONTEXT_MESSAGES = 4;
-const CHAT_CONTEXT_CHARS    = 200;
+const CHAT_CONTEXT_CHARS    = 300;
 
 // --- Phase 1: Plan System Prompt ---------------------------------------------
 
@@ -271,6 +283,18 @@ ${PLAN_TOOLS}
 # 4. For LayerNorm errors like "normalized_shape=[512] ... input ... [32, 256]":
 #    Use LayerNormFlow and set_param(layerNormNode, "normalizedShape", upstreamFeatureSize)
 # 5. Common mistake: Conv2d(out) → Dense(in=64) but Dense never defined outputSize!
+
+## RANK/LAYOUT MISMATCH — error says "outputs BD → ... expects BTC" (2D vs 3D):
+# set_param (embedDim/normalizedShape/inputSize) can NEVER fix this — it is a
+# tensor-RANK problem, not a size problem. Do NOT retry parameter values.
+# Choose exactly ONE fix:
+#  A) RECOMMENDED after dense layers: remove_node the attention/transformer node
+#     (and its adjacent layernorm if it only feeds that attention), then add_edge
+#     to reconnect the chain (previous node → next node). Attention over a single
+#     feature vector adds nothing.
+#  B) Keep attention: add_node reshape between source and attention,
+#     set_param(reshapeId, "shape", "1, <features>")  → turns [B, F] into [B, 1, F],
+#     add_edge source→reshape + reshape→attention, remove_edge source→attention.
 # augmentation(out) → loss(targets)
 # optimizer [standalone — no incoming edges]
 # optimizer(optimizer) → scheduler(optimizer)  [optional]
@@ -332,6 +356,13 @@ If error contains Attention embed mismatch like "was expecting embedding dimensi
 1. IDENTIFY: Which AttentionFlow line is MISMATCH.
 2. FIX: Use set_param(attentionNodeId, "embedDim", upstreamFeatureSize).
 3. REPORT: "attention-1 embedDim: 512→256 korrigiert."
+
+If error contains RANK mismatch like "outputs BD → attention (...) expects BTC" (2D vs 3D):
+1. set_param can NEVER fix this — do NOT change embedDim/normalizedShape again.
+2. EITHER remove_node the attention/transformer (+ its dedicated layernorm) and
+   add_edge to reconnect the chain (recommended after dense layers),
+3. OR add_node reshape + set_param(reshapeId, "shape", "1, <features>") and rewire:
+   remove_edge source→attention, add_edge source→reshape, add_edge reshape→attention.
 
 ## HARD RULES (same as main agent):
 # optimizer has NO input ports — NEVER connect anything TO optimizer.
@@ -407,10 +438,16 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
   let currentSteps: AgentStep[] = [];
   onStepsUpdate([]);
 
+  // Kontext = komprimierte Zusammenfassung älterer Nachrichten (falls vorhanden)
+  // + die letzten Nachrichten wörtlich (gekürzt).
   const priorMessages = chatHistory.slice(-(CHAT_CONTEXT_MESSAGES + 1), -1);
-  const chatContext = priorMessages.length > 0
+  const summaryBlock = opts.chatSummary
+    ? `## Conversation summary (compressed older context — treat as established facts):\n${opts.chatSummary}`
+    : '';
+  const recentBlock = priorMessages.length > 0
     ? `## Recent conversation:\n${priorMessages.map(m => `${m.role}: ${m.content.slice(0, CHAT_CONTEXT_CHARS)}`).join('\n')}`
     : '';
+  const chatContext = [summaryBlock, recentBlock].filter(Boolean).join('\n\n');
 
   // ============================================================
   // PHASE 1 — PLAN
@@ -433,7 +470,7 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
     planReply = await callAI(aiSettings, {
       system: planSystem,
       messages: planMessages,
-      maxTokens: PLAN_MAX_TOKENS,
+      maxTokens: getPlanMaxTokens(aiSettings),
       temperature: 0.1,
       responseLanguage,
     });
@@ -441,7 +478,6 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
     const errMsg = String(e?.message ?? e);
     await dbg1.onError(errMsg);
     if (isRateLimitError(errMsg)) {
-      // Auto-retry once after the suggested delay from Groq's error message
       const delayMs = extractRetryDelayMs(errMsg);
       if (delayMs > 0 && delayMs <= 30_000) {
         await new Promise(res => setTimeout(res, delayMs));
@@ -449,7 +485,7 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
           planReply = await callAI(aiSettings, {
             system: planSystem,
             messages: planMessages,
-            maxTokens: PLAN_MAX_TOKENS,
+            maxTokens: getPlanMaxTokens(aiSettings),
             temperature: 0.1,
             responseLanguage,
           });
@@ -502,6 +538,7 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
   // ============================================================
   // PHASE 3 — FIX (only on real failures)
   // ============================================================
+  let fixSummary: string | null = null;
   if (failures.length > 0) {
     if (signal?.aborted) return { steps: currentSteps, summary: textFor(responseLanguage, 'Abgebrochen', 'Aborted') };
 
@@ -514,7 +551,7 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
       const fixReply = await callAI(aiSettings, {
         system: fixSystem,
         messages: fixMessages,
-        maxTokens: FIX_MAX_TOKENS,
+        maxTokens: getFixMaxTokens(aiSettings),
         temperature: 0.05,
         responseLanguage,
       });
@@ -531,9 +568,7 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
         totalActualChanges += phase3Changes;
 
         const fixDone = fixPlan.find((c) => c.tool === 'done');
-        if (fixDone?.args?.summary) {
-          return { steps: currentSteps, summary: String(fixDone.args.summary) };
-        }
+        if (fixDone?.args?.summary) fixSummary = String(fixDone.args.summary);
       }
     } catch (e: any) {
       const errMsg = String(e?.message ?? e);
@@ -556,6 +591,64 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
     }
   }
 
+  // ============================================================
+  // PHASE 4 — REVIEW (max. eine Extra-Runde)
+  // Nur wenn Aktionen ausgeführt wurden und die lokale Validierung danach
+  // noch echte Shape-/Dimensions-Fehler meldet: dem Modell den Befund
+  // zurückspiegeln und einmal nachbessern lassen. Best-effort — Fehler
+  // in dieser Phase sind nie fatal.
+  // ============================================================
+  let reviewSummary: string | null = null;
+  if (
+    actionSteps.length > 0 &&
+    totalActualChanges > 0 &&
+    opts.getValidationReport &&
+    !signal?.aborted
+  ) {
+    const check = opts.getValidationReport();
+    if (!check.valid && check.report) {
+      const reviewSystem = buildPlanSystem(getGraphContext(), chatContext);
+      const reviewMessages: ChatMessage[] = [{
+        role: 'user',
+        content:
+          `REVIEW ROUND — after your previous tool calls, graph validation still reports:\n` +
+          `${check.report}\n\n` +
+          `Fix these remaining issues with a MINIMAL JSON tool-call array ` +
+          `(prefer set_param; add_node/add_edge/remove_edge only if required). ` +
+          `End with {"tool":"done","args":{"summary":"..."}}. ` +
+          `If the reported state is intentional, return ONLY the done call explaining why.`,
+      }];
+
+      const dbg4 = await debugLogRequest(2, reviewSystem, reviewMessages);
+      try {
+        const reviewReply = await callAI(aiSettings, {
+          system: reviewSystem,
+          messages: reviewMessages,
+          maxTokens: getFixMaxTokens(aiSettings),
+          temperature: 0.05,
+          responseLanguage,
+        });
+
+        const reviewPlan = parsePlan(reviewReply);
+        await dbg4.onReply(reviewReply, reviewPlan ? { tool: 'review', args: { steps: reviewPlan.length } } : null);
+
+        if (reviewPlan && reviewPlan.length > 0) {
+          const { steps: stepsAfterReview, actualChanges: phase4Changes } = await executeBatch(
+            reviewPlan.filter((c) => c.tool !== 'done'),
+            executorHandle, currentSteps, currentSteps.length, onStepsUpdate
+          );
+          currentSteps = stepsAfterReview;
+          totalActualChanges += phase4Changes;
+
+          const reviewDone = reviewPlan.find((c) => c.tool === 'done');
+          if (reviewDone?.args?.summary) reviewSummary = String(reviewDone.args.summary);
+        }
+      } catch (e: any) {
+        await dbg4.onError(String(e?.message ?? e));
+      }
+    }
+  }
+
   // When the model tried to build things that already exist, give a clear message
   // instead of "✓ 30 Schritte ausgeführt" which makes the user think something changed.
   if (actionSteps.length > 0 && totalActualChanges === 0) {
@@ -570,9 +663,12 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
     };
   }
 
-  const summary = doneStep?.args?.summary
-    ? String(doneStep.args.summary)
-    : `${totalActualChanges} von ${actionSteps.length} Schritten effektiv`;
+  let summary =
+    fixSummary
+    ?? (doneStep?.args?.summary
+      ? String(doneStep.args.summary)
+      : `${totalActualChanges} von ${actionSteps.length} Schritten effektiv`);
+  if (reviewSummary) summary = `${summary}\n${reviewSummary}`;
 
   return { steps: currentSteps, summary };
 }

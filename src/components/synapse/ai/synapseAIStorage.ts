@@ -11,6 +11,8 @@ export type SynapseAIChat = {
   messages: SynapseAIMessage[];
   createdAt: number;
   updatedAt: number;
+  /** Canvas-Modell-ID, mit der dieser Chat verknüpft ist (optional) */
+  canvasModelId?: string;
 };
 
 const BASE_KEY = 'ft_synapse_ai_chats_v1';

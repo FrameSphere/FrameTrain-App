@@ -17,6 +17,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
+import GradientChatInput from './ui/GradientChatInput';
 import { openAICoach } from '../ai/aiCoachEvents';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -893,6 +894,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  // Text der letzten fehlgeschlagenen Chat-Anfrage — für "Erneut senden"
+  const [chatRetryText, setChatRetryText] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -1136,18 +1139,29 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     finally { setGeneratingReport(false); }
   };
 
-  const sendChatMessage = async () => {
-    if (!chatInput.trim() || chatLoading || !report) return;
+  const sendChatMessage = async (retryText?: string) => {
+    const isRetry = typeof retryText === 'string';
+    const text = (isRetry ? retryText : chatInput).trim();
+    if (!text || chatLoading || !report) return;
     const meta = PROVIDER_META[aiProvider];
     if (meta.needsKey && !aiApiKey.trim()) { notifyError(t('common.error'), ''); return; }
-    const userMsg: ChatMessage = { role: 'user', content: chatInput.trim() };
-    const updated = [...chatMessages, userMsg];
-    setChatMessages(updated); setChatInput(''); setChatLoading(true);
+    // Retry: letzte (Fehler-)Antwort entfernen — die User-Nachricht steht bereits im Verlauf
+    const base = isRetry && chatMessages[chatMessages.length - 1]?.role === 'assistant'
+      ? chatMessages.slice(0, -1)
+      : chatMessages;
+    const updated = isRetry ? base : [...base, { role: 'user', content: text } as ChatMessage];
+    setChatMessages(updated);
+    if (!isRetry) setChatInput('');
+    setChatRetryText(null);
+    setChatLoading(true);
     try {
       const sys = `${buildAnalysisSystemPrompt(language)}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
       const reply = await callAIClient(aiSettings, { system: sys, messages: updated, maxTokens: 3000, temperature: 0.6, responseLanguage: language });
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
-    } catch (e: any) { setChatMessages(prev => [...prev, { role: 'assistant', content: `${t('common.error')}: ${String(e)}` }]); }
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `${t('common.error')}: ${String(e)}` }]);
+      setChatRetryText(text);
+    }
     finally { setChatLoading(false); }
   };
 
@@ -1612,13 +1626,26 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                           <div className="bg-white/5 rounded-xl px-3 py-2"><Loader2 className="w-4 h-4 animate-spin text-gray-400" /></div>
                         </div>
                       )}
+                      {chatRetryText && !chatLoading && (
+                        <div className="pl-10">
+                          <button
+                            onClick={() => sendChatMessage(chatRetryText)}
+                            className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-medium transition-all"
+                          >
+                            {t('aiCoach.retryButton')}
+                          </button>
+                        </div>
+                      )}
                       <div ref={chatEndRef} />
                     </div>
-                    <div className="border-t border-white/10 p-3 flex gap-2">
-                      <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }} placeholder={t('analysisPanel.aiAnalysis.chat.inputPlaceholder')} className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-white/30" />
-                      <button onClick={sendChatMessage} disabled={!chatInput.trim() || chatLoading} className={`p-2 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white hover:opacity-90 transition-all disabled:opacity-40`}>
-                        <Send className="w-4 h-4" />
-                      </button>
+                    <div className="border-t border-white/10 p-3">
+                      <GradientChatInput
+                        value={chatInput}
+                        onChange={setChatInput}
+                        onSend={sendChatMessage}
+                        loading={chatLoading}
+                        placeholder={t('analysisPanel.aiAnalysis.chat.inputPlaceholder')}
+                      />
                     </div>
                   </div>
                 )}

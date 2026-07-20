@@ -164,47 +164,93 @@ class CanvasPlugin:
         return optim.AdamW(params, lr=lr, weight_decay=wd)
 
     def _make_loss(self) -> nn.Module:
-        loss_name = "cross_entropy"
-        if self.ir:
-            loss_name = self.ir.training.loss
+        spec = self.ir.training if self.ir else None
+        loss_name = spec.loss if spec else "cross_entropy"
+        # reduction="none" liefert keinen Skalar → backward() bricht. Auf mean zurückfallen.
+        reduction = str(getattr(spec, "loss_reduction", "mean") or "mean") if spec else "mean"
+        if reduction not in ("mean", "sum"):
+            if reduction == "none":
+                MessageProtocol.status(
+                    "train", "[Warn] Loss reduction='none' wird beim Training nicht unterstützt — nutze 'mean'"
+                )
+            reduction = "mean"
+        smoothing = 0.0
+        if spec is not None:
+            smoothing = max(0.0, min(float(getattr(spec, "label_smoothing", 0.0) or 0.0), 0.9))
         loss_map = {
-            "cross_entropy": nn.CrossEntropyLoss(),
-            "mse": nn.MSELoss(),
-            "mae": nn.L1Loss(),
-            "bce": nn.BCEWithLogitsLoss(),
-            "huber": nn.HuberLoss(),
-            "nll": nn.NLLLoss(),
+            "cross_entropy": nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing),
+            "mse": nn.MSELoss(reduction=reduction),
+            "mae": nn.L1Loss(reduction=reduction),
+            "bce": nn.BCEWithLogitsLoss(reduction=reduction),
+            "huber": nn.HuberLoss(reduction=reduction),
+            "nll": nn.NLLLoss(reduction=reduction),
         }
-        return loss_map.get(loss_name, nn.CrossEntropyLoss())
+        return loss_map.get(loss_name, nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing))
 
     def _make_scheduler(self, optimizer: optim.Optimizer, epochs: int, steps_per_epoch: int):
         """W1: Scheduler-Instanz basierend auf IR-Konfiguration.
-        steps_per_epoch wird nur für one_cycle benötigt (Batch-Level-Scheduler).
-        Alle anderen Scheduler arbeiten auf Epoch-Level.
+        steps_per_epoch wird für one_cycle (Batch-Level) und die Umrechnung
+        der warmupSteps in Warmup-Epochen benötigt.
+        minLr/warmupSteps kommen aus dem Scheduler-Node im Canvas.
         """
-        name = (self.ir.training.scheduler if self.ir else "none").lower()
-        lr = self.ir.training.learning_rate if self.ir else self.config.learning_rate
-        if name == "cosine":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=epochs, eta_min=lr * 0.01
-            )
-        if name == "linear":
-            return torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=1.0, end_factor=0.01, total_iters=epochs
-            )
-        if name in ("exponential", "exp"):
-            # gamma so dass LR nach allen Epochen auf ~1% gefallen ist
-            gamma = (0.01) ** (1.0 / max(epochs, 1))
-            return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+        import math as _math
+
+        spec = self.ir.training if self.ir else None
+        name = (spec.scheduler if spec else "none").lower()
+        lr = spec.learning_rate if spec else self.config.learning_rate
+        min_lr = float(getattr(spec, "min_lr", 0.0) or 0.0) if spec else 0.0
+        eta_min = min_lr if min_lr > 0 else lr * 0.01
+        warmup_steps = int(getattr(spec, "warmup_steps", 0) or 0) if spec else 0
+
         if name == "one_cycle":
+            # one_cycle hat eingebautes Warmup (pct_start) — warmupSteps hier ignorieren
             return torch.optim.lr_scheduler.OneCycleLR(
                 optimizer,
                 max_lr=lr,
                 epochs=epochs,
                 steps_per_epoch=max(steps_per_epoch, 1),
             )
-        # "none" oder unbekannt — kein Scheduler
-        return None
+
+        # warmupSteps (Optimizer-Steps) → ganze Epochen für Epoch-Level-Scheduler
+        warm_epochs = 0
+        if warmup_steps > 0:
+            warm_epochs = min(
+                _math.ceil(warmup_steps / max(steps_per_epoch, 1)),
+                max(epochs - 1, 0),
+            )
+        main_epochs = max(epochs - warm_epochs, 1)
+
+        base = None
+        if name == "cosine":
+            base = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=main_epochs, eta_min=eta_min
+            )
+        elif name == "linear":
+            end_factor = max(eta_min / lr, 1e-8) if lr > 0 else 0.01
+            base = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=1.0, end_factor=end_factor, total_iters=main_epochs
+            )
+        elif name in ("exponential", "exp"):
+            # gamma so dass LR nach allen Epochen auf eta_min gefallen ist
+            target = max(eta_min / lr, 1e-8) if lr > 0 else 0.01
+            gamma = target ** (1.0 / max(main_epochs, 1))
+            base = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+        elif name == "polynomial":
+            base = torch.optim.lr_scheduler.PolynomialLR(
+                optimizer, total_iters=main_epochs, power=2.0
+            )
+        # "constant"/"none"/unbekannt — kein Scheduler
+        if base is None:
+            return None
+
+        if warm_epochs > 0:
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warm_epochs
+            )
+            return torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=[warmup, base], milestones=[warm_epochs]
+            )
+        return base
 
     def train(self) -> bool:
         if not self.model:
@@ -281,6 +327,13 @@ class CanvasPlugin:
             if accum_steps > 1:
                 MessageProtocol.status("train", f"✓ Gradient Accumulation aktiv: accum_steps={accum_steps}")
 
+            # Gradient-Clipping: Wert aus dem Optimizer-Node im Canvas (clipGrad),
+            # Fallback auf die globale Trainings-Config. 0 = deaktiviert.
+            max_grad = (
+                float(getattr(self.ir.training, "clip_grad", self.config.max_grad_norm))
+                if self.ir else float(self.config.max_grad_norm)
+            )
+
             # W1 Edit 3a: Scheduler anlegen — nach Shape-Test und accum_steps, steps_per_epoch jetzt bekannt
             # W2 Fix: effective_steps_per_epoch = ceil(len(train_loader) / accum_steps)
             # identische Logik wie do_step-Gate: is_last_batch fängt Rest-Batches ab
@@ -340,14 +393,14 @@ class CanvasPlugin:
 
                     if do_step:
                         if self.config.fp16 and scaler:
-                            if self.config.max_grad_norm > 0:
+                            if max_grad > 0:
                                 scaler.unscale_(optimizer)
-                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad)
                             scaler.step(optimizer)
                             scaler.update()
                         else:
-                            if self.config.max_grad_norm > 0:
-                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                            if max_grad > 0:
+                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad)
                             optimizer.step()
 
                         # W1 SAFE: one_cycle scheduler.step() nur bei echtem optimizer.step()
@@ -504,15 +557,4 @@ class CanvasPlugin:
         except Exception as e:
             MessageProtocol.error("Export Fehler", str(e))
             return str(self.config.output_path)
-
-
-def run(config: TrainingConfig) -> Dict[str, Any]:
-    plugin = CanvasPlugin(config)
-    if not plugin.setup():
-        return {"success": False, "error": "Setup fehlgeschlagen"}
-    if not plugin.train():
-        return {"success": False, "error": "Training fehlgeschlagen"}
-    output_path = Path(config.output_path) / "model.pt"
-    if not plugin.save_model(str(output_path), optimizer=plugin._optimizer):
-        return {"success": False, "error": "Save fehlgeschlagen"}
-    return {"success": True, "output_path": str(plugin.export()), "metrics": plugin.get_metrics()}
+# run() wurde entfernt -- toter Code, wird vom Orchestrator nie aufgerufen.

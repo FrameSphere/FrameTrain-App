@@ -109,7 +109,7 @@ function removeNodeFix(
 
   return {
     success: true,
-    message: `✅ Node ${node.data?.label || nodeId} entfernt`,
+    message: `✓ Node ${node.data?.label || nodeId} entfernt`,
     nodesRemoved: [nodeId],
     edgesAdded: newEdges,
     edgesRemoved: [...incomingEdges, ...outgoingEdges].map((e) => e.id),
@@ -149,7 +149,7 @@ function adjustParamsFix(
 
   return {
     success: true,
-    message: `✅ Parameter angepasst: ${Object.keys(fix.params || {}).join(", ")}`,
+    message: `✓ Parameter angepasst: ${Object.keys(fix.params || {}).join(", ")}`,
   };
 }
 
@@ -218,7 +218,7 @@ function insertBridgeFix(
 
   return {
     success: true,
-    message: `✅ Bridge-Layer eingefügt: ${params.inputSize || 256} → ${params.outputSize || 512}`,
+    message: `✓ Bridge-Layer eingefügt: ${params.inputSize || 256} → ${params.outputSize || 512}`,
     nodesAdded: [bridgeNode],
     edgesAdded: newEdges,
     edgesRemoved: incomingEdges.map((e) => e.id),
@@ -248,10 +248,10 @@ function reorderNodesFix(
  */
 export function showAutoFixNotification(result: AutoFixResult) {
   if (result.success) {
-    console.log(`✅ ${result.message}`);
+    console.log(`✓ ${result.message}`);
     // TODO: Toast anzeigen
   } else {
-    console.error(`❌ ${result.message}`);
+    console.error(`✗ ${result.message}`);
     // TODO: Error Toast anzeigen
   }
 }

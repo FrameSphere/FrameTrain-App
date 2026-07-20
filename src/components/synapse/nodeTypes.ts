@@ -95,7 +95,7 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'csv_loader', label: 'CSV Loader', category: 'data', icon: '📊',
+    type: 'csv_loader', label: 'CSV Loader', category: 'data', icon: '▤',
     description: 'Load tabular data from a CSV file',
     color: '#60a5fa',
     inputs: [],
@@ -108,7 +108,7 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'image_loader', label: 'Image Loader', category: 'data', icon: '🖼️',
+    type: 'image_loader', label: 'Image Loader', category: 'data', icon: '▣',
     description: 'Load images from a folder structure',
     color: '#60a5fa',
     inputs: [],
@@ -121,8 +121,18 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'tokenizer', label: 'Tokenizer', category: 'data', icon: '✂️',
-    description: 'Tokenize raw text into IDs',
+    type: 'parquet_loader', label: 'Parquet Loader', category: 'data', icon: '▥',
+    description: 'Load tabular data from Parquet files (FrameTrain datasets)',
+    color: '#60a5fa',
+    inputs: [],
+    outputs: [{ id: 'out', label: 'Dataset', portType: 'dataset' }],
+    params: [
+      { key: 'targetCol', label: 'Target Column', type: 'string', default: 'label' },
+    ],
+  },
+  {
+    type: 'tokenizer', label: 'Tokenizer', category: 'data', icon: '⊟',
+    description: 'Tokenize raw text into IDs (info only — canvas runtime ignores this node for now)',
     color: '#60a5fa',
     inputs:  [{ id: 'text', label: 'Text', portType: 'dataset' }],
     outputs: [{ id: 'tokens', label: 'Tokens', portType: 'tensor' }],
@@ -134,8 +144,8 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'dataset_split', label: 'Dataset Split', category: 'data', icon: '🔀',
-    description: 'Split dataset into train / val / test',
+    type: 'dataset_split', label: 'Dataset Split', category: 'data', icon: '⋔',
+    description: 'Split dataset into train / val / test (info only — canvas runtime uses its own 80/20 split for now)',
     color: '#60a5fa',
     inputs:  [{ id: 'in', label: 'Dataset', portType: 'dataset' }],
     outputs: [
@@ -151,8 +161,8 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'augmentation', label: 'Augmentation', category: 'data', icon: '🎲',
-    description: 'Apply random data augmentations',
+    type: 'augmentation', label: 'Augmentation', category: 'data', icon: '⚄',
+    description: 'Apply random data augmentations (info only — canvas runtime ignores this node for now)',
     color: '#60a5fa',
     inputs:  [{ id: 'in', label: 'Dataset', portType: 'dataset' }],
     outputs: [{ id: 'out', label: 'Dataset', portType: 'dataset' }],
@@ -386,7 +396,7 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'scheduler', label: 'LR Scheduler', category: 'training', icon: '📉',
+    type: 'scheduler', label: 'LR Scheduler', category: 'training', icon: '↝',
     description: 'Learning rate schedule',
     color: '#fb923c',
     inputs:  [{ id: 'optimizer', label: 'Optimizer', portType: 'any' }],
@@ -398,7 +408,7 @@ export const NODE_DEFINITIONS: NodeDef[] = [
     ],
   },
   {
-    type: 'output_node', label: 'Output', category: 'training', icon: '🏁',
+    type: 'output_node', label: 'Output', category: 'training', icon: '⚑',
     description: 'Model output — final prediction head',
     color: '#fb923c',
     inputs:  [{ id: 'logits', label: 'Logits', portType: 'tensor' }],
@@ -550,7 +560,7 @@ export function buildDefaultParams(def: NodeDef): Record<string, any> {
 export type TemplateId = 'empty' | 'mlp' | 'cnn' | 'transformer' | 'lstm_cls' | 'resnet_skip';
 
 export const TEMPLATES: Record<TemplateId, { label: string; icon: string; description: string }> = {
-  empty:       { label: 'Empty Canvas',        icon: '⬜', description: 'Start from scratch' },
+  empty:       { label: 'Empty Canvas',        icon: '□', description: 'Start from scratch' },
   mlp:         { label: 'MLP Classifier',      icon: '▦', description: 'Dense → ReLU → Dense → Softmax' },
   cnn:         { label: 'CNN Classifier',      icon: '◫', description: 'Conv2D blocks → Dense head' },
   transformer: { label: 'Transformer Encoder', icon: '⬡', description: 'Embedding → Transformer Block → Output' },

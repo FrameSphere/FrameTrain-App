@@ -134,17 +134,17 @@ export const LEVEL_META: Record<CompatLevel, { label: string; color: string; bg:
 };
 
 /** Lesbare Labels für DatasetType */
-export const DATASET_TYPE_LABELS: Record<DatasetType, { label: string; icon: 'file' | 'target' | 'image' | 'folder' | 'mic' | 'volume' | 'scissors' | 'archive' | 'help'; color: string; modality: Modality }> = {
-  flat_file:        { label: 'Flat File',          icon: 'file',     color: 'text-violet-400',  modality: 'text'  },
-  yolo_bbox:        { label: 'YOLO Bounding Box',  icon: 'target',   color: 'text-orange-400',  modality: 'image' },
-  coco_json:        { label: 'COCO JSON',          icon: 'image',    color: 'text-amber-400',   modality: 'image' },
-  pascal_voc:       { label: 'Pascal VOC',         icon: 'archive',  color: 'text-yellow-400',  modality: 'image' },
-  folder_class:     { label: 'Ordner-Klassen',     icon: 'folder',   color: 'text-blue-400',    modality: 'image' },
-  audio_transcript: { label: 'Audio + Transkript', icon: 'mic',      color: 'text-cyan-400',    modality: 'audio' },
-  common_voice:     { label: 'Common Voice',       icon: 'volume',   color: 'text-teal-400',    modality: 'audio' },
-  pre_split:        { label: 'Voraufgeteilt',      icon: 'scissors', color: 'text-emerald-400', modality: 'text'  },
-  multi_shard:      { label: 'Multi-Shard Parquet',icon: 'archive',  color: 'text-indigo-400',  modality: 'text'  },
-  unknown:          { label: 'Unbekannt',          icon: 'help',     color: 'text-gray-400',    modality: 'text'  },
+export const DATASET_TYPE_LABELS: Record<DatasetType, { label: string; icon: string; color: string; modality: Modality }> = {
+  flat_file:        { label: 'Flat File',           icon: '📄', color: 'text-violet-400',  modality: 'text'  },
+  yolo_bbox:        { label: 'YOLO Bounding Box',   icon: '🎯', color: 'text-orange-400',  modality: 'image' },
+  coco_json:        { label: 'COCO JSON',           icon: '🖼️', color: 'text-amber-400',   modality: 'image' },
+  pascal_voc:       { label: 'Pascal VOC',          icon: '🗂️', color: 'text-yellow-400',  modality: 'image' },
+  folder_class:     { label: 'Ordner-Klassen',      icon: '📁', color: 'text-blue-400',    modality: 'image' },
+  audio_transcript: { label: 'Audio + Transkript',  icon: '🎤', color: 'text-cyan-400',    modality: 'audio' },
+  common_voice:     { label: 'Common Voice',        icon: '🔊', color: 'text-teal-400',    modality: 'audio' },
+  pre_split:        { label: 'Voraufgeteilt',       icon: '✂️', color: 'text-emerald-400', modality: 'text'  },
+  multi_shard:      { label: 'Multi-Shard Parquet', icon: '🧉', color: 'text-indigo-400',  modality: 'text'  },
+  unknown:          { label: 'Unbekannt',           icon: '❓', color: 'text-gray-400',    modality: 'text'  },
 };
 
 /**

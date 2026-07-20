@@ -146,6 +146,20 @@ fn get_user_id(state: &State<'_, AppState>) -> Result<String, String> {
         .ok_or_else(|| "Kein Benutzer angemeldet".to_string())
 }
 
+/// IDs dürfen nur aus [A-Za-z0-9_-] bestehen — verhindert Path-Traversal.
+fn is_safe_id(id: &str) -> bool {
+    crate::model_manager::is_safe_id(id)
+}
+
+/// Prüft, dass `path` innerhalb von `base` liegt (nach Kanonisierung).
+/// Schutz gegen absichtlich/versehentlich übergebene fremde Pfade.
+fn is_within_dir(path: &Path, base: &Path) -> bool {
+    let (Ok(canon_path), Ok(canon_base)) = (path.canonicalize(), base.canonicalize()) else {
+        return false;
+    };
+    canon_path.starts_with(&canon_base)
+}
+
 fn sanitize_user_id(user_id: &str) -> String {
     user_id.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
@@ -348,7 +362,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
     let all_extensions = collect_extensions(path);
 
     // 1. Pre-Split
-    let split_dirs: Vec<&str> = ["train","val","test","validation","training","testing"]
+    let split_dirs: Vec<&str> = ["train","val","valid","test","validation","training","testing"]
         .iter().filter(|&&s| dir_names_lc.contains(&s.to_string())).copied().collect();
     if split_dirs.len() >= 2 {
         return DatasetAnalysis { detected_type: DatasetType::PreSplit, confidence: 95,
@@ -763,22 +777,283 @@ fn split_folder_class(base: &Path, train_r: f64, val_r: f64, test_r: f64) -> Res
                    train_ratio: train_r, val_ratio: val_r, test_ratio: test_r })
 }
 
+/// Erkennt ob eine Datei zeilenweise/Sample-weise gesplittet werden kann
+/// (strukturiertes Format mit mehreren Datensaetzen pro Datei), statt als
+/// atomare Einheit verschoben zu werden.
+fn is_row_splittable(ext: &str) -> bool {
+    matches!(ext.to_lowercase().as_str(), "parquet" | "csv" | "tsv" | "jsonl" | "json")
+}
+
+/// Findet die Python-Executable (python3 bevorzugt).
+fn find_python_cmd() -> Result<&'static str, String> {
+    use std::process::Command;
+    if Command::new("python3").arg("--version").output().is_ok() { return Ok("python3"); }
+    if Command::new("python").arg("--version").output().is_ok() { return Ok("python"); }
+    Err("Python nicht gefunden -- wird fuer das Splitten strukturierter Dateien (Parquet/CSV/JSON) benoetigt.".to_string())
+}
+
+/// Splittet eine einzelne strukturierte Datei (Parquet/CSV/TSV/JSONL/JSON) intern
+/// nach Zeilen/Samples, NICHT nach ganzen Dateien. Schema/Header bleibt in jeder
+/// Split-Datei erhalten (z.B. CSV-Header wird in train/val/test-Datei dupliziert).
+/// Schreibt train.<ext>, val.<ext>, test.<ext> (val/test nur wenn > 0 Zeilen) in den
+/// jeweiligen Split-Ordner und gibt (train_n, val_n, test_n) Zeilenanzahl zurueck.
+/// Bei zu wenigen Zeilen fuer eine sinnvolle Aufteilung wird gewarnt statt zu splitten.
+fn split_row_file(
+    src: &Path, train_dir: &Path, val_dir: &Path, test_dir: &Path,
+    train_r: f64, val_r: f64, _test_r: f64,
+    warnings: &mut Vec<String>,
+) -> Result<(usize, usize, usize), String> {
+    let ext  = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("data");
+    fs::create_dir_all(train_dir).ok();
+    fs::create_dir_all(val_dir).ok();
+    fs::create_dir_all(test_dir).ok();
+
+    // Namenskollisions-Schutz: falls eine Datei mit gleichem Namen im Zielordner
+    // schon existiert (z.B. zwei Shards heissen beide 0000.parquet nach stem-Extraktion),
+    // wird ein Suffix angehaengt: 0000_1.parquet, 0000_2.parquet, ...
+    let unique_name = |dir: &Path, base: &str, extension: &str| -> String {
+        let candidate = format!("{}.{}", base, extension);
+        if !dir.join(&candidate).exists() { return candidate; }
+        let mut i = 1usize;
+        loop {
+            let c = format!("{}_{}.{}", base, i, extension);
+            if !dir.join(&c).exists() { return c; }
+            i += 1;
+        }
+    };
+
+    let train_out = train_dir.join(unique_name(train_dir, stem, &ext));
+    let val_out   = val_dir.join(unique_name(val_dir, stem, &ext));
+    let test_out  = test_dir.join(unique_name(test_dir, stem, &ext));
+
+    match ext.as_str() {
+        "jsonl" => {
+            let content = fs::read_to_string(src).map_err(|e| format!("Lesen '{}': {}", src.display(), e))?;
+            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+            let n = lines.len();
+            if n < 3 {
+                warnings.push(format!("'{}' hat nur {} Zeile(n) -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
+                fs::write(&train_out, &content).map_err(|e| format!("Schreiben: {}", e))?;
+                return Ok((n, 0, 0));
+            }
+            let indices = shuffle_indices(n);
+            let (tn, vn, _tt) = split_counts(n, train_r, val_r);
+            let mut train_lines = Vec::new(); let mut val_lines = Vec::new(); let mut test_lines = Vec::new();
+            for (slot, &idx) in indices.iter().enumerate() {
+                if slot < tn { train_lines.push(lines[idx]); }
+                else if slot < tn + vn { val_lines.push(lines[idx]); }
+                else { test_lines.push(lines[idx]); }
+            }
+            fs::write(&train_out, train_lines.join("\n") + "\n").map_err(|e| format!("Schreiben train: {}", e))?;
+            if !val_lines.is_empty()  { fs::write(&val_out,  val_lines.join("\n") + "\n").map_err(|e| format!("Schreiben val: {}", e))?; }
+            if !test_lines.is_empty() { fs::write(&test_out, test_lines.join("\n") + "\n").map_err(|e| format!("Schreiben test: {}", e))?; }
+            Ok((train_lines.len(), val_lines.len(), test_lines.len()))
+        }
+        "csv" | "tsv" => {
+            let content = fs::read_to_string(src).map_err(|e| format!("Lesen '{}': {}", src.display(), e))?;
+            let mut all_lines = content.lines();
+            let header = all_lines.next().ok_or_else(|| format!("'{}' ist leer.", src.display()))?.to_string();
+            let data_lines: Vec<&str> = all_lines.filter(|l| !l.trim().is_empty()).collect();
+            let n = data_lines.len();
+            if n < 3 {
+                warnings.push(format!("'{}' hat nur {} Datenzeile(n) -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
+                fs::write(&train_out, &content).map_err(|e| format!("Schreiben: {}", e))?;
+                return Ok((n, 0, 0));
+            }
+            let indices = shuffle_indices(n);
+            let (tn, vn, _tt) = split_counts(n, train_r, val_r);
+            let mut train_lines = vec![header.clone()];
+            let mut val_lines   = vec![header.clone()];
+            let mut test_lines  = vec![header.clone()];
+            for (slot, &idx) in indices.iter().enumerate() {
+                if slot < tn { train_lines.push(data_lines[idx].to_string()); }
+                else if slot < tn + vn { val_lines.push(data_lines[idx].to_string()); }
+                else { test_lines.push(data_lines[idx].to_string()); }
+            }
+            // Header zaehlt nicht als Datenzeile -- Split-Dateien immer mit Header schreiben,
+            // damit Spaltennamen (CSV-Schema) in jedem Split erhalten bleiben.
+            fs::write(&train_out, train_lines.join("\n") + "\n").map_err(|e| format!("Schreiben train: {}", e))?;
+            let val_n  = val_lines.len().saturating_sub(1);
+            let test_n = test_lines.len().saturating_sub(1);
+            if val_n  > 0 { fs::write(&val_out,  val_lines.join("\n") + "\n").map_err(|e| format!("Schreiben val: {}", e))?; }
+            if test_n > 0 { fs::write(&test_out, test_lines.join("\n") + "\n").map_err(|e| format!("Schreiben test: {}", e))?; }
+            Ok((train_lines.len() - 1, val_n, test_n))
+        }
+        "json" => {
+            let content = fs::read_to_string(src).map_err(|e| format!("Lesen '{}': {}", src.display(), e))?;
+            let parsed: serde_json::Value = serde_json::from_str(&content).map_err(|e| format!("JSON-Parse '{}': {}", src.display(), e))?;
+            let arr = parsed.as_array().ok_or_else(|| format!("'{}' ist kein JSON-Array von Samples -- Zeilen-Split nicht moeglich.", src.display()))?;
+            let n = arr.len();
+            if n < 3 {
+                warnings.push(format!("'{}' hat nur {} Eintraege -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
+                fs::write(&train_out, &content).map_err(|e| format!("Schreiben: {}", e))?;
+                return Ok((n, 0, 0));
+            }
+            let indices = shuffle_indices(n);
+            let (tn, vn, _tt) = split_counts(n, train_r, val_r);
+            let mut train_items = Vec::new(); let mut val_items = Vec::new(); let mut test_items = Vec::new();
+            for (slot, &idx) in indices.iter().enumerate() {
+                if slot < tn { train_items.push(arr[idx].clone()); }
+                else if slot < tn + vn { val_items.push(arr[idx].clone()); }
+                else { test_items.push(arr[idx].clone()); }
+            }
+            fs::write(&train_out, serde_json::to_string_pretty(&train_items).unwrap()).map_err(|e| format!("Schreiben train: {}", e))?;
+            if !val_items.is_empty()  { fs::write(&val_out,  serde_json::to_string_pretty(&val_items).unwrap()).map_err(|e| format!("Schreiben val: {}", e))?; }
+            if !test_items.is_empty() { fs::write(&test_out, serde_json::to_string_pretty(&test_items).unwrap()).map_err(|e| format!("Schreiben test: {}", e))?; }
+            Ok((train_items.len(), val_items.len(), test_items.len()))
+        }
+        "parquet" => split_parquet_file(src, &train_out, &val_out, &test_out, train_r, val_r, warnings),
+        _ => Err(format!("Format '.{}' kann nicht zeilenweise gesplittet werden.", ext)),
+    }
+}
+
+/// Splittet eine Parquet-Datei zeilenweise via Python (pandas), da Parquet ein
+/// binaeres Spaltenformat ist und nicht ohne pyarrow/pandas geparst werden kann.
+/// Mischt Zeilen, schreibt train/val/test-Parquet-Dateien mit identischem Schema.
+fn split_parquet_file(
+    src: &Path, train_out: &Path, val_out: &Path, test_out: &Path,
+    train_r: f64, val_r: f64, warnings: &mut Vec<String>,
+) -> Result<(usize, usize, usize), String> {
+    use std::process::Command;
+    let python = find_python_cmd()?;
+    let script = format!(r#"
+import sys, json
+import pandas as pd
+import numpy as np
+
+src       = sys.argv[1]
+train_out = sys.argv[2]
+val_out   = sys.argv[3]
+test_out  = sys.argv[4]
+train_r   = float(sys.argv[5])
+val_r     = float(sys.argv[6])
+
+df = pd.read_parquet(src)
+n = len(df)
+if n < 3:
+    df.to_parquet(train_out)
+    print(json.dumps({{"train": n, "val": 0, "test": 0, "too_small": True}}))
+    sys.exit(0)
+
+rng = np.random.default_rng(42)
+idx = rng.permutation(n)
+train_n = round(n * train_r)
+val_n   = round(n * val_r)
+
+train_idx = idx[:train_n]
+if train_r + val_r >= 0.999:
+    # Kein Test-Split vorgesehen (z.B. Halbieren 0.5/0.5): Rest komplett zu val.
+    # Vorher konnte durch Banker's Rounding (round(2.5)=2) bei ungerader
+    # Zeilenzahl eine Restzeile im test-Output landen, der beim Halbieren
+    # verworfen wurde -- 1 Zeile Datenverlust pro Datei.
+    val_idx  = idx[train_n:]
+    test_idx = idx[:0]
+else:
+    val_idx   = idx[train_n:train_n+val_n]
+    test_idx  = idx[train_n+val_n:]
+
+df.iloc[train_idx].to_parquet(train_out)
+val_count = 0
+test_count = 0
+if len(val_idx) > 0:
+    df.iloc[val_idx].to_parquet(val_out)
+    val_count = len(val_idx)
+if len(test_idx) > 0:
+    df.iloc[test_idx].to_parquet(test_out)
+    test_count = len(test_idx)
+
+print(json.dumps({{"train": len(train_idx), "val": val_count, "test": test_count, "too_small": False}}))
+"#);
+    let output = Command::new(python)
+        .arg("-c").arg(&script)
+        .arg(src.to_string_lossy().to_string())
+        .arg(train_out.to_string_lossy().to_string())
+        .arg(val_out.to_string_lossy().to_string())
+        .arg(test_out.to_string_lossy().to_string())
+        .arg(train_r.to_string())
+        .arg(val_r.to_string())
+        .output()
+        .map_err(|e| format!("Python spawn: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Parquet-Split fehlgeschlagen fuer '{}': {}", src.display(), stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("JSON-Parse Parquet-Split-Ergebnis: {} (raw: {})", e, stdout.trim()))?;
+    let train_n = result.get("train").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let val_n   = result.get("val").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let test_n  = result.get("test").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    if result.get("too_small").and_then(|v| v.as_bool()).unwrap_or(false) {
+        warnings.push(format!("'{}' hat nur {} Zeile(n) -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), train_n));
+    }
+    Ok((train_n, val_n, test_n))
+}
+
 /// Flacher Split fuer Root-Dateien (FlatFile, MultiShard).
+///
+/// WICHTIG: Strukturierte Dateien (Parquet/CSV/TSV/JSONL/JSON) werden NICHT als
+/// atomare Einheit verschoben, sondern zeilenweise/Sample-weise intern gesplittet --
+/// jede Datei landet anteilig (train_r/val_r/test_r) in train/val/test, mit Header/Schema
+/// in jeder resultierenden Datei erhalten. Nur unbekannte/binaere Formate (die nicht
+/// row-splittable sind) werden weiterhin als ganze Datei einem Split zugeteilt.
 fn split_flat_files(base: &Path, train_r: f64, val_r: f64, test_r: f64) -> Result<SplitInfo, String> {
     let files = collect_files(base);
     let n = files.len();
     if n == 0 { return Err("Keine Dateien im Dataset-Root.".to_string()); }
-    let indices = shuffle_indices(n);
-    let (train_n, val_n, test_n) = split_counts(n, train_r, val_r);
+
     let train_dir = base.join("train"); let val_dir = base.join("val"); let test_dir = base.join("test");
-    fs::create_dir_all(&train_dir).ok(); fs::create_dir_all(&val_dir).ok(); fs::create_dir_all(&test_dir).ok();
-    for (slot, &file_idx) in indices.iter().enumerate() {
-        let src = &files[file_idx];
-        let fname = src.file_name().unwrap_or_default();
-        let dst_dir = if slot < train_n { &train_dir } else if slot < train_n + val_n { &val_dir } else { &test_dir };
-        move_or_copy(src, &dst_dir.join(fname))?;
+    let mut warnings: Vec<String> = Vec::new();
+    let mut total_train = 0usize; let mut total_val = 0usize; let mut total_test = 0usize;
+    let mut whole_file_fallback: Vec<&Path> = Vec::new();
+
+    for f in &files {
+        let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if is_row_splittable(&ext) {
+            match split_row_file(f, &train_dir, &val_dir, &test_dir, train_r, val_r, test_r, &mut warnings) {
+                Ok((tn, vn, tt)) => {
+                    total_train += tn; total_val += vn; total_test += tt;
+                    // FIX: Quelldatei wurde bereits vollstaendig zeilenweise in train/val/test
+                    // aufgeteilt (Inhalt liegt jetzt in train.<ext>/val.<ext>/test.<ext>) -- die
+                    // urspruengliche Datei im Dataset-Root MUSS geloescht werden, sonst bleibt sie
+                    // liegen und taucht zusaetzlich als "unsplit" auf (Bug: train+val+unsplit
+                    // gleichzeitig sichtbar, wirkt wie verdoppelte Daten).
+                    fs::remove_file(f).ok();
+                }
+                Err(e) => {
+                    // Bei Fehler (z.B. Python fehlt fuer Parquet) auf ganze-Datei-Split zurueckfallen,
+                    // damit der Split nicht komplett scheitert -- User wird gewarnt.
+                    warnings.push(format!("Zeilen-Split fuer '{}' fehlgeschlagen ({}), Datei wird als Ganzes zugeteilt.", f.file_name().unwrap_or_default().to_string_lossy(), e));
+                    whole_file_fallback.push(f.as_path());
+                }
+            }
+        } else {
+            whole_file_fallback.push(f.as_path());
+        }
     }
-    Ok(SplitInfo { train_count: train_n, val_count: val_n, test_count: test_n,
+
+    // Fallback: nicht-splittable Dateien (oder Fehlerfaelle) als ganze Einheiten verteilen
+    if !whole_file_fallback.is_empty() {
+        fs::create_dir_all(&train_dir).ok(); fs::create_dir_all(&val_dir).ok(); fs::create_dir_all(&test_dir).ok();
+        let fc = whole_file_fallback.len();
+        let indices = shuffle_indices(fc);
+        let (tn, vn, _tt) = split_counts(fc, train_r, val_r);
+        for (slot, &file_idx) in indices.iter().enumerate() {
+            let src = whole_file_fallback[file_idx];
+            let fname = src.file_name().unwrap_or_default();
+            let dst_dir = if slot < tn { &train_dir } else if slot < tn + vn { &val_dir } else { &test_dir };
+            move_or_copy(src, &dst_dir.join(fname))?;
+            if slot < tn { total_train += 1; } else if slot < tn + vn { total_val += 1; } else { total_test += 1; }
+        }
+    }
+
+    if total_train + total_val + total_test == 0 {
+        return Err("Split ergab keine Zeilen/Dateien -- Dataset pruefen.".to_string());
+    }
+
+    Ok(SplitInfo { train_count: total_train, val_count: total_val, test_count: total_test,
                    train_ratio: train_r, val_ratio: val_r, test_ratio: test_r })
 }
 
@@ -814,6 +1089,28 @@ pub async fn list_datasets_for_model(
             if storage.exists() {
                 let exts = collect_extensions(&storage);
                 if !exts.is_empty() { d.extensions = exts; }
+
+                // FIX: split_info live aus den tatsaechlichen train/val/test-Ordnern
+                // berechnen statt dem evtl. veralteten gespeicherten Wert zu vertrauen.
+                // Betrifft v.a. PreSplit-Datasets von HuggingFace, die bereits mit
+                // train/test-Ordnern ankommen ohne dass split_dataset() je lief.
+                let train_dir = storage.join("train");
+                let val_dir   = storage.join("val");
+                let test_dir  = storage.join("test");
+                let has_split_dirs = train_dir.exists() || val_dir.exists() || test_dir.exists();
+                if has_split_dirs {
+                    let train_count = collect_files_recursive(&train_dir).len();
+                    let val_count   = collect_files_recursive(&val_dir).len();
+                    let test_count  = collect_files_recursive(&test_dir).len();
+                    let total = (train_count + val_count + test_count).max(1) as f64;
+                    d.split_info = Some(SplitInfo {
+                        train_count, val_count, test_count,
+                        train_ratio: train_count as f64 / total,
+                        val_ratio:   val_count   as f64 / total,
+                        test_ratio:  test_count  as f64 / total,
+                    });
+                    d.status = "split".to_string();
+                }
             }
             d
         }).collect();
@@ -911,6 +1208,7 @@ pub async fn delete_dataset(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     dataset_id: String, model_id: String,
 ) -> Result<(), String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
     let user_id      = get_user_id(&state)?;
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let target       = datasets_dir.join(&dataset_id);
@@ -933,6 +1231,11 @@ pub async fn split_dataset(
     dataset_id: String, model_id: String,
     train_ratio: f64, val_ratio: f64, test_ratio: f64,
 ) -> Result<DatasetInfo, String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
+    if !(0.0..=1.0).contains(&train_ratio) || !(0.0..=1.0).contains(&val_ratio) || !(0.0..=1.0).contains(&test_ratio)
+        || (train_ratio + val_ratio + test_ratio) > 1.0001 || train_ratio <= 0.0 {
+        return Err("Ungültige Split-Verhältnisse (train muss > 0 sein, Summe ≤ 1.0).".to_string());
+    }
     let user_id      = get_user_id(&state)?;
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let base         = datasets_dir.join(&dataset_id);
@@ -978,7 +1281,11 @@ pub async fn split_dataset(
 pub async fn split_dataset_in_half(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     dataset_id: String, model_id: String,
+    preserve_splits: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    // Standard: vorhandene train/val/test-Struktur an beide Hälften vererben.
+    let preserve = preserve_splits.unwrap_or(true);
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
     let user_id      = get_user_id(&state)?;
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let base         = datasets_dir.join(&dataset_id);
@@ -1045,8 +1352,42 @@ pub async fn split_dataset_in_half(
             }
         }
         DatasetType::FolderClass => {
+            // Vorher wurden train/val/test-Ordner komplett ÜBERSPRUNGEN —
+            // das Halbieren eines bereits gesplitteten FolderClass-Datasets
+            // erzeugte damit zwei LEERE Hälften. Jetzt: Split-Ordner werden
+            // pro Split pro Klasse halbiert (Struktur vererbt) bzw. bei
+            // preserve=false pro Klasse zusammengelegt.
+            let split_dirs: Vec<String> = ["train", "val", "valid", "test"].iter()
+                .map(|s| s.to_string())
+                .filter(|s| base.join(s).is_dir())
+                .collect();
+
+            for sd in &split_dirs {
+                for class in list_subdir_names(&base.join(sd)) {
+                    let files = list_files_in_dir(&base.join(sd).join(&class));
+                    let half  = files.len() / 2;
+                    let (ta, tb) = if preserve {
+                        (dir_a.join(sd).join(&class), dir_b.join(sd).join(&class))
+                    } else {
+                        (dir_a.join(&class), dir_b.join(&class))
+                    };
+                    fs::create_dir_all(&ta).ok();
+                    fs::create_dir_all(&tb).ok();
+                    for (i, f) in files.iter().enumerate() {
+                        let dst_dir = if i < half { &ta } else { &tb };
+                        let fname = f.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        // Beim Zusammenlegen (preserve=false) können gleiche
+                        // Dateinamen aus train/ und val/ kollidieren → Split-Präfix
+                        let mut dst = dst_dir.join(&fname);
+                        if dst.exists() { dst = dst_dir.join(format!("{}_{}", sd, fname)); }
+                        fs::copy(f, &dst).ok();
+                    }
+                }
+            }
+
+            // Klassen-Ordner auf Root-Ebene (ungesplitteter Anteil) wie bisher
             for class in list_subdir_names(&base) {
-                if matches!(class.as_str(), "train"|"val"|"test") { continue; }
+                if matches!(class.as_str(), "train"|"val"|"valid"|"test") { continue; }
                 let files = list_files_in_dir(&base.join(&class));
                 let half  = files.len() / 2;
                 fs::create_dir_all(dir_a.join(&class)).ok();
@@ -1058,16 +1399,71 @@ pub async fn split_dataset_in_half(
             }
         }
         _ => {
-            // FIX Bug 4: collect_files_recursive statt collect_files damit MultiShard-Shards
-            // in Unterordnern (z.B. train/part-0.parquet) vollstaendig erfasst werden.
-            // Relative Pfadstruktur bleibt erhalten.
+            // FIX: Strukturierte Dateien (Parquet/CSV/TSV/JSONL/JSON) werden zeilenweise
+            // gesplittet statt als ganze Datei einer Haelfte zugeteilt zu werden --
+            // sonst landet bei 2 Dateien Datei 1 komplett in Haelfte A, Datei 2 komplett
+            // in Haelfte B (das urspruengliche Bug-Symptom). Jede splittable Datei wird
+            // intern in zwei Haelften (50/50) aufgeteilt, Header/Schema bleibt erhalten.
+            // Nicht-splittable Dateien werden weiterhin pfad-erhaltend kopiert.
             let files = collect_files_recursive(&base);
             if files.is_empty() { return Err("Keine Dateien im Dataset.".to_string()); }
-            let half = files.len() / 2;
-            for (i, f) in files.iter().enumerate() {
+            let mut whole_files: Vec<&PathBuf> = Vec::new();
+            let mut half_warnings: Vec<String> = Vec::new();
+            for f in &files {
+                let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if is_row_splittable(&ext) {
+                    // preserve: relative Struktur (z.B. train/, val/) in beiden Hälften
+                    // spiegeln — vorher landete alles flach im Root und die Hälften
+                    // verloren ihre Split-Struktur. preserve=false = bewusst flach.
+                    let rel_parent = if preserve {
+                        f.parent()
+                            .and_then(|p| p.strip_prefix(&base).ok())
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_default()
+                    } else {
+                        PathBuf::new()
+                    };
+                    let out_a = dir_a.join(&rel_parent);
+                    let out_b = dir_b.join(&rel_parent);
+                    // train_dir/val_dir Parameter zweckentfremdet als Haelfte A / Haelfte B,
+                    // test_dir wird nicht genutzt (ratio 0.5/0.5/0.0).
+                    let unused_test = std::env::temp_dir().join(format!("ft_unused_split_{}", uuid::Uuid::new_v4()));
+                    match split_row_file(f, &out_a, &out_b, &unused_test, 0.5, 0.5, 0.0, &mut half_warnings) {
+                        Ok(_) => {
+                            // Quelldatei bleibt absichtlich erhalten: Halbieren erzeugt zwei NEUE
+                            // Datasets (Kopie-Semantik, wie bei allen anderen Typen in dieser
+                            // Funktion) — das Original-Dataset bleibt unangetastet bestehen.
+                        }
+                        Err(e) => {
+                            half_warnings.push(format!("Zeilen-Split fuer '{}' fehlgeschlagen ({}), Datei wird als Ganzes kopiert.", f.file_name().unwrap_or_default().to_string_lossy(), e));
+                            whole_files.push(f);
+                        }
+                    }
+                    fs::remove_dir_all(&unused_test).ok();
+                } else {
+                    whole_files.push(f);
+                }
+            }
+            let half = whole_files.len() / 2;
+            for (i, f) in whole_files.iter().enumerate() {
                 let dst_root = if i < half { &dir_a } else { &dir_b };
-                let rel = f.strip_prefix(&base).unwrap_or(f.as_path());
-                let dst = dst_root.join(rel);
+                // preserve: Pfadstruktur erhalten; sonst flach ablegen (mit
+                // Kollisionsschutz, falls z.B. train/x.bin und val/x.bin existieren)
+                let dst = if preserve {
+                    let rel = f.strip_prefix(&base).unwrap_or(f.as_path());
+                    dst_root.join(rel)
+                } else {
+                    let fname = f.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let mut d = dst_root.join(&fname);
+                    if d.exists() {
+                        let prefix = f.parent()
+                            .and_then(|p| p.strip_prefix(&base).ok())
+                            .map(|p| p.to_string_lossy().replace('/', "_"))
+                            .unwrap_or_default();
+                        d = dst_root.join(format!("{}_{}", prefix, fname));
+                    }
+                    d
+                };
                 if let Some(p) = dst.parent() { fs::create_dir_all(p).ok(); }
                 fs::copy(f, &dst).ok();
             }
@@ -1078,8 +1474,39 @@ pub async fn split_dataset_in_half(
     let (sb, fb) = dir_size(&dir_b);
     let name_a = format!("{} (Haelfte 1)", ds.name);
     let name_b = format!("{} (Haelfte 2)", ds.name);
-    let ds_a = make_info(&id_a, &name_a, &model_id, "local", None, &dir_a, sa, fa, "unused", None, ds.dataset_type.clone(), None, vec![]);
-    let ds_b = make_info(&id_b, &name_b, &model_id, "local", None, &dir_b, sb, fb, "unused", None, ds.dataset_type, None, vec![]);
+
+    // Geerbte Split-Struktur → Hälfte ist direkt trainierbar (Status "split"
+    // + SplitInfo aus den tatsächlichen Datei-Zahlen der Split-Ordner).
+    let has_split_dirs = |dir: &Path| -> bool {
+        ["train", "val", "valid", "test"].iter().any(|s| dir.join(s).is_dir())
+    };
+    let count_split_info = |dir: &Path| -> SplitInfo {
+        let cnt = |s: &str| -> usize {
+            let d = dir.join(s);
+            if d.is_dir() { collect_files_recursive(&d).len() } else { 0 }
+        };
+        let train = cnt("train");
+        let val   = cnt("val") + cnt("valid");
+        let test  = cnt("test");
+        let tot   = (train + val + test).max(1) as f64;
+        SplitInfo {
+            train_count: train, val_count: val, test_count: test,
+            train_ratio: train as f64 / tot,
+            val_ratio:   val as f64 / tot,
+            test_ratio:  test as f64 / tot,
+        }
+    };
+    let inherited_a = preserve && has_split_dirs(&dir_a);
+    let inherited_b = preserve && has_split_dirs(&dir_b);
+
+    let ds_a = make_info(&id_a, &name_a, &model_id, "local", None, &dir_a, sa, fa,
+        if inherited_a { "split" } else { "unused" },
+        if inherited_a { Some(count_split_info(&dir_a)) } else { None },
+        ds.dataset_type.clone(), None, vec![]);
+    let ds_b = make_info(&id_b, &name_b, &model_id, "local", None, &dir_b, sb, fb,
+        if inherited_b { "split" } else { "unused" },
+        if inherited_b { Some(count_split_info(&dir_b)) } else { None },
+        ds.dataset_type, None, vec![]);
 
     let mut all = load_metadata(&datasets_dir);
     all.push(ds_a.clone());
@@ -1092,6 +1519,7 @@ pub async fn split_dataset_in_half(
 pub async fn get_dataset_files(
     app_handle: tauri::AppHandle, state: State<'_, AppState>, dataset_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
     let user_id      = get_user_id(&state)?;
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let dataset_dir  = datasets_dir.join(&dataset_id);
@@ -1140,12 +1568,21 @@ pub async fn move_dataset_files(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     dataset_id: String, file_paths: Vec<String>, target_split: String,
 ) -> Result<(), String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
+    if !matches!(target_split.as_str(), "train" | "val" | "test" | "unused") {
+        return Err(format!("Ungültiger Ziel-Split: {}", target_split));
+    }
     let user_id      = get_user_id(&state)?;
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let target_dir   = datasets_dir.join(&dataset_id).join(&target_split);
     fs::create_dir_all(&target_dir).map_err(|e| format!("mkdir: {}", e))?;
     for fp in &file_paths {
         let src = Path::new(fp);
+        if !src.exists() { continue; }
+        // Nur Dateien innerhalb des eigenen Datasets-Verzeichnisses verschieben
+        if !is_within_dir(src, &datasets_dir) {
+            return Err(format!("Pfad liegt außerhalb des Dataset-Ordners: {}", fp));
+        }
         if src.exists() && src.is_file() {
             let dst = target_dir.join(src.file_name().unwrap_or_default());
             if fs::rename(src, &dst).is_err() {
@@ -1162,6 +1599,7 @@ pub async fn add_files_to_dataset(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     dataset_id: String, file_paths: Vec<String>,
 ) -> Result<serde_json::Value, String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
     let user_id = get_user_id(&state)?;
     let dst = get_datasets_dir(&app_handle, &user_id)?.join(&dataset_id);
     fs::create_dir_all(&dst).ok();
@@ -1177,12 +1615,76 @@ pub async fn add_files_to_dataset(
 }
 
 #[tauri::command]
-pub async fn delete_dataset_files(file_paths: Vec<String>) -> Result<(), String> {
+pub async fn delete_dataset_files(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    file_paths: Vec<String>,
+) -> Result<(), String> {
+    // FIX Sicherheit: Vorher konnte hierüber JEDE Datei auf der Festplatte gelöscht
+    // werden. Jetzt nur noch Dateien innerhalb des eigenen Datasets-Verzeichnisses.
+    let user_id      = get_user_id(&state)?;
+    let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     for fp in &file_paths {
         let p = Path::new(fp);
-        if p.exists() { fs::remove_file(p).map_err(|e| format!("Delete: {}", e))?; }
+        if !p.exists() { continue; }
+        if !is_within_dir(p, &datasets_dir) {
+            return Err(format!("Pfad liegt außerhalb des Dataset-Ordners: {}", fp));
+        }
+        fs::remove_file(p).map_err(|e| format!("Delete: {}", e))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn preview_parquet_file(file_path: String, max_rows: Option<usize>) -> Result<serde_json::Value, String> {
+    use std::process::{Command, Stdio};
+    let path = Path::new(&file_path);
+    if !path.exists() { return Err(format!("Datei nicht gefunden: {}", file_path)); }
+    let limit = max_rows.unwrap_or(50).min(500);
+
+    let python_script = format!(r#"
+import sys, json
+import pandas as pd
+
+try:
+    df = pd.read_parquet(sys.argv[1])
+    total_rows = len(df)
+    total_cols = len(df.columns)
+    columns = [{{"name": str(c), "dtype": str(df[c].dtype)}} for c in df.columns]
+    preview = df.head({limit})
+    rows = json.loads(preview.to_json(orient="records", date_format="iso", default_handler=str))
+    print(json.dumps({{
+        "columns": columns,
+        "rows": rows,
+        "total_rows": total_rows,
+        "total_cols": total_cols,
+        "shown_rows": len(rows),
+    }}))
+except Exception as e:
+    print(json.dumps({{"error": str(e)}}), file=sys.stderr)
+    sys.exit(1)
+"#);
+
+    let python_cmd = if Command::new("python3").arg("--version").output().is_ok() { "python3" }
+        else if Command::new("python").arg("--version").output().is_ok() { "python" }
+        else { return Err("Python nicht gefunden — Parquet-Preview benötigt Python mit pandas/pyarrow.".to_string()); };
+
+    let output = Command::new(python_cmd)
+        .arg("-c").arg(&python_script).arg(&file_path)
+        .stdout(Stdio::piped()).stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Python spawn: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let user_error = serde_json::from_str::<serde_json::Value>(stderr.trim())
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+            .unwrap_or_else(|| stderr.trim().to_string());
+        return Err(format!("Parquet-Preview fehlgeschlagen: {}", user_error));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim()).map_err(|e| format!("JSON-Parse: {} (raw: {})", e, stdout.trim()))
 }
 
 #[tauri::command]
@@ -1586,6 +2088,7 @@ pub async fn get_dataset_yaml(
     state: State<'_, AppState>,
     dataset_id: String,
 ) -> Result<serde_json::Value, String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
     let user_id = get_user_id(&state)?;
     let dir     = get_datasets_dir(&app_handle, &user_id)?;
     let ds_dir  = dir.join(&dataset_id);
@@ -1654,6 +2157,7 @@ pub async fn save_dataset_yaml(
     val_path: String,
     names: Vec<String>,
 ) -> Result<String, String> {
+    if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
     let user_id  = get_user_id(&state)?;
     let dir      = get_datasets_dir(&app_handle, &user_id)?;
     let ds_dir   = dir.join(&dataset_id);

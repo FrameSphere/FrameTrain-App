@@ -18,6 +18,10 @@ src-tauri/WixTools/
 *.swo
 *~
 
+# Python
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 Thumbs.db

@@ -51,8 +51,13 @@ class IRTrainingSpec:
     learning_rate: float = 0.001
     weight_decay: float = 0.01
     optimizer: str = "adamw"
+    clip_grad: float = 1.0
     loss: str = "cross_entropy"
+    loss_reduction: str = "mean"
+    label_smoothing: float = 0.0
     scheduler: str = "cosine"
+    warmup_steps: int = 0
+    min_lr: float = 0.0
     num_classes: int = 10
     task_type: str = "classification"
     precision: str = "fp32"
@@ -67,8 +72,13 @@ class IRTrainingSpec:
             learning_rate=float(d.get("learningRate", d.get("learning_rate", 0.001))),
             weight_decay=float(d.get("weightDecay", d.get("weight_decay", 0.01))),
             optimizer=str(d.get("optimizer", "adamw")),
+            clip_grad=float(d.get("clipGrad", d.get("clip_grad", 1.0))),
             loss=str(d.get("loss", "cross_entropy")),
+            loss_reduction=str(d.get("lossReduction", d.get("loss_reduction", "mean"))),
+            label_smoothing=float(d.get("labelSmoothing", d.get("label_smoothing", 0.0))),
             scheduler=str(d.get("scheduler", "cosine")),
+            warmup_steps=int(d.get("warmupSteps", d.get("warmup_steps", 0))),
+            min_lr=float(d.get("minLr", d.get("min_lr", 0.0))),
             num_classes=int(d.get("numClasses", d.get("num_classes", 10))),
             task_type=str(d.get("taskType", d.get("task_type", "classification"))),
             precision=str(d.get("precision", "fp32")),

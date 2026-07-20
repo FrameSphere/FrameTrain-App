@@ -58,7 +58,22 @@ class ModelServer:
 
         cfg_file = self.model_path / "config.json"
         if not cfg_file.exists():
-            raise FileNotFoundError(f"Keine config.json in: {self.model_path}")
+            # Klare Diagnose statt nackter Meldung: Canvas-Modelle sind kein
+            # HF-Format und können hier grundsätzlich nicht geladen werden.
+            if (self.model_path / "graph_metadata.json").exists() or \
+               (self.model_path / "canvas_model.py").exists() or \
+               (self.model_path / "model.pt").exists():
+                raise FileNotFoundError(
+                    "Canvas-Modell: Lab-Inferenz unterstützt nur HuggingFace-"
+                    "Klassifikationsmodelle. Canvas-Modelle im Synapse Builder "
+                    "→ Inference-Tab testen."
+                )
+            found = ", ".join(sorted(p.name for p in self.model_path.iterdir())[:8]) or "(leer)"
+            raise FileNotFoundError(
+                f"Keine config.json in: {self.model_path}\n"
+                f"Vorhandene Dateien: {found}\n"
+                "Erwartet wird ein HuggingFace-Modellordner (config.json + Gewichte + Tokenizer)."
+            )
 
         with open(cfg_file, "r", encoding="utf-8") as f:
             model_cfg = json.load(f)

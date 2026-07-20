@@ -34,8 +34,7 @@ struct CredentialResponse {
 #[tauri::command]
 pub async fn validate_credentials(api_key: String, password: String) -> Result<ApiKeyValidation, String> {
     println!("🔐 validate_credentials called (via Backend API)");
-    println!("   API Key: {}...", &api_key.get(..10).unwrap_or(""));
-    println!("   Password length: {}", password.len());
+    // Hinweis: API-Key/Passwort werden bewusst NICHT geloggt.
 
     // 1. Prüfe API-Key Format (lokale Validierung für schnelles Feedback)
     if !api_key.starts_with("ft_") || api_key.len() < 24 {
@@ -87,6 +86,7 @@ pub async fn validate_credentials(api_key: String, password: String) -> Result<A
         .await
         .map_err(|e| format!("Fehler beim Lesen der Antwort: {}", e))?;
 
+    #[cfg(debug_assertions)]
     println!("   Response body: {}", response_text);
 
     let credential_response: CredentialResponse = serde_json::from_str(&response_text)

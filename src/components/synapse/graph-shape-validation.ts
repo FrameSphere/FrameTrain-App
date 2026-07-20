@@ -377,6 +377,10 @@ export function validateFullGraph(
   // VALIDATION 4: Numeric parameter flow (nur gültige Kanten)
   errors.push(...validateParameterFlow(nodes, validEdges));
 
+  // VALIDATION 4b: Effektive Shape-Propagation durch flexible Nodes
+  // (fängt z. B. dense → layernorm → attention: BD kommt effektiv bei BTC an)
+  errors.push(...validateShapeFlow(nodes, validEdges));
+
   // VALIDATION 5: Nicht verbundene Nodes (Connectivity)
   errors.push(...validateConnectivity(nodes, edges));
 
@@ -400,6 +404,118 @@ function outputFeatureSize(node: Node): number | undefined {
   if (type === "lstm") return Number(params.hiddenSize);
   if (type === "attention" || type === "transformer_block") return Number(params.embedDim);
   return undefined;
+}
+
+/**
+ * VALIDATION 4b: Effektive Shape-Propagation durch flexible Nodes.
+ *
+ * Die reine Kanten-Prüfung (VALIDATION 1) sieht Ketten wie
+ *   dense (BD) → layernorm (flexibel) → attention (BTC)
+ * nicht, weil layernorm die Shape nur durchreicht — effektiv kommt aber ein
+ * 2D-Tensor bei einem Layer an, der eine 3D-Sequenz braucht. Das entspricht
+ * exakt der Backend-Validierung ("outputs BD → expects BTC") und wird hier
+ * schon im Canvas gefangen, bevor das Training startet.
+ */
+const SHAPE_RESETTING_TYPES = new Set([
+  "reshape", "transpose", "pool", "split_node", "merge", "matmul",
+]);
+
+// Nur Ziel-Typen prüfen, deren Shape-Anforderung sicher mit der
+// Backend-Validierung (shape_propagate.py) übereinstimmt. batchnorm ist
+// bewusst NICHT dabei (Frontend: BHWC, Backend: BD — würde False-Positives geben).
+const SHAPE_FLOW_CHECKED_TARGETS = new Set([
+  "attention", "transformer_block", "lstm", "embedding", "conv2d",
+]);
+
+export function validateShapeFlow(nodes: Node[], edges: Edge[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+  // Topologische Reihenfolge (Kahn) — Zyklen meldet detectCycles separat,
+  // zyklische Nodes fallen hier einfach aus der Betrachtung.
+  const inDeg: Record<string, number> = {};
+  const adj: Record<string, string[]> = {};
+  nodes.forEach((n) => { inDeg[n.id] = 0; adj[n.id] = []; });
+  validEdges.forEach((e) => { inDeg[e.target]++; adj[e.source].push(e.target); });
+  const queue = nodes.filter((n) => inDeg[n.id] === 0).map((n) => n.id);
+  const topo: string[] = [];
+  while (queue.length) {
+    const id = queue.shift()!;
+    topo.push(id);
+    adj[id].forEach((nb) => { if (--inDeg[nb] === 0) queue.push(nb); });
+  }
+
+  const incoming: Record<string, string[]> = {};
+  validEdges.forEach((e) => { (incoming[e.target] ??= []).push(e.source); });
+
+  // Effektive Output-Shape je Node ("Variable" = unbekannt/beliebig)
+  // + Herkunfts-Node der Shape für verständliche Fehlermeldungen.
+  const eff: Record<string, string> = {};
+  const effOrigin: Record<string, string> = {};
+
+  const nodeLabel = (id: string): string => {
+    const n = nodeMap.get(id);
+    const d = n?.data as Record<string, unknown> | undefined;
+    const def = d?._def as { label?: string } | undefined;
+    return String(d?.label ?? def?.label ?? id);
+  };
+
+  for (const id of topo) {
+    const node = nodeMap.get(id)!;
+    const type = getSynapseNodeType(node);
+    const meta = LAYER_SHAPE_METADATA[type];
+
+    if (SHAPE_RESETTING_TYPES.has(type)) {
+      eff[id] = "Variable"; // ändert die Form bewusst — Ergebnis unbekannt
+      continue;
+    }
+
+    const concreteInputs = (incoming[id] ?? [])
+      .map((src) => ({ src, shape: eff[src] ?? "Variable" }))
+      .filter((x) => !x.shape.includes("Variable"));
+
+    if (meta && !meta.flexible) {
+      for (const { src, shape } of concreteInputs) {
+        if (!SHAPE_FLOW_CHECKED_TARGETS.has(type)) continue;
+        // Starre Quelle → starre Senke prüft bereits validateEdgeConnection;
+        // hier geht es nur um Shapes, die durch flexible Nodes durchgereicht wurden.
+        const srcMeta = LAYER_SHAPE_METADATA[getSynapseNodeType(nodeMap.get(src)!)];
+        const directlyChecked = !!srcMeta && !srcMeta.flexible;
+        if (directlyChecked || isShapeCompatible(shape, meta.inputShape)) continue;
+
+        const originId = effOrigin[src];
+        const origin = originId && originId !== src ? ` (Shape stammt von „${nodeLabel(originId)}" / ${originId})` : "";
+        const isRankMismatch = shape === "BD" && meta.inputShape === "BTC";
+        errors.push({
+          type: ValidationErrorType.SHAPE_MISMATCH,
+          severity: "error",
+          sourceNodeId: src,
+          targetNodeId: id,
+          message: isRankMismatch
+            ? `${type} „${id}" braucht eine 3D-Sequenz [Batch, Time, Channels], bekommt über „${src}" aber effektiv 2D [Batch, Features]${origin}`
+            : `${type} „${id}" erwartet ${meta.inputShape}, bekommt über „${src}" aber effektiv ${shape}${origin}`,
+          suggestion: isRankMismatch
+            ? `set_param kann das NICHT beheben (Rang-Problem, keine Größenfrage). Entweder: reshape-Node zwischen „${src}" und „${id}" einfügen und set_param(reshape, "shape", "1, <features>") — oder „${id}" per remove_node entfernen und die Kette mit Dense-Layern fortsetzen (nach Dense empfohlen).`
+            : `reshape/transpose zwischen „${src}" und „${id}" einfügen oder die Verbindung ändern`,
+          details: { effectiveShape: shape, expectedShape: meta.inputShape, rankMismatch: isRankMismatch },
+        });
+      }
+      eff[id] = meta.outputShape;
+      effOrigin[id] = id;
+    } else {
+      // flexibel/unbekannt: erste konkrete eingehende Shape durchreichen
+      if (concreteInputs.length > 0) {
+        eff[id] = concreteInputs[0].shape;
+        effOrigin[id] = effOrigin[concreteInputs[0].src] ?? concreteInputs[0].src;
+      } else {
+        eff[id] = "Variable";
+      }
+    }
+  }
+
+  return errors;
 }
 
 /**
@@ -614,7 +730,7 @@ export function printValidationReport(
 
 Nodes: ${nodes.length}
 Edges: ${edges.length}
-Valid: ${valid ? "✅ YES" : "❌ NO"}
+Valid: ${valid ? "YES" : "NO"}
 
 ${
   errors.length === 0

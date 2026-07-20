@@ -123,6 +123,23 @@ fn get_python_executable() -> String {
     "python3".to_string()
 }
 
+/// Prueft ob eine installierte Version eine Obergrenze ueberschreitet (z.B. numpy < 2.0.0).
+/// Simpler Parser fuer "major.minor.patch" Versions-Strings.
+fn version_exceeds_max(version: &str, max_major: u32, max_minor: u32) -> bool {
+    let parts: Vec<u32> = version.split('.')
+        .filter_map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+        .collect();
+    let major = parts.first().copied().unwrap_or(0);
+    let minor = parts.get(1).copied().unwrap_or(0);
+    major > max_major || (major == max_major && minor >= max_minor)
+}
+
+/// Pakete mit harten Obergrenzen die trotz erfolgreichem Import erzwungen werden muessen.
+/// (package, max_major, max_minor) -- "< max_major.max_minor"
+const VERSION_CEILINGS: &[(&str, u32, u32)] = &[
+    ("numpy", 2, 0),
+];
+
 fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
     let import_name = match package {
         "scikit-learn"    => "sklearn",
@@ -130,6 +147,9 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
         "pillow"          => "PIL",
         other             => other,
     };
+    // Nicht nur Metadaten lesen, sondern auch echten Import versuchen.
+    // Faengt binaere Inkompatibilitaeten ab (z.B. numpy/pandas ABI-Mismatch),
+    // die importlib.metadata nicht erkennt weil das Paket "installiert" aber kaputt ist.
     let check = Command::new(python)
         .args(["-c", &format!(
             "import importlib.metadata, {}; print(importlib.metadata.version('{}'))",
@@ -139,7 +159,26 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
     match check {
         Ok(out) if out.status.success() => {
             let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // Versions-Obergrenze pruefen: z.B. numpy>=2.0 gilt als "nicht korrekt installiert",
+            // weil andere Pakete (pandas etc.) noch gegen numpy<2.0 kompiliert sein koennen.
+            // Ein erfolgreicher eigener Import reicht hier nicht -- die Versionsnummer entscheidet.
+            if let Some(&(_, max_major, max_minor)) = VERSION_CEILINGS.iter().find(|(p, _, _)| *p == package) {
+                if version_exceeds_max(&version, max_major, max_minor) {
+                    eprintln!("[Deps] {} Version {} ueberschreitet Obergrenze {}.{} -- wird neu installiert",
+                        package, version, max_major, max_minor);
+                    return DependencyStatus { package: package.to_string(), installed: false, version: Some(version) };
+                }
+            }
             DependencyStatus { package: package.to_string(), installed: true, version: Some(version) }
+        }
+        Ok(out) => {
+            // Import ist fehlgeschlagen -- Paket gilt als nicht (korrekt) installiert,
+            // damit install_plugins es per --force-reinstall neu installiert.
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if stderr.contains("binary incompatibility") || stderr.contains("dtype size changed") {
+                eprintln!("[Deps] {} hat ABI-Konflikt (numpy/pandas Mismatch) -- wird neu installiert", package);
+            }
+            DependencyStatus { package: package.to_string(), installed: false, version: None }
         }
         _ => DependencyStatus { package: package.to_string(), installed: false, version: None },
     }
@@ -236,9 +275,9 @@ fn get_free_disk_gb() -> f64 {
     // Wir nutzen ein Python-Einzeiler weil cross-platform sys-Crate nicht im Projekt ist
     let python = get_python_executable();
     let script = if cfg!(target_os = "windows") {
-        r#"import shutil,os; s=shutil.disk_usage(os.environ.get('USERPROFILE','C:\')); print(s.free/1e9)""".to_string()
+        "import shutil,os; s=shutil.disk_usage(os.environ.get('USERPROFILE','C:\\\\')); print(s.free/1e9)".to_string()
     } else {
-        r#"import shutil,os; s=shutil.disk_usage(os.path.expanduser('~')); print(s.free/1e9)"".to_string()
+        "import shutil,os; s=shutil.disk_usage(os.path.expanduser('~')); print(s.free/1e9)".to_string()
     };
     if let Ok(out) = Command::new(&python).args(["-c", &script]).output() {
         if out.status.success() {
@@ -353,6 +392,19 @@ fn torch_install_args(gpu: &GpuInfo) -> Vec<String> {
         // CPU oder MPS (macOS) — normaler PyPI-Torch
         vec!["torch".to_string(), "torchvision".to_string(), "torchaudio".to_string()]
     }
+}
+
+/// Prüft ob torchvision/torchaudio (falls installiert) zur torch-Version passen.
+/// Inkompatible Kombinationen (z. B. nach torch-Update ohne Begleitpakete)
+/// crashen sonst später beim transformers-Import mit
+/// "operator torchvision::nms does not exist".
+fn torch_ecosystem_broken(python: &str) -> bool {
+    let check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
+    Command::new(python)
+        .args(["-c", check])
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(false)
 }
 
 /// Prüft ob torch bereits mit korrekter CUDA-Unterstützung installiert ist
@@ -492,7 +544,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
     verify_python_available()?;
     let python = get_python_executable();
-    let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn", "numpy", "accelerate", "ultralytics"];
+    let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn", "numpy", "pandas", "pyarrow", "accelerate", "ultralytics"];
     let status: Vec<DependencyStatus> = packages.iter().map(|p| check_package_installed(&python, p)).collect();
     let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
     if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
@@ -507,11 +559,7 @@ pub async fn check_first_launch() -> Result<bool, String> {
     let json = std::fs::read_to_string(&path).map_err(|e| format!("Settings lesen: {}", e))?;
     let settings: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Settings parsen: {}", e))?;
     let completed = settings["first_launch_completed"].as_bool().unwrap_or(false);
-    if !completed { return Ok(true); }
-    let python = get_python_executable();
-    let core = ["torch", "transformers", "datasets", "huggingface_hub"];
-    if !core.iter().all(|p| check_package_installed(&python, p).installed) { return Ok(true); }
-    Ok(false)
+    Ok(!completed)
 }
 
 #[tauri::command]
@@ -538,8 +586,12 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
 
     // --- Schritt 1: Paketliste aufbauen ---
     // Torch wird separat behandelt (GPU-aware), daher hier raus
+    // pandas/pyarrow: immer installiert, werden für Dataset-Vorschau (Parquet-Preview)
+    // und generelle Dataset-Verarbeitung gebraucht, unabhängig vom gewählten Plugin.
     let mut packages: Vec<(&'static str, &'static str)> = vec![
         ("numpy",           "NumPy"),
+        ("pandas",          "Pandas"),
+        ("pyarrow",         "PyArrow (Parquet)"),
     ];
     if plugin_ids.iter().any(|id| id == "seq_classification") || plugin_ids.is_empty() {
         packages.extend([
@@ -606,8 +658,10 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
         // Prüfe ob Torch Reinstall nötig (CPU-Torch aber NVIDIA-GPU vorhanden)
         let torch_status = check_package_installed(&python, "torch");
         let needs_reinstall = torch_status.installed && torch_needs_reinstall(&python, &gpu_info);
+        // torch da, aber torchvision/torchaudio passen nicht zur torch-Version
+        let ecosystem_broken = torch_status.installed && torch_ecosystem_broken(&python);
 
-        if torch_status.installed && !needs_reinstall {
+        if torch_status.installed && !needs_reinstall && !ecosystem_broken {
             emit_progress(
                 &window,
                 &format!("PyTorch bereits vorhanden ({}) ✓",
@@ -616,7 +670,7 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                 pct(step + 1),
             );
         } else {
-            // Torch installieren (oder neu installieren für CUDA)
+            // Torch installieren (oder neu installieren für CUDA / Versionskonflikt)
             let mut torch_cmd_args = vec!["-m".to_string(), "pip".to_string(),
                 "install".to_string(), "--quiet".to_string()];
             if needs_reinstall {
@@ -624,6 +678,16 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                 emit_progress(
                     &window,
                     "PyTorch wird für CUDA neu installiert...",
+                    "installing_package",
+                    pct(step),
+                );
+            } else if ecosystem_broken {
+                // --upgrade nötig: sonst meldet pip "already satisfied" und lässt
+                // die inkompatiblen torchvision/torchaudio-Versionen stehen
+                torch_cmd_args.push("--upgrade".to_string());
+                emit_progress(
+                    &window,
+                    "torchvision/torchaudio passen nicht zur torch-Version — werden aktualisiert...",
                     "installing_package",
                     pct(step),
                 );
@@ -691,6 +755,8 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                 "huggingface_hub" => "huggingface_hub>=0.19.0",
                 "scikit-learn"    => "scikit-learn>=1.3.0",
                 "numpy"           => "numpy>=1.24.0,<2.0.0",
+                "pandas"          => "pandas>=2.0.0,<2.2.0",  // kompatibel zu numpy<2.0
+                "pyarrow"         => "pyarrow>=14.0.0",
                 "accelerate"      => "accelerate>=0.24.0",
                 "ultralytics"     => "ultralytics>=8.0.0",
                 "pillow"          => "pillow>=9.0.0",
@@ -836,24 +902,25 @@ pub async fn run_yolo_inference(
 ) -> Result<YoloInferenceResult, String> {
     let python = get_python_executable();
 
-    // Inline-Script: gibt JSON auf stdout aus
-    let script = format!(r#"
+    // FIX Sicherheit: Pfade werden als sys.argv übergeben statt in den Python-Code
+    // interpoliert zu werden (vorher: Code-Injection / Crash bei Anführungszeichen im Pfad).
+    let script = r#"
 import sys, json, time
 
 try:
     from ultralytics import YOLO
     import os
 
-    model_path  = r"{}"
-    image_path  = r"{}"
-    conf        = {:.4}
-    iou         = {:.4}
+    model_path  = sys.argv[1]
+    image_path  = sys.argv[2]
+    conf        = float(sys.argv[3])
+    iou         = float(sys.argv[4])
 
     if not os.path.exists(model_path):
-        print(json.dumps({{"error": f"Modell nicht gefunden: {{model_path}}"}}))
+        print(json.dumps({"error": f"Modell nicht gefunden: {model_path}"}))
         sys.exit(1)
     if not os.path.exists(image_path):
-        print(json.dumps({{"error": f"Bild nicht gefunden: {{image_path}}"}}))
+        print(json.dumps({"error": f"Bild nicht gefunden: {image_path}"}))
         sys.exit(1)
 
     model = YOLO(model_path)
@@ -872,36 +939,35 @@ try:
             label  = names.get(cls_id, str(cls_id))
             conf_v = float(box.conf[0].item())
             xyxy   = box.xyxy[0].tolist()
-            detections.append({{
+            detections.append({
                 "label":      label,
                 "confidence": conf_v,
                 "bbox":       xyxy,
-            }})
+            })
 
-    print(json.dumps({{
+    print(json.dumps({
         "detections":        detections,
         "inference_time_ms": elapsed_ms,
         "image_path":        image_path,
-    }}))
+    }))
 
 except ImportError:
-    print(json.dumps({{"error": "ultralytics ist nicht installiert. Installiere es über den First-Launch-Setup."}}))
+    print(json.dumps({"error": "ultralytics ist nicht installiert. Installiere es über den First-Launch-Setup."}))
     sys.exit(1)
 except Exception as e:
-    print(json.dumps({{"error": str(e)}}))
+    print(json.dumps({"error": str(e)}))
     sys.exit(1)
-"#,
-        model_path.replace('\\', "/"),
-        image_path.replace('\\', "/"),
-        conf_threshold,
-        iou_threshold,
-    );
+"#;
 
-    let tmp_path = std::env::temp_dir().join("ft_yolo_infer.py");
+    let tmp_path = std::env::temp_dir().join(format!("ft_yolo_infer_{}.py", uuid::Uuid::new_v4()));
     std::fs::write(&tmp_path, &script).map_err(|e| format!("Script schreiben: {}", e))?;
 
     let out = Command::new(&python)
         .arg(tmp_path.to_string_lossy().to_string())
+        .arg(&model_path)
+        .arg(&image_path)
+        .arg(format!("{:.4}", conf_threshold))
+        .arg(format!("{:.4}", iou_threshold))
         .output()
         .map_err(|e| format!("Python spawn: {}", e))?;
 

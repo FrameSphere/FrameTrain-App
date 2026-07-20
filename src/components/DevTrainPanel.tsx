@@ -22,6 +22,8 @@ import { callAI, LossChart } from './TrainingPanel';
 import TrainingDashboard from './TrainingDashboard';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
+import { sendAppErrorReport } from '../utils/errorReport';
+import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
 import DiffViewer from './DiffViewer';
 
 // ── Script Library ────────────────────────────────────────────────────────
@@ -83,9 +85,10 @@ function analyzeError(errorMsg: string): {
     return { category: 'cuda', icon: '⚙️' };
   if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
     return { category: 'dataset', icon: '📁' };
-  if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module named'))
+  if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module named')
+      || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
     return { category: 'packages', icon: '📦' };
-  if (e.includes('nan') || e.includes('inf') || e.includes('gradient') || e.includes('loss'))
+  if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
     return { category: 'config', icon: '📊' };
   if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror') || e.includes('nameerror'))
     return { category: 'code', icon: '🐛' };
@@ -549,6 +552,8 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   const [currentMessageWithEdits, setCurrentMessageWithEdits] = useState<AiMessage | null>(null);
   const [isApplyingEdits, setIsApplyingEdits] = useState(false);
   const [appliedEdits, setAppliedEdits] = useState<AppliedEditInfo[]>([]);
+  // Text der letzten fehlgeschlagenen Anfrage — für "Erneut senden"
+  const [retryText, setRetryText] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const lastPrefillRef = useRef<string>('');
 
@@ -611,6 +616,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
     setCurrentMessageWithEdits(null);
     setIsReadonly(false);
     setShowHistory(false);
+    setRetryText(null);
     onClearHighlights?.();
   };
 
@@ -622,6 +628,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
     setCurrentMessageWithEdits(null);
     setIsReadonly(true);
     setShowHistory(false);
+    setRetryText(null);
     onClearHighlights?.();
   };
 
@@ -701,21 +708,31 @@ ANFORDERUNGEN:
     t('devTrainPanel.aiSidebar.suggestions.performance'),
   ];
 
-  const send = async () => {
-    if (!input.trim() || loading || isReadonly) return;
-    const userMsg: AiMessage = { role: 'user', content: input.trim() };
+  const send = async (retryText?: string) => {
+    const isRetry = typeof retryText === 'string';
+    const text = (isRetry ? retryText : input).trim();
+    if (!text || loading || isReadonly) return;
+    const userMsg: AiMessage = { role: 'user', content: text };
     // Session-Titel beim ersten User-Message setzen
-    if (messages.length === 0) {
-      const title = makeSessionTitle(input.trim());
+    if (!isRetry && messages.length === 0) {
+      const title = makeSessionTitle(text);
       setSessionTitle(title);
       const sessions = loadChatSessions();
       const idx = sessions.findIndex(s => s.id === currentSessionIdRef.current);
       if (idx >= 0) { sessions[idx].title = title; saveChatSessions(sessions); }
     }
-    setMessages(m => [...m, userMsg]); setInput(''); setLoading(true);
+    // Retry: letzte (Fehler-)Antwort entfernen — User-Nachricht ist schon im Verlauf
+    const base = isRetry && messages[messages.length - 1]?.role === 'assistant'
+      ? messages.slice(0, -1)
+      : messages;
+    const withUser = isRetry ? base : [...base, userMsg];
+    setMessages(withUser);
+    if (!isRetry) setInput('');
+    setRetryText(null);
+    setLoading(true);
 
     try {
-      const history = [...messages, userMsg].map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      const history = withUser.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
       const last = history.pop()!;
       const response = await callAI(aiSettings, systemPrompt, last.content, history, language);
 
@@ -727,6 +744,7 @@ ANFORDERUNGEN:
       setMessages(m => [...m, { role: 'assistant', content: finalContent, edits, action }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', content: `Fehler: ${String(err)}` }]);
+      setRetryText(text);
     } finally { setLoading(false); }
   };
 
@@ -1062,6 +1080,16 @@ ANFORDERUNGEN:
               </div>
             </div>
           )}
+          {retryText && !loading && (
+            <div className="pl-8">
+              <button
+                onClick={() => send(retryText)}
+                className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-[10px] font-medium transition-all"
+              >
+                {t('aiCoach.retryButton')}
+              </button>
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 
@@ -1125,7 +1153,7 @@ ANFORDERUNGEN:
                 isReadonly ? 'opacity-40 cursor-not-allowed' : ''
               }`}
             />
-            <button onClick={send} disabled={!input.trim() || loading || isReadonly}
+            <button onClick={() => send()} disabled={!input.trim() || loading || isReadonly}
               className="p-2.5 rounded-xl border transition-all disabled:opacity-40 bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/30 text-purple-200">
               <Send className="w-4 h-4" />
             </button>
@@ -1173,6 +1201,8 @@ interface DevTrainPanelProps {
 }
 
 export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets, onNavigateToAnalysis, userData }: DevTrainPanelProps) {
+  // Globale Legacy-Scripts einmalig in den User-Key übernehmen
+  useEffect(() => { migrateLegacyDevScripts(userData?.userId); }, [userData?.userId]);
   const { currentTheme } = useTheme();
   const { success, error }      = useNotification();
   const { settings: aiSettings } = useAISettings();
@@ -1544,18 +1574,35 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   useEffect(() => {
     let u1: (() => void) | undefined, u2: (() => void) | undefined, u3: (() => void) | undefined, u4: (() => void) | undefined;
 
-    listen<{ data: Partial<TrainingProgress> }>('training-progress', e => {
+    // Watchdog löschen sobald das Backend lebt — sonst würde ein Training,
+    // das länger als 5 Minuten läuft, fälschlich als "failed" markiert.
+    const clearWatchdog = () => {
+      if ((window as any).__devTrainingTimeout) {
+        clearTimeout((window as any).__devTrainingTimeout);
+        delete (window as any).__devTrainingTimeout;
+      }
+    };
+
+    // Normale Trainings (TrainingPanel) emittieren dieselben Event-Namen —
+    // hier nur auf die eigenen Dev-Jobs (job_id "dev_…") reagieren.
+    const isDevJob = (jobId?: string) => jobId?.startsWith('dev_') ?? false;
+
+    listen<{ job_id?: string; data: Partial<TrainingProgress> }>('training-progress', e => {
+      if (!isDevJob(e.payload.job_id)) return;
+      clearWatchdog();
       const d = e.payload.data;
       if (d.train_loss != null) setLoss(pts => [...pts, { step: d.step ?? pts.length, epoch: d.epoch ?? 0, train_loss: d.train_loss!, val_loss: d.val_loss ?? undefined }]);
       setJob(j => j ? { ...j, status: 'running', progress: { ...j.progress, ...d } as TrainingProgress } : null);
     }).then(fn => { u1 = fn; });
 
     listen<{ line: string }>('dev-training-output', e => {
+      clearWatchdog();
       setOutput(o => o + e.payload.line + '\n');
       setTimeout(() => outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight }), 50);
     }).then(fn => { u2 = fn; });
 
-    listen('training-complete', () => {
+    listen<{ job_id?: string }>('training-complete', e => {
+      if (!isDevJob(e.payload?.job_id)) return;
       // Timeout bereinigen
       if ((window as any).__devTrainingTimeout) {
         clearTimeout((window as any).__devTrainingTimeout);
@@ -1567,7 +1614,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       invoke('disable_prevent_sleep').catch(() => {});
     }).then(fn => { u3 = fn; });
 
-    listen<{ data?: { error?: string; details?: string } }>('training-error', e => {
+    listen<{ job_id?: string; data?: { error?: string; details?: string } }>('training-error', e => {
+      if (!isDevJob(e.payload.job_id)) return;
       const d = e.payload.data;
       // Timeout bereinigen
       if ((window as any).__devTrainingTimeout) {
@@ -1604,12 +1652,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       return;
     }
     if (!script.trim() || !modelInfo) { error('Fehler', 'Kein Modell ausgewählt oder Skript leer.'); return; }
-    
-    // DEBUG: Log what we're actually sending
-    console.log('🔥 DEBUG: Script das gesendet wird:');
-    console.log(script);
-    console.log('🔥 DEBUG: Script-Länge:', script.length);
-    
+
     setRunning(true); setOutput(''); setLoss([]);
 
     const refs: Record<string, string> = {
@@ -1658,12 +1701,15 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   };
 
   const handleStop = async () => {
-    try { 
-      await invoke('stop_training'); 
+    try {
+      // Dev-Training hat einen eigenen Stop-Command (stop_training kennt den Dev-Prozess nicht)
+      await invoke('stop_dev_training');
     } catch { /* ignore */ }
     invoke('disable_prevent_sleep').catch(() => {});
-    setRunning(false); 
-    setJob(null);
+    setRunning(false);
+    // Status "stopped" statt null — so zeigt das Dashboard sauber "Gestoppt"
+    // an, statt in einen leeren Zustand zu springen
+    setJob(j => (j ? { ...j, status: 'stopped' } : null));
     setOutput(o => o + '\n' + t('devTrainPanel.progress.trainingStopped'));
     
     // Clear timeout wenn vorhanden
@@ -1679,29 +1725,18 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
     try {
       const analysis = analyzeError(errorMessage);
       const categoryKey = `devTrainPanel.errorModal.errorCategories.${analysis.category}`;
-      const response = await fetch(
-        'https://webcontrol-hq-api.karol-paschek.workers.dev/api/app-errors',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            site_id: 'frametrain',
-            error_type: analysis.category === 'code' ? 'devtrain:code' : `devtrain:${analysis.category}`,
-            title: errorTitle || 'Dev Train Fehler',
-            message: errorMessage,
-            details: errorDetails,
-            logs: output,           // Alle Output-Logs
-            script_full: script,     // Komplettes Skript
-            error_analysis: analysis.category,
-            error_category: t(`${categoryKey}.title`),
-            platform: navigator.platform || 'unknown',
-            app_version: 'desktop-app',
-            timestamp: new Date().toISOString(),
-          }),
-        }
-      );
-      
-      if (response.ok) {
+      const ok = await sendAppErrorReport({
+        error_type: `devtrain:${analysis.category}`,
+        title: errorTitle || 'Dev Train Fehler',
+        message: errorMessage,
+        details: errorDetails,
+        logs: output,           // Alle Output-Logs
+        script_full: script,    // Komplettes Skript
+        error_analysis: analysis.category,
+        error_category: t(`${categoryKey}.title`),
+      });
+
+      if (ok) {
         success('Gesendet!', 'Fehler wurde an FrameTrain Team gesendet. Danke!');
         // Modal bleibt offen - Nutzer kann weiter Optionen nutzen
       } else {

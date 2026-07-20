@@ -80,6 +80,17 @@ fn clear_config(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Liest die config.json eines lokalen Modell-Ordners (für Plugin-Auto-Erkennung im Frontend).
+#[tauri::command]
+fn read_model_config(model_path: String) -> Result<String, String> {
+    let p = std::path::Path::new(&model_path);
+    let cfg = if p.is_dir() { p.join("config.json") } else { p.to_path_buf() };
+    if !cfg.exists() {
+        return Err("config.json nicht gefunden".to_string());
+    }
+    fs::read_to_string(&cfg).map_err(|e| format!("Lesen: {}", e))
+}
+
 #[tauri::command]
 fn force_quit_app(app_handle: tauri::AppHandle) {
     println!("[App] Force quit requested by user");
@@ -144,6 +155,7 @@ fn main() {
             verify_api_key,
             save_config,
             load_config,
+            read_model_config,
             get_app_data_dir,
             clear_config,
             force_quit_app,
@@ -156,6 +168,7 @@ fn main() {
             model_manager::list_models,
             model_manager::import_local_model,
             model_manager::delete_model,
+            model_manager::rename_model,
             model_manager::get_model_info,
             model_manager::validate_model_directory,
             model_manager::get_directory_size,
@@ -176,6 +189,7 @@ fn main() {
             dataset_manager::get_dataset_filter_options,
             dataset_manager::get_dataset_files,
             dataset_manager::read_dataset_file,
+            dataset_manager::preview_parquet_file,
             dataset_manager::move_dataset_files,
             dataset_manager::delete_dataset_files,
             dataset_manager::add_files_to_dataset,
@@ -189,7 +203,11 @@ fn main() {
             training_manager::rate_training_config,
             training_manager::start_training,
             training_manager::stop_training,
+            training_manager::list_active_trainings,
             dev_trainer::start_dev_training,
+            dev_trainer::stop_dev_training,
+            dev_trainer::start_dev_test,
+            dev_trainer::stop_dev_test,
             training_manager::register_synapse_training_version,
             training_manager::create_canvas_network_model,
             training_manager::update_canvas_network_model,

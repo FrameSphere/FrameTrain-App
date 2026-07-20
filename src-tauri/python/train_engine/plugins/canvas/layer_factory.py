@@ -54,7 +54,11 @@ def is_op_node(node_type: str) -> bool:
 def create_layer(node_type: str, params: Dict[str, Any]) -> Optional[nn.Module]:
     p = params or {}
     if node_type == "dense":
-        return nn.Linear(_int(p.get("inputSize"), 128), _int(p.get("outputSize"), 256))
+        return nn.Linear(
+            _int(p.get("inputSize"), 128),
+            _int(p.get("outputSize"), 256),
+            bias=_bool(p.get("bias"), True),
+        )
     if node_type == "conv2d":
         pad = p.get("padding", 1)
         if pad == "same":
@@ -103,11 +107,20 @@ def create_layer(node_type: str, params: Dict[str, Any]) -> Optional[nn.Module]:
             norm_first=True,
         )
     if node_type == "layernorm":
-        return nn.LayerNorm(_int(p.get("normalizedShape"), 512), eps=_float(p.get("eps"), 1e-5))
+        return nn.LayerNorm(
+            _int(p.get("normalizedShape"), 512),
+            eps=_float(p.get("eps"), 1e-5),
+            elementwise_affine=_bool(p.get("affine"), True),
+        )
     if node_type == "batchnorm":
-        return nn.BatchNorm1d(_int(p.get("numFeatures"), 64))
+        return nn.BatchNorm1d(
+            _int(p.get("numFeatures"), 64),
+            eps=_float(p.get("eps"), 1e-5),
+            momentum=_float(p.get("momentum"), 0.1),
+            affine=_bool(p.get("affine"), True),
+        )
     if node_type == "dropout":
-        return nn.Dropout(p=_float(p.get("p"), 0.1))
+        return nn.Dropout(p=_float(p.get("p"), 0.1), inplace=_bool(p.get("inplace")))
     if node_type == "relu":
         return nn.ReLU(inplace=_bool(p.get("inplace")))
     if node_type == "gelu":

@@ -1,0 +1,11 @@
+{
+  "task_type": "image_classification",
+  "name": "Image Classification (torchvision)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "ImageClassificationPlugin",
+  "description": "Transfer Learning fuer Bildklassifikation via ResNet, EfficientNet, ViT, MobileNet. Erwartet Ordner-pro-Klasse-Struktur (ImageFolder).",
+  "supported_architectures": ["resnet18", "resnet50", "efficientnet_b0", "efficientnet_b4", "vit_b_16", "mobilenet_v3_small", "mobilenet_v3_large"],
+  "dataset_formats": ["folder_class", "pre_split"],
+  "metrics": ["train_loss", "val_loss", "accuracy", "top5_accuracy"]
+}

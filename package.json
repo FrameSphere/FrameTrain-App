@@ -1,15 +1,15 @@
 {
   "name": "frametrain-desktop",
   "private": true,
-  "version": "1.2.6",
+  "license": "UNLICENSED",
+  "version": "1.2.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "changelog:prepare": "node scripts/changelog-context.mjs"
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

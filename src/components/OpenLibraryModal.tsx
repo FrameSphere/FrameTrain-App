@@ -13,7 +13,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 // ── API ───────────────────────────────────────────────────────────────────
 
-const API_BASE = 'https://frame-train.vercel.app/api/library';
+const API_BASE = 'https://frame-train.com/api/library';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -366,7 +366,7 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       
       try {
         // First try to load from backend
-        const backendRes = await fetch(`https://frame-train.vercel.app/api/user/community-name?userId=${userData.userId}`);
+        const backendRes = await fetch(`https://frame-train.com/api/user/community-name?userId=${userData.userId}`);
         if (backendRes.ok) {
           const data = await backendRes.json();
           if (data.communityName) {
@@ -417,7 +417,7 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
   // Helper: Aktualisiere User.communityName (alle Scripts werden automatisch aktualisiert)
   const updateUserScriptsWithNewAuthor = async (newName: string): Promise<void> => {
     try {
-      const response = await fetch(`https://frame-train.vercel.app/api/user/community-name`, {
+      const response = await fetch(`https://frame-train.com/api/user/community-name`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: userData?.userId, communityName: newName }),

@@ -10,16 +10,15 @@ import xlmRobertaPlugin from './xlm-roberta';
 import hfEncoderPlugin from './hf-encoder';
 import canvasPlugin from './canvas';
 import yoloPlugin from './yolo';
+import imageClassificationPlugin from './image-classification';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
-  canvasPlugin,       // Canvas Neural Net (Synapse Builder) — muss vor generischen Plugins stehen
-  yoloPlugin,         // YOLO Object Detection (YOLOv5/v8/v9/v11)
+  canvasPlugin,              // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
+  yoloPlugin,                // YOLO Object Detection (YOLOv5/v8/v9/v11)
+  imageClassificationPlugin, // ResNet / EfficientNet / ViT / MobileNet
   xlmRobertaPlugin,
   hfEncoderPlugin,
-  // Zukünftige Plugins hier eintragen:
-  // whisperPlugin,
-  // mistralPlugin,
 ];
 
 export type DetectionResult =

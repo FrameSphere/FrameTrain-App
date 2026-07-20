@@ -16,6 +16,7 @@ import {
   type SynapseAIMessage,
 } from "./synapseAIStorage";
 import type { AffectedNodeInfo } from "./synapseShapeDiagnostics";
+import GradientChatInput from "../../ui/GradientChatInput";
 import "./synapseAIPanel.css";
 
 function formatChatDate(ts: number): string {
@@ -52,9 +53,16 @@ export interface SynapseAIPanelProps {
   steps: AgentStep[];
   resumeState: AgentResumeState | null;
   onAbort: () => void;
-  /** Shape-Fix Modus: Vorlage im Input, Kurzinfo im Panel */
+  /** Letzte fehlgeschlagene Nachricht erneut senden */
+  onRetry?: () => void;
+  /** Shape-Fix-Auftrag an die AI senden (gleicher Flow wie Banner "Mit AI beheben") */
+  onShapeFix?: () => void;
+  /** Canvas-Modell-ID des aktuell geladenen Modells (null = leer oder ungespeichert) */
+  activeCanvasModelId: string | null;
+  /** Hat der Canvas überhaupt Nodes? */
+  canvasHasNodes: boolean;
+  /** Shape-Fix Modus: Hinweis-Chip über der Eingabe + Fix-Vorlage-Button */
   shapeMode?: boolean;
-  shapeUserGuide?: string;
   affectedNodes?: AffectedNodeInfo[];
 }
 
@@ -72,8 +80,11 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
   steps,
   resumeState,
   onAbort,
+  onRetry,
+  onShapeFix,
+  activeCanvasModelId,
+  canvasHasNodes,
   shapeMode = false,
-  shapeUserGuide,
   affectedNodes = [],
 }) => {
   const { t } = useLanguage();
@@ -81,9 +92,10 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
   const [chats, setChats] = useState<SynapseAIChat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const persistChat = useCallback(
-    (chatId: string, msgs: ChatMessage[], title?: string) => {
+    (chatId: string, msgs: ChatMessage[], title?: string, canvasModelId?: string) => {
       setChats((prev) => {
         const now = Date.now();
         const existing = prev.find((c) => c.id === chatId);
@@ -106,6 +118,8 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
               title: autoTitle,
               messages: stored,
               updatedAt: now,
+              // canvasModelId überschreiben wenn neu gesetzt
+              ...(canvasModelId !== undefined ? { canvasModelId } : {}),
             }
           : {
               ...freshSynapseChat(),
@@ -114,6 +128,7 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
               messages: stored,
               createdAt: now,
               updatedAt: now,
+              canvasModelId,
             };
 
         const rest = prev.filter((c) => c.id !== chatId);
@@ -125,28 +140,58 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
     [userId]
   );
 
+  // ── Chat-Auswahl beim Öffnen des Panels ────────────────────────────────────
+  // Logik:
+  //  1. Canvas leer (keine Nodes)           → immer neuer leerer Chat
+  //  2. Canvas hat Nodes, kein Model-ID     → immer neuer leerer Chat
+  //  3. Canvas hat Nodes + activeCanvasModelId → letzten Chat mit dieser ID laden;
+  //     existiert keiner, neuer Chat
   useEffect(() => {
     if (!open) return;
     const loaded = loadSynapseAIChats(userId);
     setChats(loaded);
-    if (loaded.length > 0 && !activeChatId) {
-      const c = loaded[0];
-      setActiveChatId(c.id);
-      onMessagesChange(
-        c.messages.map((m) => ({ role: m.role, content: m.content }))
-      );
-    } else if (loaded.length === 0) {
+
+    // Fall 1 & 2: Canvas leer oder kein gespeichertes Modell → neuer Chat
+    if (!canvasHasNodes || !activeCanvasModelId) {
       const c = freshSynapseChat();
       setActiveChatId(c.id);
-      setChats([c]);
-      saveSynapseAIChats([c], userId);
+      setChats((prev) => {
+        const next = [c, ...prev];
+        saveSynapseAIChats(next, userId);
+        return next;
+      });
+      onMessagesChange([]);
+      onInputChange("");
+      return;
+    }
+
+    // Fall 3: Suche den neuesten Chat der zu activeCanvasModelId gehört
+    const linked = loaded
+      .filter((c) => c.canvasModelId === activeCanvasModelId)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    if (linked.length > 0) {
+      const c = linked[0];
+      setActiveChatId(c.id);
+      onMessagesChange(c.messages.map((m) => ({ role: m.role, content: m.content })));
+    } else {
+      // Kein verknüpfter Chat vorhanden → neuer Chat
+      const c = freshSynapseChat();
+      setActiveChatId(c.id);
+      setChats((prev) => {
+        const next = [c, ...prev];
+        saveSynapseAIChats(next, userId);
+        return next;
+      });
+      onMessagesChange([]);
+      onInputChange("");
     }
   }, [open, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open || !activeChatId) return;
-    persistChat(activeChatId, messages);
-  }, [messages, activeChatId, open, persistChat]);
+    persistChat(activeChatId, messages, undefined, activeCanvasModelId ?? undefined);
+  }, [messages, activeChatId, open, persistChat, activeCanvasModelId]);
 
   useEffect(() => {
     if (open) {
@@ -293,25 +338,6 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
           </header>
 
           <div className="synapse-ai-messages">
-            {shapeMode && shapeUserGuide && (
-              <>
-                <div className="synapse-ai-shape-card">{shapeUserGuide}</div>
-                {affectedNodes.length > 0 && (
-                  <div style={{ fontSize: 10, color: "#94a3b8", padding: "0 4px" }}>
-                    {t('synapseAI.panel.affectedLabel')} {affectedNodes.map((a) => a.id).join(", ")}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="synapse-ai-shape-fix-btn"
-                  onClick={() => !loading && onSend()}
-                  disabled={loading || !input.trim()}
-                >
-                  {t('synapseAI.panel.shapeSendButton')}
-                </button>
-              </>
-            )}
-
             {messages.length === 0 && !loading && !shapeMode && (
               <div style={{ textAlign: "center", padding: "28px 12px", color: "#475569" }}>
                 <div style={{ fontSize: 28, marginBottom: 12, opacity: 0.4 }}>✦</div>
@@ -371,60 +397,89 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
                 }}
               >
                 {error}
-                {resumeState && (
+                {resumeState ? (
                   <button
                     type="button"
                     onClick={() => onSend(undefined, resumeState)}
-                    style={{
-                      display: "block",
-                      marginTop: 8,
-                      padding: "6px 12px",
-                      background: "linear-gradient(135deg, #6366f1, #a78bfa)",
-                      border: "none",
-                      borderRadius: 6,
-                      color: "#fff",
-                      fontSize: 11,
-                      cursor: "pointer",
-                    }}
+                    style={errorActionBtnStyle}
                   >
-                    Fortsetzen
+                    {t('synapseAI.panel.resumeButton')}
                   </button>
-                )}
+                ) : onRetry && !loading ? (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    style={errorActionBtnStyle}
+                  >
+                    {t('synapseAI.panel.retryButton')}
+                  </button>
+                ) : null}
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
           <div className="synapse-ai-input-area">
-            <div className="synapse-ai-input-row">
-              <textarea
-                className="synapse-ai-textarea"
-                value={input}
-                onChange={(e) => onInputChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (!loading) onSend();
-                  }
-                }}
-                placeholder={shapeMode ? t('synapseAI.panel.inputPlaceholderShapeMode') : t('synapseAI.panel.inputPlaceholder')}
-                disabled={loading}
-                rows={2}
-              />
-              <button
-                type="button"
-                className={`synapse-ai-send ${loading ? "stop" : ""}`}
-                onClick={() => (loading ? onAbort() : onSend())}
-                title={loading ? t('synapseAI.panel.abortTooltip') : t('synapseAI.panel.sendTooltip')}
+            {shapeMode && (
+              <div
+                className="synapse-ai-shape-chip"
+                title={t('synapseAI.panel.shapeContextHint')}
               >
-                {loading ? t('synapseAI.panel.abortButton') : t('synapseAI.panel.sendButton')}
-              </button>
-            </div>
+                <span className="synapse-ai-shape-chip-label">
+                  ⚠ {t('synapseAI.panel.shapeActiveLabel').replace('{count}', String(affectedNodes.length || 1))}
+                  {affectedNodes.length > 0 && (
+                    <span className="synapse-ai-shape-chip-nodes">
+                      {' '}({affectedNodes.map((a) => a.label || a.id).join(", ")})
+                    </span>
+                  )}
+                </span>
+                {onShapeFix && (
+                  <button
+                    type="button"
+                    className="synapse-ai-shape-chip-btn"
+                    onClick={() => {
+                      if (loading) return;
+                      onShapeFix();
+                      // Nach dem Einfügen (Builder wartet ~150ms) in die Eingabe fokussieren,
+                      // damit sichtbar ist, dass die Vorlage bereit ist — Enter sendet.
+                      window.setTimeout(() => chatInputRef.current?.focus(), 250);
+                    }}
+                    disabled={loading}
+                    title={t('synapseAI.panel.shapeContextHint')}
+                  >
+                    {t('synapseAI.panel.shapeSendButton')}
+                  </button>
+                )}
+              </div>
+            )}
+            <GradientChatInput
+              ref={chatInputRef}
+              value={input}
+              onChange={onInputChange}
+              onSend={() => onSend()}
+              onStop={onAbort}
+              loading={loading}
+              placeholder={shapeMode ? t('synapseAI.panel.inputPlaceholderShapeMode') : t('synapseAI.panel.inputPlaceholder')}
+              sendTitle={t('synapseAI.panel.sendTooltip')}
+              stopTitle={t('synapseAI.panel.abortTooltip')}
+            />
           </div>
         </div>
       </div>
     </>
   );
+};
+
+const errorActionBtnStyle: React.CSSProperties = {
+  display: "block",
+  marginTop: 8,
+  padding: "6px 12px",
+  background: "linear-gradient(135deg, #6366f1, #a78bfa)",
+  border: "none",
+  borderRadius: 6,
+  color: "#fff",
+  fontSize: 11,
+  cursor: "pointer",
 };
 
 function iconBtnStyle(active: boolean): React.CSSProperties {

@@ -1,5 +1,6 @@
 // dev_trainer.rs – Führt ein user-geschriebenes Python-Script aus
-// und emitiert die gleichen Events wie der normale Trainer
+// und emitiert die gleichen Events wie der normale Trainer.
+// Enthält außerdem den Dev-Test-Modus (start_dev_test / stop_dev_test).
 
 use std::fs;
 use std::process::{Command, Stdio};
@@ -18,6 +19,64 @@ use crate::training_manager::{TrainingJob, TrainingStatus, TrainingProgress, Tra
 pub struct DevTrainingRefs {
     #[serde(flatten)]
     pub vars: HashMap<String, String>,
+}
+
+// ── Prozess-Registry für Dev-Train / Dev-Test ─────────────────────────────
+// Ermöglicht sauberes Stoppen der Dev-Prozesse (vorher gab es dafür keinen Weg).
+
+struct DevProcEntry {
+    pid: Option<u32>,
+    stop_requested: bool,
+}
+
+static DEV_TRAIN_PROC: StdMutex<DevProcEntry> = StdMutex::new(DevProcEntry { pid: None, stop_requested: false });
+static DEV_TEST_PROC:  StdMutex<DevProcEntry> = StdMutex::new(DevProcEntry { pid: None, stop_requested: false });
+
+fn kill_process_tree(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+        thread::sleep(std::time::Duration::from_millis(300));
+        let _ = Command::new("pkill").args(["-KILL", "-P", &pid.to_string()]).output();
+        let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill").args(["/F", "/PID", &pid.to_string(), "/T"]).output();
+    }
+}
+
+fn registry_start(reg: &StdMutex<DevProcEntry>) -> Result<(), String> {
+    let mut e = reg.lock().map_err(|e| format!("Lock: {}", e))?;
+    if e.pid.is_some() {
+        return Err("Es läuft bereits ein Dev-Prozess. Bitte zuerst stoppen.".to_string());
+    }
+    e.stop_requested = false;
+    Ok(())
+}
+
+fn registry_set_pid(reg: &StdMutex<DevProcEntry>, pid: u32) {
+    if let Ok(mut e) = reg.lock() { e.pid = Some(pid); }
+}
+
+fn registry_clear(reg: &StdMutex<DevProcEntry>) -> bool {
+    // Gibt zurück ob ein Stop angefordert wurde (Events dann unterdrücken).
+    if let Ok(mut e) = reg.lock() {
+        e.pid = None;
+        let stopped = e.stop_requested;
+        e.stop_requested = false;
+        stopped
+    } else { false }
+}
+
+fn registry_stop(reg: &StdMutex<DevProcEntry>) {
+    let pid = {
+        if let Ok(mut e) = reg.lock() {
+            e.stop_requested = true;
+            e.pid
+        } else { None }
+    };
+    if let Some(pid) = pid { kill_process_tree(pid); }
 }
 
 // Gleiche Python-Pfad-Erkennung wie training_manager
@@ -49,6 +108,9 @@ pub async fn start_dev_training(
     refs:         HashMap<String, String>,
 ) -> Result<TrainingJob, String> {
     let python = get_python_path();
+
+    // Nur ein Dev-Training gleichzeitig
+    registry_start(&DEV_TRAIN_PROC)?;
 
     // Anti-Sleep direkt im Backend aktivieren (robust, unabhängig vom Frontend).
     if let Err(e) = crate::power_manager::enable_prevent_sleep(
@@ -111,6 +173,7 @@ pub async fn start_dev_training(
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
+                let _ = registry_clear(&DEV_TRAIN_PROC);
                 let _ = ah.emit("training-error", serde_json::json!({
                     "job_id": jid,
                     "data": { "error": format!("Python konnte nicht gestartet werden: {}", e) }
@@ -118,6 +181,7 @@ pub async fn start_dev_training(
                 return;
             }
         };
+        registry_set_pid(&DEV_TRAIN_PROC, child.id());
 
         // Stderr in separatem Thread loggen
         if let Some(stderr) = child.stderr.take() {
@@ -188,8 +252,11 @@ pub async fn start_dev_training(
 
         let status = child.wait().ok();
         let success = status.map(|s| s.success()).unwrap_or(false);
+        let was_stopped = registry_clear(&DEV_TRAIN_PROC);
 
-        if success && !json_error {
+        if was_stopped {
+            // User hat gestoppt – kein Fehler-/Complete-Event, das Frontend hat die UI bereits aktualisiert.
+        } else if success && !json_error {
             let _ = ah.emit("training-complete", serde_json::json!({
                 "job_id": jid,
                 "data": { "model_path": out_p, "final_metrics": { "total_epochs": 0, "total_steps": step } }
@@ -217,6 +284,168 @@ pub async fn start_dev_training(
     Ok(job)
 }
 
+/// Stoppt das laufende Dev-Training (killt den Python-Prozess samt Kindern).
+#[tauri::command]
+pub fn stop_dev_training(app_handle: tauri::AppHandle) -> Result<(), String> {
+    registry_stop(&DEV_TRAIN_PROC);
+    if let Err(e) = crate::power_manager::disable_prevent_sleep(
+        app_handle.state::<StdMutex<crate::power_manager::PowerState>>(),
+    ) {
+        eprintln!("[PowerManager] ⚠️ disable_prevent_sleep fehlgeschlagen: {}", e);
+    }
+    Ok(())
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DEV TEST MODE
+// Frontend (DevTestPanel) erwartet:
+//   Events: "dev-test-output"   { job_id, line }
+//           "dev-test-complete" { job_id, exit_code, data?: { error, details } }
+//   Output-Verzeichnis: <app_data>/test_outputs/dev_<job_id>
+// ══════════════════════════════════════════════════════════════════
+
+/// Startet ein user-geschriebenes Test-Script (analog zu start_dev_training).
+#[tauri::command]
+pub async fn start_dev_test(
+    app_handle:   tauri::AppHandle,
+    script:       String,
+    model_id:     String,
+    model_name:   String,
+    dataset_id:   String,
+    dataset_name: String,
+    refs:         HashMap<String, String>,
+) -> Result<String, String> {
+    let _ = (model_id, model_name, dataset_id, dataset_name); // aktuell nur fürs Logging/API-Symmetrie
+    let python = get_python_path();
+
+    registry_start(&DEV_TEST_PROC)?;
+
+    let app_data = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?;
+
+    let job_id      = format!("dev_{}", &Uuid::new_v4().to_string().replace('-', "")[..12]);
+    let scripts_dir = app_data.join("dev_scripts");
+    fs::create_dir_all(&scripts_dir).ok();
+    let script_path = scripts_dir.join(format!("{}_test.py", job_id));
+    let output_dir  = app_data.join("test_outputs").join(&job_id);
+    fs::create_dir_all(&output_dir).ok();
+
+    fs::write(&script_path, &script).map_err(|e| format!("Script schreiben: {}", e))?;
+
+    if let Err(e) = crate::power_manager::enable_prevent_sleep(
+        app_handle.state::<StdMutex<crate::power_manager::PowerState>>(),
+    ) {
+        eprintln!("[PowerManager] ⚠️ enable_prevent_sleep fehlgeschlagen: {}", e);
+    }
+
+    let ah       = app_handle.clone();
+    let jid      = job_id.clone();
+    let out_p    = output_dir.to_string_lossy().to_string();
+    let env_vars = refs;
+
+    thread::spawn(move || {
+        let mut cmd = Command::new(&python);
+        cmd.arg(script_path.to_string_lossy().to_string())
+           .stdout(Stdio::piped())
+           .stderr(Stdio::piped());
+
+        cmd.env("OUTPUT_PATH", &out_p);
+        for (k, v) in &env_vars {
+            cmd.env(k, v);
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = registry_clear(&DEV_TEST_PROC);
+                let _ = ah.emit("dev-test-complete", serde_json::json!({
+                    "job_id": jid,
+                    "exit_code": -1,
+                    "data": { "error": format!("Python konnte nicht gestartet werden: {}", e) }
+                }));
+                return;
+            }
+        };
+        registry_set_pid(&DEV_TEST_PROC, child.id());
+
+        // Stderr: loggen, als Output-Event senden, letzte Zeilen für Fehlerdetails sammeln
+        let stderr_tail: std::sync::Arc<StdMutex<Vec<String>>> =
+            std::sync::Arc::new(StdMutex::new(Vec::new()));
+        if let Some(stderr) = child.stderr.take() {
+            let jid2 = jid.clone();
+            let ah2  = ah.clone();
+            let tail = std::sync::Arc::clone(&stderr_tail);
+            thread::spawn(move || {
+                for line in BufReader::new(stderr).lines().flatten() {
+                    eprintln!("[DevTest STDERR] {}", line);
+                    let _ = ah2.emit("dev-test-output", serde_json::json!({
+                        "job_id": jid2, "line": format!("[ERR] {}", line)
+                    }));
+                    if let Ok(mut v) = tail.lock() {
+                        v.push(line);
+                        if v.len() > 30 { let n = v.len() - 30; v.drain(0..n); }
+                    }
+                }
+            });
+        }
+
+        if let Some(stdout) = child.stdout.take() {
+            for line in BufReader::new(stdout).lines().flatten() {
+                println!("[DevTest] {}", line);
+                let _ = ah.emit("dev-test-output", serde_json::json!({
+                    "job_id": jid, "line": line
+                }));
+            }
+        }
+
+        let status = child.wait().ok();
+        let exit_code = status.and_then(|s| s.code()).unwrap_or(-1);
+        let was_stopped = registry_clear(&DEV_TEST_PROC);
+
+        if !was_stopped {
+            if exit_code == 0 {
+                let _ = ah.emit("dev-test-complete", serde_json::json!({
+                    "job_id": jid, "exit_code": 0
+                }));
+            } else {
+                let details = stderr_tail.lock().ok()
+                    .map(|v| v.join("\n"))
+                    .unwrap_or_default();
+                let _ = ah.emit("dev-test-complete", serde_json::json!({
+                    "job_id": jid,
+                    "exit_code": exit_code,
+                    "data": {
+                        "error": format!("Script beendet mit Exit-Code {}", exit_code),
+                        "details": details
+                    }
+                }));
+            }
+        }
+
+        if let Err(e) = crate::power_manager::disable_prevent_sleep(
+            ah.state::<StdMutex<crate::power_manager::PowerState>>(),
+        ) {
+            eprintln!("[PowerManager] ⚠️ disable_prevent_sleep fehlgeschlagen: {}", e);
+        }
+
+        fs::remove_file(&script_path).ok();
+    });
+
+    Ok(job_id)
+}
+
+/// Stoppt den laufenden Dev-Test.
+#[tauri::command]
+pub fn stop_dev_test(app_handle: tauri::AppHandle) -> Result<(), String> {
+    registry_stop(&DEV_TEST_PROC);
+    if let Err(e) = crate::power_manager::disable_prevent_sleep(
+        app_handle.state::<StdMutex<crate::power_manager::PowerState>>(),
+    ) {
+        eprintln!("[PowerManager] ⚠️ disable_prevent_sleep fehlgeschlagen: {}", e);
+    }
+    Ok(())
+}
+
 /// Parst den Loss-Wert aus einer HuggingFace Trainer-Ausgabezeile.
 /// Beispiele:
 ///   "{'loss': 0.3452, 'learning_rate': 1e-05, 'epoch': 1.0}"
@@ -224,9 +453,10 @@ pub async fn start_dev_training(
 ///   "[100/200] loss=0.3452"
 fn parse_loss_from_line(line: &str) -> Option<f64> {
     // HuggingFace Trainer JSON-ähnliche Ausgabe
+    // (line.get statt Slice — verhindert Panic, wenn die Zeile direkt nach 'loss' endet)
     if line.contains("'loss'") || line.contains("\"loss\"") {
-        let re_sq = line.find("'loss'").map(|i| &line[i + 7..]);
-        let re_dq = line.find("\"loss\"").map(|i| &line[i + 7..]);
+        let re_sq = line.find("'loss'").and_then(|i| line.get(i + 6..));
+        let re_dq = line.find("\"loss\"").and_then(|i| line.get(i + 6..));
         let after = re_sq.or(re_dq)?;
         let after = after.trim_start_matches([' ', ':', '\t']);
         let end = after.find([',', '}', '\n', ' ']).unwrap_or(after.len());

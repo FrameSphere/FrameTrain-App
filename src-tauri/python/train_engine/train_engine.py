@@ -132,8 +132,39 @@ def is_oom(exc: Exception) -> bool:
     ])
 
 
+def is_torch_ecosystem_conflict(text: str) -> bool:
+    """torchvision/torchaudio passen nicht zur installierten torch-Version.
+
+    Typisch: "RuntimeError: operator torchvision::nms does not exist" oder
+    "OSError: ... libtorchaudio.so ... Symbol not found" beim
+    transformers-Import — landet sonst fälschlich als 'fehlendes Paket'.
+    """
+    t = text.lower()
+    return (
+        "torchvision::nms" in t
+        or ("torchvision" in t and "does not exist" in t)
+        or ("torchvision" in t and "undefined symbol" in t)
+        or ("libtorchaudio" in t and ("symbol not found" in t or "could not load" in t))
+        or ("torchaudio" in t and "undefined symbol" in t)
+    )
+
+
 def handle_exception(exc: Exception) -> None:
     tb = traceback.format_exc()
+
+    if is_torch_ecosystem_conflict(tb) or is_torch_ecosystem_conflict(str(exc)):
+        MessageProtocol.error(
+            "PyTorch/torchvision/torchaudio Versionskonflikt",
+            "Die installierte torchvision- bzw. torchaudio-Version passt nicht zur torch-Version.\n"
+            "Das passiert oft nach einem torch-Update ohne Update der Begleitpakete.\n\n"
+            "Behebe mit:\n"
+            f"  {sys.executable} -m pip install --upgrade torch torchvision torchaudio\n\n"
+            "Falls das nicht hilft:\n"
+            f"  {sys.executable} -m pip uninstall -y torchvision torchaudio\n"
+            f"  {sys.executable} -m pip install torchvision torchaudio\n\n"
+            f"Detail: {exc}\n\n{tb}"
+        )
+        return
 
     if is_oom(exc):
         MessageProtocol.error(
@@ -236,7 +267,10 @@ class Orchestrator:
             MessageProtocol.status("init", "Setup...")
             setup_ok = self.plugin.setup()
             if self.plugin.is_stopped: return
-            if not setup_ok:
+            # Nur ein EXPLIZITES False ist ein Fehler — Plugins ohne
+            # Rückgabewert (None) gelten als erfolgreich. Vorher führte ein
+            # fehlendes "return True" zu einem stillen Abbruch ohne Event.
+            if setup_ok is False:
                 # setup() hat bereits eine Fehlermeldung gesendet — nicht duplizieren
                 return
 

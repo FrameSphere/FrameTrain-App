@@ -471,13 +471,36 @@ fn get_python_path() -> String {
     }
 
     candidates.sort_by(|a,b| b.version.cmp(&a.version));
-    candidates.dedup_by(|a,b| a.version == b.version);
+    // Nur echte Duplikate (gleiche Binärdatei via Symlink) entfernen — Version allein
+    // reicht nicht: /opt/homebrew und /usr/local können dieselbe Version mit
+    // unterschiedlichen site-packages haben (nur eine davon hat torch).
+    candidates.dedup_by(|a, b| {
+        match (std::fs::canonicalize(&a.path), std::fs::canonicalize(&b.path)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => a.path == b.path,
+        }
+    });
 
+    // torch muss importierbar sein UND torchvision/torchaudio (falls installiert)
+    // zur torch-Version passen — sonst crasht transformers später mit
+    // "operator torchvision::nms does not exist" o. ä.
+    let torch_check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
+    for c in &candidates {
+        let ok = Command::new(&c.path).args(["-c", torch_check]).output()
+            .map(|o| o.status.success()).unwrap_or(false);
+        if ok {
+            println!("[Python] ✅ Gewählt (torch + torchvision/torchaudio kompatibel): {}", c.path);
+            return c.path.clone();
+        }
+    }
+
+    // Fallback: torch importierbar, aber torchvision/torchaudio defekt → mit Warnung nutzen
     for c in &candidates {
         let ok = Command::new(&c.path).args(["-c","import torch"]).output()
             .map(|o| o.status.success()).unwrap_or(false);
         if ok {
-            println!("[Python] ✅ Gewählt (torch vorhanden): {}", c.path);
+            println!("[Python] ⚠️ Gewählt (torch vorhanden, aber torchvision/torchaudio defekt/inkompatibel): {}", c.path);
+            println!("[Python] ⚠️ Fix: {} -m pip install --upgrade torch torchvision torchaudio", c.path);
             return c.path.clone();
         }
     }
@@ -599,6 +622,13 @@ pub async fn start_training(
     // Vorher wurde nur SQLite file_path gelesen – der stimmt nicht mit dem
     // user-isolierten datasets/<user_id>/<dataset_id>/ Pfad überein.
     let resolve_dataset_path = || -> PathBuf {
+        // Ohne Dataset-ID gibt es nichts aufzulösen. WICHTIG: vorher lief die
+        // leere ID bis in den Fallback `datasets.join("")` durch — das ergab den
+        // datasets-STAMMORDNER, den der image_loader dann als ImageFolder
+        // scannte ("Found no valid file for the classes <dataset-ids>...").
+        if dataset_id.is_empty() {
+            return PathBuf::new();
+        }
         // 1. user-scoped Metadaten-JSON → storage_path (Primary Source)
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             // Eigener Block: app_state + db_guard werden hier sofort gedropt
@@ -705,7 +735,11 @@ pub async fn start_training(
         final_config.model_path = String::new();
         final_config.canvas_model_code = String::new();
         let dp = resolve_dataset_path();
-        final_config.dataset_path = dp.to_string_lossy().to_string();
+        if !dp.as_os_str().is_empty() {
+            final_config.dataset_path = dp.to_string_lossy().to_string();
+        }
+        // sonst: dataset_path vom Frontend behalten (ggf. leer → Engine meldet
+        // sauber "kein Dataset-Pfad angegeben" statt den Stammordner zu laden)
         let ir_path = output_dir.join("canvas_graph.json");
         fs::write(&ir_path, serde_json::to_string_pretty(&final_config.canvas_graph)
             .unwrap_or_default())
@@ -717,7 +751,10 @@ pub async fn start_training(
             .map_err(|e| format!("Canvas-Code speichern: {}", e))?;
         final_config.task_type = "canvas".to_string();
         final_config.model_path = String::new();
-        final_config.dataset_path = resolve_dataset_path().to_string_lossy().to_string();
+        let dp = resolve_dataset_path();
+        if !dp.as_os_str().is_empty() {
+            final_config.dataset_path = dp.to_string_lossy().to_string();
+        }
     } else {
         // Traditionelles Modell - lade von Festplatte
         // Modell-Pfad: Aus Version-DB lesen wenn version_id gesetzt, sonst models_dir/model_id
@@ -956,14 +993,15 @@ fn run_training(
         }
     };
 
-    if let Some(pid) = child.id().into() {
-        if let Ok(mut s) = state.lock() { s.process_pid = Some(pid); }
+    // PID merken + Job als "running" markieren (vorher blieb der Status dauerhaft "pending")
+    if let Ok(mut s) = state.lock() {
+        s.process_pid = Some(child.id());
+        if let Some(ref mut job) = s.current_job {
+            job.status = TrainingStatus::Running;
+            job.started_at = Some(Utc::now());
+        }
     }
     let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-
-    if let Some(pid) = Some(child.id()) {
-        if let Ok(mut s) = state.lock() { s.process_pid = Some(pid); }
-    }
 
     if let Some(stderr) = child.stderr.take() {
         let sl = Arc::clone(&stderr_lines);
@@ -987,6 +1025,7 @@ fn run_training(
         .unwrap_or(serde_json::Value::Null);
 
     let mut json_error = false;
+    let mut json_complete = false;
 
     if let Some(stdout) = child.stdout.take() {
         let ah = app_handle.clone();
@@ -1016,12 +1055,31 @@ fn run_training(
                             "timestamp":     Utc::now().to_rfc3339(),
                         });
                         step_logs.push(log_entry);
+
+                        // Progress auch im State mitführen — sonst liefert
+                        // list_active_trainings (Polling-Fallback des globalen
+                        // Widgets) dauerhaft veraltete Nullwerte.
+                        if let Ok(mut sl) = state.lock() {
+                            if let Some(ref mut job) = sl.current_job {
+                                job.status = TrainingStatus::Running;
+                                let p = &mut job.progress;
+                                if let Some(v) = data.get("epoch").and_then(|v| v.as_u64()) { p.epoch = v as u32; }
+                                if let Some(v) = data.get("total_epochs").and_then(|v| v.as_u64()) { p.total_epochs = v as u32; }
+                                if let Some(v) = data.get("step").and_then(|v| v.as_u64()) { p.step = v as u32; }
+                                if let Some(v) = data.get("total_steps").and_then(|v| v.as_u64()) { p.total_steps = v as u32; }
+                                if let Some(v) = data.get("train_loss").and_then(|v| v.as_f64()) { p.train_loss = v; }
+                                p.val_loss = data.get("val_loss").and_then(|v| v.as_f64()).or(p.val_loss);
+                                if let Some(v) = data.get("learning_rate").and_then(|v| v.as_f64()) { p.learning_rate = v; }
+                                if let Some(v) = data.get("progress_percent").and_then(|v| v.as_f64()) { p.progress_percent = v; }
+                            }
+                        }
                     }
                     let _ = ah.emit("training-progress", serde_json::json!({"job_id":jid,"data":msg.get("data")}));
                 }
                 "status"   => { let _ = ah.emit("training-status",   serde_json::json!({"job_id":jid,"data":msg.get("data")})); }
                 "checkpoint"=>{ let _ = ah.emit("training-checkpoint",serde_json::json!({"job_id":jid,"data":msg.get("data")})); }
                 "complete" => {
+                    json_complete = true;
                     if let Some(data) = msg.get("data") {
                         if let Some(mp) = data.get("model_path").and_then(|v| v.as_str()) {
                             match create_version(&ah, &mid, &mname, vid.clone(), mp, &uid) {
@@ -1065,13 +1123,33 @@ fn run_training(
     let status = child.wait();
     let ok = status.as_ref().map(|s| s.success()).unwrap_or(false);
 
-    if !ok && !json_error {
+    // Bewusster Stop: stop_training setzt current_job auf None BEVOR es killt.
+    // Ohne diesen Guard würde der Kill hier als "Training unerwartet beendet"
+    // gemeldet und der "Gestoppt"-Status im UI mit "Fehlgeschlagen" überschrieben.
+    let was_stopped = state.lock().ok()
+        .map(|sl| sl.current_job.is_none())
+        .unwrap_or(false);
+
+    if !ok && !json_error && !was_stopped {
         let stderr_ctx = stderr_lines.lock().ok()
             .map(|v| if v.is_empty() { String::new() } else { format!("\n\nStderr:\n{}", v.join("\n")) })
             .unwrap_or_default();
         let _ = app_handle.emit("training-error", serde_json::json!({
             "job_id": job_id,
             "data": { "error": "Training unerwartet beendet", "details": format!("Exit: {:?}{}", status.as_ref().map(|s| s.code()), stderr_ctx) }
+        }));
+    }
+
+    // Exit 0 OHNE complete/error-Event: die Engine ist still gestorben (z. B.
+    // extern gekillt oder App-Neustart während tauri dev). Vorher bekam das
+    // Frontend dann NIE ein Event und das Dashboard blieb ewig auf "läuft".
+    if ok && !json_error && !json_complete && !was_stopped {
+        let _ = app_handle.emit("training-error", serde_json::json!({
+            "job_id": job_id,
+            "data": {
+                "error": "Training ohne Ergebnis beendet",
+                "details": "Der Trainingsprozess hat sich beendet, ohne ein Ergebnis oder einen Fehler zu melden.\nMögliche Ursachen: Prozess wurde extern beendet (z. B. App-Neustart, System) oder die Engine wurde unterbrochen.\nStarte das Training danach erneut."
+            }
         }));
     }
 
@@ -1102,13 +1180,19 @@ pub fn stop_training(
     state: tauri::State<'_, Arc<Mutex<TrainingState>>>,
 ) -> Result<(), String> {
     let mut sl = state.lock().map_err(|e| format!("Lock: {}", e))?;
+
+    // Job-Info vor dem Kill sichern
+    let job_snapshot = sl.current_job.clone();
+
     if let Some(ref mut p) = sl.process { let _ = p.kill(); }
     if let Some(pid) = sl.process_pid {
         #[cfg(unix)] {
             let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
             thread::sleep(std::time::Duration::from_millis(300));
-            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
+            // Kinder VOR dem Parent killen — nach dem Parent-Kill werden sie
+            // an launchd/init umgehängt und pkill -P findet sie nicht mehr.
             let _ = Command::new("pkill").args(["-KILL","-P",&pid.to_string()]).output();
+            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
         }
         #[cfg(windows)] { let _ = Command::new("taskkill").args(["/F","/PID",&pid.to_string(),"/T"]).output(); }
     }
@@ -1125,12 +1209,121 @@ pub fn stop_training(
         eprintln!("[PowerManager] ⚠️ disable_prevent_sleep fehlgeschlagen: {}", e);
     }
 
+    // ── Neuesten Checkpoint als Version registrieren ─────────────────────────────────
+    // Nach dem Kill pruefen ob HF Trainer bereits Checkpoints geschrieben hat.
+    // Neuesten Checkpoint-Ordner finden und als gestoppte Version speichern.
+    if let Some(job) = job_snapshot {
+        let checkpoint_dir = PathBuf::from(&job.config.checkpoint_dir);
+        if checkpoint_dir.exists() {
+            // Suche nach checkpoint-{N}-Ordnern, nimm den mit der hoechsten Schritt-Nummer
+            let best_checkpoint = fs::read_dir(&checkpoint_dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|entry| {
+                    let p = entry.path();
+                    if !p.is_dir() { return None; }
+                    let name = p.file_name()?.to_str()?.to_string();
+                    if !name.starts_with("checkpoint-") { return None; }
+                    let step: u64 = name.strip_prefix("checkpoint-")?.parse().ok()?;
+                    Some((step, p))
+                })
+                .max_by_key(|(step, _)| *step)
+                .map(|(_, path)| path);
+
+            if let Some(ckpt_path) = best_checkpoint {
+                // Modell-Dateien aus Checkpoint exportieren (HF-Format: pytorch_model.bin / model.safetensors + config.json)
+                let has_model = ckpt_path.join("pytorch_model.bin").exists()
+                    || ckpt_path.join("model.safetensors").exists()
+                    || ckpt_path.join("model.pt").exists();
+
+                if has_model {
+                    let ah = app_handle.clone();
+                    let model_id = job.model_id.clone();
+                    let model_name = job.model_name.clone();
+                    let user_id = job.user_id.clone();
+                    let ckpt_str = ckpt_path.to_string_lossy().to_string();
+                    let job_id = job.id.clone();
+
+                    // In separatem Thread damit stop_training sofort zurückgibt
+                    thread::spawn(move || {
+                        match create_version(&ah, &model_id, &model_name, None, &ckpt_str, &user_id) {
+                            Ok(version_id) => {
+                                eprintln!("[Train] Stop-Checkpoint als Version registriert: {}", version_id);
+                                let _ = ah.emit("training-stopped-with-checkpoint", serde_json::json!({
+                                    "job_id": job_id,
+                                    "version_id": version_id,
+                                    "checkpoint_path": ckpt_str,
+                                    "message": "Training gestoppt. Letzter Checkpoint wurde als Version gespeichert.",
+                                }));
+                            }
+                            Err(e) => {
+                                eprintln!("[Train] Stop-Checkpoint konnte nicht gespeichert werden: {}", e);
+                                let _ = ah.emit("training-stopped", serde_json::json!({
+                                    "job_id": job_id,
+                                    "message": "Training gestoppt. Kein Checkpoint gespeichert.",
+                                }));
+                            }
+                        }
+                    });
+                } else {
+                    eprintln!("[Train] Stop: Checkpoint-Ordner gefunden aber keine Modell-Dateien: {:?}", ckpt_path);
+                    let _ = app_handle.emit("training-stopped", serde_json::json!({
+                        "job_id": job.id,
+                        "message": "Training gestoppt. Kein vollst\u{00e4}ndiger Checkpoint vorhanden.",
+                    }));
+                }
+            } else {
+                eprintln!("[Train] Stop: Kein Checkpoint-Ordner gefunden in {:?}", checkpoint_dir);
+                let _ = app_handle.emit("training-stopped", serde_json::json!({
+                    "job_id": job.id,
+                    "message": "Training gestoppt. Es wurde noch kein Checkpoint geschrieben.",
+                }));
+            }
+        }
+    }
+
     Ok(())
 }
 
 #[tauri::command]
 pub fn get_current_training(state: tauri::State<'_, Arc<Mutex<TrainingState>>>) -> Result<Option<TrainingJob>, String> {
     Ok(state.lock().map_err(|e| format!("Lock: {}", e))?.current_job.clone())
+}
+
+/// Liste der aktuell laufenden Trainings (für das globale Progress-Widget).
+/// Format entspricht dem ActiveTraining-Interface im Frontend.
+#[tauri::command]
+pub fn list_active_trainings(state: tauri::State<'_, Arc<Mutex<TrainingState>>>) -> Result<Vec<serde_json::Value>, String> {
+    let sl = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let Some(job) = sl.current_job.as_ref() else { return Ok(vec![]) };
+    if !matches!(job.status, TrainingStatus::Pending | TrainingStatus::Running) {
+        return Ok(vec![]);
+    }
+    let p = &job.progress;
+    let elapsed = job.started_at.or(Some(job.created_at))
+        .map(|t| (Utc::now() - t).num_seconds().max(0))
+        .unwrap_or(0);
+    let status = match job.status {
+        TrainingStatus::Pending => "pending", TrainingStatus::Running => "running",
+        TrainingStatus::Completed => "completed", TrainingStatus::Failed => "failed",
+        TrainingStatus::Stopped => "stopped",
+    };
+    Ok(vec![serde_json::json!({
+        "training_id": job.id,
+        "status": status,
+        "current_epoch": p.epoch,
+        "total_epochs": p.total_epochs,
+        "current_step": p.step,
+        "total_steps": p.total_steps,
+        "progress_percentage": p.progress_percent,
+        "train_loss": p.train_loss,
+        "val_loss": p.val_loss,
+        "learning_rate": p.learning_rate,
+        "elapsed_time_seconds": elapsed,
+        "estimated_time_remaining_seconds": null,
+    })])
 }
 
 #[tauri::command]
@@ -1173,7 +1366,13 @@ pub fn delete_training_job(
         let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
         db.get_current_user_id()
     };
+    // FIX: job_id validieren (Path-Traversal) und Output-Ordner nur löschen,
+    // wenn der Job tatsächlich dem User gehörte und entfernt wurde.
+    if job_id.is_empty() || !job_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err("Ungültige Job-ID".to_string());
+    }
     let mut jobs = load_jobs(&app_handle)?;
+    let before = jobs.len();
     jobs.retain(|j| {
         if j.id != job_id { return true; }
         // Job gehört dem User (oder ist ein alter Job ohne user_id)
@@ -1182,10 +1381,13 @@ pub fn delete_training_job(
             None => true,
         }
     });
+    let removed = jobs.len() < before;
     write_jobs(&app_handle, &jobs)?;
-    let out = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?
-        .join("training_outputs").join(&job_id);
-    if out.exists() { fs::remove_dir_all(&out).ok(); }
+    if removed {
+        let out = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?
+            .join("training_outputs").join(&job_id);
+        if out.exists() { fs::remove_dir_all(&out).ok(); }
+    }
     Ok(())
 }
 

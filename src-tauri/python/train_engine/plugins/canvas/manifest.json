@@ -1,17 +1,20 @@
 {
   "name": "Canvas Model Training",
   "description": "Trainiert dynamisch generierte Canvas-Modelle mit beliebigen Graphen-Topologien",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "task_type": "canvas",
   "entry": "plugin.py",
   "class": "CanvasPlugin",
+  "dataset_formats": ["image_loader", "csv_loader", "parquet_loader"],
   "requirements": [
     "torch>=2.0.0",
-    "numpy>=1.24.0"
+    "numpy>=1.24.0,<2.0.0",
+    "pandas>=2.0.0",
+    "pyarrow>=14.0.0"
   ],
   "supports_features": {
     "amp": true,
-    "gradient_accumulation": false,
+    "gradient_accumulation": true,
     "lora": false,
     "checkpoint": true,
     "multi_gpu": false

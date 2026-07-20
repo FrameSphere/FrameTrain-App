@@ -56,27 +56,36 @@ SUPPORTED_ARCHITECTURES = {
 LABEL_COLUMN_NAMES = ["label", "labels", "category", "class", "target", "sentiment"]
 TEXT_COLUMN_NAMES  = ["text", "sentence", "content", "review_body", "input", "document", "title", "body", "description", "abstract", "question", "passage", "premise", "hypothesis"]
 # Spalten die nie als Text-Eingabe verwendet werden sollen
-ID_COLUMN_NAMES    = {"id", "idx", "index", "row_id", "sample_id", "uid", "uuid", "key"}
+ID_COLUMN_NAMES = {
+    "id", "idx", "index", "row_id", "sample_id", "uid", "uuid", "key",
+    "review_id", "product_id", "user_id", "item_id", "doc_id", "article_id",
+    "tweet_id", "post_id", "comment_id", "message_id", "conversation_id",
+    "passage_id", "question_id", "answer_id", "sentence_id", "token_id",
+    "source_id", "target_id", "pair_id", "example_id", "data_id",
+}
 
 
 def _detect_columns(features: dict):
     """Erkennt automatisch Text- und Label-Spalte."""
+    # Interne Spalten wie '__index_level_0__' (Pandas/Parquet-Artefakt) sind
+    # NIE Text oder Label — vorher wurde genau diese Index-Spalte als "Label"
+    # erkannt (KeyError beim Eval-Split, tausende Pseudo-Klassen).
+    cols = [c for c in features.keys() if not c.startswith("__")]
     label_col = None
     text_col  = None
 
     for name in LABEL_COLUMN_NAMES:
-        if name in features:
+        if name in cols:
             label_col = name
             break
 
     for name in TEXT_COLUMN_NAMES:
-        if name in features:
+        if name in cols:
             text_col = name
             break
 
     # Fallback: erste nicht-ID Spalte ist Text, letzte ist Label
     if text_col is None or label_col is None:
-        cols = list(features.keys())
         non_id_cols = [c for c in cols if c.lower() not in ID_COLUMN_NAMES]
         if text_col is None and non_id_cols:
             text_col = non_id_cols[0]
@@ -109,7 +118,7 @@ class Plugin(TrainPlugin):
 
     # ─── 1. Setup ──────────────────────────────────────────────────────────
 
-    def setup(self) -> None:
+    def setup(self) -> bool:
         """Prüft Modell-Architektur und initialisiert Tokenizer."""
         model_path = Path(self.config.model_path)
         if not model_path.exists():
@@ -150,6 +159,9 @@ class Plugin(TrainPlugin):
         )
 
         MessageProtocol.status("init", "Tokenizer geladen ✓")
+        # WICHTIG: Der Orchestrator wertet den Rückgabewert aus — ohne
+        # "return True" (implizit None) brach das Training hier STILL ab.
+        return True
 
     # ─── 2. Daten laden ────────────────────────────────────────────────────
 
@@ -182,20 +194,39 @@ class Plugin(TrainPlugin):
             f"Text-Spalte: '{self.text_col}', Label-Spalte: '{self.label_col}'"
         )
 
-        # Labels normalisieren - handle list values
-        label_values = raw[split][self.label_col]
+        # Labels normalisieren — aus ALLEN Splits sammeln, nicht nur dem ersten.
+        # Vorher: Labels nur aus train → unbekanntes Label im Eval-Split = KeyError.
         unique_labels = set()
-        for val in label_values:
-            if isinstance(val, list):
-                # Wenn die Label eine Liste sind, take the first element
-                if val:
-                    unique_labels.add(val[0])
-            else:
-                unique_labels.add(val)
-        all_labels = sorted(unique_labels)
+        total_rows = 0
+        for split_name in raw.keys():
+            if self.label_col not in raw[split_name].features:
+                continue
+            total_rows += len(raw[split_name])
+            for val in raw[split_name][self.label_col]:
+                if isinstance(val, list):
+                    # Wenn die Label eine Liste sind, take the first element
+                    if val:
+                        unique_labels.add(val[0])
+                else:
+                    unique_labels.add(val)
+        all_labels = sorted(unique_labels, key=lambda x: str(x))
         self.label2id = {str(l): i for i, l in enumerate(all_labels)}
         self.id2label = {i: str(l) for i, l in enumerate(all_labels)}
         self.num_labels = len(all_labels)
+
+        # Sanity-Check: fast so viele "Klassen" wie Zeilen = ID-/Index-Spalte,
+        # kein Klassifikations-Label. Klare Meldung statt kryptischem Crash.
+        if self.num_labels > 1000 or (total_rows > 0 and self.num_labels > total_rows * 0.5):
+            raise ValueError(
+                f"Label-Spalte '{self.label_col}' hat {self.num_labels} verschiedene Werte "
+                f"bei {total_rows} Zeilen — das sieht nach einer ID-/Index-Spalte aus, "
+                "nicht nach Klassifikations-Labels.\n"
+                f"Gefundene Spalten: {list(raw[split].features.keys())}\n\n"
+                "Lösungen:\n"
+                "  - Dataset mit echter Label-Spalte verwenden (z.B. 'label' mit wenigen Klassen)\n"
+                "  - Dieses Dataset ist evtl. kein Klassifikations-Dataset "
+                "(z.B. Text-Generierung/Keyphrases) — dann passt der Task-Typ nicht"
+            )
 
         MessageProtocol.status("loading_data", f"Labels ({self.num_labels}): {all_labels[:10]}")
 
@@ -270,81 +301,86 @@ class Plugin(TrainPlugin):
     def _load_from_dir(self, path: Path) -> dict:
         # Strategie 1: Suche nach train/val/test-Unterordnern
         train_subdir = None
-        val_subdir = None
-        test_subdir = None
-        
+        val_subdir   = None
+        test_subdir  = None
+
         for subdir in path.iterdir():
             if subdir.is_dir():
-                dir_name = subdir.name.lower()
-                if dir_name in ("train", "training"):
-                    train_subdir = subdir
-                elif dir_name in ("val", "validation", "valid", "dev"):
-                    val_subdir = subdir
-                elif dir_name in ("test", "testing", "eval"):
-                    test_subdir = subdir
-        
-        # Falls Split-Ordner gefunden, suche darin nach Dateien
+                n = subdir.name.lower()
+                if   n in ("train", "training"):                  train_subdir = subdir
+                elif n in ("val", "validation", "valid", "dev"): val_subdir   = subdir
+                elif n in ("test", "testing", "eval"):           test_subdir  = subdir
+
+        SKIP = {"dataset_infos.json", "metadata.json"}
+
+        def _files(subdir, glob):
+            """Alle Dateien eines Globs in einem Unterordner, ohne Metadateien."""
+            if subdir is None:
+                return []
+            return [f for f in sorted(subdir.glob(glob)) if f.name not in SKIP]
+
         if train_subdir:
-            for ext in ("*.jsonl", "*.json", "*.csv", "*.parquet"):
-                train_files = list(train_subdir.glob(ext))
-                if train_files:
-                    # Filtere Metadateien
-                    train_files = [f for f in train_files if f.name not in ("dataset_infos.json", "metadata.json")]
-                    if not train_files:
-                        continue
-                    
-                    # Suche auch nach Validierungs- und Test-Dateien
-                    val_files = None
-                    test_files = None
-                    
-                    if val_subdir:
-                        val_files = list(val_subdir.glob(ext))
-                        val_files = [f for f in val_files if f.name not in ("dataset_infos.json", "metadata.json")]
-                        if not val_files:
-                            val_files = None
-                    
-                    if test_subdir:
-                        test_files = list(test_subdir.glob(ext))
-                        test_files = [f for f in test_files if f.name not in ("dataset_infos.json", "metadata.json")]
-                        if not test_files:
-                            test_files = None
-                    
-                    ext_key = "json" if ext.endswith(".json") or ext.endswith(".jsonl") else ext[2:]
-                    data_files = {"train": str(train_files[0])}
-                    
-                    if val_files:
-                        data_files["validation"] = str(val_files[0])
-                    if test_files:
-                        data_files["test"] = str(test_files[0])
-                    
-                    return load_dataset(ext_key, data_files=data_files)
-        
-        # Strategie 2: Suche nach Dateien mit "train"/"test" im Namen (Fallback)
-        for ext in ("*.jsonl", "*.json", "*.csv", "*.parquet"):
-            files = list(path.glob(ext))
-            # Filtere Metadateien
-            files = [f for f in files if f.name not in ("dataset_infos.json", "metadata.json")]
+            for ext_glob, ext_key in [
+                ("*.parquet", "parquet"),
+                ("*.jsonl",   "json"),
+                ("*.json",    "json"),
+                ("*.csv",     "csv"),
+            ]:
+                train_files = _files(train_subdir, ext_glob)
+                if not train_files:
+                    continue
+
+                val_files  = _files(val_subdir,  ext_glob)
+                test_files = _files(test_subdir, ext_glob)
+
+                # WICHTIG: alle Shards uebergeben, nicht nur [0]!
+                # load_dataset akzeptiert eine Liste von Dateipfaden pro Split
+                # und konkateniert sie automatisch (Multi-Shard-Support).
+                data_files: dict = {"train": [str(f) for f in train_files]}
+                if val_files:  data_files["validation"] = [str(f) for f in val_files]
+                if test_files: data_files["test"]       = [str(f) for f in test_files]
+
+                MessageProtocol.status(
+                    "loading_data",
+                    f"Split-Ordner gefunden | {ext_key} | "
+                    f"train: {len(train_files)} Datei(en), "
+                    f"val: {len(val_files)}, test: {len(test_files)}"
+                )
+                return load_dataset(ext_key, data_files=data_files)
+
+        # Strategie 2: Dateien mit train/test im Namen im Root (Fallback)
+        for ext_glob, ext_key in [
+            ("*.parquet", "parquet"),
+            ("*.jsonl",   "json"),
+            ("*.json",    "json"),
+            ("*.csv",     "csv"),
+        ]:
+            files = [f for f in sorted(path.glob(ext_glob)) if f.name not in SKIP]
+            if not files:
+                continue
+
+            train_files = [f for f in files if "train" in f.stem.lower()]
+            test_files  = [f for f in files if any(k in f.stem.lower() for k in ("test", "eval", "val"))]
+
+            if train_files and test_files:
+                MessageProtocol.status("loading_data",
+                    f"Root-Dateien | {ext_key} | train: {len(train_files)}, test: {len(test_files)}")
+                return load_dataset(ext_key, data_files={
+                    "train": [str(f) for f in train_files],
+                    "test":  [str(f) for f in test_files],
+                })
+
+            # Alle Dateien als ungeteiltes Dataset
             if files:
-                train_files = [f for f in files if "train" in f.stem]
-                test_files  = [f for f in files if any(k in f.stem for k in ("test", "eval", "val"))]
-                if train_files and test_files:
-                    return load_dataset(
-                        "json" if ext.endswith(".json") or ext.endswith(".jsonl") else ext[2:],
-                        data_files={"train": str(train_files[0]), "test": str(test_files[0])}
-                    )
-                if train_files:
-                    return load_dataset(
-                        "json" if ext.endswith(".json") or ext.endswith(".jsonl") else ext[2:],
-                        data_files=str(train_files[0])
-                    )
-                if files:
-                    return load_dataset(
-                        "json" if ext.endswith(".json") or ext.endswith(".jsonl") else ext[2:],
-                        data_files=str(files[0])
-                    )
+                MessageProtocol.status("loading_data",
+                    f"Root-Dateien | {ext_key} | {len(files)} Datei(en) gesamt")
+                return load_dataset(ext_key,
+                    data_files={"train": [str(f) for f in files]})
+
         raise FileNotFoundError(
-            f"Keine unterstützten Dataset-Dateien in {path} gefunden.\n"
-            "Erwartet: .jsonl, .json, .csv, oder .parquet in train/val/test-Ordnern oder direkt im Root"
+            f"Keine unterstuetzten Dataset-Dateien in {path} gefunden.\n"
+            f"Erwartet: .parquet, .jsonl, .json oder .csv in train/val/test-Ordnern "
+            f"oder direkt im Root."
         )
 
     # ─── 3. Modell laden ───────────────────────────────────────────────────
@@ -481,8 +517,13 @@ class Plugin(TrainPlugin):
             bf16=use_bf16,
             gradient_checkpointing=self.config.gradient_checkpointing,
             eval_strategy=self.config.eval_strategy,
-            save_strategy=self.config.save_strategy,
-            save_total_limit=self.config.save_total_limit,
+            # Checkpointing: immer steps-basiert damit stop_training() einen
+            # Checkpoint findet, auch wenn keine Epoche abgeschlossen wurde.
+            # save_total_limit=2: aktuellsten + einen Backup halten,
+            # aeltere werden automatisch geloescht.
+            save_strategy="steps",
+            save_steps=max(self.config.save_steps, 50),
+            save_total_limit=2,
             logging_steps=self.config.logging_steps,
             seed=self.config.seed,
             # Dataloader
@@ -492,9 +533,7 @@ class Plugin(TrainPlugin):
             # Logging
             report_to=[],
             disable_tqdm=True,
-            load_best_model_at_end=True,
-            metric_for_best_model="eval_loss",
-            greater_is_better=False,
+            load_best_model_at_end=False,  # False weil save_strategy != eval_strategy
         )
 
         data_collator = DataCollatorWithPadding(

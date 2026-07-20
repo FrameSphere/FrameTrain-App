@@ -152,7 +152,7 @@ export default function Login({ onLogin }: LoginProps) {
                 <p className="text-sm text-red-300">{error}</p>
                 {needsDesktopPassword && (
                   <a
-                    href="https://frame-train.vercel.app/dashboard"
+                    href="https://frame-train.com/dashboard"
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 mt-1.5 text-xs text-purple-400 hover:text-purple-300 underline"

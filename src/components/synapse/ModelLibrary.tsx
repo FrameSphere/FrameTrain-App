@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { exportCanvasNetworkToModelLibrary } from "./canvasModelBridge";
+import { buildCanvasGraphIR } from "./graphIR";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface SavedModel {
@@ -16,6 +18,10 @@ export interface SavedModel {
   moduleMetadata?: any;
   /** Backend canvas_XXXX ID — erforderlich für SQLite-Persistenz */
   canvasModelId?: string;
+  /** model.pt vorhanden — Modell wurde bereits trainiert */
+  hasWeights?: boolean;
+  taskType?: string;
+  numClasses?: number;
 }
 
 // ─── CanvasDesign: was in SQLite gespeichert wird ─────────────────────────────
@@ -33,7 +39,6 @@ interface ModelLibraryProps {
   onClose: () => void;
   onLoad: (model: SavedModel) => void;
   userId: string; // required — kein anonymes Speichern
-  onSwitchToSessions?: () => void;
 }
 
 // ─── SQLite-backed storage helpers (exportiert für SynapseBuilder) ────────────
@@ -61,6 +66,9 @@ export async function readModels(userId: string): Promise<SavedModel[]> {
       nodes: [],
       edges: [],
       canvasModelId: m.model_id,
+      hasWeights: m.has_weights,
+      taskType: m.task_type,
+      numClasses: m.num_classes,
     }));
   } catch {
     return [];
@@ -123,12 +131,19 @@ function formatDate(ts: number): string {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onLoad, userId, onSwitchToSessions }) => {
+export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onLoad, userId }) => {
   const [models, setModels] = useState<SavedModel[]>([]);
   const [loading, setLoading] = useState(false);
+  // Zwei-Klick-Löschen: erster Klick auf ✕ merkt die ID, zweiter löscht wirklich
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // Inline-Umbenennen
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   useEffect(() => {
     if (!isOpen) return;
+    setConfirmDeleteId(null);
+    setRenameId(null);
     setLoading(true);
     readModels(userId)
       .then(setModels)
@@ -136,13 +151,59 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
       .finally(() => setLoading(false));
   }, [isOpen, userId]);
 
+  // Löscht das Modell WIRKLICH (Backend: Ordner + DB + Metadata) und das Design.
+  // Vorher wurde nur das Design gelöscht — das Modell tauchte danach wieder auf.
   const handleDelete = useCallback(
     async (id: string) => {
+      if (confirmDeleteId !== id) {
+        setConfirmDeleteId(id);
+        return;
+      }
+      setConfirmDeleteId(null);
       await deleteModelDesign(id).catch(() => {});
+      await invoke("delete_model", { modelId: id }).catch(() => {});
       setModels((prev) => prev.filter((m) => m.id !== id));
     },
-    []
+    [confirmDeleteId]
   );
+
+  const startRename = useCallback((m: SavedModel) => {
+    setRenameId(m.id);
+    setRenameValue(m.name);
+  }, []);
+
+  // Kopie anlegen — für Experimente am Design, ohne das Original anzufassen
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const handleDuplicate = useCallback(async (m: SavedModel) => {
+    if (duplicatingId) return;
+    setDuplicatingId(m.id);
+    try {
+      const design = await loadModelDesign(m.canvasModelId ?? m.id);
+      if (!design) return;
+      const graphIR = buildCanvasGraphIR(design.nodes as any, design.edges as any, {
+        epochs: 10, batchSize: 32, learningRate: 0.001, gpu: "cpu", precision: "fp32", gradAccum: 1,
+      });
+      const name = `${m.name} (Kopie)`;
+      const result = await exportCanvasNetworkToModelLibrary(
+        design.graphConfig, design.pythonCode ?? "", name, graphIR
+      );
+      await writeModelDesign(result.modelId, design);
+      const fresh = await readModels(userId);
+      setModels(fresh);
+    } catch { /* Kopie fehlgeschlagen — Liste unverändert */ }
+    finally { setDuplicatingId(null); }
+  }, [duplicatingId, userId]);
+
+  const commitRename = useCallback(async () => {
+    const id = renameId;
+    const name = renameValue.trim();
+    setRenameId(null);
+    if (!id || !name) return;
+    try {
+      await invoke("rename_model", { modelId: id, newName: name });
+      setModels((prev) => prev.map((m) => (m.id === id ? { ...m, name } : m)));
+    } catch { /* Name bleibt unverändert */ }
+  }, [renameId, renameValue]);
 
   const handleLoad = useCallback(
     async (model: SavedModel) => {
@@ -220,20 +281,8 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
               flex: 1,
             }}
           >
-            ◈ Gespeicherte Modelle
+            ◈ Modell-Bibliothek
           </span>
-          {onSwitchToSessions && (
-            <button
-              onClick={onSwitchToSessions}
-              style={{
-                fontSize: 10, color: "#a78bfa", background: "none",
-                border: "1px solid #334155", borderRadius: 4, padding: "2px 8px",
-                cursor: "pointer", marginRight: 8, fontFamily: "'JetBrains Mono', monospace",
-              }}
-            >
-              ← Sessions
-            </button>
-          )}
           <span
             style={{
               fontSize: 11,
@@ -308,28 +357,57 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
 
                 {/* Info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "#e2e8f0",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {model.name}
-                  </div>
+                  {renameId === model.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") setRenameId(null);
+                      }}
+                      onBlur={commitRename}
+                      style={{
+                        width: "100%", background: "#111827", border: "1px solid #4f46e5",
+                        borderRadius: 5, color: "#e2e8f0", fontSize: 12, padding: "3px 8px",
+                        fontFamily: "'JetBrains Mono', monospace", outline: "none",
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#e2e8f0",
+                        fontFamily: "'JetBrains Mono', monospace",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={model.name}
+                    >
+                      {model.name}
+                    </div>
+                  )}
                   <div
                     style={{
                       fontSize: 10,
                       color: "#334155",
                       fontFamily: "'JetBrains Mono', monospace",
                       marginTop: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
                     }}
                   >
-                    {formatDate(model.savedAt)} · {model.nodeCount} nodes · {model.edgeCount} edges
+                    {model.hasWeights && (
+                      <span style={{ color: "#34d399", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 4, padding: "0 5px" }}>
+                        ✓ trainiert
+                      </span>
+                    )}
+                    {model.taskType && <span>{model.taskType}</span>}
+                    {model.numClasses != null && model.numClasses > 0 && <span>· {model.numClasses} Klassen</span>}
+                    {model.savedAt > 0 && <span>· {formatDate(model.savedAt)}</span>}
                   </div>
                 </div>
 
@@ -339,18 +417,32 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
                     Laden
                   </button>
                   <button
-                    onClick={() => handleDelete(model.id)}
+                    onClick={() => startRename(model)}
                     style={deleteBtn}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.color = "#f87171";
-                      (e.currentTarget as HTMLButtonElement).style.borderColor = "#7f1d1d";
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.color = "#475569";
-                      (e.currentTarget as HTMLButtonElement).style.borderColor = "#1e293b";
-                    }}
+                    title="Umbenennen"
                   >
-                    ✕
+                    ✎
+                  </button>
+                  <button
+                    onClick={() => handleDuplicate(model)}
+                    style={{ ...deleteBtn, ...(duplicatingId === model.id ? { opacity: 0.5 } : {}) }}
+                    disabled={duplicatingId !== null}
+                    title="Duplizieren — Kopie zum Experimentieren"
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    onClick={() => handleDelete(model.id)}
+                    style={{
+                      ...deleteBtn,
+                      ...(confirmDeleteId === model.id
+                        ? { color: "#f87171", borderColor: "#7f1d1d", background: "rgba(127,29,29,0.2)" }
+                        : {}),
+                    }}
+                    title={confirmDeleteId === model.id ? "Nochmal klicken zum endgültigen Löschen" : "Modell löschen"}
+                    onMouseLeave={() => setConfirmDeleteId((c) => (c === model.id ? null : c))}
+                  >
+                    {confirmDeleteId === model.id ? "Löschen?" : "✕"}
                   </button>
                 </div>
               </div>
@@ -370,7 +462,7 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
               flexShrink: 0,
             }}
           >
-            Modelle werden in SQLite gespeichert – nur für deinen Account sichtbar.
+            Modelle sind an deinen Account gebunden und im Training-Panel trainierbar.
           </div>
         )}
       </div>

@@ -61,6 +61,17 @@ export class ErrorParser {
   } {
     const msg = errorMsg.toLowerCase();
 
+    if (
+      msg.includes("image_loader") || msg.includes("csv_loader") ||
+      msg.includes("parquet_loader") || msg.includes("found no valid file") ||
+      msg.includes("kein dataset")
+    ) {
+      return {
+        type: "dataset_error",
+        root: "Dataset-Problem: Pfad, Auswahl oder Format prüfen",
+        details: errorMsg,
+      };
+    }
     if (msg.includes("shape")) {
       return {
         type: "shape_mismatch",
@@ -75,7 +86,7 @@ export class ErrorParser {
         details: errorMsg,
       };
     }
-    if (msg.includes("nan")) {
+    if (/\bnan\b/.test(msg)) {
       return {
         type: "nan_error",
         root: "NaN in loss - Training instabil",
@@ -128,6 +139,23 @@ export class GraphAnalyzer {
     const warnings: string[] = [];
     const suggestions: FixSuggestion[] = [];
 
+    // Die Heuristik unten nimmt eine LINEARE Kette an (Layer i → i+1 in
+    // Array-Reihenfolge). Bei verzweigten Graphen (Fan-in/Fan-out) wären
+    // die Meldungen frei erfunden — dann keine Struktur-Diagnose liefern;
+    // maßgeblich bleibt die echte Graph-Validierung (validateFullGraph).
+    const inDeg = new Map<string, number>();
+    const outDeg = new Map<string, number>();
+    edges.forEach((e) => {
+      outDeg.set(e.source, (outDeg.get(e.source) ?? 0) + 1);
+      inDeg.set(e.target, (inDeg.get(e.target) ?? 0) + 1);
+    });
+    const isLinearChain = nodes.every(
+      (n) => (inDeg.get(n.id) ?? 0) <= 1 && (outDeg.get(n.id) ?? 0) <= 1
+    );
+    if (!isLinearChain) {
+      return { isHealthy: true, issues, warnings, suggestions };
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // 1. Shape Compatibility Check
     // ─────────────────────────────────────────────────────────────────
@@ -169,7 +197,7 @@ export class GraphAnalyzer {
         // Suggestion 1: Bridge-Layer (sicher & präserviert Model)
         suggestions.push({
           id: `fix_bridge_${i}_${i + 1}`,
-          title: `🌉 Bridge Layer zwischen Layer ${i} und ${i + 1}`,
+          title: `Bridge-Layer zwischen Layer ${i} und ${i + 1}`,
           description: `Füge eine Dense-Bridge Layer hinzu um von ${currentOutput} auf ${nextInput} zu transformieren`,
           action: "insert_bridge",
           targetNodeId: nodeId,
@@ -184,7 +212,7 @@ export class GraphAnalyzer {
         // Suggestion 2: Nur Warnung (nicht automatisch löschen)
         suggestions.push({
           id: `inspect_${i + 1}`,
-          title: `⚠️ Layer ${i + 1} überprüfen`,
+          title: `⚠ Layer ${i + 1} überprüfen`,
           description: `Diese Layer könnte der Verursacher sein. Überprüfe manuell oder nutze die Bridge-Option.`,
           action: "inspect_only",
           targetNodeId: nodeId,
@@ -441,7 +469,7 @@ export class TrainingAnalyzer {
     if (result.success) {
       return {
         status: "success",
-        message: `✅ Training erfolgreich! (${result.epochs} Epochs in ${Math.round(result.duration / 1000)}s, Loss: ${result.finalLoss?.toFixed(4)})`,
+        message: `✓ Training erfolgreich! (${result.epochs} Epochs in ${Math.round(result.duration / 1000)}s, Loss: ${result.finalLoss?.toFixed(4)})`,
       };
     }
 
@@ -450,20 +478,20 @@ export class TrainingAnalyzer {
     if (parsed.type === "shape_mismatch") {
       return {
         status: "shape_error",
-        message: `❌ Shape Fehler: ${parsed.root}`,
+        message: `✗ Shape-Fehler: ${parsed.root}`,
       };
     }
 
     if (parsed.type === "memory_error") {
       return {
         status: "memory_error",
-        message: `❌ Memory Fehler: Reduziere batch_size oder modell_complexity`,
+        message: `✗ Memory-Fehler: Reduziere batch_size oder modell_complexity`,
       };
     }
 
     return {
       status: "failed",
-      message: `❌ Training fehlgeschlagen: ${parsed.root}`,
+      message: `✗ Training fehlgeschlagen: ${parsed.root}`,
     };
   }
 
@@ -534,75 +562,109 @@ export class SynapseAICoach {
     needsUserConfirmation?: boolean;
   } {
     const q = question.toLowerCase();
+    const result = this.lastTrainingResult;
+    const analysis = result ? TrainingAnalyzer.analyzeResult(result) : null;
+    const errorType = result?.error
+      ? ErrorParser.parseTrainingError(result.error).type
+      : null;
 
-    // "War das Training erfolgreich?"
+    // Fehlertyp-spezifische Handlungsempfehlung (statt "verstehe nicht")
+    const guidance = (): string => {
+      switch (errorType) {
+        case "dataset_error":
+          return SynapseAICoach.datasetStructureHelp();
+        case "memory_error":
+          return "Speicher-Problem: Batch-Size halbieren, Bildgröße reduzieren oder andere Apps schließen.";
+        case "shape_mismatch":
+        case "dimension_error":
+          return "Shape-Problem: Nutze im Fehler-Banner »Mit AI beheben« — die Synapse-AI kennt die betroffenen Nodes und Parameter.";
+        case "nan_error":
+          return "NaN im Loss: Learning Rate deutlich senken (z.B. /10) oder Gradient Clipping aktivieren.";
+        default:
+          return "Details stehen im Fehlertext der Trainings-Konsole. Über »An FrameTrain senden« kannst du den Fehler auch ans Team melden.";
+      }
+    };
+
+    // "Wie muss das Dataset aussehen?" / "How should the dataset be structured?"
+    if (q.includes("dataset") || q.includes("aufgebaut") || q.includes("structured")) {
+      return { answer: SynapseAICoach.datasetStructureHelp() };
+    }
+
+    // "Was sind die Probleme?" / "What are the issues?"
+    if (q.includes("problem") || q.includes("issue") || q.includes("was sind")) {
+      const issues = this.lastDiagnosis?.issues ?? [];
+      if (issues.length > 0) {
+        return {
+          answer: `Gefundene Probleme:\n${issues.map((i) => `• ${i.description}`).join("\n")}`,
+          suggestFixes: this.lastDiagnosis?.suggestions,
+        };
+      }
+      if (result && !result.success && analysis) {
+        return { answer: `${analysis.message}\n\n${guidance()}` };
+      }
+      return { answer: "✓ Keine Probleme gefunden!" };
+    }
+
+    // "Fixe Shape-Fehler" / "Fix shape errors" / "Was soll ich ändern?" / "What should I change?"
     if (
-      q.includes("war") &&
-      (q.includes("erfolgreich") || q.includes("training"))
+      q.includes("fix") || q.includes("behe") || q.includes("änder") || q.includes("change")
     ) {
-      if (!this.lastTrainingResult) {
+      const suggestions = this.lastDiagnosis?.suggestions ?? [];
+      if (suggestions.length > 0) {
+        const topFix = suggestions[0];
+        return {
+          answer: `Vorschlag: ${topFix.title}\n${topFix.description}`,
+          suggestFixes: [topFix],
+          needsUserConfirmation: true,
+        };
+      }
+      if (result && !result.success) {
+        return { answer: guidance() };
+      }
+      return { answer: "✓ Nichts zu fixen — das Training war erfolgreich." };
+    }
+
+    // "War das Training erfolgreich?" / "Was training successful?"
+    if (q.includes("erfolgreich") || q.includes("success") || q.includes("training")) {
+      if (!result || !analysis) {
         return { answer: "Ich habe keine Training-Informationen. Führe erst ein Training durch." };
       }
-
-      const analysis = TrainingAnalyzer.analyzeResult(this.lastTrainingResult);
       return {
         answer: analysis.message,
         suggestFixes:
-          analysis.status === "shape_error"
-            ? this.lastDiagnosis?.suggestions
-            : undefined,
+          analysis.status === "shape_error" ? this.lastDiagnosis?.suggestions : undefined,
       };
     }
 
-    // "Fixe Shape-Fehler"
-    if (q.includes("fixe") && (q.includes("shape") || q.includes("fehler"))) {
-      if (!this.lastDiagnosis) {
-        return {
-          answer: "Keine Fehlerdiagnose verfügbar. Bitte erst Training durchführen.",
-        };
-      }
-
-      if (this.lastDiagnosis.suggestions.length === 0) {
-        return {
-          answer: "✅ Keine Shape-Fehler gefunden!",
-        };
-      }
-
-      const topFix = this.lastDiagnosis.suggestions[0];
-      return {
-        answer: `🔧 Vorschlag: ${topFix.title}\n${topFix.description}`,
-        suggestFixes: [topFix],
-        needsUserConfirmation: true,
-      };
+    // Fallback: statt "verstehe nicht" den Fehler + passende Hilfe zeigen
+    if (result && !result.success && analysis) {
+      return { answer: `${analysis.message}\n\n${guidance()}` };
     }
-
-    // "Was sind die Probleme?"
-    if (q.includes("problem") || q.includes("issue")) {
-      if (!this.lastDiagnosis) {
-        return {
-          answer: "Keine Diagnose verfügbar.",
-        };
-      }
-
-      if (this.lastDiagnosis.issues.length === 0) {
-        return {
-          answer: "✅ Keine Probleme gefunden!",
-        };
-      }
-
-      const issuesSummary = this.lastDiagnosis.issues
-        .map((i) => `• ${i.description}`)
-        .join("\n");
-
-      return {
-        answer: `Gefundene Probleme:\n${issuesSummary}`,
-        suggestFixes: this.lastDiagnosis.suggestions,
-      };
-    }
-
     return {
-      answer: "Ich konnte deine Frage nicht verstehen. Frag mich nach: War das Training erfolgreich? Oder: Fixe Shape-Fehler.",
+      answer: "Frag mich z.B.: Was sind die Probleme? · Was soll ich ändern? · War das Training erfolgreich?",
     };
+  }
+
+  /** Erklärt die erwartete Dataset-Struktur für den Canvas-image_loader. */
+  static datasetStructureHelp(): string {
+    return [
+      "Der image_loader trainiert Bild-KLASSIFIKATION und erwartet:",
+      "",
+      "dataset/",
+      "  hund/    bild1.jpg …",
+      "  katze/   bild2.jpg …",
+      "",
+      "oder mit fertigen Splits:",
+      "",
+      "dataset/",
+      "  train/hund/…   train/katze/…",
+      "  val/hund/…     val/katze/…",
+      "",
+      "⚠ YOLO-Datasets (train/images/ + train/labels/ + dataset.yaml) sind",
+      "Objekterkennungs-Daten — dafür das YOLO-Training im Training-Panel",
+      "nutzen, nicht den Canvas-image_loader.",
+      "Parquet-/CSV-Datasets brauchen den parquet_loader- bzw. csv_loader-Node.",
+    ].join("\n");
   }
 
   analyzeDiagnosis(diagnosis: GraphDiagnosis) {

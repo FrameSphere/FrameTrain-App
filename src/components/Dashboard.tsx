@@ -11,6 +11,7 @@ import LaboratoryPanel from './LaboratoryPanel';
 import Settings from './Settings';
 import FloatingAICoach from './FloatingAICoach';
 import GlobalTrainingProgress from './GlobalTrainingProgress';
+import AppContextMenu from './ui/AppContextMenu';
 import TrainingDashboard from './TrainingDashboard';
 import SynapseBuilder from './synapse/SynapseBuilder';
 import { useTheme } from '../contexts/ThemeContext';
@@ -41,6 +42,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
     setIsDashMinimized,
     setCurrentJob,
     setCompletedVersionId,
+    updateJobStatus,
     clearTraining,
   } = useTrainingContext();
 
@@ -78,7 +80,11 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
   };
 
   const handleStopFromGlobal = async () => {
-    try { await invoke('stop_training'); } catch { /* ignore */ }
+    try {
+      await invoke('stop_training');
+      // Sofortiges UI-Feedback — nicht auf das (optionale) Stop-Event warten
+      updateJobStatus('stopped');
+    } catch { /* ignore */ }
   };
 
   const handleNavigateToAnalysis = (versionId: string) => {
@@ -105,6 +111,9 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
           {renderView()}
         </div>
       </main>
+
+      {/* App-weites Rechtsklick-Menü (nativ in Eingabefeldern, custom sonst) */}
+      <AppContextMenu />
 
       {/* Floating AI Coach */}
       <FloatingAICoach userId={userData.userId} />

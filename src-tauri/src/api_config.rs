@@ -4,7 +4,7 @@
 use std::sync::OnceLock;
 
 /// Production API base URL
-pub const PRODUCTION_API_URL: &str = "https://frame-train.vercel.app/api";
+pub const PRODUCTION_API_URL: &str = "https://frame-train.com/api";
 
 /// Development API base URL (for local testing)
 pub const DEVELOPMENT_API_URL: &str = "http://localhost:3000/api";
@@ -58,7 +58,7 @@ mod tests {
     
     #[test]
     fn test_production_url() {
-        assert_eq!(PRODUCTION_API_URL, "https://frame-train.vercel.app/api");
+        assert_eq!(PRODUCTION_API_URL, "https://frame-train.com/api");
     }
     
     #[test]

@@ -7,13 +7,52 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
  */
 
 export type AIProvider = 'anthropic' | 'openai' | 'groq' | 'ollama';
+export type TokenBudget = 'minimal' | 'balanced' | 'quality' | 'max';
+
+export const TOKEN_BUDGET_CONFIG: Record<TokenBudget, {
+  label: string;
+  maxTokens: number;
+  historyTokenBudget: number;
+  synapseMaxTokens: number;
+  description: string;
+}> = {
+  minimal: {
+    label: 'Minimal',
+    maxTokens: 400,
+    historyTokenBudget: 800,
+    synapseMaxTokens: 1500,
+    description: 'Sehr kurze Antworten, minimaler Verbrauch. Ideal für Groq Free Tier.',
+  },
+  balanced: {
+    label: 'Balanced',
+    maxTokens: 800,
+    historyTokenBudget: 1500,
+    synapseMaxTokens: 3000,
+    description: 'Gute Balance aus Qualität und Token-Verbrauch. Empfohlen für die meisten User.',
+  },
+  quality: {
+    label: 'Quality',
+    maxTokens: 1500,
+    historyTokenBudget: 2500,
+    synapseMaxTokens: 5000,
+    description: 'Ausführliche Antworten mit mehr Kontext. Für Claude / GPT-4 empfohlen.',
+  },
+  max: {
+    label: 'Maximum',
+    maxTokens: 3000,
+    historyTokenBudget: 4000,
+    synapseMaxTokens: 8000,
+    description: 'Maximale Qualität und Tiefe. Nur für bezahlte APIs mit hohem Rate-Limit.',
+  },
+};
 
 export interface AISettings {
   enabled: boolean;
   provider: AIProvider;
   apiKey: string;
   selectedModel: string;
-  ollamaModel: string; // Nur für Ollama
+  ollamaModel: string;
+  tokenBudget: TokenBudget;
 }
 
 interface AISettingsContextType {
@@ -30,6 +69,7 @@ const DEFAULT_SETTINGS: AISettings = {
   apiKey: '',
   selectedModel: 'llama3.2',
   ollamaModel: 'llama3.2',
+  tokenBudget: 'balanced',
 };
 
 export function AISettingsProvider({ children, userId }: { children: ReactNode; userId?: string }) {
