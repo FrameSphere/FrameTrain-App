@@ -810,7 +810,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
   const unlistenRef = useRef<(() => void)[]>([]);
 
-  useEffect(() => () => { unlistenRef.current.forEach(fn => fn()); }, []);
+  useEffect(() => () => {
+    unlistenRef.current.forEach(fn => { try { fn(); } catch { /* listener already removed */ } });
+    unlistenRef.current = [];
+  }, []);
 
   // ── Derived (muss VOR allen useEffects stehen – TDZ-Vermeidung) ──────────
 
@@ -892,7 +895,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         }
       }
     );
-    return () => { unlisten.then(fn => fn()); };
+    return () => { unlisten.then(fn => fn()).catch(() => { /* listener already removed */ }); };
   }, [t]);
 
   // Cleanup: Server stoppen wenn Komponente unmountet
@@ -1213,7 +1216,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     setTesting(true);
     setTestResult(null);
     setTestError(null);
-    unlistenRef.current.forEach(fn => fn());
+    unlistenRef.current.forEach(fn => { try { fn(); } catch { /* listener already removed */ } });
     unlistenRef.current = [];
 
     const start = Date.now();
