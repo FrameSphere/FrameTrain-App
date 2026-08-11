@@ -677,7 +677,7 @@ export default function VersionManager() {
         ].join('\n'))
       ].join('\n') : '',
     ].filter(Boolean);
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'versions');
   }, [models, selectedModel, modelVersions, setCurrentPageContent]);
 
   // Auto-refresh when training completes

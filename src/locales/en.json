@@ -381,9 +381,6 @@
     },
     "hadThought": "Thought it through",
     "steps": "Steps",
-    "thinkingAnalyze": "Analyzing page",
-    "thinkingProcess": "Processing context",
-    "thinkingGenerate": "Generating response",
     "disabledError": "AI assistant is disabled. Please enable it in Settings.",
     "apiKeyMissing": "API key missing. Please configure it in Settings.",
     "unknownError": "Unknown error",
@@ -394,7 +391,16 @@
     "hoursAgo": "{n} hr ago",
     "daysAgo": "{n} day ago",
     "daysAgoPlural": "{n} days ago",
-    "currentArea": "Current Area"
+    "openPage": "Open {page}",
+    "applyConfig": "Apply",
+    "configApplied": "Applied ✓",
+    "explainError": "Explain error",
+    "estimateRam": "Estimate RAM",
+    "trainStart": "Start training",
+    "trainStop": "Stop training",
+    "confirm": "Confirm?",
+    "automationOn": "Automation on — coach may start/stop training (with confirmation)",
+    "automationOff": "Automation off — click to enable training actions"
   },
   "modelManager": {
     "title": "Models",
@@ -1115,7 +1121,17 @@
       "countLabelPlural": "{count} models",
       "empty": "No models saved yet.\nBuild a graph and click \"Save\".",
       "loadButton": "Load",
-      "footer": "Models are stored locally – only visible to your account."
+      "footer": "Models are stored locally – only visible to your account.",
+      "loading": "Loading models…",
+      "trainedBadge": "✓ trained",
+      "classesLabel": "{count} classes",
+      "footerTrainable": "Models are linked to your account and trainable in the Training panel.",
+      "renameTooltip": "Rename",
+      "duplicateTooltip": "Duplicate — a copy to experiment with",
+      "deleteTooltip": "Delete model",
+      "deleteConfirmTooltip": "Click again to permanently delete",
+      "deleteConfirmLabel": "Delete?",
+      "duplicateSuffix": "(Copy)"
     },
     "sessionLibrary": {
       "title": "◈ Sessions",
@@ -1140,6 +1156,7 @@
       "noParams": "No configurable params",
       "tensorShapeLabel": "Tensor Shape"
     },
+    "contextClear": "Clear canvas",
     "shapeErrorBanner": {
       "closeTooltip": "Close",
       "fixWithAIButton": "Fix with AI",
@@ -1626,7 +1643,9 @@
       "aiTemplateSaved": "Template Saved!",
       "aiTemplateSavedDetail": "AI suggestion saved as template.",
       "trainingComplete": "Training Complete!",
-      "trainingCompleteDetail": "The model has been saved."
+      "trainingCompleteDetail": "The model has been saved.",
+      "fp16NoCudaTitle": "fp16 requires CUDA",
+      "fp16NoCudaDetail": "No CUDA GPU detected — training runs in fp32 (fp16 was disabled)."
     },
     "pageContext": {
       "title": "=== FrameTrain Training Panel ===",
@@ -2458,7 +2477,9 @@
   "contextMenu": {
     "copy": "Copy",
     "copied": "Copied",
-    "askCoach": "Discuss with AI Coach"
+    "askCoach": "Discuss with AI Coach",
+    "openCoach": "Open AI Coach",
+    "goto": "Go to …"
   },
   "common": {
     "loading": "Loading...",

@@ -154,7 +154,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
     lines.push('Für nicht unterstützte Modelle: Dev Test Mode mit eigenem Python-Skript verwenden.');
     lines.push('Im Dev Test Mode: Skript empfängt Eingabe via stdin, Ausgabe als JSON auf stdout.');
 
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'tests');
   }, [selectedModelId, selectedVersionId, panelState, mode, models, modelsWithVersions]);
 
   // ── Initialer Load ──────────────────────────────────────────────────────

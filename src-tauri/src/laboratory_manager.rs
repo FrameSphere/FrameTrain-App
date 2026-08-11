@@ -435,6 +435,7 @@ pub async fn lab_start_model_server(
 #[tauri::command]
 pub fn lab_infer_sample(
     text: String,
+    image_path: Option<String>,
     state: tauri::State<'_, Arc<Mutex<LabState>>>,
 ) -> Result<InferResult, String> {
     let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
@@ -444,8 +445,15 @@ pub fn lab_infer_sample(
         let server = s.server.as_mut()
             .ok_or_else(|| "Kein Modell geladen. Bitte warte bis das Modell fertig geladen ist.".to_string())?;
 
-        // Canvas-Modelle erwarten einen Zahlen-Tensor statt Text
-        let req = if server.is_canvas {
+        // Bild-Sample: Pfad direkt an den Canvas-Server (Preprocessing per IR im Python)
+        let img = image_path.as_deref().map(str::trim).filter(|p| !p.is_empty());
+        let req = if let Some(path) = img {
+            if !server.is_canvas {
+                return Err("Bild-Inferenz wird aktuell nur für Canvas-Modelle (Synapse Builder) unterstützt.".to_string());
+            }
+            serde_json::json!({ "input": path, "input_type": "image" }).to_string()
+        } else if server.is_canvas {
+            // Canvas-Modelle erwarten einen Zahlen-Tensor statt Text
             let nums: Vec<f64> = text
                 .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
                 .filter(|s| !s.is_empty())

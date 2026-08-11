@@ -381,9 +381,6 @@
     },
     "hadThought": "Hat nachgedacht",
     "steps": "Schritte",
-    "thinkingAnalyze": "Seite analysieren",
-    "thinkingProcess": "Kontext verarbeiten",
-    "thinkingGenerate": "Antwort generieren",
     "disabledError": "KI-Assistent ist deaktiviert. Bitte in Einstellungen aktivieren.",
     "apiKeyMissing": "API-Key fehlt. Bitte in Einstellungen konfigurieren.",
     "unknownError": "Unbekannter Fehler",
@@ -394,7 +391,16 @@
     "hoursAgo": "vor {n} Std.",
     "daysAgo": "vor {n} Tag",
     "daysAgoPlural": "vor {n} Tagen",
-    "currentArea": "Aktueller Bereich"
+    "openPage": "{page} öffnen",
+    "applyConfig": "Übernehmen",
+    "configApplied": "Übernommen ✓",
+    "explainError": "Fehler erklären",
+    "estimateRam": "RAM schätzen",
+    "trainStart": "Training starten",
+    "trainStop": "Training stoppen",
+    "confirm": "Bestätigen?",
+    "automationOn": "Automation an — Coach darf Training starten/stoppen (mit Bestätigung)",
+    "automationOff": "Automation aus — klicke, um Training-Aktionen freizuschalten"
   },
   "modelManager": {
     "title": "Modelle",
@@ -1115,7 +1121,17 @@
       "countLabelPlural": "{count} Modelle",
       "empty": "Noch keine Modelle gespeichert.\nBaue einen Graph und klicke „Speichern“.",
       "loadButton": "Laden",
-      "footer": "Modelle werden lokal gespeichert – nur für deinen Account sichtbar."
+      "footer": "Modelle werden lokal gespeichert – nur für deinen Account sichtbar.",
+      "loading": "Lade Modelle…",
+      "trainedBadge": "✓ trainiert",
+      "classesLabel": "{count} Klassen",
+      "footerTrainable": "Modelle sind an deinen Account gebunden und im Training-Panel trainierbar.",
+      "renameTooltip": "Umbenennen",
+      "duplicateTooltip": "Duplizieren — Kopie zum Experimentieren",
+      "deleteTooltip": "Modell löschen",
+      "deleteConfirmTooltip": "Nochmal klicken zum endgültigen Löschen",
+      "deleteConfirmLabel": "Löschen?",
+      "duplicateSuffix": "(Kopie)"
     },
     "sessionLibrary": {
       "title": "◈ Sessions",
@@ -1140,6 +1156,7 @@
       "noParams": "No configurable params",
       "tensorShapeLabel": "Tensor Shape"
     },
+    "contextClear": "Canvas leeren",
     "shapeErrorBanner": {
       "closeTooltip": "Schließen",
       "fixWithAIButton": "Mit AI beheben",
@@ -1626,7 +1643,9 @@
       "aiTemplateSaved": "Template gespeichert!",
       "aiTemplateSavedDetail": "KI-Vorschlag als Template hinterlegt.",
       "trainingComplete": "Training abgeschlossen!",
-      "trainingCompleteDetail": "Das Modell wurde gespeichert."
+      "trainingCompleteDetail": "Das Modell wurde gespeichert.",
+      "fp16NoCudaTitle": "fp16 benötigt CUDA",
+      "fp16NoCudaDetail": "Keine CUDA-GPU erkannt — Training läuft in fp32 (fp16 wurde deaktiviert)."
     },
     "pageContext": {
       "title": "=== FrameTrain Training Panel ===",
@@ -2458,7 +2477,9 @@
   "contextMenu": {
     "copy": "Kopieren",
     "copied": "Kopiert",
-    "askCoach": "Mit AI Coach besprechen"
+    "askCoach": "Mit AI Coach besprechen",
+    "openCoach": "AI Coach öffnen",
+    "goto": "Gehe zu …"
   },
   "common": {
     "loading": "Wird geladen...",

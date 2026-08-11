@@ -81,8 +81,10 @@ class LoadedCanvasModel:
         return {
             "predicted_class": pred_idx,
             "confidence": confidence,
+            # "label" ergänzt — der Lab-Server/UI zeigt top_predictions über 'label'.
+            # Canvas-Modelle kennen keine Klassennamen → Klassen-Index als Label.
             "top_predictions": [
-                {"class_idx": i, "score": round(float(probs[i]), 6)}
+                {"class_idx": i, "label": f"Klasse {i}", "score": round(float(probs[i]), 6)}
                 for i in top
             ],
             "all_probs": [round(float(p), 6) for p in probs],
@@ -93,6 +95,61 @@ class LoadedCanvasModel:
     def predict_batch(self, xs: List[Any]) -> List[Dict[str, Any]]:
         """Mehrere Vorhersagen auf einmal."""
         return [self.predict(x) for x in xs]
+
+    # ── Bild-Inferenz ─────────────────────────────────────────────────────────
+    def _image_spec(self) -> Dict[str, Any]:
+        """Bildgröße/Kanäle/Normalisierung aus dem IR ableiten (image_loader-Node).
+        Fallback: Kanäle aus erstem conv2d-Layer, sonst 3×224×224 ohne Normalisierung."""
+        size, channels, normalize = 224, 3, False
+        data = getattr(self.ir, "data", None)
+        if data is not None and getattr(data, "type", "") == "image_loader":
+            p = data.params or {}
+            try:
+                size = int(p.get("imageSize", size))
+            except Exception:
+                pass
+            try:
+                channels = int(p.get("channels", channels))
+            except Exception:
+                pass
+            normalize = bool(p.get("normalize", False))
+        else:
+            # Kanäle aus erstem Conv2D-Layer schätzen
+            for n in getattr(self.ir, "nodes", []):
+                if getattr(n, "type", "") == "conv2d":
+                    try:
+                        channels = int((n.params or {}).get("inChannels", channels))
+                    except Exception:
+                        pass
+                    break
+        return {"size": size, "channels": channels, "normalize": normalize}
+
+    def predict_image(self, image_path: str) -> Dict[str, Any]:
+        """Lädt eine Bilddatei, bereitet sie nach IR-Spezifikation auf und sagt vorher."""
+        import torch
+        from PIL import Image
+
+        spec = self._image_spec()
+        size, channels, normalize = spec["size"], spec["channels"], spec["normalize"]
+
+        img = Image.open(image_path)
+        img = img.convert("L" if channels == 1 else "RGB")
+        img = img.resize((size, size))
+
+        # PIL → Tensor [C, H, W] in [0, 1]
+        import numpy as np
+        arr = np.asarray(img, dtype="float32") / 255.0
+        if arr.ndim == 2:  # Graustufen
+            arr = arr[:, :, None]
+        tensor = torch.from_numpy(arr).permute(2, 0, 1).contiguous()  # [C, H, W]
+
+        if normalize and channels == 3:
+            mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+            std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+            tensor = (tensor - mean) / std
+
+        tensor = tensor.unsqueeze(0)  # Batch-Dim [1, C, H, W]
+        return self.predict(tensor)
 
 
 def load_canvas_model(

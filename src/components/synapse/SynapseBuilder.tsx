@@ -18,6 +18,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Save as SaveIcon, Sparkles as SparklesIcon, FolderOpen as LibraryIcon, Trash2 as TrashIcon } from "lucide-react";
+import { useContextMenuActions } from "../../ui/contextMenuRegistry";
 
 import { NodeLibrary } from "./NodeLibrary";
 import { PropertyPanel } from "./PropertyPanel";
@@ -59,6 +61,8 @@ import { SynapseAIPanel } from "./ai/SynapseAIPanel";
 import "./ai/synapseAIPanel.css";
 import { useAISettings } from "../../contexts/AISettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { usePageContext } from "../../contexts/PageContext";
+import { buildPageContext, kv } from "../../ai/coachContext";
 import { callAI } from "../../ai/aiClient";
 import type { ChatMessage } from "../../ai/aiClient";
 
@@ -176,6 +180,31 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>("idle");
   const [metrics, setMetrics]               = useState<TrainingMetrics[]>([]);
   const [logLines, setLogLines]             = useState<string[]>([]);
+
+  // ── Seiten-Kontext für den globalen Floating AI Coach ──────────────────
+  const { setCurrentPageContent } = usePageContext();
+  useEffect(() => {
+    setCurrentPageContent(buildPageContext({
+      pageId: 'synapse',
+      language,
+      title: 'Synapse Builder',
+      purpose: 'Visueller Node-Builder: ML-Pipelines aus Bausteinen zusammenstecken. Synapse hat einen eigenen, spezialisierten Coach im Panel.',
+      state: [
+        kv('Nodes', String(nodes.length)),
+        kv('Verbindungen', String(edges.length)),
+        kv('Ausgewählter Node', selectedNodeId ?? '—'),
+        kv('Modell', activeModelName ?? '—'),
+        kv('Ungespeicherte Änderungen', hasUnsavedChanges ? 'ja' : 'nein'),
+        kv('Training', trainingStatus),
+      ],
+      actions: [
+        'Nodes aus der Bibliothek ziehen und verbinden',
+        'Node anklicken → Parameter im Inspector rechts bearbeiten',
+        'Speichern / Exportieren über die Kopfleiste',
+        'Für tiefe Node-Graph-Fragen den Synapse-Coach im Panel nutzen',
+      ],
+    }), 'synapse');
+  }, [nodes.length, edges.length, selectedNodeId, activeModelName, hasUnsavedChanges, trainingStatus, language, setCurrentPageContent]);
   const [outputDir, setOutputDir]           = useState<string>("/tmp/synapse_output");
 
   const rfRef          = useRef<ReactFlowInstance | null>(null);
@@ -790,6 +819,32 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     else performClear();
   }, [nodes.length, edges.length, hasUnsavedChanges, performClear]);
 
+  // ── Rechtsklick-Menü: Synapse-Aktionen ────────────────────────────────────
+  useContextMenuActions(() => [
+    {
+      id: 'synapse-save', group: 'Synapse',
+      label: t('synapseBuilder.saveButton'), icon: SaveIcon,
+      disabled: nodes.length === 0,
+      onSelect: () => handleSaveToModelLibrary(),
+    },
+    {
+      id: 'synapse-ai', group: 'Synapse',
+      label: t('synapseBuilder.aiAssistantButton'), icon: SparklesIcon,
+      onSelect: () => setShowAiPanel(true),
+    },
+    {
+      id: 'synapse-lib', group: 'Synapse',
+      label: t('synapseBuilder.sessionsModelsButton'), icon: LibraryIcon,
+      onSelect: () => setShowLibrary(true),
+    },
+    {
+      id: 'synapse-clear', group: 'Synapse',
+      label: t('synapse.contextClear'), icon: TrashIcon,
+      disabled: nodes.length === 0 && edges.length === 0,
+      onSelect: () => requestClear(),
+    },
+  ]);
+
   const handleStopTraining = useCallback(() => {
     cancelRef.current = true;
     invoke("stop_training").catch(() => {});
@@ -800,8 +855,22 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
 
   const handleExport = useCallback(
     (format: string) => {
-      setLogLines((p) => [...p, `[Export] Exportiere als ${format}…`]);
-      // Open the output dir in Finder/Explorer so user can grab the files
+      // Datei-Export (.txt/.csv/.json) läuft direkt in der TrainingConsole via
+      // Blob-Download — hier nur protokollieren.
+      if (format.startsWith("export_file:")) {
+        setLogLines((p) => [...p, `[Export] Datei gespeichert: ${format.slice("export_file:".length)}`]);
+        return;
+      }
+      if (format.startsWith("export_error:")) {
+        setLogLines((p) => [...p, `[Export] Fehler: ${format.slice("export_error:".length)}`]);
+        return;
+      }
+      if (format === "model_export") {
+        setLogLines((p) => [...p, `[Export] Trainiertes Modell in Downloads exportiert.`]);
+        return;
+      }
+      // "open_folder" (oder Unbekanntes): Output-Ordner im Finder/Explorer öffnen
+      setLogLines((p) => [...p, `[Export] Öffne Output-Verzeichnis…`]);
       invoke("open_path_in_finder", { path: outputDir }).catch(() => {
         setLogLines((pp) => [...pp, `[Export] Output-Verzeichnis: ${outputDir}`]);
       });

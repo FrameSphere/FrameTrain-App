@@ -1118,7 +1118,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
       `Verfügbare Paths: ${dsRefs.map(d => d.key).join(', ')}`,
     ];
 
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'tests-dev');
   }, [script, lineCount, running, isDirty, output, exitCode, modelInfo, datasets, currentScriptId, outputPath, dsRefs, setCurrentPageContent]);
 
   const syncEditorScroll = () => {

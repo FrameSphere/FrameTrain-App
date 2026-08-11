@@ -7,6 +7,9 @@ target/
 .env
 .env.local
 
+# Claude Code lokale Settings (enthält Secrets für die Auto-Fix-Routine) – nie committen
+.claude/settings.local.json
+
 # Build
 src-tauri/target/
 src-tauri/WixTools/

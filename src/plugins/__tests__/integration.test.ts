@@ -95,16 +95,20 @@ describe('Typen-Kontrakt – hfEncoderPlugin', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('PLUGINS[] – Reihenfolge & Vollständigkeit', () => {
-  it('enthält genau 2 Plugins', () => {
-    expect(PLUGINS).toHaveLength(2);
+  it('enthält alle registrierten Basis-Plugins', () => {
+    const ids = PLUGINS.map(p => p.id);
+    expect(ids).toEqual(
+      expect.arrayContaining(['canvas', 'yolo', 'image-classification', 'xlm-roberta', 'hf-encoder'])
+    );
   });
 
-  it('xlm-roberta liegt an Index 0 (höchste Priorität)', () => {
-    expect(PLUGINS[0].id).toBe('xlm-roberta');
+  it('canvas liegt an Index 0 (höchste Priorität, vor generischen Plugins)', () => {
+    expect(PLUGINS[0].id).toBe('canvas');
   });
 
-  it('hf-encoder liegt an Index 1 (Fallback)', () => {
-    expect(PLUGINS[1].id).toBe('hf-encoder');
+  it('xlm-roberta liegt vor hf-encoder (spezifisch vor Fallback)', () => {
+    const ids = PLUGINS.map(p => p.id);
+    expect(ids.indexOf('xlm-roberta')).toBeLessThan(ids.indexOf('hf-encoder'));
   });
 
   it('keine doppelten IDs', () => {
@@ -261,8 +265,8 @@ describe('Smoke-Test – minimales neues Plugin erfüllt Interface', () => {
   });
 
   it('nach Entfernen aus PLUGINS[] → detectPlugin findet es wieder nicht', () => {
-    // Sicherstellen dass der finally-Block oben funktioniert hat
-    expect(PLUGINS).toHaveLength(2);
+    // Sicherstellen dass der finally-Block oben funktioniert hat (whisper wieder raus)
+    expect(PLUGINS.map(p => p.id)).not.toContain('whisper');
     const result = detectPlugin('openai/whisper-large-v3');
     expect(result.supported).toBe(false);
   });

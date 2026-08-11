@@ -6,6 +6,7 @@ import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
+import { buildPageContext, kv } from '../ai/coachContext';
 import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
@@ -232,48 +233,45 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       about:        'Informationen (Über FrameTrain)',
       system:       'System (Training-Pakete, Hardware, Anti-Sleep)',
     };
-    const lines = [
-      '=== FrameTrain Einstellungen (Settings) ===',
-      '',
-      '--- Aktueller Tab ---',
-      `Aktiver Tab: "${tabs[activeTab] || activeTab}"`,
-      '',
-      '--- Alle verfügbaren Tabs ---',
-      ...Object.entries(tabs).map(([k, v]) => `\u2022 ${v}`),
-      '',
-      '--- KI-Assistent Konfiguration ---',
-      `Status: ${aiSettings.enabled ? '\u2705 Aktiviert' : '\u274c Deaktiviert'}`,
-      `Anbieter: ${providerInfo.label} (${aiSettings.provider})`,
-      providerInfo.needsKey
-        ? `API-Key: ${aiSettings.apiKey ? '\u2705 eingetragen' : '\u274c fehlt! (' + providerInfo.keyHint + ')'}`
-        : `API-Key: nicht benötigt (${providerInfo.keyHint})`,
-      `Modell: ${aiSettings.selectedModel || providerInfo.models[0]}`,
-      aiSettings.provider === 'ollama' ? `Ollama-Modell: ${aiSettings.ollamaModel || 'llama3.2'}` : '',
-      '',
-      '--- Anbieter-Vergleich ---',
-      '\u2022 Anthropic (Claude): Bezahlt, bestes Modell, sk-ant-... Key',
-      '\u2022 OpenAI (GPT-4o): Bezahlt, sehr gut, sk-... Key',
-      '\u2022 Groq: KOSTENLOS, schnell, gsk_... Key von console.groq.com',
-      '\u2022 Ollama: KOSTENLOS, lokal, kein Key — ollama.com installieren',
-      '',
-      '--- App-Version ---',
-      `Version: ${appVersion}`,
-      updateStatus === 'update-available' ? `\u26a0\ufe0f Update verfügbar: ${latestVersion}` :
-      updateStatus === 'up-to-date' ? '\u2705 App ist aktuell' : '',
-      '',
-      '--- Account ---',
-      `E-Mail: ${userData.email || 'nicht gesetzt'}`,
-      `User-ID: ${userData.userId || 'nicht gesetzt'}`,
-      '',
-      '--- Mögliche Aktionen ---',
-      '\u2022 KI-Assistent aktivieren/deaktivieren (Toggle im KI-Assistent-Tab)',
-      '\u2022 Anbieter wechseln: KI-Assistent-Tab > Anbieter auswählen',
-      '\u2022 API-Key eintragen: KI-Assistent-Tab > API-Key Feld',
-      '\u2022 Farbthema ändern: Erscheinungsbild-Tab',
-      '\u2022 Support-Ticket erstellen: Support-Tab',
-      '\u2022 Abmelden: Account-Tab > Abmelden-Button',
-    ].filter(Boolean);
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(buildPageContext({
+      pageId: 'settings',
+      title: 'Einstellungen (Settings)',
+      purpose: 'Konfiguration der App: KI-Provider (dieser Coach), Erscheinungsbild, Account, Support, Updates, System.',
+      state: [
+        kv('Aktiver Tab', tabs[activeTab] || activeTab),
+        kv('KI-Assistent', aiSettings.enabled ? 'aktiviert' : 'deaktiviert'),
+        kv('Anbieter', `${providerInfo.label} (${aiSettings.provider})`),
+        providerInfo.needsKey
+          ? kv('API-Key', aiSettings.apiKey ? 'eingetragen' : `FEHLT! (${providerInfo.keyHint})`)
+          : kv('API-Key', `nicht ben\u00f6tigt (${providerInfo.keyHint})`),
+        kv('Modell', aiSettings.selectedModel || providerInfo.models[0]),
+        aiSettings.provider === 'ollama' ? kv('Ollama-Modell', aiSettings.ollamaModel || 'llama3.2') : '',
+        kv('App-Version', appVersion),
+        updateStatus === 'update-available' ? kv('Update', `verf\u00fcgbar: ${latestVersion}`)
+          : updateStatus === 'up-to-date' ? kv('Update', 'App ist aktuell') : '',
+        kv('E-Mail', userData.email || 'nicht gesetzt'),
+      ],
+      actions: [
+        'KI-Assistent aktivieren/deaktivieren (Toggle im KI-Assistent-Tab)',
+        'Anbieter wechseln: KI-Assistent-Tab > Anbieter ausw\u00e4hlen',
+        'API-Key eintragen: KI-Assistent-Tab > API-Key Feld',
+        'Farbthema \u00e4ndern: Erscheinungsbild-Tab',
+        'Support-Ticket erstellen: Support-Tab',
+        'Abmelden: Account-Tab > Abmelden-Button',
+      ],
+      sections: [
+        { heading: 'VERF\u00dcGBARE TABS', lines: Object.values(tabs) },
+        {
+          heading: 'ANBIETER-VERGLEICH',
+          lines: [
+            'Anthropic (Claude): bezahlt, bestes Modell, sk-ant-\u2026 Key',
+            'OpenAI (GPT-4o): bezahlt, sehr gut, sk-\u2026 Key',
+            'Groq: KOSTENLOS, schnell, gsk_\u2026 Key von console.groq.com',
+            'Ollama: KOSTENLOS, lokal, kein Key \u2014 ollama.com installieren',
+          ],
+        },
+      ],
+    }), 'settings');
   }, [activeTab, aiSettings, appVersion, updateStatus, latestVersion, userData, setCurrentPageContent]);
 
   // Check for unread admin replies

@@ -1,22 +1,38 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import type { PageId } from '../ai/coachContext';
+import { setCurrentScreen } from '../utils/errorReport';
 
 /**
- * Globaler Context für den aktuellen Seiten-Inhalt
- * Damit der AI Coach automatisch den Kontext der aktuellen Seite erhält
+ * Globaler Context für die aktuelle Seite des AI Coaches.
+ * - currentPageContent: Live-Zustand der Seite (aus buildPageContext o.ä.)
+ * - currentPageId:      welche Seite gerade aktiv ist → steuert das lazy
+ *                       geladene, seiten-spezifische Wissen des Coaches.
  */
 
 interface PageContextType {
   currentPageContent: string;
-  setCurrentPageContent: (content: string) => void;
+  currentPageId: PageId | null;
+  /** Setzt Live-Zustand (+ optional die Seiten-ID für das seiten-spezifische Wissen). */
+  setCurrentPageContent: (content: string, pageId?: PageId) => void;
 }
 
 const PageContext = createContext<PageContextType | undefined>(undefined);
 
 export function PageContextProvider({ children }: { children: ReactNode }) {
-  const [currentPageContent, setCurrentPageContent] = useState('');
+  const [currentPageContent, setContent] = useState('');
+  const [currentPageId, setPageId] = useState<PageId | null>(null);
+
+  const setCurrentPageContent = useCallback((content: string, pageId?: PageId) => {
+    setContent(content);
+    if (pageId !== undefined) {
+      setPageId(pageId);
+      // Screen-Kontext für automatische Error-Reports mitführen.
+      setCurrentScreen(pageId);
+    }
+  }, []);
 
   return (
-    <PageContext.Provider value={{ currentPageContent, setCurrentPageContent }}>
+    <PageContext.Provider value={{ currentPageContent, currentPageId, setCurrentPageContent }}>
       {children}
     </PageContext.Provider>
   );

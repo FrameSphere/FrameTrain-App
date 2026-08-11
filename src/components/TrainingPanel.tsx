@@ -14,9 +14,12 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
+import { onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
+import { coercePatchFromRecord } from '../ai/coachContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
+import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { openAICoach } from '../ai/aiCoachEvents';
 import { detectPlugin } from '../plugins/registry';
 import { checkDatasetCompat } from '../plugins/datasetCompat';
@@ -196,11 +199,16 @@ function SelectInput({ value, onChange, options }: { value: string; onChange: (v
   );
 }
 
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+function Toggle({ checked, onChange, label, disabled, title }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; title?: string }) {
   return (
-    <div className="flex items-center justify-between py-0.5">
+    <div className={`flex items-center justify-between py-0.5 ${disabled ? 'opacity-40' : ''}`} title={title}>
       <span className="text-xs text-gray-400">{label}</span>
-      <button onClick={() => onChange(!checked)} className={`relative w-10 rounded-full transition-all ${checked ? 'bg-emerald-500' : 'bg-white/10'}`} style={{ height: '22px', minWidth: '40px' }}>
+      <button
+        onClick={() => { if (!disabled) onChange(!checked); }}
+        disabled={disabled}
+        className={`relative w-10 rounded-full transition-all ${checked ? 'bg-emerald-500' : 'bg-white/10'} ${disabled ? 'cursor-not-allowed' : ''}`}
+        style={{ height: '22px', minWidth: '40px' }}
+      >
         <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
       </button>
     </div>
@@ -776,7 +784,7 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`}`;
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function TrainingPanel({ userData, onNavigateToAnalysis }: TrainingPanelProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { currentTheme } = useTheme();
   const { success, error, warning } = useNotification();
   const { setCurrentPageContent } = usePageContext();
@@ -807,6 +815,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
   const [config, setConfig] = useState<TrainingConfig>(DEFAULT_CONFIG);
   const updateConfig = useCallback((patch: Partial<TrainingConfig>) => setConfig(c => ({ ...c, ...patch })), []);
+
+  // AI Coach darf empfohlene Config-Werte per Klick übernehmen ([[set:…]]-Tool).
+  useEffect(() => onApplyCoachConfig((patch) => {
+    updateConfig(patch as Partial<TrainingConfig>);
+  }), [updateConfig]);
 
   const [sections, setSections] = useState({ basic: true, optimizer: false, advanced: false, lora: false, ram: true });
   const toggleSection = (k: keyof typeof sections) => setSections(s => ({ ...s, [k]: !s[k] }));
@@ -1043,8 +1056,41 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       lines.push(t('trainingPanel.pageContext.actionPauseStop'));
     }
 
-    setCurrentPageContent(lines.join('\n'));
-  }, [selectedModelId, selectedDatasetId, mode, currentJob, setCurrentPageContent]);
+    // Aktuelle Config-Werte — damit der Coach sieht was eingestellt ist und
+    // gezielt via [[set:…]]-Tool anpassen kann.
+    if (mode === 'train') {
+      const precision = config.fp16 ? 'FP16' : config.bf16 ? 'BF16' : 'FP32';
+      lines.push('');
+      lines.push('--- AKTUELLE CONFIG (Train-Modus) ---');
+      lines.push(`epochs=${config.epochs}, batch_size=${config.batch_size}, learning_rate=${config.learning_rate}`);
+      lines.push(`warmup_ratio=${config.warmup_ratio}, weight_decay=${config.weight_decay}, max_seq_length=${config.max_seq_length}`);
+      lines.push(`gradient_accumulation_steps=${config.gradient_accumulation_steps}, gradient_checkpointing=${config.gradient_checkpointing}, precision=${precision}`);
+      lines.push(`optimizer=${config.optimizer}, scheduler=${config.scheduler}, dropout=${config.dropout}, label_smoothing=${config.label_smoothing}`);
+      lines.push(`load_in_4bit=${config.load_in_4bit}, load_in_8bit=${config.load_in_8bit}`);
+      lines.push(config.use_lora
+        ? `LoRA: an (lora_r=${config.lora_r}, lora_alpha=${config.lora_alpha}, lora_dropout=${config.lora_dropout})`
+        : 'LoRA: aus');
+
+      // Modellgröße + grobe RAM/VRAM-Schätzung (für [[estimate:ram]])
+      const isFp16 = config.fp16 || config.bf16;
+      const isQuant = config.load_in_4bit || config.load_in_8bit;
+      const weightRam = config.load_in_4bit ? modelSizeGb * 0.25 + (config.use_lora ? modelSizeGb * 0.05 : 0)
+        : config.load_in_8bit ? modelSizeGb * 0.5
+        : isFp16 ? modelSizeGb : modelSizeGb * 2;
+      const gradRam = (config.use_lora || isQuant) ? modelSizeGb * 0.05 : isFp16 ? modelSizeGb : modelSizeGb * 2;
+      const trainedFraction = (config.use_lora || isQuant) ? 0.05 : 1.0;
+      const optimizerRam = modelSizeGb * trainedFraction * 2;
+      const activationRam = config.batch_size * (config.max_seq_length / 128) * 0.5 * (config.gradient_checkpointing ? 0.3 : 1.0);
+      const totalRam = weightRam + gradRam + optimizerRam + activationRam;
+      lines.push('');
+      lines.push('--- RESSOURCEN-SCHÄTZUNG (grob) ---');
+      lines.push(`Modellgröße: ~${modelSizeGb.toFixed(2)} GB`);
+      lines.push(`Weights ~${weightRam.toFixed(1)} GB, Gradients ~${gradRam.toFixed(1)} GB, Optimizer ~${optimizerRam.toFixed(1)} GB, Activations ~${activationRam.toFixed(1)} GB`);
+      lines.push(`Geschätzter Peak-RAM/VRAM: ~${totalRam.toFixed(1)} GB`);
+    }
+
+    setCurrentPageContent(lines.join('\n'), 'training');
+  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, setCurrentPageContent]);
 
   const selectedModel   = models.find(m => m.id === selectedModelId);
   const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
@@ -1061,12 +1107,22 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     const isCanvasModel = selectedModelId.startsWith('canvas_');
     if (!isCanvasModel && selectedDataset?.status !== 'split') { warning(t('trainingPanel.notifications.noSplit'), t('trainingPanel.notifications.noSplitDetail')); return; }
 
+    // fp16 ist CUDA-gebunden — auf CPU/MPS bricht der HF-Trainer hart ab.
+    // Ohne CUDA fp16 abschalten (Training läuft dann in fp32) statt zu crashen.
+    const cudaOk = reqs?.cuda_available ?? false;
+    const fp16Safe = config.fp16 && cudaOk;
+    if (config.fp16 && !cudaOk) {
+      updateConfig({ fp16: false });
+      warning(t('trainingPanel.notifications.fp16NoCudaTitle'), t('trainingPanel.notifications.fp16NoCudaDetail'));
+    }
+
     setLossPoints([]);
     setLossPointsContext([]);
     try {
       // Konvertiere lora_target_modules von String zu Array falls nötig
       const configForBackend = {
         ...config,
+        fp16: fp16Safe,
         lora_target_modules: typeof config.lora_target_modules === 'string'
           ? config.lora_target_modules.split(',').map(m => m.trim()).filter(m => m)
           : config.lora_target_modules,
@@ -1095,6 +1151,42 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       success(t('trainingPanel.notifications.started'), t('trainingPanel.notifications.startedDetail'));
     } catch (err: unknown) { error(t('trainingPanel.notifications.startFailed'), String(err)); }
   };
+
+  // ── Rechtsklick-Menü: Training-Aktionen ───────────────────────────────────
+  useContextMenuActions(() => {
+    const running = currentJob?.status === 'running' || currentJob?.status === 'pending';
+    const actions = [
+      {
+        id: 'train-start', group: t('sidebar.nav.training'),
+        label: t('trainingPanel.actions.startButton'), icon: Play,
+        disabled: running || !selectedModelId || !selectedDatasetId,
+        onSelect: () => { void handleStartTraining(); },
+      },
+      {
+        id: 'train-ai', group: t('sidebar.nav.training'),
+        label: t('trainingPanel.toolbar.aiButton'), icon: Sparkles,
+        onSelect: () => { setAiInitialGoal(''); setShowAIAssistant(true); },
+      },
+      {
+        id: 'train-templates', group: t('sidebar.nav.training'),
+        label: t('trainingPanel.toolbar.templatesButton'), icon: ClipboardList,
+        onSelect: () => setShowTemplates(true),
+      },
+      {
+        id: 'train-history', group: t('sidebar.nav.training'),
+        label: t('trainingPanel.header.historyButton'), icon: History,
+        onSelect: () => { void handleOpenHistory(); },
+      },
+    ];
+    if (running) {
+      actions.push({
+        id: 'train-dashboard', group: t('sidebar.nav.training'),
+        label: t('trainingPanel.progress.openDashboardButton'), icon: BarChart3,
+        onSelect: () => { setShowDashboardContext(true); setIsDashMinimizedContext(false); },
+      });
+    }
+    return actions;
+  });
 
   const handleStopTraining = async () => {
     try {
@@ -1150,6 +1242,39 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
   const isRunning = currentJob?.status === 'running' || currentJob?.status === 'pending';
   const progress  = currentJob?.progress;
+
+  // ── AI-Coach-Kommandos (open/apply/start/stop) ────────────────────────────
+  // Ref-Pattern: einmal subscriben, aber immer die frische Closure aufrufen.
+  const coachCmdRef = useRef<(cmd: CoachCommand) => void>(() => {});
+  coachCmdRef.current = (cmd: CoachCommand) => {
+    switch (cmd.kind) {
+      case 'openDialog':
+        if (cmd.target === 'templates') setShowTemplates(true);
+        else if (cmd.target === 'ai-assistant') { setAiInitialGoal(''); setShowAIAssistant(true); }
+        else if (cmd.target === 'ram') setSections(s => ({ ...s, ram: true }));
+        break;
+      case 'applyRecommended': {
+        const rec = getRecommendedParams();
+        const patch = rec ? coercePatchFromRecord(rec) : {};
+        if (Object.keys(patch).length > 0) {
+          updateConfig(patch as Partial<TrainingConfig>);
+          success(t('trainingPanel.notifications.aiTemplateSaved'), Object.keys(patch).join(', '));
+        } else {
+          warning(t('common.error'), language === 'en' ? 'No applicable parameters found.' : 'Keine übernehmbaren Parameter gefunden.');
+        }
+        break;
+      }
+      case 'startTraining': void handleStartTraining(); break;
+      case 'stopTraining': void handleStopTraining(); break;
+      default: break;
+    }
+  };
+  useEffect(() => {
+    const handle = (cmd: CoachCommand) => coachCmdRef.current(cmd);
+    const pendingCmd = consumePendingCoachCommand(() => true);
+    if (pendingCmd) handle(pendingCmd);
+    return onCoachCommand(handle);
+  }, []);
 
   if (loadingData) return <div className="flex items-center justify-center py-24"><Loader2 className="w-8 h-8 text-gray-500 animate-spin" /></div>;
 
@@ -1400,7 +1525,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 <Field label={t('trainingPanel.fields.gradientAccumulation')} tooltip={t('trainingPanel.fields.gradientAccumulationTooltip')}><NumInput value={config.gradient_accumulation_steps} onChange={v => updateConfig({ gradient_accumulation_steps: v })} min={1} step={1} /></Field>
               </div>
               <div className="grid grid-cols-2 gap-4 pt-1">
-                <Toggle checked={config.fp16} onChange={v => updateConfig({ fp16: v, bf16: v ? false : config.bf16 })} label={t('trainingPanel.fields.fp16')} />
+                <Toggle checked={config.fp16 && !!reqs?.cuda_available} onChange={v => updateConfig({ fp16: v, bf16: v ? false : config.bf16 })} label={t('trainingPanel.fields.fp16')} disabled={!reqs?.cuda_available} title={!reqs?.cuda_available ? t('trainingPanel.notifications.fp16NoCudaDetail') : undefined} />
                 <Toggle checked={config.bf16} onChange={v => updateConfig({ bf16: v, fp16: v ? false : config.fp16 })} label={t('trainingPanel.fields.bf16')} />
               </div>
             </SectionCard>

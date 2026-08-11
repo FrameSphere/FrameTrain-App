@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Sidebar from './Sidebar';
 import ModelManager from './ModelManager';
@@ -12,6 +12,7 @@ import Settings from './Settings';
 import FloatingAICoach from './FloatingAICoach';
 import GlobalTrainingProgress from './GlobalTrainingProgress';
 import AppContextMenu from './ui/AppContextMenu';
+import { onNavigate } from '../ui/navigationEvents';
 import TrainingDashboard from './TrainingDashboard';
 import SynapseBuilder from './synapse/SynapseBuilder';
 import { useTheme } from '../contexts/ThemeContext';
@@ -78,6 +79,9 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         return <ModelManager />;
     }
   };
+
+  // Globale Navigation (aus Rechtsklick-Menü / Aktionen)
+  useEffect(() => onNavigate((view) => setCurrentView(view)), []);
 
   const handleStopFromGlobal = async () => {
     try {

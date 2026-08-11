@@ -1,0 +1,68 @@
+name: Auto-Triage FrameTrain Errors
+
+# Echte Cloud-Routine: läuft in GitHubs Cloud, unabhängig davon ob dein Mac an ist.
+# Holt offene App-Fehler aus dem Manager, baut Fixes auf auto/fix-* Branches, öffnet PRs
+# und lädt Review-Reports in den Manager. Merged NIE nach main — das machst du per
+# "Fix übernehmen"-Button im Manager (der mergt via Cloudflare-Worker + eigenem Token).
+
+on:
+  # NÄCHTLICHER CRON IST DEAKTIVIERT, bis der ANTHROPIC_API_KEY als Repo-Secret gesetzt ist
+  # (geplant in ~2 Wochen). Bis dahin läuft die Triage LOKAL über /triage-errors (Cowork,
+  # nutzt die Claude-Subscription, kein API-Key nötig).
+  # Zum Aktivieren: die nächsten zwei Zeilen einkommentieren UND das Secret ANTHROPIC_API_KEY setzen.
+  # schedule:
+  #   - cron: "0 1 * * *"   # 01:00 UTC ≈ 03:00 Berlin
+  workflow_dispatch: {}   # manuell auslösbar (Actions-Tab → "Run workflow") — braucht dann auch den API-Key
+
+# Läufe nicht überlappen lassen
+concurrency:
+  group: auto-triage
+  cancel-in-progress: false
+
+permissions:
+  contents: write         # Branch pushen
+  pull-requests: write    # PR öffnen
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (volle History für Branching von main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Dependencies (für das Build-Gate tsc && vite build)
+        run: npm ci
+
+      - name: Claude Code installieren
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Git-Identität für Auto-Commits
+        run: |
+          git config user.name  "frametrain-auto-triage[bot]"
+          git config user.email "auto-triage@users.noreply.github.com"
+
+      - name: Triage ausführen
+        env:
+          # Anthropic-API-Key für den headless Claude-Code-Lauf (als Repo-Secret setzen)
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Muss denselben Wert haben wie AUTOMATION_SECRET in Cloudflare (Repo-Secret)
+          MANAGER_AUTOMATION_SECRET: ${{ secrets.MANAGER_AUTOMATION_SECRET }}
+          # Eingebautes Actions-Token: reicht für git push + PR öffnen (kein PAT nötig)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          claude -p "Folge den Anweisungen in .claude/commands/triage-errors.md EXAKT, mit --limit 5. \
+          Base-Branch main, Repo FrameSphere/FrameTrain-App. \
+          Zwingende Guardrails: niemals auf main committen oder pushen, niemals selbst mergen — \
+          nur Branch auto/fix-* + PR + Report-Upload in den Manager. Im Zweifel report statt fix. \
+          Secrets niemals ausgeben. Wenn MANAGER_AUTOMATION_SECRET fehlt: sofort abbrechen." \
+            --permission-mode bypassPermissions

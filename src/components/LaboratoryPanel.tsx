@@ -2,7 +2,7 @@
 // Workflow: Datei laden → Samples extrahieren → Einzeln testen → Bewerten → Auswerten
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   FlaskConical, Upload, Play, ChevronRight, ChevronLeft,
@@ -21,6 +21,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { callAI } from './TrainingPanel';
 import OpenLibraryModal from './OpenLibraryModal';
 import { readUserDevScripts } from '../utils/devScriptStorage';
+import { useContextMenuActions } from '../ui/contextMenuRegistry';
 
 // ── Eigene Dev-Scripts (DevTrain + DevTest) — strikt user-getrennt ───────────
 interface LabSavedScript { id: string; name: string; script: string; savedAt: string; source: 'train' | 'test'; }
@@ -53,6 +54,8 @@ interface LabSample {
   text: string;          // Haupttext für die Inference
   label?: string;        // Erwartetes Label (optional)
   rawData: unknown;      // Original-Daten aus Datei
+  imagePath?: string;    // Bild-Sample: absoluter Dateipfad (Canvas-Bildmodelle)
+  isImage?: boolean;     // true → Bild-Inferenz statt Text/Tensor
 }
 
 interface TopPred { label: string; score: number; }
@@ -876,6 +879,29 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     });
   }, [selectedVersionId]);
 
+  // ── Rechtsklick-Menü: Lab-Aktionen ────────────────────────────────────────
+  useContextMenuActions(() => [
+    {
+      id: 'lab-load', group: t('sidebar.nav.laboratory'),
+      label: t('laboratoryPanel.setup.loadModelButton'), icon: Zap,
+      disabled: !selectedVersionId || serverStatus === 'loading',
+      onSelect: () => handleLoadModel(),
+    },
+    {
+      id: 'lab-engine', group: t('sidebar.nav.laboratory'),
+      label: engineMode === 'engine'
+        ? t('laboratoryPanel.setup.engineDev')
+        : t('laboratoryPanel.setup.engineLabel'),
+      icon: Code2,
+      onSelect: () => setEngineMode(m => m === 'engine' ? 'dev' : 'engine'),
+    },
+    {
+      id: 'lab-sessions', group: t('sidebar.nav.laboratory'),
+      label: t('laboratoryPanel.header.sessionsButton'), icon: FolderOpen,
+      onSelect: () => setShowSessions(true),
+    },
+  ]);
+
   useEffect(() => {
     const unlisten = listen<{ status: string; version_id?: string; message?: string }>(
       'lab-server-status',
@@ -1057,7 +1083,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       lines.push('• Wähle zuerst ein Modell!');
     }
 
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'laboratory');
   }, [
     selectedModel,
     selectedVersionTree,
@@ -1099,6 +1125,34 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
       const filtered = files.filter(f => !f.is_dir && (selectedSampleSplit === 'all' || f.split === selectedSampleSplit));
       console.log('[Lab] Gefilterte Dateien:', filtered);
+
+      // Bild-Dataset (ImageFolder): Dateien sind Bilder → als Bild-Samples laden,
+      // Label = übergeordneter Ordnername. Kein Text-Parsing.
+      const IMG_EXT = /\.(jpe?g|png|bmp|webp|gif|tiff?)$/i;
+      const imageFiles = filtered.filter(f => IMG_EXT.test(f.name));
+      if (imageFiles.length > 0 && imageFiles.length >= filtered.length * 0.5) {
+        const imgSamples: LabSample[] = imageFiles.map((f, i) => {
+          const parts = f.path.split(/[/\\]/);
+          const folderLabel = parts.length >= 2 ? parts[parts.length - 2] : undefined;
+          return {
+            id: `img_${Date.now()}_${i}`,
+            index: i,
+            text: f.name,
+            label: folderLabel,
+            rawData: { path: f.path, name: f.name },
+            imagePath: f.path,
+            isImage: true,
+          };
+        });
+        setSamples(imgSamples);
+        const dsImg = datasets.find(d => d.id === selectedSampleDatasetId);
+        setSourceFileName(dsImg?.name ?? 'Dataset');
+        success(
+          t('laboratoryPanel.setup.notifications.loadSuccess'),
+          t('laboratoryPanel.setup.notifications.loadSuccessDetail', { count: imgSamples.length, fileCount: imageFiles.length }),
+        );
+        return;
+      }
 
       if (filtered.length === 0) {
         warning(
@@ -1236,7 +1290,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           confidence?: number;
           top_predictions?: TopPred[];
           inference_ms: number;
-        }>('lab_infer_sample', { text: currentSample.text });
+        }>('lab_infer_sample', {
+          text: currentSample.text,
+          imagePath: currentSample.isImage ? currentSample.imagePath ?? null : null,
+        });
 
         setTestResult({
           predicted:      result.predicted,
@@ -1251,6 +1308,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           MODEL_PATH: modelPath,
           ...Object.fromEntries(dsRefs.map(r => [r.key, r.value])),
           LAB_SAMPLE_INPUT: currentSample.text,
+          LAB_IMAGE_PATH: currentSample.isImage ? currentSample.imagePath ?? '' : '',
         };
 
         const u1 = await listen<{ predicted?: string; confidence?: number; top_predictions?: TopPred[]; error?: string }>('lab-script-result', e => {
@@ -1728,9 +1786,20 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     <span className="text-white font-medium text-sm">{t('laboratoryPanel.testing.sampleCardTitle', { index: currentSample.index + 1 })}</span>
                   </div>
 
-                  <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-36 overflow-y-auto">
-                    <p className="text-gray-200 text-xs leading-relaxed whitespace-pre-wrap">{getDisplayText(currentSample)}</p>
-                  </div>
+                  {currentSample.isImage && currentSample.imagePath ? (
+                    <div className="rounded-xl bg-black/30 border border-white/10 p-3 flex flex-col items-center gap-2">
+                      <img
+                        src={convertFileSrc(currentSample.imagePath)}
+                        alt={currentSample.text}
+                        className="max-h-40 max-w-full rounded-lg object-contain"
+                      />
+                      <span className="text-gray-400 text-[10px] font-mono truncate max-w-full">{currentSample.text}</span>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-36 overflow-y-auto">
+                      <p className="text-gray-200 text-xs leading-relaxed whitespace-pre-wrap">{getDisplayText(currentSample)}</p>
+                    </div>
+                  )}
 
                   {/* Rohdaten (aufklappbar) */}
                   {typeof currentSample.rawData === 'object' && currentSample.rawData !== null && Object.keys(currentSample.rawData as object).length > 1 && (

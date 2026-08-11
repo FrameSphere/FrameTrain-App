@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { exportCanvasNetworkToModelLibrary } from "./canvasModelBridge";
 import { buildCanvasGraphIR } from "./graphIR";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface SavedModel {
@@ -132,6 +133,7 @@ function formatDate(ts: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onLoad, userId }) => {
+  const { t } = useLanguage();
   const [models, setModels] = useState<SavedModel[]>([]);
   const [loading, setLoading] = useState(false);
   // Zwei-Klick-Löschen: erster Klick auf ✕ merkt die ID, zweiter löscht wirklich
@@ -183,7 +185,7 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
       const graphIR = buildCanvasGraphIR(design.nodes as any, design.edges as any, {
         epochs: 10, batchSize: 32, learningRate: 0.001, gpu: "cpu", precision: "fp32", gradAccum: 1,
       });
-      const name = `${m.name} (Kopie)`;
+      const name = `${m.name} ${t("synapse.modelLibrary.duplicateSuffix")}`;
       const result = await exportCanvasNetworkToModelLibrary(
         design.graphConfig, design.pythonCode ?? "", name, graphIR
       );
@@ -281,7 +283,7 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
               flex: 1,
             }}
           >
-            ◈ Modell-Bibliothek
+            {t("synapse.modelLibrary.title")}
           </span>
           <span
             style={{
@@ -291,7 +293,10 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
               marginRight: 12,
             }}
           >
-            {models.length} Modell{models.length !== 1 ? "e" : ""}
+            {(models.length === 1
+              ? t("synapse.modelLibrary.countLabel")
+              : t("synapse.modelLibrary.countLabelPlural")
+            ).replace("{count}", String(models.length))}
           </span>
           <button onClick={onClose} style={iconBtn}>
             ✕
@@ -302,7 +307,7 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 10px" }}>
           {loading ? (
             <div style={{ textAlign: "center", padding: "40px 20px", color: "#334155", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-              Lade Modelle…
+              {t("synapse.modelLibrary.loading")}
             </div>
           ) : models.length === 0 ? (
             <div
@@ -313,11 +318,10 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
                 fontSize: 12,
                 fontFamily: "'JetBrains Mono', monospace",
                 lineHeight: 2,
+                whiteSpace: "pre-line",
               }}
             >
-              Noch keine Modelle gespeichert.
-              <br />
-              Baue einen Graph und klicke „Speichern".
+              {t("synapse.modelLibrary.empty")}
             </div>
           ) : (
             models.map((model) => (
@@ -402,11 +406,13 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
                   >
                     {model.hasWeights && (
                       <span style={{ color: "#34d399", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 4, padding: "0 5px" }}>
-                        ✓ trainiert
+                        {t("synapse.modelLibrary.trainedBadge")}
                       </span>
                     )}
                     {model.taskType && <span>{model.taskType}</span>}
-                    {model.numClasses != null && model.numClasses > 0 && <span>· {model.numClasses} Klassen</span>}
+                    {model.numClasses != null && model.numClasses > 0 && (
+                      <span>· {t("synapse.modelLibrary.classesLabel").replace("{count}", String(model.numClasses))}</span>
+                    )}
                     {model.savedAt > 0 && <span>· {formatDate(model.savedAt)}</span>}
                   </div>
                 </div>
@@ -414,12 +420,12 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
                 {/* Actions */}
                 <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
                   <button onClick={() => handleLoad(model)} style={loadBtn}>
-                    Laden
+                    {t("synapse.modelLibrary.loadButton")}
                   </button>
                   <button
                     onClick={() => startRename(model)}
                     style={deleteBtn}
-                    title="Umbenennen"
+                    title={t("synapse.modelLibrary.renameTooltip")}
                   >
                     ✎
                   </button>
@@ -427,7 +433,7 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
                     onClick={() => handleDuplicate(model)}
                     style={{ ...deleteBtn, ...(duplicatingId === model.id ? { opacity: 0.5 } : {}) }}
                     disabled={duplicatingId !== null}
-                    title="Duplizieren — Kopie zum Experimentieren"
+                    title={t("synapse.modelLibrary.duplicateTooltip")}
                   >
                     ⧉
                   </button>
@@ -439,10 +445,10 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
                         ? { color: "#f87171", borderColor: "#7f1d1d", background: "rgba(127,29,29,0.2)" }
                         : {}),
                     }}
-                    title={confirmDeleteId === model.id ? "Nochmal klicken zum endgültigen Löschen" : "Modell löschen"}
+                    title={confirmDeleteId === model.id ? t("synapse.modelLibrary.deleteConfirmTooltip") : t("synapse.modelLibrary.deleteTooltip")}
                     onMouseLeave={() => setConfirmDeleteId((c) => (c === model.id ? null : c))}
                   >
-                    {confirmDeleteId === model.id ? "Löschen?" : "✕"}
+                    {confirmDeleteId === model.id ? t("synapse.modelLibrary.deleteConfirmLabel") : "✕"}
                   </button>
                 </div>
               </div>
@@ -462,7 +468,7 @@ export const ModelLibrary: React.FC<ModelLibraryProps> = ({ isOpen, onClose, onL
               flexShrink: 0,
             }}
           >
-            Modelle sind an deinen Account gebunden und im Training-Panel trainierbar.
+            {t("synapse.modelLibrary.footerTrainable")}
           </div>
         )}
       </div>

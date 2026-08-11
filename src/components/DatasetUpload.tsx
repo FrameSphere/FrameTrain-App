@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   Upload, FolderOpen, Download, Trash2, Search,
@@ -11,9 +12,11 @@ import {
   Scissors, Layers, FileText, Filter, AlertTriangle,
   Zap, Heart, Info,
 } from 'lucide-react';
+import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
+import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
 import { useLanguage } from '../contexts/LanguageContext';
 import DatasetFileManager from './DatasetFileManager';
 import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
@@ -520,7 +523,7 @@ export default function DatasetUpload() {
     contextLines.push('   → Wähle [Dataset Dropdown]');
     contextLines.push('   → Nur aufgeteilte Datensätze erscheinen');
 
-    setCurrentPageContent(contextLines.join('\n'));
+    setCurrentPageContent(contextLines.join('\n'), 'dataset');
   }, [models, selectedModelId, datasets, setCurrentPageContent]);
 
   useEffect(() => {
@@ -595,6 +598,22 @@ export default function DatasetUpload() {
     }
   };
 
+  // ── Rechtsklick-Menü: Dataset-Aktionen ────────────────────────────────────
+  useContextMenuActions(() => [
+    {
+      id: 'ds-import', group: t('sidebar.nav.datasets'),
+      label: t('datasetUpload.emptyState.noDatasets.addButton'), icon: Upload,
+      disabled: !selectedModelId,
+      onSelect: () => setShowImportModal(true),
+    },
+    {
+      id: 'ds-refresh', group: t('sidebar.nav.datasets'),
+      label: t('common.refresh'), icon: RefreshCw,
+      disabled: !selectedModelId,
+      onSelect: () => { void loadDatasets(); },
+    },
+  ]);
+
   // ── Local Import ──
 
   const validateAndSetPath = async (path: string) => {
@@ -639,15 +658,38 @@ export default function DatasetUpload() {
     }
   };
 
-  const handleDragOver  = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); }, []);
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault(); setIsDragging(false);
-    const file = e.dataTransfer.items?.[0]?.getAsFile?.();
-    const path = file && (file as unknown as { path?: string }).path;
-    if (path) await validateAndSetPath(path);
-    else info(t('datasetUpload.importModal.local.dragDropInfoTitle'), t('datasetUpload.importModal.local.dragDropInfo'));
-  }, []);
+  // DOM-Handler: unter Tauri v2 fängt das Webview das OS-Drop ab, bevor das
+  // HTML5-drop-Event feuert → echte Pfade kommen über onDragDropEvent (useEffect
+  // unten). Diese Handler unterdrücken nur das Browser-Default-Verhalten.
+  const handleDragOver  = useCallback((e: React.DragEvent) => { e.preventDefault(); }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); }, []);
+  const handleDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); }, []);
+
+  // Tauri v2 Datei-Drop: liefert echte Dateisystempfade. Nur aktiv, solange der
+  // lokale Import-Dialog offen ist, damit Drops woanders nichts auslösen.
+  useEffect(() => {
+    if (!showImportModal || importMode !== 'local') return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === 'over') {
+          setIsDragging(true);
+        } else if (p.type === 'drop') {
+          setIsDragging(false);
+          const first = p.paths?.[0];
+          if (first) void validateAndSetPath(first);
+        } else {
+          setIsDragging(false);
+        }
+      })
+      .then((fn) => { if (active) unlisten = fn; else fn(); })
+      .catch(() => { /* Drag-Drop nicht verfügbar — Ordner-Auswahl bleibt */ });
+    return () => { active = false; setIsDragging(false); unlisten?.(); };
+    // validateAndSetPath ist stabil genug (nutzt nur setState + invoke)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showImportModal, importMode]);
 
   // ── HuggingFace ──
 
@@ -688,6 +730,23 @@ export default function DatasetUpload() {
     setTrainRatio(0.8); setValRatio(0.1); setTestRatio(0.1);
     setShowSplitModal(true);
   };
+
+  // AI-Coach: [[split:name]] → passenden Split-Dialog öffnen (User bestätigt)
+  const coachSplitRef = useRef<(cmd: CoachCommand) => void>(() => {});
+  coachSplitRef.current = (cmd: CoachCommand) => {
+    if (cmd.kind !== 'splitDataset') return;
+    const wanted = cmd.name?.trim().toLowerCase();
+    const target = wanted
+      ? datasets.find(d => d.name.toLowerCase().includes(wanted))
+      : datasets.find(d => d.status !== 'split') ?? datasets[0];
+    if (target) openSplitModal(target);
+  };
+  useEffect(() => {
+    const handle = (cmd: CoachCommand) => coachSplitRef.current(cmd);
+    const pendingCmd = consumePendingCoachCommand(c => c.kind === 'splitDataset');
+    if (pendingCmd) handle(pendingCmd);
+    return onCoachCommand(handle);
+  }, []);
 
   const handleSplit = async () => {
     if (!datasetToSplit || !selectedModelId) return;

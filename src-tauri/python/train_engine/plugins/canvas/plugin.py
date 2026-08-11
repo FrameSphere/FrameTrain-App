@@ -297,7 +297,15 @@ class CanvasPlugin:
                     MessageProtocol.status("train", f"[Warn] Optimizer-State konnte nicht geladen werden: {e}")
 
             criterion = self._make_loss()
-            scaler = GradScaler() if self.config.fp16 else None
+            # AMP/fp16 ist CUDA-gebunden. Auf MPS/CPU liefert autocast(cuda)+GradScaler
+            # kein echtes fp16 (no-op/Warnung) → sauber auf fp32 zurückfallen.
+            use_amp = bool(self.config.fp16) and self.device == "cuda"
+            if self.config.fp16 and not use_amp:
+                MessageProtocol.status(
+                    "train",
+                    f"[Warn] fp16 wird nur auf CUDA unterstützt (Device: {self.device}) — Training läuft in fp32.",
+                )
+            scaler = GradScaler() if use_amp else None
 
             # Shape test
             try:
@@ -375,7 +383,7 @@ class CanvasPlugin:
                     batch_y = batch_y.to(self.device)
 
                     # W2: Loss skalieren für korrekte Gradientenmagnitude
-                    if self.config.fp16 and scaler:
+                    if use_amp:
                         with autocast():
                             out = self.model(batch_x)
                             loss_raw = criterion(out, batch_y) if is_clf else criterion(out.squeeze(-1), batch_y.float())
@@ -392,7 +400,7 @@ class CanvasPlugin:
                     do_step = ((batch_idx + 1) % accum_steps == 0) or is_last_batch
 
                     if do_step:
-                        if self.config.fp16 and scaler:
+                        if use_amp:
                             if max_grad > 0:
                                 scaler.unscale_(optimizer)
                                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad)

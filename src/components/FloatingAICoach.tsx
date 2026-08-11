@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2,
   MessageSquare, Plus, Trash2, ChevronDown, ChevronRight, Brain,
-  FileSearch, Cpu, Sparkles, ArrowLeft
+  FileSearch, Cpu, Sparkles, ArrowLeft, ArrowRight, ExternalLink, HelpCircle, Sliders,
+  Play, Square, Zap, Bug, Gauge, Wrench
 } from 'lucide-react';
 import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -12,6 +13,14 @@ import { callAI as callAIClient } from '../ai/aiClient';
 import GradientChatInput from './ui/GradientChatInput';
 import { PROVIDER_META } from '../ai/providerMeta';
 import { onOpenAICoach } from '../ai/aiCoachEvents';
+import {
+  buildCoachSystemPrompt, parseCoachActions, navTargetLabel, linkTargetLabel,
+  commandLabel, hasPageKnowledge, type CoachAction, type PageId,
+} from '../ai/coachContext';
+import { navigateTo } from '../ui/navigationEvents';
+import { applyCoachConfig, runCoachCommand } from '../ai/coachToolEvents';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
+import type { Language } from '../contexts/LanguageContext';
 
 // ============ Types ============
 
@@ -408,6 +417,211 @@ function ThinkingBlock({
   );
 }
 
+// ============ Coach Action Chips (Tools) ============
+
+// Set-Chip: übernimmt eine empfohlene Trainings-Config; zeigt nach Klick "Übernommen".
+function SetConfigChip({
+  summary,
+  onApply,
+}: {
+  summary: string;
+  onApply: () => void;
+}) {
+  const { t } = useLanguage();
+  const [applied, setApplied] = useState(false);
+  return (
+    <button
+      onClick={() => { if (!applied) { onApply(); setApplied(true); } }}
+      disabled={applied}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium transition-all ${
+        applied
+          ? 'bg-green-500/15 border border-green-500/30 text-green-300'
+          : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 hover:scale-[1.02]'
+      }`}
+      title={summary}
+    >
+      {applied ? <CheckCircle className="w-3 h-3 flex-shrink-0" /> : <Sliders className="w-3 h-3 flex-shrink-0" />}
+      <span className="truncate max-w-[220px]">
+        {applied ? t('aiCoach.configApplied') : `${t('aiCoach.applyConfig')}: ${summary}`}
+      </span>
+    </button>
+  );
+}
+
+// Zwei-Stufen-Bestätigungs-Chip (für sensible Aktionen wie Training starten).
+function ConfirmChip({
+  label,
+  confirmLabel,
+  icon,
+  danger,
+  onConfirm,
+}: {
+  label: string;
+  confirmLabel: string;
+  icon: React.ReactNode;
+  danger?: boolean;
+  onConfirm: () => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  const tone = danger
+    ? 'bg-red-500/15 hover:bg-red-500/25 border-red-500/30 text-red-200'
+    : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30 text-amber-200';
+  return (
+    <button
+      onClick={() => { if (armed) { onConfirm(); setArmed(false); } else { setArmed(true); } }}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-medium transition-all hover:scale-[1.02] ${tone}`}
+      title={armed ? confirmLabel : label}
+    >
+      {icon}
+      <span className="truncate max-w-[200px]">{armed ? confirmLabel : label}</span>
+    </button>
+  );
+}
+
+function CoachActionChips({
+  actions,
+  language,
+  gradient,
+  automation,
+  onNavigate,
+  onAsk,
+  onExplain,
+  onEstimate,
+  onCommand,
+  onTrain,
+}: {
+  actions: CoachAction[];
+  language: Language;
+  gradient: string;
+  automation: boolean;
+  onNavigate: () => void;
+  onAsk: (text: string) => void;
+  onExplain: (topic: 'error' | 'log') => void;
+  onEstimate: () => void;
+  onCommand: (action: Extract<CoachAction, { type: 'command' }>) => void;
+  onTrain: (op: 'start' | 'stop') => void;
+}) {
+  const { t } = useLanguage();
+  if (actions.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1">
+      {actions.map((a, i) => {
+        // ── Fehler/Log erklären ──
+        if (a.type === 'explain') {
+          return (
+            <button
+              key={`explain-${i}`}
+              onClick={() => onExplain(a.topic)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-gray-200 text-[11px] font-medium transition-all hover:scale-[1.02]"
+              title={t('aiCoach.explainError')}
+            >
+              <Bug className="w-3 h-3 opacity-80" />
+              {t('aiCoach.explainError')}
+            </button>
+          );
+        }
+        // ── RAM schätzen ──
+        if (a.type === 'estimate') {
+          return (
+            <button
+              key={`est-${i}`}
+              onClick={onEstimate}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-gray-200 text-[11px] font-medium transition-all hover:scale-[1.02]"
+              title={t('aiCoach.estimateRam')}
+            >
+              <Gauge className="w-3 h-3 opacity-80" />
+              {t('aiCoach.estimateRam')}
+            </button>
+          );
+        }
+        // ── Seitenspezifisches Kommando (open/hf/split/apply) ──
+        if (a.type === 'command') {
+          return (
+            <button
+              key={`cmd-${i}`}
+              onClick={() => onCommand(a)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-white text-[11px] font-medium shadow-lg shadow-black/20 transition-all hover:scale-[1.03]"
+              style={{ background: gradient, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.16)' }}
+              title={commandLabel(a, language)}
+            >
+              <Wrench className="w-3 h-3 opacity-90" />
+              <span className="truncate max-w-[200px]">{commandLabel(a, language)}</span>
+            </button>
+          );
+        }
+        // ── Training starten/stoppen (nur bei Automation, mit Bestätigung) ──
+        if (a.type === 'train') {
+          if (!automation) return null;
+          const start = a.op === 'start';
+          return (
+            <ConfirmChip
+              key={`train-${i}`}
+              label={start ? t('aiCoach.trainStart') : t('aiCoach.trainStop')}
+              confirmLabel={t('aiCoach.confirm')}
+              danger={!start}
+              icon={start ? <Play className="w-3 h-3" /> : <Square className="w-3 h-3" />}
+              onConfirm={() => onTrain(a.op)}
+            />
+          );
+        }
+        // ── Navigation (primär, Theme-Gradient) ──
+        if (a.type === 'navigate') {
+          const label = t('aiCoach.openPage').replace('{page}', navTargetLabel(a.view, language));
+          return (
+            <button
+              key={`nav-${a.view}-${i}`}
+              onClick={() => { navigateTo(a.view); onNavigate(); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-white text-[11px] font-medium shadow-lg shadow-black/20 transition-all hover:scale-[1.03]"
+              style={{ background: gradient, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.16)' }}
+              title={label}
+            >
+              <ArrowRight className="w-3 h-3 opacity-90" />
+              {label}
+            </button>
+          );
+        }
+        // ── Externer Hilfe-Link (sekundär) ──
+        if (a.type === 'link') {
+          const label = linkTargetLabel(a.key, language);
+          return (
+            <button
+              key={`link-${a.key}-${i}`}
+              onClick={() => { openUrl(a.url).catch(() => {}); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 text-gray-200 text-[11px] font-medium transition-all hover:scale-[1.03]"
+              title={a.url}
+            >
+              <ExternalLink className="w-3 h-3 opacity-80" />
+              {label}
+            </button>
+          );
+        }
+        // ── Trainings-Config übernehmen ──
+        if (a.type === 'set') {
+          return (
+            <SetConfigChip
+              key={`set-${i}`}
+              summary={a.summary}
+              onApply={() => applyCoachConfig(a.patch)}
+            />
+          );
+        }
+        // ── Anschlussfrage (Ein-Klick weiterfragen) ──
+        return (
+          <button
+            key={`ask-${i}`}
+            onClick={() => onAsk(a.text)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.10] border border-dashed border-white/15 text-gray-300 text-[11px] font-medium transition-all hover:scale-[1.02] text-left"
+            title={a.text}
+          >
+            <HelpCircle className="w-3 h-3 flex-shrink-0 opacity-70" />
+            <span className="truncate max-w-[200px]">{a.text}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ============ Main Component ============
 
 interface FloatingAICoachProps {
@@ -455,7 +669,7 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const budgetCfg = TOKEN_BUDGET_CONFIG[settings.tokenBudget ?? 'balanced'];
   const { language } = useLanguage();
   const { currentTheme } = useTheme();
-  const { currentPageContent: ctxPageContent } = usePageContext();
+  const { currentPageContent: ctxPageContent, currentPageId } = usePageContext();
   const { t } = useLanguage();
 
   // Theme-Farben mit Light-Color-Detection (Fix für Monochrome / Arctic White)
@@ -470,6 +684,17 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const [isOpen, setIsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [view, setView] = useState<'chat' | 'chatList'>('chat');
+  // Automation-Modus: schaltet Training-Start/Stop-Tools frei (persistiert)
+  const [automation, setAutomation] = useState<boolean>(() => {
+    try { return localStorage.getItem('ft_coach_automation') === '1'; } catch { return false; }
+  });
+  const toggleAutomation = useCallback(() => {
+    setAutomation(v => {
+      const nv = !v;
+      try { localStorage.setItem('ft_coach_automation', nv ? '1' : '0'); } catch { /* ignore */ }
+      return nv;
+    });
+  }, []);
 
   // ── Chat state ──
   // `chats` = only persisted chats (have at least one message)
@@ -499,6 +724,9 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const prevMsgCountRef = useRef(0);
   // Letzter Seitenkontext der dem Modell bekannt ist
   const lastSentPageContentRef = useRef<string>('');
+  // Seiten, deren tiefes Wissen im aktuellen Chat bereits ans Modell ging
+  // (verhindert erneutes Senden bei jeder Nachricht auf derselben Seite)
+  const knowledgeSentRef = useRef<Set<PageId>>(new Set());
 
   // Load chats from localStorage on mount (only persisted ones)
   useEffect(() => {
@@ -556,6 +784,8 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
     const fresh = createFreshChat(t('aiCoach.newChat'));
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
+    knowledgeSentRef.current = new Set();
+    lastSentPageContentRef.current = '';
     setView('chat');
     setError('');
     setInputText('');
@@ -569,6 +799,8 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
     const fresh = createFreshChat(t('aiCoach.newChat'));
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
+    knowledgeSentRef.current = new Set();
+    lastSentPageContentRef.current = '';
     setView('chat');
     setError('');
     setInputText('');
@@ -596,6 +828,9 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
     if (chat) {
       setCurrentChat(chat);
       currentChatPersistedRef.current = true;
+      // Neuer Chat-Kontext → Seiten-Wissen im nächsten Turn frisch mitschicken
+      knowledgeSentRef.current = new Set();
+      lastSentPageContentRef.current = '';
     }
     setView('chat');
     setError('');
@@ -645,48 +880,37 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   }, []);
 
   // ── System Prompt ───────────────────────────────────────────────────────────
-  // isFirstMessage: Seitenkontext nur beim 1. Message einbetten.
-  // Danach ist er bereits in der History — spart 30-50% Input-Tokens.
+  // Einheitliches System via src/ai/coachContext.ts (lazy per-page knowledge):
+  //   - 1. Message: Persona + Kurzüberblick + Skills + Tools + Wissen der AKTUELLEN
+  //                 Seite + deren Live-Zustand.
+  //   - Seitenwechsel: Wissen der NEUEN Seite (falls neu) + neuer Live-Zustand.
+  //   - sonst: nur die Persona.
+  // Sprache folgt der App-Sprache (DE/EN).
   const buildSystemPrompt = (isFirstMessage: boolean): string => {
-    const baseRole = `Du bist der FrameTrain AI Coach — ein präziser, freundlicher Assistent für Machine Learning Training in der FrameTrain Desktop-App.
-
-Deine Persönlichkeit:
-- Antworte knapp und direkt. Kein unnötiges Füllwort.
-- Bei technischen Fragen: konkret, mit Codebeispielen oder Zahlenwerten.
-- Bei Fehlern: Ursache + Fix, nicht nur Beschreibung.
-- Nutze Markdown: **fett** für Schlüsselbegriffe, Listen für Schritte, \`code\` für Werte.
-- Wenn du dir nicht sicher bist: sag es. Nicht raten.
-- Beziehe dich auf den Seiteninhalt wenn relevant — du weißt was der User gerade sieht.`;
-
     const pageChanged = !isFirstMessage &&
-      pageContent &&
+      !!pageContent &&
       pageContent !== lastSentPageContentRef.current;
 
-    if (isFirstMessage && pageContent) {
-      lastSentPageContentRef.current = pageContent;
-      return `${baseRole}
+    // Tiefes Seiten-Wissen nur senden, wenn für diese Seite in diesem Chat neu.
+    const pid = currentPageId;
+    const includePageKnowledge =
+      !!pid &&
+      hasPageKnowledge(pid) &&
+      !knowledgeSentRef.current.has(pid) &&
+      (isFirstMessage || pageChanged);
 
-── AKTUELLE SEITE (nur einmal mitgeliefert, danach in der History) ──
-${pageContent}
-────────────────────────────────────────────────────────────────────────────────`;
-    }
+    if (includePageKnowledge && pid) knowledgeSentRef.current.add(pid);
+    if (isFirstMessage || pageChanged) lastSentPageContentRef.current = pageContent;
 
-    if (pageChanged) {
-      lastSentPageContentRef.current = pageContent;
-      return `${baseRole}
-
-── SEITE GEWECHSELT — NEUER KONTEXT ──
-${pageContent}
-────────────────────────────────────────────────────────────────────────────────`;
-    }
-
-    if (isFirstMessage) {
-      return `${baseRole}
-
-Kein Seitenkontext verfügbar — beantworte allgemeine FrameTrain-Fragen.`;
-    }
-
-    return baseRole;
+    return buildCoachSystemPrompt({
+      language,
+      pageId: pid,
+      pageContent,
+      isFirstMessage,
+      pageChanged,
+      includePageKnowledge,
+      automation,
+    });
   };
 
   // ── Token-Budget für History ──────────────────────────────────────────────────
@@ -956,6 +1180,42 @@ Reply with ONLY the title, nothing else.`;
     sendMessage(text, true);
   };
 
+  // ── Tool-Handler ─────────────────────────────────────────────────────────
+  const en = language === 'en';
+
+  // Fehler/Log erklären: frischen Seitenkontext (mit aktuellem Log) erzwingen + fragen
+  const handleExplain = (topic: 'error' | 'log') => {
+    if (isLoading) return;
+    lastSentPageContentRef.current = ''; // erzwingt Re-Injektion des aktuellen Kontexts
+    const prompt = topic === 'log'
+      ? (en ? 'Explain the current log output and what it means.' : 'Erkläre die aktuelle Log-Ausgabe und was sie bedeutet.')
+      : (en ? 'Explain the current error in detail and give me a concrete fix.' : 'Erkläre den aktuellen Fehler im Detail und gib mir einen konkreten Fix.');
+    sendMessage(prompt);
+  };
+
+  // RAM schätzen: frischen Kontext (mit Modellgröße + Schätzung) + fragen
+  const handleEstimate = () => {
+    if (isLoading) return;
+    lastSentPageContentRef.current = '';
+    sendMessage(en
+      ? 'Estimate RAM/VRAM and rough time for my current model and config, and how to reduce it if needed.'
+      : 'Schätze RAM/VRAM und grob die Zeit für mein aktuelles Modell + Config — und wie ich es bei Bedarf senken kann.');
+  };
+
+  // Seitenspezifisches Kommando: ggf. zur Zielseite navigieren, dann ausführen
+  const handleCommand = (action: Extract<CoachAction, { type: 'command' }>) => {
+    navigateTo(action.page);
+    runCoachCommand(action.command);
+    setIsOpen(false); // Coach schließen, damit der User den Dialog/das Ergebnis sieht
+  };
+
+  // Training starten/stoppen (nur nach ConfirmChip-Bestätigung)
+  const handleTrain = (op: 'start' | 'stop') => {
+    navigateTo('training');
+    runCoachCommand(op === 'start' ? { kind: 'startTraining' } : { kind: 'stopTraining' });
+    setIsOpen(false);
+  };
+
   // ── Toggle thinking collapse for a specific message ──
   const toggleMessageThinking = (msgId: string) => {
     applyToCurrentChat(c => ({
@@ -1105,6 +1365,13 @@ Reply with ONLY the title, nothing else.`;
           </div>
         </div>
         <div className="flex items-center gap-1 pointer-events-auto flex-shrink-0">
+          <button
+            onClick={toggleAutomation}
+            className={`p-1.5 rounded-lg transition-all ${automation ? 'bg-amber-500/20 text-amber-300' : 'hover:bg-white/10 text-gray-400 hover:text-amber-300'}`}
+            title={automation ? t('aiCoach.automationOn') : t('aiCoach.automationOff')}
+          >
+            <Zap className="w-3.5 h-3.5" />
+          </button>
           <button onClick={() => setView('chatList')} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-purple-300 transition-all" title={t('aiCoach.chatHistory')}>
             <MessageSquare className="w-3.5 h-3.5" />
           </button>
@@ -1161,7 +1428,9 @@ Reply with ONLY the title, nothing else.`;
 
         {currentChat?.messages.map(msg => (
           <div key={msg.id} className={`ft-coach-message flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {msg.role === 'assistant' ? (
+            {msg.role === 'assistant' ? (() => {
+              const { cleanedText, actions } = parseCoachActions(msg.content);
+              return (
               <div className="max-w-[88%] space-y-1">
                 {/* Thinking block — shown above the message when finished */}
                 {msg.thinkingSteps && msg.thinkingSteps.length > 0 && (
@@ -1173,10 +1442,23 @@ Reply with ONLY the title, nothing else.`;
                   />
                 )}
                 <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.065] border border-white/[0.10] text-gray-200 shadow-lg shadow-black/20">
-                  <MarkdownText text={msg.content} />
+                  <MarkdownText text={cleanedText} />
                 </div>
+                <CoachActionChips
+                  actions={actions}
+                  language={language}
+                  gradient={themeGradient}
+                  automation={automation}
+                  onNavigate={() => setIsOpen(false)}
+                  onAsk={(text) => { if (!isLoading) sendMessage(text); }}
+                  onExplain={handleExplain}
+                  onEstimate={handleEstimate}
+                  onCommand={handleCommand}
+                  onTrain={handleTrain}
+                />
               </div>
-            ) : (
+              );
+            })() : (
               <div className="max-w-[85%] px-3 py-2.5 rounded-2xl rounded-tr-sm text-white text-sm leading-relaxed shadow-lg shadow-black/20"
                 style={{ background: themeGradient, boxShadow: `0 12px 28px ${safePrimary}20, inset 0 1px 0 rgba(255,255,255,.16)` }}>
                 {msg.content}

@@ -1333,7 +1333,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       lossPoints.length > 0 ? t('devTrainPanel.pageContext.contextLoss').replace('{count}', String(lossPoints.length)) : '',
     ];
 
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'training-dev');
   }, [script, lineCount, running, isDirty, output, modelInfo, datasets, currentScriptId, outputPath, selectedVersionPath, currentJob, lossPoints, showDashboard, setCurrentPageContent]);
 
   const syncEditorScroll = () => {

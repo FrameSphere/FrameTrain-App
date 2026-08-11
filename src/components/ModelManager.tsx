@@ -28,6 +28,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
+import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
 import { useLanguage } from '../contexts/LanguageContext';
 import { detectPlugin } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
@@ -321,7 +322,7 @@ export default function ModelManager() {
     lines.push('• Bei Download-Fehlern: KI kann dir weitere Schritte empfehlen');
     lines.push('• Bei Speicherplatz-Problemen: Frag den Coach um Hilfe');
 
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'models');
   }, [
     models,
     loading,
@@ -360,6 +361,24 @@ export default function ModelManager() {
 
     return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); };
   }, [hfQuery]);
+
+  // ── AI-Coach: [[hf:query]] / [[open:add-model]] ──────────────────────────
+  const coachCmdRef = useRef<(cmd: CoachCommand) => void>(() => {});
+  coachCmdRef.current = (cmd: CoachCommand) => {
+    if (cmd.kind === 'hfSearch') {
+      setShowImportModal(true);
+      setImportMode('huggingface');
+      setHfQuery(cmd.query);   // triggert die debounced Suche automatisch
+    } else if (cmd.kind === 'openDialog' && cmd.target === 'add-model') {
+      setShowImportModal(true);
+    }
+  };
+  useEffect(() => {
+    const handle = (cmd: CoachCommand) => coachCmdRef.current(cmd);
+    const pendingCmd = consumePendingCoachCommand(c => c.kind === 'hfSearch' || (c.kind === 'openDialog' && c.target === 'add-model'));
+    if (pendingCmd) handle(pendingCmd);
+    return onCoachCommand(handle);
+  }, []);
 
   // ── Download Progress Listener ──
   useEffect(() => {

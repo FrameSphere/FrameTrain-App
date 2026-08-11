@@ -58,6 +58,22 @@ class CanvasInferenceServer:
         if raw is None:
             return {"type": "error", "message": "Kein 'input' in Anfrage"}
 
+        # Bild-Input: Dateipfad → Loader übernimmt Laden + Preprocessing per IR
+        if input_type == "image":
+            path = raw if isinstance(raw, str) else str(raw)
+            try:
+                result = self.loaded.predict_image(path)
+            except FileNotFoundError:
+                return {"type": "error", "message": f"Bild nicht gefunden: {path}"}
+            except Exception as e:
+                return {"type": "error", "message": f"Bild-Inferenz: {type(e).__name__}: {e}"}
+            result["type"] = "result"
+            if "predicted" not in result and "predicted_class" in result:
+                result["predicted"] = str(result["predicted_class"])
+            if "inference_time" not in result and "inference_ms" in result:
+                result["inference_time"] = float(result["inference_ms"]) / 1000.0
+            return result
+
         # Tensor-Input: Liste von Zahlen oder Liste von Listen
         if input_type == "tensor":
             try:

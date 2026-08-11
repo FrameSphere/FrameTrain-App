@@ -1,6 +1,6 @@
 [package]
 name = "frametrain-desktop"
-version = "1.2.7"
+version = "1.2.8"
 description = "FrameTrain Desktop App"
 authors = ["FrameTrain Team"]
 edition = "2021"
@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 dotenvy = "0.15"
 
 tauri-plugin-os = "2"

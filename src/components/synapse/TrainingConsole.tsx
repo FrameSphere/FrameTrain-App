@@ -326,6 +326,45 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
     }
   }, [completedVersionId, onExport]);
 
+  // ── Log / Metriken / Config als echte Datei exportieren ───────────────────
+  // Schreibt tatsächlich .txt/.csv/.json statt nur den Ordner zu öffnen.
+  const handleExportFormat = useCallback((fmt: string) => {
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    let filename = "", content = "", mime = "text/plain;charset=utf-8";
+
+    if (fmt.includes(".csv")) {
+      filename = `metrics_${ts}.csv`;
+      mime = "text/csv;charset=utf-8";
+      const header = "epoch,loss,val_loss,accuracy,lr,gpu_mem_mb";
+      const rows = metrics.map((m) =>
+        [m.epoch, m.loss, m.valLoss ?? "", m.accuracy ?? "", m.lr, m.gpuMemMB ?? ""].join(",")
+      );
+      content = [header, ...rows].join("\n");
+    } else if (fmt.includes(".json")) {
+      filename = `config_${ts}.json`;
+      mime = "application/json";
+      content = JSON.stringify(
+        { config, epochsTrained: metrics.length, finalMetrics: metrics[metrics.length - 1] ?? null },
+        null, 2
+      );
+    } else {
+      filename = `training_log_${ts}.txt`;
+      content = logLines.join("\n") || "(kein Log vorhanden)";
+    }
+
+    try {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      onExport(`export_file:${filename}`);
+    } catch (e) {
+      onExport(`export_error:${e}`);
+    }
+    setShowExportModal(false);
+  }, [metrics, config, logLines, onExport]);
+
   // ── Train-Click ───────────────────────────────────────────────────────────
   const handleTrainClick = useCallback(() => {
     onStartTraining({
@@ -474,16 +513,40 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               <input type="number" value={config.learningRate} step={0.0001} min={0} onChange={(e) => setConfig((c) => ({ ...c, learningRate: Number(e.target.value) }))} style={{ ...inputStyle, width: 90 }} />
             </ConfigField>
             <ConfigField label="GPU">
-              <select value={config.gpu} onChange={(e) => setConfig((c) => ({ ...c, gpu: e.target.value }))} style={{ ...inputStyle, width: 100 }}>
+              <select
+                value={config.gpu}
+                onChange={(e) => {
+                  const gpu = e.target.value;
+                  // fp16/bf16 sind CUDA-only → auf Nicht-CUDA automatisch fp32 erzwingen
+                  setConfig((c) => ({
+                    ...c,
+                    gpu,
+                    precision: gpu.startsWith("cuda") ? c.precision : "fp32",
+                  }));
+                }}
+                style={{ ...inputStyle, width: 100 }}
+              >
                 {["cpu", "cuda:0", "cuda:1", "mps"].map((g) => (
                   <option key={g} value={g} style={{ background: "#111827" }}>{g}</option>
                 ))}
               </select>
             </ConfigField>
             <ConfigField label="Precision">
-              <select value={config.precision} onChange={(e) => setConfig((c) => ({ ...c, precision: e.target.value as TrainingConfig["precision"] }))} style={{ ...inputStyle, width: 80 }}>
+              <select
+                value={config.precision}
+                onChange={(e) => setConfig((c) => ({ ...c, precision: e.target.value as TrainingConfig["precision"] }))}
+                style={{ ...inputStyle, width: 80 }}
+                title={config.gpu.startsWith("cuda") ? undefined : "fp16/bf16 nur auf CUDA — auf CPU/MPS wird fp32 verwendet"}
+              >
                 {["fp32", "fp16", "bf16"].map((p) => (
-                  <option key={p} value={p} style={{ background: "#111827" }}>{p}</option>
+                  <option
+                    key={p}
+                    value={p}
+                    disabled={p !== "fp32" && !config.gpu.startsWith("cuda")}
+                    style={{ background: "#111827" }}
+                  >
+                    {p}{p !== "fp32" && !config.gpu.startsWith("cuda") ? " (CUDA)" : ""}
+                  </option>
                 ))}
               </select>
             </ConfigField>
@@ -560,7 +623,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
       {showExportModal && (
         <ExportModal
           completedVersionId={completedVersionId ?? null}
-          onExportFormat={(fmt) => { onExport(fmt); setShowExportModal(false); }}
+          onExportFormat={handleExportFormat}
           onExportVersion={handleExportVersion}
           onClose={() => setShowExportModal(false)}
           exporting={exporting}

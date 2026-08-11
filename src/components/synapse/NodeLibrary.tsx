@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NODE_CATEGORIES, NodeDefinition } from "./nodeTypes";
 import { dragState } from "./dragState";
 
@@ -198,11 +199,67 @@ const CategorySection: React.FC<{
 // ─── Main Component ───────────────────────────────────────────────────────────
 export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
   const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
 
   const handleAdd = useCallback(
     (def: NodeDefinition) => onAddNode(def),
     [onAddNode]
   );
+
+  // ── Collapsed rail: schmaler Streifen mit Aufklapp-Button ──────────────────
+  if (collapsed) {
+    return (
+      <div
+        style={{
+          width: 36,
+          minWidth: 36,
+          height: "100%",
+          background: "#0d1117",
+          borderRight: "1px solid #1e293b",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          paddingTop: 10,
+          flexShrink: 0,
+        }}
+      >
+        <button
+          onClick={() => setCollapsed(false)}
+          title="Node Library einblenden"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 26,
+            height: 26,
+            background: "transparent",
+            border: "1px solid #1e293b",
+            borderRadius: 5,
+            color: "#64748b",
+            cursor: "pointer",
+          }}
+        >
+          <PanelLeftOpen size={15} />
+        </button>
+        <div
+          style={{
+            marginTop: 14,
+            writingMode: "vertical-rl",
+            transform: "rotate(180deg)",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.12em",
+            color: "#334155",
+            textTransform: "uppercase",
+            fontFamily: "'JetBrains Mono', monospace",
+            userSelect: "none",
+          }}
+        >
+          Node Library
+        </div>
+      </div>
+    );
+  }
 
   const filtered = search.trim()
     ? Object.entries(NODE_CATEGORIES).reduce<Record<string, NodeDefinition[]>>(
@@ -243,16 +300,43 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
       >
         <div
           style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: "0.12em",
-            color: "#334155",
-            textTransform: "uppercase",
-            fontFamily: "'JetBrains Mono', monospace",
+            display: "flex",
+            alignItems: "center",
             marginBottom: 9,
           }}
         >
-          Node Library
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.12em",
+              color: "#334155",
+              textTransform: "uppercase",
+              fontFamily: "'JetBrains Mono', monospace",
+              flex: 1,
+            }}
+          >
+            Node Library
+          </div>
+          <button
+            onClick={() => setCollapsed(true)}
+            title="Node Library einklappen"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              background: "transparent",
+              border: "none",
+              borderRadius: 5,
+              color: "#475569",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <PanelLeftClose size={15} />
+          </button>
         </div>
 
         {/* Search */}

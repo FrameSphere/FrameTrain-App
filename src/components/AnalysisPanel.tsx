@@ -14,6 +14,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
+import { setRecommendedParams } from '../ai/coachToolEvents';
 import { useLanguage } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
@@ -1049,8 +1050,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       }
     }
 
-    setCurrentPageContent(lines.join('\n'));
+    setCurrentPageContent(lines.join('\n'), 'analysis');
   }, [modelsWithVersions, selectedModelId, selectedVersionId, metrics, report, aiRecommendedParams, loadingAnalysis, generatingReport, chatMessages.length, showChat, logs.length, setCurrentPageContent]);
+
+  // KI-Empfehlungen als Brücke für das Training bereitstellen ([[apply:recommended]]).
+  useEffect(() => {
+    setRecommendedParams(aiRecommendedParams);
+  }, [aiRecommendedParams]);
 
   // ── Loaders ────────────────────────────────────────────────────────────────
 
