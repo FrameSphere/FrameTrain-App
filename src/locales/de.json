@@ -401,7 +401,8 @@
     "trainStop": "Training stoppen",
     "confirm": "Bestätigen?",
     "automationOn": "Automation an — Coach darf Training starten/stoppen (mit Bestätigung)",
-    "automationOff": "Automation aus — klicke, um Training-Aktionen freizuschalten"
+    "automationOff": "Automation aus — klicke, um Training-Aktionen freizuschalten",
+    "thinkingLabel": "Denkt nach…"
   },
   "modelManager": {
     "title": "Modelle",
@@ -595,7 +596,10 @@
       "aiNotEnabledDetail": "Bitte aktiviere die KI zuerst in den Einstellungen.",
       "noModelForTemplate": "Kein Modell",
       "noModelForTemplateDetail": "Bitte wähle erst ein Modell aus, um ein Template zu generieren.",
-      "placeholder": "# Beginne zu tippen…\n# Tippe '! ' + Leertaste um das Template zu laden"
+      "placeholder": "# Beginne zu tippen…\n# Tippe '! ' + Leertaste um das Template zu laden",
+      "prevSearchTooltip": "Vorheriger Treffer",
+      "nextSearchTooltip": "Nächster Treffer",
+      "closeSearchTooltip": "Suche schließen"
     },
     "progress": {
       "running": "Training läuft…",
@@ -623,7 +627,9 @@
       "empty": "Noch keine Skripte gespeichert.",
       "loadButton": "Laden",
       "saveCurrentButton": "Aktuelles Skript speichern",
-      "namePlaceholder": "Skript-Name…"
+      "namePlaceholder": "Skript-Name…",
+      "savedTitle": "Gespeichert",
+      "savedDetail": "Skript „{name}“ in der Bibliothek gespeichert."
     },
     "aiSidebar": {
       "title": "Code Assistant",
@@ -654,7 +660,9 @@
         "paths": "Pfade korrekt nutzen (DATASET_PATH/OUTPUT_PATH)",
         "performance": "Performance / Stabilität verbessern"
       },
-      "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite."
+      "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.",
+      "continuedSuffix": " (fortgesetzt)",
+      "emptyHistory": "Noch keine Chats vorhanden."
     },
     "errorModal": {
       "title": "Training fehlgeschlagen",
@@ -719,13 +727,93 @@
       "sendErrorSuccessDetail": "Fehler wurde an FrameTrain Team gesendet. Danke!",
       "sendErrorFail": "Fehler",
       "sendErrorFailDetail": "Konnte Fehler nicht senden. Prüfe deine Internetverbindung.",
-      "networkError": "Netzwerkfehler:"
+      "networkError": "Netzwerkfehler:",
+      "savedTitle": "Gespeichert",
+      "savedDetail": "Trainings-Skript „{name}“ gespeichert."
     },
     "relativeTime": {
       "justNow": "gerade eben",
       "minutesAgo": "vor {n} Min",
       "hoursAgo": "vor {n} Std",
       "daysAgo": "vor {n} Tagen"
+    },
+    "banner": {
+      "title": "Dev Train Mode",
+      "description": "Schreibe dein eigenes Python-Trainingsskript. Modell- und Dataset-Pfade stehen als Platzhalter bereit."
+    },
+    "output": {
+      "running": "Training läuft…",
+      "lossHistory": "Loss-Verlauf",
+      "trainLossLabel": "Train Loss",
+      "valLossLabel": "Val Loss",
+      "lrLabel": "Lernrate",
+      "outputLabel": "Konsole",
+      "waitingForOutput": "Warte auf Ausgabe…"
+    },
+    "aiPrefill": {
+      "fixScript": "Bitte korrigiere mein Trainings-Skript.",
+      "error": "Fehler:",
+      "script": "Skript:"
+    },
+    "pageContext": {
+      "title": "=== FrameTrain – Dev Train Mode ===",
+      "purposeBody": "Eigenes Python-Trainingsskript für volle Kontrolle über den Trainingsablauf.",
+      "currentStateTitle": "--- Aktueller Zustand ---",
+      "statusLabel": "Status",
+      "statusRunning": "Training läuft",
+      "statusDirty": "Ungespeicherte Änderungen",
+      "statusReady": "Bereit",
+      "modelLabel": "Modell",
+      "modelNotLoaded": "(nicht geladen)",
+      "scriptSizeLabel": "Skript: {lines} Zeilen, {chars} Zeichen",
+      "runtimeActive": "Ausgabe: läuft, {lines} Zeilen bisher",
+      "lastRun": "Ausgabe: letzter Lauf, {lines} Zeilen",
+      "noOutput": "Ausgabe: (noch keine)",
+      "jobStatus": "Job: {status} — Epoche {epoch}/{total}",
+      "scriptStateTitle": "--- SKRIPT-ZUSTAND ---",
+      "unsaved": "Nicht gespeichert",
+      "saved": "Gespeichert",
+      "scriptLoaded": "Geladen: {id}",
+      "loaded": "geladen",
+      "newUnsaved": "Neu, noch nicht gespeichert",
+      "notSet": "nicht gesetzt",
+      "running": "Training läuft gerade",
+      "dashboardOpen": "Dashboard ist geöffnet",
+      "idle": "Kein Training aktiv ({count} Loss-Punkte)",
+      "none": "(keine)",
+      "layoutTitle": "--- UI LAYOUT ---",
+      "topSection": "**OBEN (Header):**",
+      "topModel": "  • Modell: {name}",
+      "topVersionPath": "  • Versions-Pfad: {status}",
+      "topSave": "  • [Speichern] (Cmd+S)",
+      "topLibrary": "  • [Bibliothek] — gespeicherte Skripte",
+      "leftSection": "**LINKS (Editor):**",
+      "leftEditor": "  • Python-Editor mit Syntax-Highlighting",
+      "leftGutter": "  • Zeilennummern und Suche (Cmd+F)",
+      "leftStart": "  • [Training starten] unter dem Editor",
+      "rightSection": "**RECHTS (Ausgabe):**",
+      "rightOutput": "  • Konsolen-Ausgabe des Skripts",
+      "rightLive": "  • Live-Ausgabe läuft gerade",
+      "rightLast": "  • Ausgabe des letzten Laufs",
+      "rightButtons": "  • [Stoppen] / [Leeren]",
+      "rightDashboard": "  • [Dashboard] für Live-Metriken",
+      "bottomSection": "**UNTEN:**",
+      "bottomChat": "  • KI-Chat für Skript-Hilfe",
+      "bottomDashboard": "  • Dashboard mit Loss-Kurve",
+      "availableActionsTitle": "--- VERFÜGBARE AKTIONEN ---",
+      "step1Empty": "1. Schreibe ein Skript oder erzeuge eine Vorlage",
+      "step1Filled": "1. Skript liegt vor — bei Bedarf anpassen",
+      "step2": "2. Speichere mit Cmd+S",
+      "step3": "3. Klick [Training starten]",
+      "step4Running": "4. Verfolge die Ausgabe rechts",
+      "step4Error": "4. Prüfe die Ausgabe — bei Fehlern [An KI senden]",
+      "step5": "5. Ergebnisse erscheinen unter Versionen",
+      "contextTitle": "--- Dev Train Context ---",
+      "contextModel": "Modell: {name}",
+      "contextDatasets": "Datasets ({count}): {names}",
+      "contextDatasetPaths": "Dataset-Platzhalter: {paths}",
+      "contextOutput": "Ausgabe-Pfad: {path}",
+      "contextLoss": "Loss-Punkte: {count}"
     }
   },
   "devTestPanel": {
@@ -820,7 +908,14 @@
       "testStarted": "🚀 Test gestartet…",
       "testComplete": "✅ Test abgeschlossen!",
       "testStopped": "⏹️  Test gestoppt.",
-      "exitCodeError": "Prozess beendet mit Exit-Code {code}"
+      "exitCodeError": "Prozess beendet mit Exit-Code {code}",
+      "complete": "✓ Test abgeschlossen.",
+      "errorPrefix": "[Fehler]",
+      "started": "[Start] Test-Skript wird ausgeführt…",
+      "stopped": "[Gestoppt] Test abgebrochen.",
+      "label": "Ausgabe",
+      "panelLabel": "Konsole",
+      "waiting": "Warte auf Ausgabe…"
     },
     "chat": {
       "title": "KI-Assistent",
@@ -864,7 +959,16 @@
       "libraryScriptSaved": "Gespeichert",
       "libraryScriptSavedDetail": "Test-Skript \"{name}\" gespeichert.",
       "openLibLoaded": "Geladen!",
-      "openLibLoadedDetail": "„{name}“ wurde in den Editor geladen."
+      "openLibLoadedDetail": "„{name}“ wurde in den Editor geladen.",
+      "unsavedTitle": "Ungespeicherte Änderungen",
+      "unsavedDetail": "Speichere das Skript zuerst (Cmd+S).",
+      "updatedTitle": "Gespeichert",
+      "updatedDetail": "Änderungen übernommen.",
+      "savedTitle": "Gespeichert",
+      "savedDetail": "Test-Skript „{name}“ gespeichert.",
+      "noModelOrScriptTitle": "Modell oder Skript fehlt",
+      "startedTitle": "Test gestartet",
+      "startedDetail": "Das Skript läuft jetzt."
     },
     "pageContext": {
       "title": "=== FrameTrain – Dev Test Mode ===",
@@ -1000,7 +1104,24 @@
       "devMode": "Dev Train Mode — kein strukturierter Config.",
       "notAvailable": "Konfiguration nicht verfügbar.",
       "yes": "Ja",
-      "no": "Nein"
+      "no": "Nein",
+      "epochs": "Epochen",
+      "batchSize": "Batch-Größe",
+      "learningRate": "Lernrate",
+      "maxSeqLen": "Max. Sequenzlänge",
+      "warmupRatio": "Warmup-Ratio",
+      "gradAccum": "Grad-Akkumulation",
+      "optimizer": "Optimizer",
+      "scheduler": "Scheduler",
+      "weightDecay": "Weight Decay",
+      "maxGradNorm": "Max. Grad-Norm",
+      "dropout": "Dropout",
+      "seed": "Seed",
+      "fp16": "fp16",
+      "bf16": "bf16",
+      "lora": "LoRA",
+      "qlora": "QLoRA (4-bit)",
+      "gradCheckpoint": "Gradient Checkpointing"
     },
     "eventLog": {
       "title": "Trainings-Log",
@@ -1094,13 +1215,13 @@
   "synapse": {
     "builder": {
       "title": "Synapse Builder",
-      "nodesEdgesCount": "{nodes} nodes · {edges} connections",
+      "nodesEdgesCount": "{nodes} Nodes · {edges} Verbindungen",
       "modelsButton": "Modelle",
       "aiButton": "AI",
-      "clearButton": "Clear",
-      "fullscreenTooltip": "Fullscreen",
-      "exitFullscreenTooltip": "Exit fullscreen",
-      "canvasEmptyHint": "Drag nodes from the library or click a node to place it",
+      "clearButton": "Leeren",
+      "fullscreenTooltip": "Vollbild",
+      "exitFullscreenTooltip": "Vollbild verlassen",
+      "canvasEmptyHint": "Ziehe Nodes aus der Bibliothek oder klicke einen Node an, um ihn zu platzieren",
       "shapeBannerConnection": "Verbindung wegen Shape-Konflikt blockiert",
       "shapeBannerGraph": "Graph hat Shape-Fehler — Training nicht möglich",
       "shapeBannerTraining": "Training: Shape-Fehler im Netzwerk",
@@ -1663,7 +1784,9 @@
       "trainingComplete": "Training abgeschlossen!",
       "trainingCompleteDetail": "Das Modell wurde gespeichert.",
       "fp16NoCudaTitle": "fp16 benötigt CUDA",
-      "fp16NoCudaDetail": "Keine CUDA-GPU erkannt — Training läuft in fp32 (fp16 wurde deaktiviert)."
+      "fp16NoCudaDetail": "Keine CUDA-GPU erkannt — Training läuft in fp32 (fp16 wurde deaktiviert).",
+      "stoppedWithCheckpoint": "Training gestoppt",
+      "stoppedWithCheckpointDetail": "Der Fortschritt wurde als Checkpoint gesichert."
     },
     "pageContext": {
       "title": "=== FrameTrain Training Panel ===",
@@ -1876,7 +1999,8 @@
       },
       "coach": {
         "button": "Im KI-Coach weiterführen"
-      }
+      },
+      "createdWith": "Erstellt mit {provider}"
     },
     "templates": {
       "title": "Gespeicherte Parameter-Templates",
@@ -1887,8 +2011,11 @@
       "saveButton": "Speichern",
       "cancelButton": "Abbrechen",
       "nameInput": "Template-Name",
-      "descriptionInput": "Beschreibung (optional)"
-    }
+      "descriptionInput": "Beschreibung (optional)",
+      "aiDescription": "KI-empfohlene Parameter · {date} · {provider}",
+      "savedDetail": "„{name}“ ist jetzt beim Training abrufbar."
+    },
+    "noJsonNote": "Diese Analyse enthält keine übernehmbaren Parameter."
   },
   "datasetUpload": {
     "title": "Datasets",
@@ -2065,7 +2192,10 @@
       "confidenceLabel": "{confidence}% Konfidenz · {count} Dateien",
       "autoDetectedTooltip": "Auto-erkannt",
       "pairedCount": "{count} Paare vollständig",
-      "orphanCount": "{count} Dateien ohne Partner"
+      "orphanCount": "{count} Dateien ohne Partner",
+      "preferredType": "Optimal für {name}",
+      "compatible": "Kompatibel mit {name}",
+      "notRecommended": "Für {name} nicht empfohlen — unterstützt: {types}"
     },
     "notifications": {
       "loadModelsError": "Fehler beim Laden der Modelle",

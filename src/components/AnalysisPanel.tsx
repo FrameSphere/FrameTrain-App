@@ -1060,6 +1060,14 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   const { setCurrentPageContent } = usePageContext();
   const { t, language } = useLanguage();
 
+  // PROVIDER_META.label ist der deutsche Fallback („Ollama (Lokal)“). Nur die
+  // Einträge mit labelKey haben übersetzbare Anteile — der Rest sind Markennamen.
+  const providerLabel = (provider: AIProvider | string): string => {
+    const meta = PROVIDER_META[provider as AIProvider];
+    if (!meta) return String(provider);
+    return meta.labelKey ? t(meta.labelKey, meta.label) : meta.label;
+  };
+
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -1170,7 +1178,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     lines.push('--- AI-BERICHT & EMPFEHLUNGEN ---');
 
     if (generatingReport) {
-      lines.push(`${t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', PROVIDER_META[aiProvider].label)}`);
+      lines.push(`${t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', providerLabel(aiProvider))}`);
     } else if (report) {
       lines.push(`✓ ${t('analysisPanel.aiAnalysis.title')} (${report.generated_at})`);
       if (aiRecommendedParams) {
@@ -1335,7 +1343,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: resolvedModel, language, generated_at: new Date().toISOString() };
       setReport(newReport); setAiRecommendedParams(extractAIRecommendedParams(text));
       setChatMessages([{ role: 'assistant', content: text }]); setShowChat(true);
-      success(t('common.success'), `Erstellt mit ${PROVIDER_META[aiProvider].label}`);
+      success(t('common.success'), t('analysisPanel.aiAnalysis.createdWith', { provider: providerLabel(aiProvider) }));
     } catch (e: any) { notifyError(t('common.error'), String(e)); }
     finally { setGeneratingReport(false); }
   };
@@ -1382,10 +1390,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     setSavingAITemplate(true);
     try {
       const name = `${t('analysisPanel.templates.sourceAI')} · ${versionDetails?.version_name || selectedVersionId?.slice(0, 8) || 'Analyse'}`;
-      const desc = `KI-empfohlene Parameter · ${report ? formatDate(report.generated_at, language) : 'heute'} · ${PROVIDER_META[aiProvider].label}`;
+      const desc = t('analysisPanel.templates.aiDescription', {
+        date: report ? formatDate(report.generated_at, language) : formatDate(new Date().toISOString(), language),
+        provider: providerLabel(aiProvider),
+      });
       const tmpl = await invoke<MetricsTemplate>('save_metrics_template', { name, description: desc, config: aiRecommendedParams, source: 'ai' });
       setTemplates(prev => [...prev, tmpl]);
-      success(t('common.success'), `"${name}" ist jetzt beim Training abrufbar.`);
+      success(t('common.success'), t('analysisPanel.templates.savedDetail', { name }));
     } catch (e: any) { notifyError(t('common.error'), String(e)); }
     finally { setSavingAITemplate(false); }
   };
@@ -1710,8 +1721,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 <div>
                   <h2 className="text-lg font-bold text-white">{t('analysisPanel.aiAnalysis.title')}</h2>
                   <p className="text-xs text-gray-400">
-                    {report ? `${PROVIDER_META[report.provider as AIProvider]?.label || report.provider} · ${report.model} · ${formatDate(report.generated_at, language)}`
-                      : aiEnabled ? `${PROVIDER_META[aiProvider].label} · ${aiModel}` : t('analysisPanel.aiAnalysis.notEnabledDescription')}
+                    {report ? `${providerLabel(report.provider)} · ${report.model} · ${formatDate(report.generated_at, language)}`
+                      : aiEnabled ? `${providerLabel(aiProvider)} · ${aiModel}` : t('analysisPanel.aiAnalysis.notEnabledDescription')}
                   </p>
                 </div>
               </div>
@@ -1749,7 +1760,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
             {generatingReport && (
               <div className="flex flex-col items-center justify-center gap-3 py-10 text-gray-300">
                 <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-                <span className="text-sm">{t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', PROVIDER_META[aiProvider].label)}</span>
+                <span className="text-sm">{t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', providerLabel(aiProvider))}</span>
                 <span className="text-xs text-gray-500">{t('analysisPanel.aiAnalysis.generatingSubtext')}</span>
               </div>
             )}

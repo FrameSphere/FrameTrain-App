@@ -1294,7 +1294,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       '',
       t('devTrainPanel.pageContext.scriptStateTitle'),
       isDirty ? t('devTrainPanel.pageContext.unsaved') : t('devTrainPanel.pageContext.saved'),
-      currentScriptId ? t('devTrainPanel.pageContext.loaded').replace('{id}', currentScriptId) : t('devTrainPanel.pageContext.newUnsaved'),
+      currentScriptId ? t('devTrainPanel.pageContext.scriptLoaded').replace('{id}', currentScriptId) : t('devTrainPanel.pageContext.newUnsaved'),
       running ? t('devTrainPanel.pageContext.running') : showDashboard ? t('devTrainPanel.pageContext.dashboardOpen') : t('devTrainPanel.pageContext.idle').replace('{count}', String(lossPoints.length)),
       '',
       t('devTrainPanel.pageContext.layoutTitle'),

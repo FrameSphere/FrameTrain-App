@@ -373,7 +373,7 @@ function ThinkingBlock({
       <div className="ft-coach-thinking-card mb-3 rounded-2xl border border-white/10 bg-white/[0.045] p-2.5">
         <div className="flex items-center gap-1.5 text-xs mb-1.5" style={{ color: textColor }}>
           <Loader2 className="w-3 h-3 animate-spin" style={{ color: tPrimary }} />
-          <span>{activeStep?.label || t('aiCoach.thinking')}</span>
+          <span>{activeStep?.label || t('aiCoach.thinkingLabel')}</span>
         </div>
         <div className="pl-1 space-y-1 ml-1.5" style={{ borderLeft: `2px solid ${borderColor}` }}>
           {steps.map(step => (
