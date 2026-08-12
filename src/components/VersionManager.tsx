@@ -31,7 +31,8 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
-import { useLanguage } from '../contexts/LanguageContext';
+import { useLanguage, type Language } from '../contexts/LanguageContext';
+import { dateLocale } from '../utils/dateLocale';
 
 // ============ Types ============
 
@@ -85,9 +86,9 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function formatDate(dateString: string): string {
+function formatDate(dateString: string, language: Language): string {
   const date = new Date(dateString);
-  return date.toLocaleDateString('de-DE', {
+  return date.toLocaleDateString(dateLocale(language), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -237,7 +238,7 @@ function VersionsModal({
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportingVersion, setExportingVersion] = useState<ModelVersion | null>(null);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   const handleStartEdit = (version: ModelVersion) => {
     setEditingId(version.id);
@@ -410,7 +411,7 @@ function VersionsModal({
                       </div>
                       <div className="flex items-center gap-2 text-gray-400">
                         <Calendar className="w-4 h-4" />
-                        <span className="text-xs">{formatDate(version.created_at)}</span>
+                        <span className="text-xs">{formatDate(version.created_at, language)}</span>
                       </div>
                       {!version.is_root && (
                         <div className="flex items-center gap-2 text-gray-400">
@@ -622,7 +623,7 @@ export default function VersionManager() {
   const { currentTheme } = useTheme();
   const { success, error, warning } = useNotification();
   const { setCurrentPageContent } = usePageContext();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [models, setModels] = useState<ModelWithVersions[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedModel, setSelectedModel] = useState<ModelWithVersions | null>(null);
@@ -860,7 +861,7 @@ export default function VersionManager() {
                 )}
                 <div className="flex items-center gap-2 text-gray-500 text-xs">
                   <Calendar className="w-3 h-3" />
-                  <span>{formatDate(model.last_updated)}</span>
+                  <span>{formatDate(model.last_updated, language)}</span>
                 </div>
               </div>
 

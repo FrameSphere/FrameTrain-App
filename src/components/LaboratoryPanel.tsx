@@ -13,7 +13,7 @@ import {
   ClipboardList, Save, FolderOpen, Bot, Send, Pencil,
   Check, Wand2, Copy, Maximize2, Minimize2, Zap,
 } from 'lucide-react';
-import { detectPlugin } from '../plugins/registry';
+import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -22,6 +22,7 @@ import { callAI } from './TrainingPanel';
 import OpenLibraryModal from './OpenLibraryModal';
 import { readUserDevScripts } from '../utils/devScriptStorage';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
+import { dateLocale } from '../utils/dateLocale';
 
 // ── Eigene Dev-Scripts (DevTrain + DevTest) — strikt user-getrennt ───────────
 interface LabSavedScript { id: string; name: string; script: string; savedAt: string; source: 'train' | 'test'; }
@@ -379,7 +380,7 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
                         {s.engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge')}
                       </span>
                     </div>
-                    <p className="text-gray-600 text-[10px] mt-1">{new Date(s.updatedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
+                    <p className="text-gray-600 text-[10px] mt-1">{new Date(s.updatedAt).toLocaleDateString(dateLocale(language), { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
                     <button onClick={() => handleDelete(s.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-600 hover:text-red-400 transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -760,7 +761,7 @@ type LabPhase = 'setup' | 'testing' | 'analysis';
 
 export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const { success, error, warning } = useNotification();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { setCurrentPageContent } = usePageContext();
 
   // Models
@@ -846,7 +847,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         ]);
         setModels(list);
         setModelsWithVersions(listWithVersions);
-        if (listWithVersions.length > 0) setSelectedModelId(listWithVersions[0].id);
+        const preferred = pickPreferredModelId(listWithVersions, list);
+        if (preferred) setSelectedModelId(preferred);
       } catch (e) { console.error('[Lab] initLoad:', e); }
       finally { setLoadingModels(false); }
     })();
@@ -1230,7 +1232,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
     const newSession: LabSession = {
       id: `lab_${Date.now()}`,
-      name: `${selectedModel.name} – ${sourceFileName} (${new Date().toLocaleDateString('de-DE')})`,
+      name: `${selectedModel.name} – ${sourceFileName} (${new Date().toLocaleDateString(dateLocale(language))})`,
       modelId: selectedModel.id,
       modelName: selectedModel.name,
       versionId: selectedVersionId,
@@ -1461,7 +1463,12 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                 <div className="text-left">
                   <span className="text-white font-semibold text-sm">{t('laboratoryPanel.setup.title')}</span>
                   {phase === 'testing' && selectedModel && (
-                    <p className="text-gray-500 text-xs">{selectedModel.name} · {engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge')} · {samples.length} Samples aus „{sourceFileName}"</p>
+                    <p className="text-gray-500 text-xs">{t('laboratoryPanel.setup.configSummary', {
+                      model: selectedModel.name,
+                      engine: engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge'),
+                      count: samples.length,
+                      file: sourceFileName,
+                    })}</p>
                   )}
                 </div>
               </div>
@@ -1610,7 +1617,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                           <option value="" className="bg-slate-900">{t('laboratoryPanel.setup.datasetPlaceholder')}</option>
                           {datasets.map(d => (
                             <option key={d.id} value={d.id} className="bg-slate-900">
-                              {d.name} ({d.file_count} Dateien{d.status === 'split' ? ' · gesplittet' : ''})
+                              {d.name} ({t('laboratoryPanel.setup.datasetFileCount', { count: d.file_count })}{d.status === 'split' ? t('laboratoryPanel.setup.datasetSplitSuffix') : ''})
                             </option>
                           ))}
                         </select>
@@ -2001,7 +2008,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm truncate">{s.name}</p>
-                    <p className="text-gray-600 text-[10px]">{new Date(s.savedAt).toLocaleString('de-DE')}</p>
+                    <p className="text-gray-600 text-[10px]">{new Date(s.savedAt).toLocaleString(dateLocale(language))}</p>
                   </div>
                   <button
                     onClick={() => {

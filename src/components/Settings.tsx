@@ -12,6 +12,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { PROVIDER_META } from '../ai/providerMeta';
 import { getStoredAuthorName, saveAuthorName } from './OpenLibraryModal';
+import { dateLocale } from '../utils/dateLocale';
 
 interface UserData {
   apiKey: string;
@@ -235,7 +236,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     };
     setCurrentPageContent(buildPageContext({
       pageId: 'settings',
-      title: 'Einstellungen (Settings)',
+      // Der Titel landet im Kontext-Chip des Coaches. Fest verdrahtet stand
+      // dort doppelt „Einstellungen (Settings)“ — jetzt in der UI-Sprache.
+      title: t('settings.title'),
       purpose: 'Konfiguration der App: KI-Provider (dieser Coach), Erscheinungsbild, Account, Support, Updates, System.',
       state: [
         kv('Aktiver Tab', tabs[activeTab] || activeTab),
@@ -882,7 +885,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   >
                     <span className="flex-shrink-0">{providerIcon(key)}</span>
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold">{m.label}</div>
+                      <div className="text-sm font-semibold">{m.labelKey ? t(m.labelKey, m.label) : m.label}</div>
                       <div className="text-xs opacity-60 mt-0.5 flex items-center gap-1.5">
                         {m.needsKey ? (
                           <>{t('settings.ai.keyNeeded')}</>
@@ -1802,7 +1805,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                                 {m.sender === 'user' ? t('settings.support.sender') : <>
                                   <Wrench className="w-3 h-3" />
                                   {t('settings.support.senderSupport')}
-                                </>} · {new Date(m.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </>} · {new Date(m.created_at).toLocaleString(dateLocale(language), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             </div>
                           </div>

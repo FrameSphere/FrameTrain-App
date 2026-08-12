@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { CanvasInferenceTab } from "./CanvasInferenceTab";
 import { invoke } from "@tauri-apps/api/core";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type TrainingStatus = "idle" | "running" | "paused" | "done" | "error";
@@ -117,7 +118,9 @@ const SelectorModal: React.FC<{
   onSelect: (item: { id: string; name: string }) => void;
   onClose: () => void;
   loading: boolean;
-}> = ({ title, items, onSelect, onClose, loading }) => (
+}> = ({ title, items, onSelect, onClose, loading }) => {
+  const { t } = useLanguage();
+  return (
   <>
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000 }} />
     <div style={{
@@ -132,10 +135,10 @@ const SelectorModal: React.FC<{
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
         {loading ? (
-          <div style={{ padding: "20px", textAlign: "center", color: "#334155", fontSize: 12, fontFamily: "'JetBrains Mono',monospace" }}>Laden…</div>
+          <div style={{ padding: "20px", textAlign: "center", color: "#334155", fontSize: 12, fontFamily: "'JetBrains Mono',monospace" }}>{t('synapse.trainingConsole.datasetSelector.loading')}</div>
         ) : items.length === 0 ? (
           <div style={{ padding: "20px", textAlign: "center", color: "#334155", fontSize: 12, fontFamily: "'JetBrains Mono',monospace" }}>
-            Keine Einträge vorhanden.
+            {t('synapse.trainingConsole.datasetSelector.empty')}
           </div>
         ) : items.map((item) => (
           <button
@@ -156,7 +159,8 @@ const SelectorModal: React.FC<{
       </div>
     </div>
   </>
-);
+  );
+};
 
 // ─── Export Modal ─────────────────────────────────────────────────────────────
 const ExportModal: React.FC<{
@@ -166,7 +170,9 @@ const ExportModal: React.FC<{
   onClose: () => void;
   exporting: boolean;
   exportPath: string | null;
-}> = ({ completedVersionId, onExportFormat, onExportVersion, onClose, exporting, exportPath }) => (
+}> = ({ completedVersionId, onExportFormat, onExportVersion, onClose, exporting, exportPath }) => {
+  const { t } = useLanguage();
+  return (
   <>
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000 }} />
     <div style={{
@@ -176,7 +182,7 @@ const ExportModal: React.FC<{
       zIndex: 2001, boxShadow: "0 20px 60px rgba(0,0,0,0.8)",
     }}>
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #1e293b", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", fontFamily: "'JetBrains Mono',monospace" }}>Export ↓</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", fontFamily: "'JetBrains Mono',monospace" }}>{t('synapse.trainingConsole.exportModal.title')}</span>
         <button onClick={onClose} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 14 }}>✕</button>
       </div>
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -184,14 +190,14 @@ const ExportModal: React.FC<{
         {completedVersionId && (
           <div style={{ padding: "10px 12px", background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 8 }}>
             <div style={{ fontSize: 11, color: "#34d399", fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", marginBottom: 6 }}>
-              ✓ Trainiertes Modell verfügbar
+              {t('synapse.trainingConsole.exportModal.trainedModelTitle')}
             </div>
             <div style={{ fontSize: 10, color: "#475569", fontFamily: "'JetBrains Mono',monospace", marginBottom: 8 }}>
-              Exportiert den gesamten Modell-Ordner in deinen Downloads-Ordner (PyTorch-Format).
+              {t('synapse.trainingConsole.exportModal.trainedModelDesc')}
             </div>
             {exportPath ? (
               <div style={{ fontSize: 10, color: "#34d399", fontFamily: "'JetBrains Mono',monospace", wordBreak: "break-all" }}>
-                ✓ Exportiert nach: {exportPath}
+                {t('synapse.trainingConsole.exportModal.exportedLabel', { path: exportPath ?? '' })}
               </div>
             ) : (
               <button
@@ -204,7 +210,7 @@ const ExportModal: React.FC<{
                   fontFamily: "'JetBrains Mono',monospace", width: "100%",
                 }}
               >
-                {exporting ? "Wird exportiert…" : "↓ In Downloads exportieren"}
+                {exporting ? t('synapse.trainingConsole.exportModal.exportingButton') : t('synapse.trainingConsole.exportModal.exportButton')}
               </button>
             )}
           </div>
@@ -212,12 +218,16 @@ const ExportModal: React.FC<{
 
         {/* Log-Export-Formate */}
         <div style={{ fontSize: 10, color: "#334155", fontFamily: "'JetBrains Mono',monospace", paddingTop: completedVersionId ? 4 : 0 }}>
-          Log / Metriken exportieren
+          {t('synapse.trainingConsole.exportModal.logMetricsLabel')}
         </div>
-        {["Training Log (.txt)", "Metrics CSV (.csv)", "Config JSON (.json)"].map((fmt) => (
+        {([
+          { id: "txt",  labelKey: "synapse.trainingConsole.exportModal.formatTxt" },
+          { id: "csv",  labelKey: "synapse.trainingConsole.exportModal.formatCsv" },
+          { id: "json", labelKey: "synapse.trainingConsole.exportModal.formatJson" },
+        ] as const).map(({ id, labelKey }) => (
           <button
-            key={fmt}
-            onClick={() => onExportFormat(fmt)}
+            key={id}
+            onClick={() => onExportFormat(id)}
             style={{
               padding: "8px 12px", background: "transparent", border: "1px solid #1e293b",
               borderRadius: 6, color: "#94a3b8", fontSize: 12, cursor: "pointer", textAlign: "left",
@@ -226,13 +236,14 @@ const ExportModal: React.FC<{
             onMouseEnter={(e) => (e.currentTarget.style.background = "#1e293b")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            {fmt}
+            {t(labelKey)}
           </button>
         ))}
       </div>
     </div>
   </>
-);
+  );
+};
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
@@ -246,6 +257,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
   userId,
   outputDir,
 }) => {
+  const { t } = useLanguage();
   const [config, setConfig] = useState<TrainingConfig>({
     epochs: 10,
     batchSize: 32,
@@ -332,7 +344,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
     const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
     let filename = "", content = "", mime = "text/plain;charset=utf-8";
 
-    if (fmt.includes(".csv")) {
+    if (fmt === "csv") {
       filename = `metrics_${ts}.csv`;
       mime = "text/csv;charset=utf-8";
       const header = "epoch,loss,val_loss,accuracy,lr,gpu_mem_mb";
@@ -340,7 +352,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
         [m.epoch, m.loss, m.valLoss ?? "", m.accuracy ?? "", m.lr, m.gpuMemMB ?? ""].join(",")
       );
       content = [header, ...rows].join("\n");
-    } else if (fmt.includes(".json")) {
+    } else if (fmt === "json") {
       filename = `config_${ts}.json`;
       mime = "application/json";
       content = JSON.stringify(
@@ -387,9 +399,9 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               padding: "4px 10px", background: activeTab === tab ? "#1e293b" : "transparent",
               border: "none", borderRadius: 4, color: activeTab === tab ? "#e2e8f0" : "#475569",
               fontSize: 11, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
-              textTransform: "capitalize", letterSpacing: "0.04em",
+              letterSpacing: "0.04em",
             }}>
-              {tab}
+              {t(`synapse.trainingConsole.tabs.${tab}`)}
               {tab === "log" && logLines.length > 0 && (
                 <span style={{ marginLeft: 4, fontSize: 9, color: "#334155" }}>{logLines.length}</span>
               )}
@@ -400,7 +412,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
         {/* Epoch progress */}
         {metrics.length > 0 && (
           <div style={{ marginLeft: "auto", fontSize: 11, color: "#475569", fontFamily: "'JetBrains Mono', monospace" }}>
-            Epoch {metrics[metrics.length - 1].epoch}/{config.epochs}
+            {t('synapse.trainingConsole.epochLabel', { current: metrics[metrics.length - 1].epoch, total: config.epochs })}
           </div>
         )}
 
@@ -416,7 +428,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               fontSize: 11, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
             }}
           >
-            Export ↓
+            {t('synapse.trainingConsole.exportButton')}
           </button>
 
           {/* Start / Stop */}
@@ -426,7 +438,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               borderRadius: 5, color: "#f87171", fontSize: 11, fontWeight: 600,
               fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
             }}>
-              ■ Stop
+              {t('synapse.trainingConsole.stopButton')}
             </button>
           ) : (
             <button disabled={!canStart} onClick={handleTrainClick} style={{
@@ -436,7 +448,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               fontSize: 11, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
               cursor: canStart ? "pointer" : "not-allowed",
             }}>
-              ▶ Train
+              {t('synapse.trainingConsole.trainButton')}
             </button>
           )}
         </div>
@@ -453,7 +465,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
           zIndex: 10, backdropFilter: "blur(4px)",
         }}>
           <span style={{ fontSize: 12, color: "#34d399", fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }}>
-            ✓ Training abgeschlossen
+            {t('synapse.trainingConsole.doneBannerTitle')}
           </span>
           <span style={{ fontSize: 11, color: "#475569", fontFamily: "'JetBrains Mono',monospace", flex: 1 }}>
             model.pt · metrics.json · canvas_model.py
@@ -470,7 +482,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               cursor: "pointer",
             }}
           >
-            Ordner öffnen ↗
+            {t('synapse.trainingConsole.openFolderButton')}
           </button>
         </div>
       )}
@@ -482,13 +494,13 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
         {activeTab === "config" && (
           <div style={{ display: "flex", gap: 16, padding: "10px 14px", overflowX: "auto", alignItems: "flex-start", width: "100%" }}>
 
-            <ConfigField label="Architektur">
+            <ConfigField label={t('synapse.trainingConsole.architectureLabel')}>
               <div style={{ ...inputStyle, width: 120, color: "#64748b", fontSize: 10 }}>
                 Canvas Graph
               </div>
             </ConfigField>
 
-            <ConfigField label="Dataset">
+            <ConfigField label={t('synapse.trainingConsole.datasetLabel')}>
               <button
                 onClick={() => { loadDatasets(); setShowDatasetSelector(true); }}
                 style={{
@@ -497,22 +509,22 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
                   borderColor: selectedDataset ? "#4f46e5" : "#1e293b",
                 }}
               >
-                {selectedDataset ? selectedDataset.name.slice(0, 14) + (selectedDataset.name.length > 14 ? "…" : "") : "— wählen —"}
+                {selectedDataset ? selectedDataset.name.slice(0, 14) + (selectedDataset.name.length > 14 ? "…" : "") : t('synapse.trainingConsole.datasetPlaceholder')}
               </button>
             </ConfigField>
 
             <div style={{ width: 1, background: "#1e293b", alignSelf: "stretch", flexShrink: 0 }} />
 
-            <ConfigField label="Epochs">
+            <ConfigField label={t('synapse.trainingConsole.epochsLabel')}>
               <input type="number" value={config.epochs} min={1} onChange={(e) => setConfig((c) => ({ ...c, epochs: Number(e.target.value) }))} style={{ ...inputStyle, width: 70 }} />
             </ConfigField>
-            <ConfigField label="Batch Size">
+            <ConfigField label={t('synapse.trainingConsole.batchSizeLabel')}>
               <input type="number" value={config.batchSize} min={1} onChange={(e) => setConfig((c) => ({ ...c, batchSize: Number(e.target.value) }))} style={{ ...inputStyle, width: 70 }} />
             </ConfigField>
-            <ConfigField label="Learning Rate">
+            <ConfigField label={t('synapse.trainingConsole.learningRateLabel')}>
               <input type="number" value={config.learningRate} step={0.0001} min={0} onChange={(e) => setConfig((c) => ({ ...c, learningRate: Number(e.target.value) }))} style={{ ...inputStyle, width: 90 }} />
             </ConfigField>
-            <ConfigField label="GPU">
+            <ConfigField label={t('synapse.trainingConsole.gpuLabel')}>
               <select
                 value={config.gpu}
                 onChange={(e) => {
@@ -531,12 +543,12 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
                 ))}
               </select>
             </ConfigField>
-            <ConfigField label="Precision">
+            <ConfigField label={t('synapse.trainingConsole.precisionLabel')}>
               <select
                 value={config.precision}
                 onChange={(e) => setConfig((c) => ({ ...c, precision: e.target.value as TrainingConfig["precision"] }))}
                 style={{ ...inputStyle, width: 80 }}
-                title={config.gpu.startsWith("cuda") ? undefined : "fp16/bf16 nur auf CUDA — auf CPU/MPS wird fp32 verwendet"}
+                title={config.gpu.startsWith("cuda") ? undefined : t('synapse.trainingConsole.precisionCudaHint')}
               >
                 {["fp32", "fp16", "bf16"].map((p) => (
                   <option
@@ -550,7 +562,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
                 ))}
               </select>
             </ConfigField>
-            <ConfigField label="Grad Accum">
+            <ConfigField label={t('synapse.trainingConsole.gradAccumLabel')}>
               <input type="number" value={config.gradAccum} min={1} onChange={(e) => setConfig((c) => ({ ...c, gradAccum: Number(e.target.value) }))} style={{ ...inputStyle, width: 60 }} />
             </ConfigField>
           </div>
@@ -561,15 +573,15 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
           <div style={{ display: "flex", gap: 32, padding: "12px 18px", alignItems: "flex-start", overflowX: "auto", width: "100%" }}>
             {losses.length > 1 ? (
               <>
-                <Sparkline data={losses} color="#f87171" label="Train Loss" />
-                {valLosses.length > 1 && <Sparkline data={valLosses} color="#fb923c" label="Val Loss" />}
-                {accs.length > 1 && <Sparkline data={accs} color="#34d399" label="Accuracy" />}
+                <Sparkline data={losses} color="#f87171" label={t('synapse.trainingConsole.metricLoss')} />
+                {valLosses.length > 1 && <Sparkline data={valLosses} color="#fb923c" label={t('synapse.trainingConsole.metricValLoss')} />}
+                {accs.length > 1 && <Sparkline data={accs} color="#34d399" label={t('synapse.trainingConsole.metricAccuracy')} />}
                 <div style={{ marginLeft: "auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 20px", alignSelf: "center" }}>
                   {[
-                    { label: "Loss",     val: losses[losses.length - 1]?.toFixed(4) },
-                    { label: "Val Loss", val: valLosses[valLosses.length - 1]?.toFixed(4) ?? "—" },
-                    { label: "Accuracy", val: accs.length ? (accs[accs.length - 1] * 100).toFixed(1) + "%" : "—" },
-                    { label: "LR",       val: metrics[metrics.length - 1]?.lr?.toExponential(2) ?? "—" },
+                    { label: t('synapse.trainingConsole.metricLoss'), val: losses[losses.length - 1]?.toFixed(4) },
+                    { label: t('synapse.trainingConsole.metricValLoss'), val: valLosses[valLosses.length - 1]?.toFixed(4) ?? "—" },
+                    { label: t('synapse.trainingConsole.metricAccuracy'), val: accs.length ? (accs[accs.length - 1] * 100).toFixed(1) + "%" : "—" },
+                    { label: t('synapse.trainingConsole.metricLr'), val: metrics[metrics.length - 1]?.lr?.toExponential(2) ?? "—" },
                   ].map(({ label, val }) => (
                     <div key={label}>
                       <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", letterSpacing: "0.07em" }}>{label}</div>
@@ -580,7 +592,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
               </>
             ) : (
               <div style={{ fontSize: 12, color: "#334155", fontFamily: "'JetBrains Mono', monospace", alignSelf: "center" }}>
-                No metrics yet — start training to see data
+                {t('synapse.trainingConsole.noMetrics')}
               </div>
             )}
           </div>
@@ -601,7 +613,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
             lineHeight: 1.7, scrollbarWidth: "thin", scrollbarColor: "#1e293b transparent",
           }}>
             {logLines.length === 0 ? (
-              <span style={{ color: "#334155" }}>Waiting for output…</span>
+              <span style={{ color: "#334155" }}>{t('synapse.trainingConsole.logWaiting')}</span>
             ) : (
               logLines.map((line, i) => {
                 const isError   = line.toLowerCase().includes("error");
@@ -634,7 +646,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
       {/* ── Dataset Selector ────────────────────────────────────────────────── */}
       {showDatasetSelector && (
         <SelectorModal
-          title="Dataset wählen"
+          title={t('synapse.trainingConsole.datasetSelector.title')}
           items={datasets}
           onSelect={(d) => { setSelectedDataset(d); setShowDatasetSelector(false); }}
           onClose={() => setShowDatasetSelector(false)}

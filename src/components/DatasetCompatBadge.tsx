@@ -67,7 +67,7 @@ export default function DatasetCompatBadge({
   if (compact) {
     return (
       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${meta.bg} ${meta.border} border ${meta.color}`}>
-        {levelIcon} {meta.label}
+        {levelIcon} {t(meta.labelKey, meta.label)}
       </span>
     );
   }
@@ -79,7 +79,7 @@ export default function DatasetCompatBadge({
         <div className="flex items-center gap-2">
           <span className="text-base">{levelIcon}</span>
           <div>
-            <span className={`text-sm font-semibold ${meta.color}`}>{meta.label}</span>
+            <span className={`text-sm font-semibold ${meta.color}`}>{t(meta.labelKey, meta.label)}</span>
             <p className="text-gray-400 text-xs mt-0.5 leading-snug">{result.summary}</p>
           </div>
         </div>

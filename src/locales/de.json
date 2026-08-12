@@ -3,7 +3,7 @@
     "tagline": "Local ML Training",
     "nav": {
       "models": "Modelle",
-      "datasets": "Datensätze",
+      "datasets": "Datasets",
       "training": "Training",
       "analysis": "Analyse",
       "tests": "Tests",
@@ -134,6 +134,7 @@
       "getKey": "Key holen ↗",
       "keyLocalOnly": "Key wird nur lokal gespeichert, nie an FrameTrain übertragen.",
       "model": "Modell",
+      "providerLabelOllama": "Ollama (Lokal)",
       "ollamaTitle": "Ollama-Konfiguration",
       "ollamaModelLabel": "Modell-Name (muss lokal installiert sein)",
       "ollamaPopular": "Beliebte Modelle",
@@ -1144,17 +1145,27 @@
       "footer": "Modelle werden lokal gespeichert."
     },
     "nodeLibrary": {
-      "title": "Node Library",
-      "searchPlaceholder": "Search nodes…",
-      "noNodesFound": "No nodes found",
-      "footer": "drag or click to add"
+      "title": "Node-Bibliothek",
+      "searchPlaceholder": "Nodes suchen…",
+      "noNodesFound": "Keine Nodes gefunden",
+      "footer": "ziehen oder klicken zum Hinzufügen",
+      "expandTooltip": "Node-Bibliothek einblenden",
+      "collapseTooltip": "Node-Bibliothek einklappen",
+      "categories": {
+        "Data": "Daten",
+        "Layers": "Layer",
+        "Activations": "Aktivierungen",
+        "Training": "Training",
+        "Math": "Mathematik",
+        "Logic": "Logik"
+      }
     },
     "propertyPanel": {
-      "title": "Properties",
-      "emptyHint": "Select a node to edit its properties",
-      "nodeIdLabel": "Node ID",
-      "noParams": "No configurable params",
-      "tensorShapeLabel": "Tensor Shape"
+      "title": "Eigenschaften",
+      "emptyHint": "Wähle einen Node, um seine Eigenschaften zu bearbeiten",
+      "nodeIdLabel": "Node-ID",
+      "noParams": "Keine konfigurierbaren Parameter",
+      "tensorShapeLabel": "Tensor-Shape"
     },
     "contextClear": "Canvas leeren",
     "shapeErrorBanner": {
@@ -1171,18 +1182,25 @@
       "architectureValue": "Canvas Graph",
       "datasetLabel": "Dataset",
       "datasetPlaceholder": "— wählen —",
-      "epochsLabel": "Epochs",
-      "batchSizeLabel": "Batch Size",
-      "learningRateLabel": "Learning Rate",
+      "epochsLabel": "Epochen",
+      "batchSizeLabel": "Batch-Größe",
+      "learningRateLabel": "Lernrate",
       "gpuLabel": "GPU",
-      "precisionLabel": "Precision",
-      "gradAccumLabel": "Grad Accum",
-      "noMetrics": "No metrics yet — start training to see data",
+      "precisionLabel": "Genauigkeit",
+      "gradAccumLabel": "Grad-Akkum.",
+      "precisionCudaHint": "fp16/bf16 nur auf CUDA — auf CPU/MPS wird fp32 verwendet",
+      "noMetrics": "Noch keine Metriken — starte das Training, um Daten zu sehen",
       "metricLoss": "Loss",
       "metricValLoss": "Val Loss",
-      "metricAccuracy": "Accuracy",
+      "metricAccuracy": "Genauigkeit",
       "metricLr": "LR",
-      "logWaiting": "Waiting for output…",
+      "logWaiting": "Warte auf Ausgabe…",
+      "tabs": {
+        "config": "Konfiguration",
+        "metrics": "Metriken",
+        "log": "Log",
+        "inference": "Inferenz"
+      },
       "doneBannerTitle": "✓ Training abgeschlossen",
       "doneBannerFiles": "model.pt · metrics.json · canvas_model.py",
       "openFolderButton": "Ordner öffnen ↗",
@@ -1696,7 +1714,7 @@
       "actionPickDataset": "2. Öffne [Dataset Dropdown] oben Mitte → wähle Dataset",
       "actionDevMode": "1. Klick [Mode Toggle] oben rechts → schalte auf \"Dev Mode\"",
       "actionDevScript": "2. Schreib eigenes Python-Training-Skript",
-      "actionOpenDatasets": "1. Gehe zu Datensätze-Tab",
+      "actionOpenDatasets": "1. Gehe zum Datasets-Tab",
       "actionOpenDataset": "2. Öffne Dataset \"{name}\"",
       "actionSplitDataset": "3. Klick \"Dataset aufteilen\" → konfiguriere Train/Val/Test",
       "actionAdjustConfig": "1. Passe Config an (optional): Öffne ▼ Sections in der Mitte",
@@ -1758,6 +1776,8 @@
         "downloadedTitle": "Bild erfolgreich heruntergeladen!"
       },
       "bigLoss": {
+        "titleWithVal": "Loss-Verlauf über {n} Steps (Train + Val)",
+        "title": "Loss-Verlauf über {n} Steps",
         "smoothingBadge": "Smoothing",
         "legendTrain": "Train Loss",
         "legendVal": "Val Loss",
@@ -1836,6 +1856,7 @@
       "reanalyzeButton": "Neu analysieren",
       "startButton": "KI-Analyse starten",
       "generatingText": "Analysiere Training mit {provider}…",
+      "otherLanguageHint": "Diese Analyse wurde auf Englisch erstellt. Erzeuge sie neu, um sie auf Deutsch zu erhalten.",
       "generatingSubtext": "Das kann 10–30 Sekunden dauern.",
       "notEnabledTitle": "KI-Assistent nicht aktiviert",
       "notEnabledDescription": "Aktiviere einen KI-Anbieter unter Einstellungen → KI-Assistent.",

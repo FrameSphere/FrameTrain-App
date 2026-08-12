@@ -15,11 +15,12 @@ import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { setRecommendedParams } from '../ai/coachToolEvents';
-import { useLanguage } from '../contexts/LanguageContext';
+import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
 import GradientChatInput from './ui/GradientChatInput';
 import { openAICoach } from '../ai/aiCoachEvents';
+import { dateLocale } from '../utils/dateLocale';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -50,7 +51,7 @@ interface FullTrainingData {
   hardware: Record<string, any>; model_info: Record<string, any>; dataset_info: Record<string, any>;
   epoch_summaries: EpochSummary[]; step_logs: LogEntry[]; derived_stats: Record<string, any>;
 }
-interface AIAnalysisReport { version_id: string; report_text: string; provider: string; model: string; generated_at: string; }
+interface AIAnalysisReport { version_id: string; report_text: string; provider: string; model: string; generated_at: string; /** Sprache bei der Erstellung; fehlt bei Berichten aus älteren Versionen. */ language?: Language | null; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 interface MetricsTemplate { id: string; name: string; description: string; config: Record<string, any>; created_at: string; source: string; }
 
@@ -65,8 +66,17 @@ function formatDuration(s: number | null) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
   return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
-function formatDate(d: string) {
-  return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+function formatDate(d: string, language: Language) {
+  return new Date(d).toLocaleDateString(language === 'en' ? 'en-GB' : 'de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+/**
+ * derived_stats kommt als Record<string, any> aus dem Backend – einzelne Werte
+ * sind dort `null`. Ein reiner `!== undefined`-Check lässt die durch und die
+ * Kachel rendert dann „null%“ bzw. bleibt leer. Nur echte Zahlen zählen.
+ */
+function asFiniteNumber(value: unknown): number | null {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
 }
 function formatBytes(b: number) {
   if (!b) return '0 B';
@@ -74,10 +84,135 @@ function formatBytes(b: number) {
   const i = Math.floor(Math.log(b) / Math.log(k));
   return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + s[i];
 }
-function extractAIRecommendedParams(reportText: string): Record<string, any> | null {
-  const match = reportText.match(/```json\s*([\s\S]*?)```/);
-  if (!match) return null;
-  try { return JSON.parse(match[1].trim()); } catch { return null; }
+/**
+ * Parameter, die aus einer KI-Antwort übernommen werden dürfen — gruppiert
+ * nach erwartetem Typ. Der Typ gehört zur Prüfung dazu: eine reine
+ * Namens-Whitelist ließ „Bei fp16: die Hardware …“ als { fp16: 'die' }
+ * durch, und das landete dann in der Trainings-Config.
+ */
+const NUMERIC_PARAM_KEYS = new Set([
+  'epochs', 'batch_size', 'learning_rate', 'warmup_ratio', 'warmup_steps',
+  'weight_decay', 'gradient_accumulation_steps', 'max_seq_length',
+  'max_grad_norm', 'lora_r', 'lora_alpha', 'lora_dropout',
+]);
+const BOOLEAN_PARAM_KEYS = new Set(['fp16', 'use_lora', 'load_in_8bit', 'load_in_4bit']);
+/** Bei String-Parametern reicht „sieht aus wie ein Wort“ nicht — nur bekannte Bezeichner. */
+const ENUM_PARAM_VALUES: Record<string, Set<string>> = {
+  optimizer: new Set(['adamw', 'adamw_torch', 'adamw_hf', 'adamw_8bit', 'adam', 'adafactor', 'sgd', 'lion', 'rmsprop']),
+  scheduler: new Set(['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup', 'inverse_sqrt']),
+};
+const RECOMMENDABLE_PARAM_KEYS = new Set<string>([
+  ...Array.from(NUMERIC_PARAM_KEYS),
+  ...Array.from(BOOLEAN_PARAM_KEYS),
+  ...Object.keys(ENUM_PARAM_VALUES),
+]);
+
+function coerceParamValue(raw: string): unknown {
+  const v = raw.trim().replace(/^["'`]|["'`]$/g, '').replace(/[.,;]$/, '');
+  if (/^(true|false)$/i.test(v)) return v.toLowerCase() === 'true';
+  if (v !== '' && !Number.isNaN(Number(v))) return Number(v);
+  return v;
+}
+
+function isValidParamValue(key: string, value: unknown): boolean {
+  if (NUMERIC_PARAM_KEYS.has(key)) return typeof value === 'number' && Number.isFinite(value);
+  if (BOOLEAN_PARAM_KEYS.has(key)) return typeof value === 'boolean';
+  const allowed = ENUM_PARAM_VALUES[key];
+  return allowed !== undefined && typeof value === 'string' && allowed.has(value.toLowerCase());
+}
+
+function pickKnownParams(obj: Record<string, unknown>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const key = k.toLowerCase();
+    if (!RECOMMENDABLE_PARAM_KEYS.has(key)) continue;
+    // Modelle schreiben Zahlen gern als String ("epochs": "5").
+    const value = typeof v === 'string' ? coerceParamValue(v) : v;
+    if (isValidParamValue(key, value)) out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Überschrift des Empfehlungs-Abschnitts (siehe buildAnalysisSystemPrompt):
+ * „## Empfohlene Parameter …“ bzw. „## Recommended Parameters …“.
+ */
+const RECOMMENDATION_HEADING = /^[ \t]{0,3}(?:#{1,6}[ \t]+|\*\*)[^\n]*(?:empfohlen|empfehlung|recommend|suggested)/im;
+
+/** Wendet alle Such-Strategien auf einen Textausschnitt an. */
+function extractParamsFrom(text: string): Record<string, unknown> | null {
+  const tryParse = (candidate: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(candidate.trim());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return pickKnownParams(parsed as Record<string, unknown>);
+      }
+    } catch { /* nächste Strategie */ }
+    return null;
+  };
+
+  // Bei mehreren Treffern gewinnt der letzte — Berichte nennen erst den
+  // Ist-Zustand und danach die Empfehlung.
+  const lastMatch = (re: RegExp, group: number): Record<string, unknown> | null => {
+    let hit: Record<string, unknown> | null = null;
+    for (const m of text.matchAll(re)) hit = tryParse(m[group]) ?? hit;
+    return hit;
+  };
+
+  // 1. Geschlossener Code-Block (```json … ``` oder ``` … ```).
+  const fenced = lastMatch(/```json\s*([\s\S]*?)```/gi, 1) ?? lastMatch(/```\s*(\{[\s\S]*?\})\s*```/g, 1);
+  if (fenced) return fenced;
+
+  // 2. Nicht geschlossener Code-Block am Ende der Antwort.
+  const unclosed = text.match(/```json\s*([\s\S]*)$/i);
+  if (unclosed) {
+    const brace = unclosed[1].match(/\{[\s\S]*\}/);
+    if (brace) {
+      const hit = tryParse(brace[0]);
+      if (hit) return hit;
+    }
+  }
+
+  // 3. Freistehendes JSON-Objekt irgendwo im Text.
+  const loose = lastMatch(/\{[^{}]*\}/g, 0);
+  if (loose) return loose;
+
+  // 4. Inline-Paare: `epochs=5`, epochs = 5, **epochs**: 5 …
+  // Markdown-Auszeichnung vorher entfernen, damit "**epochs**: 5" greift.
+  const plain = text.replace(/[*`]/g, '');
+  const inline: Record<string, unknown> = {};
+  const pairRe = /([a-z_][a-z0-9_]*)\s*[=:]\s*([^\s,;)"'`*]+)/gi;
+  for (const m of plain.matchAll(pairRe)) {
+    const key = m[1].toLowerCase();
+    if (!RECOMMENDABLE_PARAM_KEYS.has(key)) continue;
+    const value = coerceParamValue(m[2]);
+    if (isValidParamValue(key, value)) inline[key] = value; // letzter Treffer gewinnt
+  }
+  return Object.keys(inline).length > 0 ? inline : null;
+}
+
+/**
+ * Holt die empfohlenen Trainings-Parameter aus einem KI-Bericht.
+ *
+ * Früher wurde ausschließlich ein geschlossener ```json-Block akzeptiert.
+ * Antworten, die die Werte inline als `epochs=5` nannten — oder deren
+ * Code-Fence nicht geschlossen war — lieferten dadurch keinen
+ * „Übernehmen“-Button, obwohl die Werte klar dastanden.
+ *
+ * Wichtig ist dabei, *welche* Werte gewonnen werden: ein Bericht nennt fast
+ * immer zuerst den kritisierten Ist-Zustand („lief mit epochs=8 … zu
+ * aggressiv“) und erst danach die Empfehlung. Deshalb wird zuerst nur der
+ * Empfehlungs-Abschnitt durchsucht, und innerhalb eines Ausschnitts gewinnt
+ * der letzte Treffer — sonst übernimmt der Button genau die Werte, von denen
+ * die KI gerade abgeraten hat.
+ */
+export function extractAIRecommendedParams(reportText: string): Record<string, unknown> | null {
+  const heading = reportText.match(RECOMMENDATION_HEADING);
+  if (heading?.index !== undefined) {
+    const fromSection = extractParamsFrom(reportText.slice(heading.index));
+    if (fromSection) return fromSection;
+  }
+  return extractParamsFrom(reportText);
 }
 function niceY(min: number, max: number, ticks = 4): number[] {
   const range = max - min || 1; const step = range / ticks; const result: number[] = [];
@@ -700,17 +835,31 @@ function EpochDurationBar({ summaries }: { summaries: EpochSummary[] }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ReportText({ text }: { text: string }) {
-  const renderInline = (input: string): string =>
+  // Der Berichtstext kommt vom Sprachmodell und wird als HTML eingesetzt.
+  // Ohne Escaping würde darin enthaltenes Markup direkt ausgeführt.
+  const escapeHtml = (input: string): string =>
     input
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const renderInline = (input: string): string =>
+    escapeHtml(input)
       .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
       .replace(/\*(.*?)\*/g, '<em class="text-gray-200">$1</em>');
+
+  // Überschriften werden als React-Child gerendert, nicht als HTML. Dort darf
+  // kein Markup zurückkommen – sonst stünden die <strong>-Tags sichtbar da.
+  const plainInline = (input: string): string =>
+    input.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1');
 
   const renderParagraph = (line: string, key: number) => (
     <p key={key} className="text-gray-300" dangerouslySetInnerHTML={{ __html: renderInline(line) }} />
   );
 
   return (
-    <div className="space-y-1 text-sm leading-relaxed">
+    <div className="space-y-1 text-sm leading-relaxed min-w-0 max-w-full">
       {(() => {
         const lines = text.split('\n');
         const nodes: ReactNode[] = [];
@@ -731,20 +880,34 @@ function ReportText({ text }: { text: string }) {
               code.push(lines[i]);
               i++;
             }
-            nodes.push(
-              <pre key={i} className="my-2 overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-gray-200">
-                {lang ? <div className="mb-2 text-[10px] uppercase tracking-wide text-gray-500">{lang}</div> : null}
-                <code>{code.join('\n')}</code>
-              </pre>
-            );
             i++;
+            // Ein nicht geschlossener Fence hinterließ bisher eine leere Box.
+            if (code.join('').trim() !== '') {
+              nodes.push(
+                <pre key={i} className="my-2 max-w-full min-w-0 overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-gray-200">
+                  {lang ? <div className="mb-2 text-[10px] uppercase tracking-wide text-gray-500">{lang}</div> : null}
+                  <code className="block whitespace-pre">{code.join('\n')}</code>
+                </pre>
+              );
+            }
             continue;
           }
           if (/^\d+\.\s/.test(trimmed)) {
             const items: string[] = [];
-            while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
-              items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
-              i++;
+            // Leerzeilen zwischen den Punkten dürfen die Liste nicht beenden,
+            // sonst startet die Nummerierung in jedem Block wieder bei 1.
+            while (i < lines.length) {
+              if (/^\d+\.\s/.test(lines[i].trim())) {
+                items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+                i++;
+                continue;
+              }
+              if (lines[i].trim() === '') {
+                let k = i;
+                while (k < lines.length && lines[k].trim() === '') k++;
+                if (k < lines.length && /^\d+\.\s/.test(lines[k].trim())) { i = k; continue; }
+              }
+              break;
             }
             nodes.push(
               <ol key={`ol-${i}`} className="space-y-1 my-1.5">
@@ -760,9 +923,19 @@ function ReportText({ text }: { text: string }) {
           }
           if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
             const items: string[] = [];
-            while (i < lines.length && (lines[i].trim().startsWith('- ') || lines[i].trim().startsWith('* '))) {
-              items.push(lines[i].trim().slice(2).trim());
-              i++;
+            const isBullet = (l: string) => l.trim().startsWith('- ') || l.trim().startsWith('* ');
+            while (i < lines.length) {
+              if (isBullet(lines[i])) {
+                items.push(lines[i].trim().slice(2).trim());
+                i++;
+                continue;
+              }
+              if (lines[i].trim() === '') {
+                let k = i;
+                while (k < lines.length && lines[k].trim() === '') k++;
+                if (k < lines.length && isBullet(lines[k])) { i = k; continue; }
+              }
+              break;
             }
             nodes.push(
               <ul key={`ul-${i}`} className="space-y-1 my-1.5">
@@ -777,11 +950,11 @@ function ReportText({ text }: { text: string }) {
             continue;
           }
           if (trimmed.startsWith('### ')) {
-            nodes.push(<h4 key={i} className="text-sm font-semibold text-purple-300 mt-3 mb-1">{renderInline(trimmed.slice(4))}</h4>);
+            nodes.push(<h4 key={i} className="text-sm font-semibold text-purple-300 mt-3 mb-1">{plainInline(trimmed.slice(4))}</h4>);
           } else if (trimmed.startsWith('## ')) {
-            nodes.push(<h3 key={i} className="text-base font-bold text-white mt-4 mb-1">{renderInline(trimmed.slice(3))}</h3>);
+            nodes.push(<h3 key={i} className="text-base font-bold text-white mt-4 mb-1">{plainInline(trimmed.slice(3))}</h3>);
           } else if (trimmed.startsWith('# ')) {
-            nodes.push(<h2 key={i} className="text-lg font-bold text-white mt-5 mb-2">{renderInline(trimmed.slice(2))}</h2>);
+            nodes.push(<h2 key={i} className="text-lg font-bold text-white mt-5 mb-2">{plainInline(trimmed.slice(2))}</h2>);
           } else {
             nodes.push(renderParagraph(line, i));
           }
@@ -831,6 +1004,15 @@ function buildAnalysisSystemPrompt(language: string) {
 
   return `You are an experienced machine learning engineer and model training expert.
 ${responseInstruction}
+Write the entire answer in that one language — never mix in words from another language.
+
+Formatting rules:
+- Do NOT use emojis anywhere in the answer. The application UI is emoji-free.
+  If you need a marker, use a plain text glyph such as -, *, > or the section headings.
+- Close every code fence you open, and never leave a trailing unclosed \`\`\`.
+- Keep code blocks short and avoid long unbroken lines.
+- Use flat lists. Do not nest ordered lists inside ordered lists;
+  prefer a single level of numbering so the numbers stay consecutive.
 
 Your analysis MUST include the following sections:
 
@@ -957,13 +1139,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     ];
 
     if (!selectedModel) {
-      lines.push(`❌ ${t('analysisPanel.emptyState.noModel.title')} → ${t('analysisPanel.modelSelector.modelLabel')}`);
+      lines.push(`✗ ${t('analysisPanel.emptyState.noModel.title')} → ${t('analysisPanel.modelSelector.modelLabel')}`);
     } else {
       lines.push(`✓ ${t('analysisPanel.modelSelector.modelLabel')}: ${selectedModel.name}`);
       if (selectedVersion) {
         lines.push(`✓ ${t('analysisPanel.modelSelector.versionLabel')}: ${selectedVersion.name} (v${selectedVersion.version_number})`);
       } else {
-        lines.push(`⚠️ ${t('analysisPanel.modelSelector.versionLabel')}: (${t('common.notSelected')})`);
+        lines.push(`⚠ ${t('analysisPanel.modelSelector.versionLabel')}: (${t('common.notSelected')})`);
       }
     }
 
@@ -988,7 +1170,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     lines.push('--- AI-BERICHT & EMPFEHLUNGEN ---');
 
     if (generatingReport) {
-      lines.push(`🤖 ${t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', PROVIDER_META[aiProvider].label)}`);
+      lines.push(`${t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', PROVIDER_META[aiProvider].label)}`);
     } else if (report) {
       lines.push(`✓ ${t('analysisPanel.aiAnalysis.title')} (${report.generated_at})`);
       if (aiRecommendedParams) {
@@ -1001,7 +1183,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     }
 
     if (showChat) {
-      lines.push(`💬 ${t('analysisPanel.aiAnalysis.chat.toggleShow')}`);
+      lines.push(`${t('analysisPanel.aiAnalysis.chat.toggleShow')}`);
       lines.push(`  Messages: ${chatMessages.length}`);
     }
 
@@ -1042,10 +1224,10 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     } else {
       lines.push('1. **Charts erforschen:** Hover über Points für Details, Download-Icons nutzen');
       if (!report) {
-        lines.push('2. Klick 🤖 [KI-Analyse Button] oben rechts → wartet auf KI-Bericht');
+        lines.push('2. Klick [KI-Analyse Button] oben rechts → wartet auf KI-Bericht');
       } else {
         lines.push('2. Lies **KI-Bericht** rechts: Bewertung, Probleme, konkrete Empfehlungen');
-        lines.push('3. Nutze 💬 **Chat Panel** für spezifische Fragen stellen');
+        lines.push('3. Nutze **Chat Panel** für spezifische Fragen stellen');
         lines.push('4. Copy/Apply empfohlene Parameter im Training Panel');
       }
     }
@@ -1061,7 +1243,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   // ── Loaders ────────────────────────────────────────────────────────────────
 
   const loadModels = async () => {
-    try { setLoading(true); const list = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree'); setModelsWithVersions(list); if (list.length > 0) setSelectedModelId(list[0].id); }
+    try {
+      setLoading(true);
+      const list = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree');
+      setModelsWithVersions(list);
+      // Das neueste Modell hat oft noch gar keine Version – dann startet die
+      // Analyse direkt im Leerzustand. Deshalb das erste Modell mit Versionen
+      // vorwählen, mit Fallback auf das erste überhaupt.
+      const preferred = list.find(m => m.versions.length > 0) ?? list[0];
+      if (preferred) setSelectedModelId(preferred.id);
+    }
     catch (e: any) { notifyError(t('common.error'), String(e)); }
     finally { setLoading(false); }
   };
@@ -1103,8 +1294,12 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       const s = fullData.training_summary, cfg = fullData.config, hw = fullData.hardware, mi = fullData.model_info, ds = fullData.dataset_info, st = fullData.derived_stats || {};
       lines.push(`\nFinal Train Loss: ${s.final_train_loss} | Val: ${s.final_val_loss ?? 'N/A'} | Epochen: ${s.total_epochs} | Steps: ${s.total_steps}`);
       lines.push(`Dauer: ${formatDuration(s.training_duration_seconds)}`);
-      if (st.loss_reduction_pct !== undefined) lines.push(`Loss-Reduktion: ${st.loss_reduction_pct}% | Overfitting-Gap: ${st.overfitting_gap_pct ?? 'N/A'}%`);
-      if (st.avg_grad_norm !== undefined) lines.push(`Ø Grad Norm: ${st.avg_grad_norm} | Max: ${st.max_grad_norm}`);
+      const ctxLossRed = asFiniteNumber(st.loss_reduction_pct);
+      const ctxGap     = asFiniteNumber(st.overfitting_gap_pct);
+      const ctxAvgNorm = asFiniteNumber(st.avg_grad_norm);
+      const ctxMaxNorm = asFiniteNumber(st.max_grad_norm);
+      if (ctxLossRed !== null) lines.push(`Loss-Reduktion: ${ctxLossRed}% | Overfitting-Gap: ${ctxGap ?? 'N/A'}%`);
+      if (ctxAvgNorm !== null) lines.push(`\u00d8 Grad Norm: ${ctxAvgNorm} | Max: ${ctxMaxNorm ?? 'N/A'}`);
       lines.push(`\nConfig: epochs=${cfg.epochs} batch=${cfg.batch_size} lr=${cfg.learning_rate} opt=${cfg.optimizer} sched=${cfg.scheduler}`);
       lines.push(`LoRA: ${cfg.use_lora} | fp16: ${cfg.fp16} | seq_len: ${cfg.max_seq_length}`);
       lines.push(`Hardware: ${hw.device?.toUpperCase()} ${hw.system_ram_gb}GB RAM | Val-Set: ${ds.has_validation ? 'Ja' : 'NEIN'}`);
@@ -1136,8 +1331,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         temperature: 0.4,
         responseLanguage: language,
       });
-      await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: resolvedModel });
-      const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: resolvedModel, generated_at: new Date().toISOString() };
+      await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: resolvedModel, language });
+      const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: resolvedModel, language, generated_at: new Date().toISOString() };
       setReport(newReport); setAiRecommendedParams(extractAIRecommendedParams(text));
       setChatMessages([{ role: 'assistant', content: text }]); setShowChat(true);
       success(t('common.success'), `Erstellt mit ${PROVIDER_META[aiProvider].label}`);
@@ -1187,7 +1382,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     setSavingAITemplate(true);
     try {
       const name = `${t('analysisPanel.templates.sourceAI')} · ${versionDetails?.version_name || selectedVersionId?.slice(0, 8) || 'Analyse'}`;
-      const desc = `KI-empfohlene Parameter · ${report ? formatDate(report.generated_at) : 'heute'} · ${PROVIDER_META[aiProvider].label}`;
+      const desc = `KI-empfohlene Parameter · ${report ? formatDate(report.generated_at, language) : 'heute'} · ${PROVIDER_META[aiProvider].label}`;
       const tmpl = await invoke<MetricsTemplate>('save_metrics_template', { name, description: desc, config: aiRecommendedParams, source: 'ai' });
       setTemplates(prev => [...prev, tmpl]);
       success(t('common.success'), `"${name}" ist jetzt beim Training abrufbar.`);
@@ -1213,6 +1408,12 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
 
   const epochSummaries = fullData?.epoch_summaries || [];
   const derivedStats   = fullData?.derived_stats;
+  const lossReductionPct = asFiniteNumber(derivedStats?.loss_reduction_pct);
+  const overfittingGapPct = asFiniteNumber(derivedStats?.overfitting_gap_pct);
+  const avgGradNorm      = asFiniteNumber(derivedStats?.avg_grad_norm);
+  const totalLogEntries  = asFiniteNumber(derivedStats?.total_log_entries);
+  const hasDerivedStats  = [lossReductionPct, overfittingGapPct, avgGradNorm, totalLogEntries]
+    .some(v => v !== null);
   const hasVal         = logs.some(l => l.val_loss != null) || epochSummaries.some(s => s.val_loss != null);
   const hasGradNorm    = logs.some(l => l.grad_norm != null);
 
@@ -1273,7 +1474,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                       {template.source === 'ai' ? <Bot className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
                       <span>{template.source === 'ai' ? t('analysisPanel.templates.sourceAI') : t('analysisPanel.templates.sourceUser')}</span>
                       <span>·</span>
-                      <span>{formatDate(template.created_at)}</span>
+                      <span>{formatDate(template.created_at, language)}</span>
                     </div>
                   </div>
                   <button onClick={() => deleteTemplate(template.id)} className="p-1.5 text-gray-500 hover:text-red-400 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -1349,7 +1550,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
               { label: t('analysisPanel.metricCards.finalTrainLoss'), value: metrics.final_train_loss.toFixed(4), sub: t('analysisPanel.metricCards.valLabel').replace('{value}', metrics.final_val_loss?.toFixed(4) || 'N/A'), icon: <TrendingDown className="w-4 h-4 text-blue-400" />, color: 'text-blue-400' },
               { label: t('analysisPanel.metricCards.epochsSteps'), value: `${metrics.total_epochs}E`, sub: t('analysisPanel.metricCards.stepsLabel').replace('{count}', metrics.total_steps.toLocaleString()), icon: <Activity className="w-4 h-4 text-purple-400" />, color: 'text-purple-400' },
               { label: t('analysisPanel.metricCards.duration'), value: formatDuration(metrics.training_duration_seconds), sub: metrics.best_epoch ? t('analysisPanel.metricCards.bestEpoch').replace('{epoch}', String(metrics.best_epoch)) : '–', icon: <Clock className="w-4 h-4 text-yellow-400" />, color: 'text-yellow-400' },
-              { label: t('analysisPanel.metricCards.status'), value: t('analysisPanel.metricCards.statusDone'), sub: formatDate(metrics.created_at), icon: <CheckCircle className="w-4 h-4 text-green-400" />, color: 'text-green-400' },
+              { label: t('analysisPanel.metricCards.status'), value: t('analysisPanel.metricCards.statusDone'), sub: formatDate(metrics.created_at, language), icon: <CheckCircle className="w-4 h-4 text-green-400" />, color: 'text-green-400' },
             ].map((c, i) => (
               <div key={i} className="bg-white/5 rounded-xl border border-white/10 p-4">
                 <div className="flex items-center justify-between mb-2">{c.icon}<span className="text-xs text-gray-400">{c.label}</span></div>
@@ -1360,32 +1561,32 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
           </div>
 
           {/* ── Abgeleitete Statistiken ─────────────────────────────────────── */}
-          {derivedStats && (
+          {hasDerivedStats && (
             <div className="bg-white/5 rounded-xl border border-white/10 p-4">
               <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-yellow-400" />{t('analysisPanel.derivedStats.title')}</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                {derivedStats.loss_reduction_pct !== undefined && (
+                {lossReductionPct !== null && (
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-center">
                     <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.lossReduction')}</div>
-                    <div className="text-emerald-400 font-bold text-lg">{derivedStats.loss_reduction_pct}%</div>
+                    <div className="text-emerald-400 font-bold text-lg">{lossReductionPct}%</div>
                   </div>
                 )}
-                {derivedStats.overfitting_gap_pct !== undefined && (
-                  <div className={`rounded-lg p-3 text-center ${Math.abs(derivedStats.overfitting_gap_pct) > 20 ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-white/5 border border-white/10'}`}>
+                {overfittingGapPct !== null && (
+                  <div className={`rounded-lg p-3 text-center ${Math.abs(overfittingGapPct) > 20 ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-white/5 border border-white/10'}`}>
                     <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.overfittingGap')}</div>
-                    <div className={`font-bold text-lg ${Math.abs(derivedStats.overfitting_gap_pct) > 20 ? 'text-amber-400' : 'text-white'}`}>{derivedStats.overfitting_gap_pct}%</div>
+                    <div className={`font-bold text-lg ${Math.abs(overfittingGapPct) > 20 ? 'text-amber-400' : 'text-white'}`}>{overfittingGapPct}%</div>
                   </div>
                 )}
-                {derivedStats.avg_grad_norm !== undefined && (
+                {avgGradNorm !== null && (
                   <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
                     <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.avgGradNorm')}</div>
-                    <div className="text-white font-bold text-lg">{derivedStats.avg_grad_norm}</div>
+                    <div className="text-white font-bold text-lg">{avgGradNorm}</div>
                   </div>
                 )}
-                {derivedStats.total_log_entries !== undefined && (
+                {totalLogEntries !== null && (
                   <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
                     <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.logEntries')}</div>
-                    <div className="text-white font-bold text-lg">{derivedStats.total_log_entries}</div>
+                    <div className="text-white font-bold text-lg">{totalLogEntries}</div>
                   </div>
                 )}
               </div>
@@ -1413,7 +1614,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
               {/* 1. Großer Loss-Chart – volle Breite, immer zuerst */}
               {logs.length > 1 && (
                 <div className="grid grid-cols-1">
-                  <BigLossChart logs={logs} label={`Loss-Verlauf über ${logs.length} Steps${hasVal ? ' (Train + Val)' : ''}`} enableSmoothing={enableSmoothing} />
+                  <BigLossChart logs={logs} label={t(hasVal ? 'analysisPanel.charts.bigLoss.titleWithVal' : 'analysisPanel.charts.bigLoss.title', { n: logs.length })} enableSmoothing={enableSmoothing} />
                 </div>
               )}
 
@@ -1509,7 +1710,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 <div>
                   <h2 className="text-lg font-bold text-white">{t('analysisPanel.aiAnalysis.title')}</h2>
                   <p className="text-xs text-gray-400">
-                    {report ? `${PROVIDER_META[report.provider as AIProvider]?.label || report.provider} · ${report.model} · ${formatDate(report.generated_at)}`
+                    {report ? `${PROVIDER_META[report.provider as AIProvider]?.label || report.provider} · ${report.model} · ${formatDate(report.generated_at, language)}`
                       : aiEnabled ? `${PROVIDER_META[aiProvider].label} · ${aiModel}` : t('analysisPanel.aiAnalysis.notEnabledDescription')}
                   </p>
                 </div>
@@ -1555,6 +1756,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
 
             {report && !generatingReport && (
               <div className="space-y-4">
+                {/* Gespeicherte Berichte bleiben in der Sprache ihrer Erstellung.
+                    Statt stillschweigend fremdsprachigen Fließtext zu zeigen,
+                    wird das benannt. Berichte ohne language-Feld stammen aus
+                    älteren Versionen und werden nicht markiert. */}
+                {report.language && report.language !== language && (
+                  <div className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <span className="text-xs text-amber-200">{t('analysisPanel.aiAnalysis.otherLanguageHint')}</span>
+                  </div>
+                )}
                 <div className="bg-black/20 rounded-xl p-5 border border-white/10 max-h-[36rem] overflow-y-auto">
                   <ReportText text={report.report_text} />
                 </div>
@@ -1683,7 +1894,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                           <td className="py-1.5 pr-3 text-emerald-400">{l.val_loss?.toFixed(4) || '–'}</td>
                           <td className="py-1.5 pr-3 text-amber-400 font-mono">{l.learning_rate.toExponential(2)}</td>
                           <td className="py-1.5 pr-3 text-purple-400">{l.grad_norm?.toFixed(3) || '–'}</td>
-                          <td className="py-1.5 text-gray-500">{new Date(l.timestamp).toLocaleTimeString('de-DE')}</td>
+                          <td className="py-1.5 text-gray-500">{new Date(l.timestamp).toLocaleTimeString(dateLocale(language))}</td>
                         </tr>
                       ))}
                     </tbody>

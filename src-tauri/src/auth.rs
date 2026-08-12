@@ -124,21 +124,18 @@ pub async fn validate_credentials(api_key: String, password: String) -> Result<A
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_api_key_format_validation() {
+    #[tokio::test]
+    async fn test_api_key_format_validation() {
         // Test ungültiges Format
-        let result = tokio_test::block_on(async {
-            validate_credentials("invalid".to_string(), "password123".to_string()).await
-        });
+        let result = validate_credentials("invalid".to_string(), "password123".to_string()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Ungültiges API-Key Format"));
     }
 
-    #[test]
-    fn test_empty_password() {
-        let result = tokio_test::block_on(async {
-            validate_credentials("ft_1234567890123456789012".to_string(), "".to_string()).await
-        });
+    #[tokio::test]
+    async fn test_empty_password() {
+        let result =
+            validate_credentials("ft_1234567890123456789012".to_string(), "".to_string()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Passwort darf nicht leer sein"));
     }

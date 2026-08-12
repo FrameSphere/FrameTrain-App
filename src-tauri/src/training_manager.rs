@@ -949,7 +949,12 @@ fn save_metrics(app_handle: &tauri::AppHandle, version_id: &str, data: &serde_js
     let epochs     = metrics.get("total_epochs").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let steps      = metrics.get("total_steps").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let best_ep    = metrics.get("best_epoch").and_then(|v| v.as_i64()).map(|v| v as i32);
-    let duration   = data.get("training_duration_seconds").and_then(|v| v.as_i64());
+    // Die Trainings-Engine liefert die Dauer innerhalb von "final_metrics"
+    // (siehe MessageProtocol.complete). Früher wurde hier nur die oberste
+    // Ebene gelesen – dadurch blieb die Spalte immer NULL und die UI zeigte
+    // überall "-". Top-Level bleibt als Fallback für ältere Payloads.
+    let duration   = metrics.get("training_duration_seconds").and_then(|v| v.as_i64())
+        .or_else(|| data.get("training_duration_seconds").and_then(|v| v.as_i64()));
 
     if epochs == 0 { return Err("Keine Metriken (epochs=0)".to_string()); }
 

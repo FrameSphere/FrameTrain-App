@@ -25,6 +25,7 @@ import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/a
 import { sendAppErrorReport } from '../utils/errorReport';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
 import DiffViewer from './DiffViewer';
+import { dateLocale } from '../utils/dateLocale';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -338,7 +339,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-white font-medium text-sm truncate">{s.name}</p>
-                  <p className="text-gray-500 text-xs mt-0.5">{new Date(s.savedAt).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</p>
+                  <p className="text-gray-500 text-xs mt-0.5">{new Date(s.savedAt).toLocaleDateString(dateLocale(language), { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</p>
                   <pre className="text-gray-600 text-[10px] mt-1.5 font-mono truncate">{s.script.split('\n').slice(0, 2).join(' · ')}</pre>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">

@@ -21,7 +21,7 @@ import { useTrainingContext } from '../contexts/TrainingContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { openAICoach } from '../ai/aiCoachEvents';
-import { detectPlugin } from '../plugins/registry';
+import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
 import { checkDatasetCompat } from '../plugins/datasetCompat';
 import DatasetCompatBadge from './DatasetCompatBadge';
 import DevTrainPanel from './DevTrainPanel';
@@ -120,6 +120,7 @@ interface TrainingPanelProps {
 
 import type { AISettings } from '../contexts/AISettingsContext';
 import { callAI as callAIClient } from '../ai/aiClient';
+import { dateLocale } from '../utils/dateLocale';
 
 export async function callAI(settings: AISettings, systemPrompt: string, userPrompt: string, history?: { role: 'user' | 'assistant'; content: string }[], responseLanguage?: Language): Promise<string> {
   const messages = [...(history ?? []), { role: 'user' as const, content: userPrompt }];
@@ -870,7 +871,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       ]);
       setModels(listModels);
       setModelsWithVersions(listWithVersions);
-      if (listWithVersions.length > 0) setSelectedModelId(listWithVersions[0].id);
+      const preferred = pickPreferredModelId(listWithVersions, listModels);
+      if (preferred) setSelectedModelId(preferred);
     } catch (e) { console.error('[Training] initLoad:', e); }
     finally { setLoadingData(false); }
   };
@@ -1361,8 +1363,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                           {job.error && <p className="text-red-400 text-xs mt-1 truncate">{t('trainingPanel.history.errorLabel')} {job.error}</p>}
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <p className="text-xs text-gray-500">{new Date(job.created_at).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' })}</p>
-                          <p className="text-xs text-gray-600">{new Date(job.created_at).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })}</p>
+                          <p className="text-xs text-gray-500">{new Date(job.created_at).toLocaleDateString(dateLocale(language), { day:'2-digit', month:'2-digit', year:'2-digit' })}</p>
+                          <p className="text-xs text-gray-600">{new Date(job.created_at).toLocaleTimeString(dateLocale(language), { hour:'2-digit', minute:'2-digit' })}</p>
                           {job.progress && job.progress.progress_percent > 0 && (
                             <p className="text-xs text-gray-500 mt-1">{job.progress.progress_percent.toFixed(0)}% · {t('trainingPanel.history.epochLabel')} {job.progress.epoch}/{job.progress.total_epochs}</p>
                           )}

@@ -126,11 +126,15 @@ export function worstLevel(levels: CompatLevel[]): CompatLevel {
   return worst;
 }
 
-export const LEVEL_META: Record<CompatLevel, { label: string; color: string; bg: string; border: string; icon: 'check' | 'info' | 'alert' | 'ban' }> = {
-  perfect: { label: 'Perfekt geeignet', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', icon: 'check' },
-  ok:      { label: 'Geeignet',         color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    icon: 'info' },
-  warning: { label: 'Bedingt geeignet', color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   icon: 'alert' },
-  bad:     { label: 'Nicht geeignet',   color: 'text-red-400',     bg: 'bg-red-500/10',     border: 'border-red-500/30',     icon: 'ban' },
+/**
+ * `labelKey` ist die Quelle für die Anzeige – `label` bleibt als deutscher
+ * Fallback für Kontexte ohne Übersetzungsfunktion (Tests, Logs) bestehen.
+ */
+export const LEVEL_META: Record<CompatLevel, { label: string; labelKey: string; color: string; bg: string; border: string; icon: 'check' | 'info' | 'alert' | 'ban' }> = {
+  perfect: { label: 'Perfekt geeignet', labelKey: 'datasetCompat.levels.perfect', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', icon: 'check' },
+  ok:      { label: 'Geeignet',         labelKey: 'datasetCompat.levels.ok',      color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    icon: 'info' },
+  warning: { label: 'Bedingt geeignet', labelKey: 'datasetCompat.levels.warning', color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   icon: 'alert' },
+  bad:     { label: 'Nicht geeignet',   labelKey: 'datasetCompat.levels.bad',     color: 'text-red-400',     bg: 'bg-red-500/10',     border: 'border-red-500/30',     icon: 'ban' },
 };
 
 /** Lesbare Labels für DatasetType */

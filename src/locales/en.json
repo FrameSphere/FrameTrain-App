@@ -134,6 +134,7 @@
       "getKey": "Get key ↗",
       "keyLocalOnly": "Key is stored locally only, never sent to FrameTrain.",
       "model": "Model",
+      "providerLabelOllama": "Ollama (Local)",
       "ollamaTitle": "Ollama Configuration",
       "ollamaModelLabel": "Model name (must be installed locally)",
       "ollamaPopular": "Popular Models",
@@ -431,7 +432,7 @@
     },
     "deleteDialog": {
       "title": "Delete model?",
-      "description": "„{name}“ and all associated versions, datasets, and training data will be permanently deleted.",
+      "description": "“{name}” and all associated versions, datasets, and training data will be permanently deleted.",
       "cancelButton": "Cancel",
       "confirmButton": "Delete"
     },
@@ -481,17 +482,17 @@
       "missingFieldsLocal": "Folder and name are required.",
       "missingFieldsHF": "Model and name are required.",
       "importSuccess": "Model Imported!",
-      "importSuccessDetail": "„{name}“ was added successfully.",
+      "importSuccessDetail": "“{name}” was added successfully.",
       "importError": "Import Failed",
       "downloadSuccess": "Download Complete!",
-      "downloadSuccessDetail": "„{name}“ was downloaded.",
+      "downloadSuccessDetail": "“{name}” was downloaded.",
       "downloadError": "Download Failed",
       "cancelInfo": "Cancelled",
       "cancelInfoDetail": "The download was cancelled. Incomplete files will be deleted.",
       "dragDropInfo": "Drag & Drop",
-      "dragDropInfoDetail": "Please use the „Browse Folder“ button.",
+      "dragDropInfoDetail": "Please use the “Browse Folder” button.",
       "deleteSuccess": "Deleted",
-      "deleteSuccessDetail": "„{name}“ was removed.",
+      "deleteSuccessDetail": "“{name}” was removed.",
       "deleteFailed": "Delete Failed"
     }
   },
@@ -863,7 +864,7 @@
       "libraryScriptSaved": "Saved",
       "libraryScriptSavedDetail": "Test script \"{name}\" saved.",
       "openLibLoaded": "Loaded!",
-      "openLibLoadedDetail": "„{name}“ was loaded into the editor."
+      "openLibLoadedDetail": "“{name}” was loaded into the editor."
     },
     "pageContext": {
       "title": "=== FrameTrain – Dev Test Mode ===",
@@ -1147,7 +1148,17 @@
       "title": "Node Library",
       "searchPlaceholder": "Search nodes…",
       "noNodesFound": "No nodes found",
-      "footer": "drag or click to add"
+      "footer": "drag or click to add",
+      "expandTooltip": "Show node library",
+      "collapseTooltip": "Collapse node library",
+      "categories": {
+        "Data": "Data",
+        "Layers": "Layers",
+        "Activations": "Activations",
+        "Training": "Training",
+        "Math": "Math",
+        "Logic": "Logic"
+      }
     },
     "propertyPanel": {
       "title": "Properties",
@@ -1177,12 +1188,19 @@
       "gpuLabel": "GPU",
       "precisionLabel": "Precision",
       "gradAccumLabel": "Grad Accum",
+      "precisionCudaHint": "fp16/bf16 requires CUDA — fp32 is used on CPU/MPS",
       "noMetrics": "No metrics yet — start training to see data",
       "metricLoss": "Loss",
       "metricValLoss": "Val Loss",
       "metricAccuracy": "Accuracy",
       "metricLr": "LR",
       "logWaiting": "Waiting for output…",
+      "tabs": {
+        "config": "Config",
+        "metrics": "Metrics",
+        "log": "Log",
+        "inference": "Inference"
+      },
       "doneBannerTitle": "✓ Training complete",
       "doneBannerFiles": "model.pt · metrics.json · canvas_model.py",
       "openFolderButton": "Open Folder ↗",
@@ -1758,6 +1776,8 @@
         "downloadedTitle": "Image downloaded successfully!"
       },
       "bigLoss": {
+        "titleWithVal": "Loss curve over {n} steps (train + val)",
+        "title": "Loss curve over {n} steps",
         "smoothingBadge": "Smoothing",
         "legendTrain": "Train Loss",
         "legendVal": "Val Loss",
@@ -1836,6 +1856,7 @@
       "reanalyzeButton": "Re-analyze",
       "startButton": "Start AI Analysis",
       "generatingText": "Analyzing training with {provider}…",
+      "otherLanguageHint": "This analysis was written in German. Regenerate it to get an English version.",
       "generatingSubtext": "This may take 10–30 seconds.",
       "notEnabledTitle": "AI Assistant Not Enabled",
       "notEnabledDescription": "Enable an AI provider under Settings → AI Assistant.",
@@ -1880,7 +1901,7 @@
       },
       "noDatasets": {
         "title": "No Datasets",
-        "description": "Add a dataset for „{model}“.",
+        "description": "Add a dataset for “{model}”.",
         "addButton": "Add First Dataset"
       }
     },
@@ -1914,7 +1935,7 @@
     },
     "deleteDialog": {
       "title": "Delete dataset?",
-      "description": "„{name}“ and all associated files will be permanently removed.",
+      "description": "“{name}” and all associated files will be permanently removed.",
       "cancelButton": "Cancel",
       "confirmButton": "Delete"
     },
@@ -1932,7 +1953,7 @@
       "splitButton": "Split Dataset",
       "splittingButton": "Splitting…",
       "successTitle": "Split Complete!",
-      "successDetail": "„{name}“ was split into Train/Val/Test.",
+      "successDetail": "“{name}” was split into Train/Val/Test.",
       "errorTitle": "Split Failed",
       "invalidRatioTitle": "Invalid Split",
       "invalidRatioDetail": "The total must equal 100%.",
@@ -1952,7 +1973,7 @@
       "halveButton": "½ Split into Two Halves",
       "halvingButton": "Splitting…",
       "successTitle": "Split Complete!",
-      "successDetail": "„{a}“ and „{b}“ created.",
+      "successDetail": "“{a}” and “{b}” created.",
       "errorTitle": "Halving Failed"
     },
     "importModal": {
@@ -1975,11 +1996,11 @@
         "importButton": "Import Dataset",
         "importingButton": "Importing…",
         "importSuccess": "Dataset Imported!",
-        "importSuccessDetail": "„{name}“ was added.",
+        "importSuccessDetail": "“{name}” was added.",
         "importError": "Import Failed",
         "missingFieldsTitle": "Missing Information",
         "missingFieldsDetail": "Folder, name, and model are required.",
-        "dragDropInfo": "Please use the „Browse Folder“ button.",
+        "dragDropInfo": "Please use the “Browse Folder” button.",
         "dragDropInfoTitle": "Drag & Drop",
         "pluginPreferredType": "Preferred type:",
         "pluginAlsoCompatible": "Also compatible:"
@@ -2004,7 +2025,7 @@
         "cancelSuccess": "Cancelled",
         "cancelDetail": "The download was cancelled.",
         "downloadSuccess": "Download Complete!",
-        "downloadSuccessDetail": "„{name}“ was downloaded.",
+        "downloadSuccessDetail": "“{name}” was downloaded.",
         "downloadError": "Download Failed",
         "missingFieldsTitle": "Missing Information",
         "missingFieldsDetail": "Dataset, name, and model are required.",
@@ -2050,7 +2071,7 @@
       "loadModelsError": "Error loading models",
       "loadDatasetsError": "Error loading datasets",
       "deleteSuccess": "Deleted",
-      "deleteSuccessDetail": "„{name}“ was removed.",
+      "deleteSuccessDetail": "“{name}” was removed.",
       "deleteError": "Delete Failed"
     }
   },
@@ -2169,7 +2190,7 @@
     },
     "setup": {
       "title": "Configuration",
-      "configSummary": "{model} · {engine} · {count} samples from „{file}“",
+      "configSummary": "{model} · {engine} · {count} samples from “{file}”",
       "noModelsTitle": "No model available",
       "noModelsDesc": "Add a model in the Model Manager first.",
       "modelLabel": "Model",
@@ -2213,7 +2234,7 @@
         "loadSuccessDetail": "{count} samples loaded from {fileCount} file(s).",
         "loadError": "Error Loading",
         "fileLoadSuccess": "Loaded",
-        "fileLoadSuccessDetail": "{count} samples loaded from „{name}“.",
+        "fileLoadSuccessDetail": "{count} samples loaded from “{name}”.",
         "fileEmpty": "Empty",
         "fileEmptyDetail": "No samples found.",
         "modelLoadError": "Model Load Error"
@@ -2247,7 +2268,7 @@
       "alreadyRatedLabel": "Already rated as",
       "skipButton": "Skip",
       "resultTitle": "Result",
-      "idleHint": "Press „Test“ to see the result",
+      "idleHint": "Press “Test” to see the result",
       "inferenceRunning": "Inference running…",
       "matchLabel": "Matches expected label",
       "mismatchLabel": "Mismatch — expected:",

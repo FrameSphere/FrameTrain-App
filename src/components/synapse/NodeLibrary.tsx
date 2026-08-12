@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NODE_CATEGORIES, NodeDefinition } from "./nodeTypes";
 import { dragState } from "./dragState";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 // ─── Icons & Colors ───────────────────────────────────────────────────────────
 const icons: Record<string, string> = {
@@ -130,9 +131,11 @@ const NodeCard: React.FC<{
 // ─── CategorySection ──────────────────────────────────────────────────────────
 const CategorySection: React.FC<{
   category: string;
+  /** Übersetzter Anzeigename – `category` bleibt der technische Schlüssel. */
+  categoryLabel: string;
   nodes: NodeDefinition[];
   onAddNode: (def: NodeDefinition) => void;
-}> = ({ category, nodes, onAddNode }) => {
+}> = ({ category, categoryLabel, nodes, onAddNode }) => {
   const [open, setOpen] = useState(true);
   const color = categoryColors[category] ?? "#64748b";
 
@@ -165,7 +168,7 @@ const CategorySection: React.FC<{
             fontFamily: "'JetBrains Mono', monospace",
           }}
         >
-          {category}
+          {categoryLabel}
         </span>
         <span
           style={{
@@ -198,6 +201,7 @@ const CategorySection: React.FC<{
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
+  const { t } = useLanguage();
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
@@ -225,7 +229,7 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
       >
         <button
           onClick={() => setCollapsed(false)}
-          title="Node Library einblenden"
+          title={t('synapse.nodeLibrary.expandTooltip')}
           style={{
             display: "flex",
             alignItems: "center",
@@ -255,7 +259,7 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
             userSelect: "none",
           }}
         >
-          Node Library
+          {t('synapse.nodeLibrary.title')}
         </div>
       </div>
     );
@@ -320,7 +324,7 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
           </div>
           <button
             onClick={() => setCollapsed(true)}
-            title="Node Library einklappen"
+            title={t('synapse.nodeLibrary.collapseTooltip')}
             style={{
               display: "flex",
               alignItems: "center",
@@ -358,7 +362,7 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search nodes…"
+            placeholder={t('synapse.nodeLibrary.searchPlaceholder')}
             style={{
               width: "100%",
               padding: "5px 8px 5px 24px",
@@ -404,13 +408,14 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
               fontFamily: "'JetBrains Mono', monospace",
             }}
           >
-            No nodes found
+            {t('synapse.nodeLibrary.noNodesFound')}
           </div>
         ) : (
           Object.entries(filtered).map(([category, nodes]) => (
             <CategorySection
               key={category}
               category={category}
+              categoryLabel={t(`synapse.nodeLibrary.categories.${category}`, category)}
               nodes={nodes}
               onAddNode={handleAdd}
             />
@@ -430,7 +435,7 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
           flexShrink: 0,
         }}
       >
-        drag or click to add
+        {t('synapse.nodeLibrary.footer')}
       </div>
     </div>
   );

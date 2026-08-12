@@ -29,9 +29,10 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
-import { useLanguage } from '../contexts/LanguageContext';
+import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { detectPlugin } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
+import { dateLocale } from '../utils/dateLocale';
 
 // ============ Types ============
 
@@ -66,8 +67,8 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString('de-DE', {
+function formatDate(dateString: string, language: Language): string {
+  return new Date(dateString).toLocaleDateString(dateLocale(language), {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -739,7 +740,7 @@ interface ModelCardProps {
 }
 
 function ModelCard({ model, onDelete, gradientClass }: ModelCardProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   // Determine the identifier to use for plugin detection
   const detectionKey = model.source === 'huggingface' && model.source_path
     ? model.source_path
@@ -805,7 +806,7 @@ function ModelCard({ model, onDelete, gradientClass }: ModelCardProps) {
 
         <div className="flex items-center gap-1.5 text-gray-500 text-xs">
           <Calendar className="w-3 h-3" />
-          {formatDate(model.created_at)}
+          {formatDate(model.created_at, language)}
         </div>
 
         {model.source_path && (

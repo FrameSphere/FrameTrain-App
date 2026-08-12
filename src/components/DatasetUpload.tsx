@@ -17,11 +17,12 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
-import { useLanguage } from '../contexts/LanguageContext';
+import { useLanguage, type Language } from '../contexts/LanguageContext';
 import DatasetFileManager from './DatasetFileManager';
 import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
 import { detectPlugin } from '../plugins/registry';
+import { dateLocale } from '../utils/dateLocale';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -80,8 +81,8 @@ function formatTime(seconds: number): string {
   return `${s}s`;
 }
 
-function formatDate(ds: string): string {
-  return new Date(ds).toLocaleDateString('de-DE', {
+function formatDate(ds: string, language: Language): string {
+  return new Date(ds).toLocaleDateString(dateLocale(language), {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -1382,7 +1383,7 @@ interface DatasetCardProps {
 }
 
 function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFiles }: DatasetCardProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const hasWarnings = (dataset.warnings?.length ?? 0) > 0;
   const typeMeta = dataset.dataset_type ? DATASET_TYPE_LABELS[dataset.dataset_type] : null;
 
@@ -1464,11 +1465,11 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
           <span>{formatBytes(dataset.size_bytes)}</span>
         </div>
         <div className="flex items-center gap-1.5 text-gray-500 text-xs">
-          <Calendar className="w-3 h-3" />{formatDate(dataset.created_at)}
+          <Calendar className="w-3 h-3" />{formatDate(dataset.created_at, language)}
         </div>
         {dataset.last_used_at && (
           <div className="flex items-center gap-1.5 text-gray-500 text-xs">
-            <CheckCircle className="w-3 h-3 text-cyan-500/60" /> {t('datasetUpload.card.lastUsed')} {formatDate(dataset.last_used_at)}
+            <CheckCircle className="w-3 h-3 text-cyan-500/60" /> {t('datasetUpload.card.lastUsed')} {formatDate(dataset.last_used_at, language)}
           </div>
         )}
         {/* Extension chips */}

@@ -1,6 +1,7 @@
 import React, { useCallback } from "react";
 import { Node } from "@xyflow/react";
 import { NodeDefinition, ParamDefinition } from "./nodeTypes";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 interface PropertyPanelProps {
   selectedNode: Node | null;
@@ -167,6 +168,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
   definition,
   onParamChange,
 }) => {
+  const { t } = useLanguage();
   const accent = categoryColors[definition?.category ?? ""] ?? "#64748b";
 
   const handleChange = useCallback(
@@ -208,7 +210,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
             fontFamily: "'JetBrains Mono', monospace",
           }}
         >
-          Properties
+          {t('synapse.propertyPanel.title')}
         </div>
       </div>
 
@@ -238,8 +240,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                 fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7,
               }}
             >
-              Select a node
-              <br />to edit its properties
+              {t('synapse.propertyPanel.emptyHint')}
             </div>
           </div>
         ) : (
@@ -288,7 +289,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                   fontFamily: "'JetBrains Mono', monospace", marginBottom: 4,
                 }}
               >
-                Node ID
+                {t('synapse.propertyPanel.nodeIdLabel')}
               </label>
               <div
                 style={{
@@ -314,7 +315,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                   textAlign: "center", padding: "10px 0",
                 }}
               >
-                No configurable params
+                {t('synapse.propertyPanel.noParams')}
               </div>
             ) : (
               definition.params.map((param) => {
@@ -344,7 +345,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                     fontFamily: "'JetBrains Mono', monospace", marginBottom: 7,
                   }}
                 >
-                  Tensor Shape
+                  {t('synapse.propertyPanel.tensorShapeLabel')}
                 </label>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
                   <span style={{ color: "#38bdf8" }}>

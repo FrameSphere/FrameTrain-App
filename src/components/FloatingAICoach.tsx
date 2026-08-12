@@ -56,6 +56,12 @@ const MAX_CHATS = 50;
 
 // ============ Helpers ============
 
+/**
+ * Neue Chats bekommen bewusst einen leeren Titel: der Platzhalter wird erst
+ * beim Rendern übersetzt. Sonst friert die Sprache ein, in der der Chat
+ * angelegt wurde, und ein englischer Nutzer sieht dauerhaft „Neuer Chat“.
+ * Sobald die erste Nachricht da ist, ersetzt generateTitle() den Titel.
+ */
 function createFreshChat(title: string): Chat {
   return {
     id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -143,15 +149,20 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
         i++;
       }
       i++; // schließendes ``` überspringen
+      // Ein alleinstehender Fence-Rest (z. B. wenn das Modell den Block nicht
+      // geschlossen hat) erzeugte bisher eine leere Code-Box im Chat.
+      if (codeLines.join('').trim() === '') continue;
       elements.push(
-        <div key={`cb-${i}`} className="my-2 rounded-xl overflow-hidden border border-white/10">
+        // min-w-0 ist nötig, damit das <pre> in den Flex-Bubbles tatsächlich
+        // scrollen kann statt rechts abgeschnitten zu werden.
+        <div key={`cb-${i}`} className="my-2 rounded-xl overflow-hidden border border-white/10 min-w-0 max-w-full">
           {lang && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.06] border-b border-white/10">
               <span className="text-[10px] font-mono text-purple-300 font-medium">{lang}</span>
             </div>
           )}
-          <pre className="px-3 py-2.5 bg-black/40 overflow-x-auto">
-            <code className="text-[11px] font-mono text-emerald-300 leading-relaxed whitespace-pre">
+          <pre className="px-3 py-2.5 bg-black/40 overflow-x-auto max-w-full">
+            <code className="block text-[11px] font-mono text-emerald-300 leading-relaxed whitespace-pre">
               {codeLines.join('\n')}
             </code>
           </pre>
@@ -168,9 +179,18 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
 
     if (trimmed.match(/^[-*•]\s/)) {
       const items: string[] = [];
-      while (i < lines.length && lines[i].trim().match(/^[-*•]\s/)) {
-        items.push(lines[i].trim().replace(/^[-*•]\s+/, ''));
-        i++;
+      while (i < lines.length) {
+        if (lines[i].trim().match(/^[-*•]\s/)) {
+          items.push(lines[i].trim().replace(/^[-*•]\s+/, ''));
+          i++;
+          continue;
+        }
+        if (lines[i].trim() === '') {
+          let k = i;
+          while (k < lines.length && lines[k].trim() === '') k++;
+          if (k < lines.length && lines[k].trim().match(/^[-*•]\s/)) { i = k; continue; }
+        }
+        break;
       }
       elements.push(
         <ul key={`ul-${i}`} className="space-y-1 my-1.5">
@@ -187,9 +207,21 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
 
     if (trimmed.match(/^\d+\.\s/)) {
       const items: string[] = [];
-      while (i < lines.length && lines[i].trim().match(/^\d+\.\s/)) {
-        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
-        i++;
+      while (i < lines.length) {
+        if (lines[i].trim().match(/^\d+\.\s/)) {
+          items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+          i++;
+          continue;
+        }
+        // Leerzeilen zwischen zwei Punkten beenden die Liste nicht. Sonst
+        // entstand pro Block ein eigenes <ol> und die Nummerierung fing
+        // jedes Mal wieder bei 1 an (1., 2., 1., 1., 1.).
+        if (lines[i].trim() === '') {
+          let k = i;
+          while (k < lines.length && lines[k].trim() === '') k++;
+          if (k < lines.length && lines[k].trim().match(/^\d+\.\s/)) { i = k; continue; }
+        }
+        break;
       }
       elements.push(
         <ol key={`ol-${i}`} className="space-y-1 my-1.5">
@@ -226,7 +258,7 @@ function MarkdownText({ text, className = '' }: { text: string; className?: stri
     i++;
   }
 
-  return <div className={`text-sm space-y-0.5 ${className}`}>{elements}</div>;
+  return <div className={`text-sm space-y-0.5 min-w-0 max-w-full ${className}`}>{elements}</div>;
 }
 
 // ============ Light-Color Detection (Fix für Monochrome / Arctic White) ============
@@ -781,7 +813,7 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
 
   // ── Opens modal with a fresh empty chat (never saved until message sent) ──
   const openModal = useCallback(() => {
-    const fresh = createFreshChat(t('aiCoach.newChat'));
+    const fresh = createFreshChat('');
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
     knowledgeSentRef.current = new Set();
@@ -796,7 +828,7 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   // ── Start a new chat (from chat list or header button) ──
   // Creates a fresh unsaved chat and switches to it, without touching `chats`
   const handleNewChat = useCallback(() => {
-    const fresh = createFreshChat(t('aiCoach.newChat'));
+    const fresh = createFreshChat('');
     setCurrentChat(fresh);
     currentChatPersistedRef.current = false;
     knowledgeSentRef.current = new Set();
@@ -844,7 +876,7 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
     saveChatsForUser(updated, userId);
     // If we're currently viewing this chat, open a fresh one
       if (currentChat?.id === chatId) {
-      const fresh = createFreshChat(t('aiCoach.newChat'));
+      const fresh = createFreshChat('');
       setCurrentChat(fresh);
       currentChatPersistedRef.current = false;
     }
@@ -1316,7 +1348,7 @@ Reply with ONLY the title, nothing else.`;
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium truncate">{chat.title}</div>
+                    <div className="text-xs font-medium truncate">{chat.title || t('aiCoach.newChat')}</div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[10px] text-gray-600">{formatRelativeTime(chat.updatedAt, t)}</span>
                       {chat.messages.length > 0 && (
@@ -1355,7 +1387,7 @@ Reply with ONLY the title, nothing else.`;
           </div>
           <div className="min-w-0">
             <div className="text-xs font-bold text-white truncate max-w-[160px]">
-              {currentChat?.title || t('aiCoach.openTitle')}
+              {currentChat ? (currentChat.title || t('aiCoach.newChat')) : t('aiCoach.openTitle')}
             </div>
             {pageContent && (
               <div className="text-[10px] text-gray-500 truncate max-w-[160px]">
@@ -1431,7 +1463,7 @@ Reply with ONLY the title, nothing else.`;
             {msg.role === 'assistant' ? (() => {
               const { cleanedText, actions } = parseCoachActions(msg.content);
               return (
-              <div className="max-w-[88%] space-y-1">
+              <div className="max-w-[88%] min-w-0 space-y-1">
                 {/* Thinking block — shown above the message when finished */}
                 {msg.thinkingSteps && msg.thinkingSteps.length > 0 && (
                   <ThinkingBlock
@@ -1441,7 +1473,7 @@ Reply with ONLY the title, nothing else.`;
                     onToggle={() => toggleMessageThinking(msg.id)}
                   />
                 )}
-                <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.065] border border-white/[0.10] text-gray-200 shadow-lg shadow-black/20">
+                <div className="px-3 py-2.5 rounded-2xl rounded-tl-sm bg-white/[0.065] border border-white/[0.10] text-gray-200 shadow-lg shadow-black/20 min-w-0 overflow-hidden">
                   <MarkdownText text={cleanedText} />
                 </div>
                 <CoachActionChips

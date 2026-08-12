@@ -789,7 +789,7 @@ fn find_python_cmd() -> Result<&'static str, String> {
     use std::process::Command;
     if Command::new("python3").arg("--version").output().is_ok() { return Ok("python3"); }
     if Command::new("python").arg("--version").output().is_ok() { return Ok("python"); }
-    Err("Python nicht gefunden -- wird fuer das Splitten strukturierter Dateien (Parquet/CSV/JSON) benoetigt.".to_string())
+    Err("Python nicht gefunden -- wird für das Splitten strukturierter Dateien (Parquet/CSV/JSON) benötigt.".to_string())
 }
 
 /// Splittet eine einzelne strukturierte Datei (Parquet/CSV/TSV/JSONL/JSON) intern
@@ -833,7 +833,7 @@ fn split_row_file(
             let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
             let n = lines.len();
             if n < 3 {
-                warnings.push(format!("'{}' hat nur {} Zeile(n) -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
+                warnings.push(format!("'{}' hat nur {} Zeile(n) -- zu wenig für einen sinnvollen Split, komplett in train übernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
                 fs::write(&train_out, &content).map_err(|e| format!("Schreiben: {}", e))?;
                 return Ok((n, 0, 0));
             }
@@ -857,7 +857,7 @@ fn split_row_file(
             let data_lines: Vec<&str> = all_lines.filter(|l| !l.trim().is_empty()).collect();
             let n = data_lines.len();
             if n < 3 {
-                warnings.push(format!("'{}' hat nur {} Datenzeile(n) -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
+                warnings.push(format!("'{}' hat nur {} Datenzeile(n) -- zu wenig für einen sinnvollen Split, komplett in train übernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
                 fs::write(&train_out, &content).map_err(|e| format!("Schreiben: {}", e))?;
                 return Ok((n, 0, 0));
             }
@@ -886,7 +886,7 @@ fn split_row_file(
             let arr = parsed.as_array().ok_or_else(|| format!("'{}' ist kein JSON-Array von Samples -- Zeilen-Split nicht moeglich.", src.display()))?;
             let n = arr.len();
             if n < 3 {
-                warnings.push(format!("'{}' hat nur {} Eintraege -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
+                warnings.push(format!("'{}' hat nur {} Einträge -- zu wenig für einen sinnvollen Split, komplett in train übernommen.", src.file_name().unwrap_or_default().to_string_lossy(), n));
                 fs::write(&train_out, &content).map_err(|e| format!("Schreiben: {}", e))?;
                 return Ok((n, 0, 0));
             }
@@ -987,7 +987,7 @@ print(json.dumps({{"train": len(train_idx), "val": val_count, "test": test_count
     let val_n   = result.get("val").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let test_n  = result.get("test").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     if result.get("too_small").and_then(|v| v.as_bool()).unwrap_or(false) {
-        warnings.push(format!("'{}' hat nur {} Zeile(n) -- zu wenig fuer einen sinnvollen Split, komplett in train uebernommen.", src.file_name().unwrap_or_default().to_string_lossy(), train_n));
+        warnings.push(format!("'{}' hat nur {} Zeile(n) -- zu wenig für einen sinnvollen Split, komplett in train übernommen.", src.file_name().unwrap_or_default().to_string_lossy(), train_n));
     }
     Ok((train_n, val_n, test_n))
 }
@@ -1277,6 +1277,73 @@ pub async fn split_dataset(
     Ok(updated)
 }
 
+/// Baut die Namen der beiden Hälften.
+///
+/// Früher wurde bei jedem Split erneut " (Hälfte N)" angehängt, sodass Namen
+/// nach mehrfachem Splitten unbegrenzt wuchsen
+/// ("ds (Haelfte 1) (Haelfte 1) (Haelfte 2)"). Stattdessen wird ein bereits
+/// vorhandener Hälften-Pfad vertieft:
+/// "ds" → "ds (Hälfte 1)" → "ds (Hälfte 1.1)" → "ds (Hälfte 1.1.2)".
+/// Der ASCII-Suffix älterer Datensätze wird dabei mit erkannt.
+fn half_names(name: &str) -> (String, String) {
+    const PREFIX: &str = " (Hälfte ";
+    const LEGACY_PREFIX: &str = " (Haelfte ";
+
+    if name.ends_with(')') {
+        for prefix in [PREFIX, LEGACY_PREFIX] {
+            let Some(idx) = name.rfind(prefix) else { continue };
+            let inner = &name[idx + prefix.len()..name.len() - 1];
+            // Nur echte Hälften-Pfade vertiefen, z. B. "1" oder "1.2.1".
+            if inner.is_empty() || !inner.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                continue;
+            }
+            let base = &name[..idx];
+            return (
+                format!("{}{}{}.1)", base, PREFIX, inner),
+                format!("{}{}{}.2)", base, PREFIX, inner),
+            );
+        }
+    }
+
+    (format!("{}{}1)", name, PREFIX), format!("{}{}2)", name, PREFIX))
+}
+
+#[cfg(test)]
+mod half_names_tests {
+    use super::half_names;
+
+    #[test]
+    fn erster_split_haengt_suffix_an() {
+        assert_eq!(
+            half_names("kp20k2"),
+            ("kp20k2 (Hälfte 1)".to_string(), "kp20k2 (Hälfte 2)".to_string())
+        );
+    }
+
+    #[test]
+    fn wiederholter_split_vertieft_statt_anzuhaengen() {
+        let (a, b) = half_names("kp20k2 (Hälfte 1)");
+        assert_eq!(a, "kp20k2 (Hälfte 1.1)");
+        assert_eq!(b, "kp20k2 (Hälfte 1.2)");
+
+        let (c, _) = half_names(&a);
+        assert_eq!(c, "kp20k2 (Hälfte 1.1.1)");
+    }
+
+    #[test]
+    fn alte_ascii_namen_werden_erkannt() {
+        let (a, b) = half_names("kp20k2 (Haelfte 2)");
+        assert_eq!(a, "kp20k2 (Hälfte 2.1)");
+        assert_eq!(b, "kp20k2 (Hälfte 2.2)");
+    }
+
+    #[test]
+    fn klammern_ohne_haelften_pfad_bleiben_unangetastet() {
+        let (a, _) = half_names("dataset (Kopie)");
+        assert_eq!(a, "dataset (Kopie) (Hälfte 1)");
+    }
+}
+
 #[tauri::command]
 pub async fn split_dataset_in_half(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
@@ -1472,8 +1539,7 @@ pub async fn split_dataset_in_half(
 
     let (sa, fa) = dir_size(&dir_a);
     let (sb, fb) = dir_size(&dir_b);
-    let name_a = format!("{} (Haelfte 1)", ds.name);
-    let name_b = format!("{} (Haelfte 2)", ds.name);
+    let (name_a, name_b) = half_names(&ds.name);
 
     // Geerbte Split-Struktur → Hälfte ist direkt trainierbar (Status "split"
     // + SplitInfo aus den tatsächlichen Datei-Zahlen der Split-Ordner).
@@ -1710,7 +1776,7 @@ pub async fn read_dataset_file(file_path: String) -> Result<String, String> {
         }
         "parquet" => {
             let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-            Ok(format!("[Parquet] {} bytes -- Binaerformat, kein Preview.", size))
+            Ok(format!("[Parquet] {} bytes -- Binärformat, kein Preview.", size))
         }
         _ => {
             let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);

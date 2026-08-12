@@ -226,6 +226,9 @@ pub async fn save_ai_analysis_report(
     report_text: String,
     provider: String,
     model: String,
+    // `language`: Sprache, in der der Bericht erzeugt wurde ("de" / "en").
+    // Berichte aus älteren Versionen haben das Feld nicht — dort bleibt es null.
+    language: Option<String>,
 ) -> Result<(), String> {
     let dir = analysis_dir(&app_handle)?;
     let path = dir.join(format!("ai_report_{}.json", version_id));
@@ -234,6 +237,7 @@ pub async fn save_ai_analysis_report(
         "report_text":   report_text,
         "provider":      provider,
         "model":         model,
+        "language":      language,
         "generated_at":  Utc::now().to_rfc3339(),
     });
     fs::write(

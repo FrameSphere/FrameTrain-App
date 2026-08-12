@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Loader2, CheckCircle, AlertTriangle, Layers, Play, Code2, Ban } from 'lucide-react';
-import { detectPlugin } from '../plugins/registry';
+import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
 import type { ModelPlugin, DatasetInfo } from '../plugins/types';
 import DevTestPanel from './DevTestPanel';
 import { usePageContext } from '../contexts/PageContext';
@@ -169,7 +169,8 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
         ]);
         setModels(list);
         setModelsWithVersions(listWithVersions);
-        if (listWithVersions.length > 0) setSelectedModelId(listWithVersions[0].id);
+        const preferred = pickPreferredModelId(listWithVersions, list);
+        if (preferred) setSelectedModelId(preferred);
       } catch (e) {
         console.error('[TestPanel] initLoad:', e);
       } finally {

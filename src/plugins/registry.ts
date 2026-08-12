@@ -51,4 +51,45 @@ export function detectPlugin(
   };
 }
 
+/** Minimal-Shape für die Modell-Vorauswahl – deckt ModelInfo aus den Panels ab. */
+export interface ModelDetectionInfo {
+  id: string;
+  name: string;
+  source_path?: string | null;
+  model_type?: string | null;
+}
+
+/** Prüft, ob für ein Modell ein Plugin existiert. */
+export function isModelSupported(model: ModelDetectionInfo): boolean {
+  return detectPlugin(
+    model.source_path ?? model.name,
+    model.model_type ? { model_type: model.model_type } : undefined,
+  ).supported;
+}
+
+/**
+ * Wählt das erste Modell aus, für das ein Plugin zuständig ist.
+ *
+ * Ohne diese Vorauswahl landet man auf dem zuletzt geladenen Modell – das ist
+ * häufig eines, das (noch) kein Plugin unterstützt, und die Seite startet
+ * direkt im Fehlerzustand.
+ *
+ * `withVersions` liefert die Reihenfolge und die IDs, `models` die für die
+ * Erkennung nötigen Felder (source_path / model_type). Findet sich kein
+ * unterstütztes Modell, wird auf das erste zurückgefallen, damit die Auswahl
+ * nie leer bleibt.
+ */
+export function pickPreferredModelId(
+  withVersions: { id: string; name: string }[],
+  models: ModelDetectionInfo[],
+): string | null {
+  if (withVersions.length === 0) return null;
+  const byId = new Map(models.map((m) => [m.id, m]));
+  const supported = withVersions.find((entry) => {
+    const info = byId.get(entry.id);
+    return isModelSupported(info ?? { id: entry.id, name: entry.name });
+  });
+  return (supported ?? withVersions[0]).id;
+}
+
 export { PLUGINS };

@@ -13,6 +13,7 @@ import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { sendAppErrorReport } from '../utils/errorReport';
+import { dateLocale } from '../utils/dateLocale';
 
 // ── Session Storage ───────────────────────────────────────────────────────
 
@@ -490,7 +491,7 @@ export default function TrainingDashboard({
   completedVersionId, onNavigateToAnalysis,
   onOpenKIAssistant, devScript, onSendCodeToKI,
 }: TrainingDashboardProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { currentTheme } = useTheme();
   const [elapsed, setElapsed] = useState(0);
   const [events, setEvents] = useState<SessionEvent[]>([]);
@@ -783,7 +784,7 @@ export default function TrainingDashboard({
               ) : events.map((ev, i) => (
                 <div key={i} className="flex items-start gap-2 text-[11px]">
                   <span className="text-gray-600 tabular-nums flex-shrink-0 font-mono text-[10px]">
-                    {new Date(ev.time).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    {new Date(ev.time).toLocaleTimeString(dateLocale(language), { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
                   <span className="flex-shrink-0 text-[13px] leading-[1.1]">{EVENT_ICONS[ev.type] ?? EVENT_ICONS.info}</span>
                   <span className={`${EVENT_COLORS[ev.type] ?? 'text-gray-300'} leading-relaxed`}>{ev.message}</span>

@@ -1,7 +1,10 @@
 import type { AIProvider } from '../contexts/AISettingsContext';
 
 export type ProviderMeta = {
+  /** Fallback-Anzeige. Reine Markennamen brauchen keine Übersetzung. */
   label: string;
+  /** Gesetzt, wenn das Label übersetzbare Anteile enthält (z. B. „Lokal“). */
+  labelKey?: string;
   needsKey: boolean;
   keyPlaceholder: string;
   keyHint: string;
@@ -40,6 +43,7 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
   },
   ollama: {
     label: 'Ollama (Lokal)',
+    labelKey: 'settings.ai.providerLabelOllama',
     needsKey: false,
     keyPlaceholder: '',
     keyHint: 'Kein Account nötig — ollama.com installieren',
