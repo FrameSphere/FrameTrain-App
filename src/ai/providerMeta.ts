@@ -38,8 +38,12 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
     keyPlaceholder: 'gsk_...',
     keyHint: 'console.groq.com',
     keyLink: 'https://console.groq.com',
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
-    defaultModel: 'llama-3.3-70b-versatile',
+    // Groq mustert Modelle regelmäßig aus. Die zuvor eingetragenen
+    // llama-3.3-70b-versatile / llama-3.1-8b-instant / mixtral-8x7b-32768
+    // existierten allesamt nicht mehr — damit war jede KI-Funktion tot, ohne
+    // dass man ohne eigenes Modellfeld etwas dagegen tun konnte.
+    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b', 'groq/compound-mini'],
+    defaultModel: 'openai/gpt-oss-20b',
   },
   ollama: {
     label: 'Ollama (Lokal)',

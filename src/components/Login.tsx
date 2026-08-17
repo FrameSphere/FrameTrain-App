@@ -174,6 +174,23 @@ export default function Login({ onLogin }: LoginProps) {
           </button>
         </form>
 
+        {/* Dauerhafter Weg zum Dashboard. Bisher tauchte der Link nur bei
+            einer bestimmten Fehlermeldung auf — wer noch gar keinen API-Key
+            hatte, sass auf diesem Screen fest, denn der Hinweis "Dein API-Key
+            aus dem FrameTrain Dashboard" war reiner Text. */}
+        <div className="mt-6 pt-5 border-t border-white/10 space-y-2 text-center">
+          <a
+            href="https://frame-train.com/dashboard"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            {t('login.noKeyLink')}
+          </a>
+          <p className="text-xs text-gray-600">{t('login.noKeyHint')}</p>
+        </div>
+
         <p className="mt-8 text-center text-sm text-gray-500">
           {t('login.footer')}
         </p>

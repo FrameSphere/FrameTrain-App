@@ -172,6 +172,25 @@ export default function AIAssistantSettingsPanel() {
                     </button>
                   ))}
                 </div>
+                {/* Freitextfeld: Anbieter mustern Modelle aus, ohne dass ein
+                    App-Update zur Stelle ist. Ohne dieses Feld war jede
+                    KI-Funktion blockiert, sobald alle Vorschläge veraltet waren. */}
+                <div className="mt-3">
+                  <label className="block text-xs text-gray-400 mb-1.5">
+                    {t('settings.ai.customModelLabel')}
+                  </label>
+                  <input
+                    type="text"
+                    value={aiSettings.selectedModel ?? ''}
+                    onChange={(e) => updateAISettings({ selectedModel: e.target.value })}
+                    placeholder={meta.defaultModel}
+                    spellCheck={false}
+                    className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-xs font-mono placeholder:text-gray-600 focus:outline-none focus:border-purple-500/50 transition-all"
+                  />
+                  <p className="text-xs text-gray-500 mt-1.5">
+                    {t('settings.ai.customModelHint')}
+                  </p>
+                </div>
               </div>
             </div>
           ) : (

@@ -38,7 +38,9 @@
       "apiKeyInvalid": "API key must start with \"ft_\" and be at least 24 characters long",
       "passwordShort": "Password must be at least 6 characters long",
       "loginFailed": "Sign in failed"
-    }
+    },
+    "noKeyLink": "No API key yet? Create one in the dashboard",
+    "noKeyHint": "That is also where you set the password you sign in with here."
   },
   "settings": {
     "title": "Settings",
@@ -172,7 +174,9 @@
         "groqWarning": "Quality / Max may hit Groq Free Tier rate limits (6k TPM). Consider Balanced or Minimal."
       },
       "show": "Show",
-      "hide": "Hide"
+      "hide": "Hide",
+      "customModelLabel": "Custom model ID",
+      "customModelHint": "Overrides the selection above. Needed when the provider retires a model."
     },
     "system": {
       "packagesTitle": "Python Packages (Training)",
@@ -466,6 +470,8 @@
         "localNamePlaceholder": "Name for local storage",
         "downloadButton": "Download Model",
         "downloadNote": "Download duration depends on model size",
+        "unsupportedTitle": "Not suitable for training",
+        "unsupportedHint": "You can still download it, but training with this model will fail.",
         "cancelDownload": "Cancel Download",
         "preparingFile": "Preparing…",
         "fileProgress": "File {current} of {total}",
@@ -705,7 +711,9 @@
       "sendErrorFailDetail": "Could not send error. Check your internet connection.",
       "networkError": "Network error:",
       "savedTitle": "Saved",
-      "savedDetail": "Training script “{name}” saved."
+      "savedDetail": "Training script “{name}” saved.",
+      "autoSavedTitle": "Script saved",
+      "autoSavedDetail": "Unsaved changes were saved automatically before the run."
     },
     "relativeTime": {
       "justNow": "just now",
@@ -1209,7 +1217,11 @@
           "title": "Unknown Error",
           "hint": "Send the error to the FrameTrain team or use the AI assistant for analysis."
         }
-      }
+      },
+      "labelsCategoryTitle": "Label problem in dataset",
+      "labelsCategoryHint": "The label column does not contain enough distinct classes. Often a split without labels was imported (e.g. IMDB's 'unsupervised' split, where label is always -1). Re-import the dataset and use train/test.",
+      "architectureCategoryTitle": "Architecture not supported",
+      "architectureCategoryHint": "This model is not an encoder for sequence classification. Use BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa or a related encoder model."
     }
   },
   "synapse": {
@@ -2000,7 +2012,8 @@
       "coach": {
         "button": "Continue in AI Coach"
       },
-      "createdWith": "Created with {provider}"
+      "createdWith": "Created with {provider}",
+      "failedTitle": "AI analysis failed"
     },
     "templates": {
       "title": "Saved Parameter Templates",
@@ -2015,7 +2028,14 @@
       "aiDescription": "AI-recommended parameters · {date} · {provider}",
       "savedDetail": "“{name}” is now available in the training panel."
     },
-    "noJsonNote": "This analysis contains no parameters that can be applied."
+    "noJsonNote": "This analysis contains no parameters that can be applied.",
+    "classification": {
+      "title": "Classification metrics",
+      "accuracy": "Accuracy",
+      "f1": "F1 score",
+      "precision": "Precision",
+      "recall": "Recall"
+    }
   },
   "datasetUpload": {
     "title": "Datasets",
@@ -2186,6 +2206,11 @@
           "label": "Pascal VOC",
           "hint": "Same basename in images/ and annotations/ – e.g. image1.jpg ↔ image1.xml."
         }
+      },
+      "schema": {
+        "title": "Expected columns (text classification)",
+        "columns": "Required: one text column and one label column. Labels are numbers or category names — at least two distinct values must occur.",
+        "alternatives": "Recognised column names — text: text, sentence, content, input, document, title, body, description, question. Label: label, labels, category, class, target, sentiment."
       }
     },
     "analysisPreview": {

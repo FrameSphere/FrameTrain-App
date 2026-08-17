@@ -45,11 +45,45 @@ export function detectPlugin(
     }
   }
 
+  // Bekannte, aber (noch) nicht trainierbare Architekturen konkret benennen.
+  // Ein pauschales "wird nicht unterstützt" ließ Nutzer erst nach dem
+  // vollständigen Download und der kompletten Konfiguration auflaufen.
+  const modelType = configJson?.model_type?.toLowerCase();
+  const known = modelType ? KNOWN_UNSUPPORTED[modelType] : undefined;
+  if (known) {
+    return {
+      supported: false,
+      reason: `${known} FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte).`,
+    };
+  }
+
   return {
     supported: false,
-    reason: `Dieses Modell wird noch nicht unterstützt. Aktuell verfügbar: ${PLUGINS.map((p) => p.name).join(', ')}.`,
+    reason: `Dieses Modell wird noch nicht unterstützt${modelType ? ` (Architektur: ${modelType})` : ''}. Aktuell verfügbar: ${PLUGINS.map((p) => p.name).join(', ')}.`,
   };
 }
+
+/**
+ * Architekturen, die häufig gesucht werden, für die es aber kein Plugin gibt.
+ * Der Text erklärt den Grund – das ist der Unterschied zwischen "geht nicht"
+ * und "geht nicht, weil …, nimm stattdessen …".
+ */
+const KNOWN_UNSUPPORTED: Record<string, string> = {
+  gpt2: 'GPT-2 ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  gptj: 'GPT-J ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  gpt_neo: 'GPT-Neo ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  gpt_neox: 'GPT-NeoX ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  llama: 'Llama ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  mistral: 'Mistral ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  qwen2: 'Qwen ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  falcon: 'Falcon ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  t5: 'T5 ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
+  mt5: 'mT5 ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
+  bart: 'BART ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
+  marian: 'Marian ist ein Übersetzungsmodell (Seq2Seq), kein reiner Encoder.',
+  whisper: 'Whisper ist ein Audio-Seq2Seq-Modell.',
+  clip: 'CLIP ist ein multimodales Embedding-Modell.',
+};
 
 /** Minimal-Shape für die Modell-Vorauswahl – deckt ModelInfo aus den Panels ab. */
 export interface ModelDetectionInfo {

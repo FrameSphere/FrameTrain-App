@@ -146,6 +146,22 @@ export const DEFAULT_CONFIG: TrainingConfig = {
   load_in_4bit: false, load_in_8bit: false,
 };
 
+// ── Zuletzt gewählte Kombination merken ────────────────────────────────────
+// Die Trainingsseite setzte Modell und Dataset bei jedem Seitenwechsel
+// zurück, sodass man beides ständig neu einstellen musste.
+const LAST_SELECTION_KEY = 'ft_training_last_selection';
+
+interface LastSelection { modelId?: string; datasetId?: string }
+
+function loadLastSelection(): LastSelection {
+  try { return JSON.parse(localStorage.getItem(LAST_SELECTION_KEY) ?? '{}'); }
+  catch { return {}; }
+}
+
+function saveLastSelection(sel: LastSelection) {
+  try { localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify(sel)); } catch { /* Storage voll o.ä. */ }
+}
+
 function getBuiltinTemplates(t: (key: string) => string): MetricsTemplate[] {
   return [
     { id: 'standard', name: t('trainingPanel.templates.builtinTemplates.standard.name'), description: t('trainingPanel.templates.builtinTemplates.standard.description'), config: { epochs: 3, batch_size: 8, learning_rate: 2e-5, warmup_ratio: 0.06, max_seq_length: 128 }, source: 'builtin' },
@@ -871,7 +887,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       ]);
       setModels(listModels);
       setModelsWithVersions(listWithVersions);
-      const preferred = pickPreferredModelId(listWithVersions, listModels);
+      // Zuletzt benutztes Modell wiederherstellen, sofern es noch existiert.
+      // Ohne das fiel die Seite bei jedem Wechsel auf den ersten Eintrag
+      // zurück — man stellte Modell und Dataset immer wieder neu ein.
+      const remembered = loadLastSelection().modelId;
+      const stillExists = remembered && listModels.some(m => m.id === remembered);
+      const preferred = stillExists ? remembered : pickPreferredModelId(listWithVersions, listModels);
       if (preferred) setSelectedModelId(preferred);
     } catch (e) { console.error('[Training] initLoad:', e); }
     finally { setLoadingData(false); }
@@ -881,8 +902,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     try {
       const list = await invoke<DatasetInfo[]>('list_datasets_for_model', { modelId });
       setDatasets(list);
+      const remembered = loadLastSelection();
+      const rememberedDs = remembered.modelId === modelId
+        ? list.find(d => d.id === remembered.datasetId)
+        : undefined;
       const split = list.find(d => d.status === 'split');
-      setSelectedDatasetId(split?.id ?? list[0]?.id ?? null);
+      setSelectedDatasetId(rememberedDs?.id ?? split?.id ?? list[0]?.id ?? null);
     } catch { setDatasets([]); }
   };
 
@@ -1096,6 +1121,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
   const selectedModel   = models.find(m => m.id === selectedModelId);
   const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
+
+  // Auswahl persistieren, damit sie den nächsten Seitenwechsel überlebt.
+  useEffect(() => {
+    if (selectedModelId) saveLastSelection({ modelId: selectedModelId, datasetId: selectedDatasetId ?? undefined });
+  }, [selectedModelId, selectedDatasetId]);
   const selectedModelTree = modelsWithVersions.find(m => m.id === selectedModelId);
   const selectedVersionTree = selectedModelTree?.versions.find(v => v.id === selectedVersionId);
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
@@ -1491,7 +1521,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
       {/* Dev Train */}
       {mode === 'dev' && (
-        <DevTrainPanel modelInfo={selectedModel ?? null} selectedVersionPath={selectedVersionPath} datasets={datasets} onNavigateToAnalysis={onNavigateToAnalysis} userData={userData} />
+        <DevTrainPanel modelInfo={selectedModel ?? null} selectedVersionPath={selectedVersionPath} datasets={datasets} selectedDatasetId={selectedDatasetId} onNavigateToAnalysis={onNavigateToAnalysis} userData={userData} />
       )}
 
       {/* Standard Training */}

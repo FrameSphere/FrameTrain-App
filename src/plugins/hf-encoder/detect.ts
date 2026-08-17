@@ -26,14 +26,57 @@ function containsToken(normalized: string, token: string): boolean {
   return re.test(normalized);
 }
 
-export function detectHFEncoder(modelPathOrId: string, configJson?: ModelConfig): boolean {
-  // 1) config.json (lokale Modelle) – robusteste Quelle
-  const modelType = configJson?.model_type?.toLowerCase();
-  if (modelType && SUPPORTED_MODEL_TYPES.has(modelType)) return true;
+/** Verzeichnisnamen, die kein Modellname sind – dort lohnt der Blick eine Ebene höher. */
+const OPAQUE_DIR = /^(ver_[a-z0-9]+|hf_[a-z0-9]+|snapshots|blobs|refs|model|models|versions|original|latest|[0-9a-f]{12,})$/;
 
-  // 2) Fallback: Model-ID/Pfad
+/**
+ * Reduziert Pfad oder Repo-ID auf den Teil, der tatsächlich den Modellnamen trägt.
+ *
+ * Wichtig: NUR dieses Segment darf für die Token-Heuristik verwendet werden.
+ * Bei der Repo-ID `distilbert/distilgpt2` ist `distilbert` der Organisations-
+ * name — wer den ganzen String durchsucht, hält ein GPT-2 für einen BERT und
+ * meldet es als unterstützt, bis das Training es beim Start abweist.
+ */
+function modelNameSegment(normalized: string): string {
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length === 0) return normalized;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (!OPAQUE_DIR.test(segments[i])) return segments[i];
+  }
+  return segments[segments.length - 1];
+}
+
+/**
+ * Namensbestandteile, die eindeutig auf eine Nicht-Encoder-Architektur zeigen.
+ *
+ * Sie schlagen die Pfad-Heuristik: `distilbert/distilgpt2` enthält im
+ * Organisationsnamen „distilbert“, ist aber ein GPT-2. Ohne diesen Vorrang
+ * galt das Modell als unterstützt — bis das Training es nach 1,5 GB Download
+ * abwies.
+ */
+const NON_ENCODER_TOKENS = [
+  'gpt2', 'distilgpt2', 'gptj', 'gpt-neo', 'gpt-neox', 'gpt',
+  'llama', 'mistral', 'mixtral', 'qwen', 'falcon', 'phi', 'gemma',
+  'bloom', 'mpt', 'opt', 't5', 'bart', 'pegasus', 'marian',
+  'whisper', 'clip', 'stable-diffusion', 'wav2vec2',
+];
+
+export function detectHFEncoder(modelPathOrId: string, configJson?: ModelConfig): boolean {
+  // 1) config.json (lokale Modelle) – robusteste Quelle.
+  //    Ist ein model_type bekannt, ist er allein maßgeblich: eine bekannte,
+  //    aber nicht unterstützte Architektur darf nicht über die Namens-
+  //    Heuristik doch noch als unterstützt durchrutschen.
+  const modelType = configJson?.model_type?.toLowerCase();
+  if (modelType) return SUPPORTED_MODEL_TYPES.has(modelType);
+
+  // 2) Fallback: Namens-Heuristik
   const normalized = modelPathOrId.toLowerCase().replace(/\\/g, '/');
-  const lastPart = normalized.split('/').pop() ?? normalized;
+  const lastPart = modelNameSegment(normalized);
+
+  // Widerspricht der Modellname selbst, zählt er mehr als der übrige Pfad.
+  for (const t of NON_ENCODER_TOKENS) {
+    if (containsToken(lastPart, t)) return false;
+  }
 
   // Spezifischere Tokens zuerst (vermeidet false positives)
   const tokens = [
@@ -56,7 +99,7 @@ export function detectHFEncoder(modelPathOrId: string, configJson?: ModelConfig)
   ];
 
   for (const t of tokens) {
-    if (containsToken(normalized, t) || containsToken(lastPart, t)) return true;
+    if (containsToken(lastPart, t) || containsToken(normalized, t)) return true;
   }
 
   return false;

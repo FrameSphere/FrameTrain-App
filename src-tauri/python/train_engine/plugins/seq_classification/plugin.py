@@ -138,6 +138,8 @@ class Plugin(TrainPlugin):
             model_cfg = json.load(f)
 
         model_type = model_cfg.get("model_type", "").lower()
+        # Fuer die Analyse-Seite: echte Architektur statt hartkodiertem Platzhalter.
+        self.model_type = model_type
 
         if model_type not in SUPPORTED_ARCHITECTURES:
             supported_list = ", ".join(sorted(SUPPORTED_ARCHITECTURES))
@@ -213,6 +215,24 @@ class Plugin(TrainPlugin):
         self.label2id = {str(l): i for i, l in enumerate(all_labels)}
         self.id2label = {i: str(l) for i, l in enumerate(all_labels)}
         self.num_labels = len(all_labels)
+
+        # Sanity-Check: weniger als 2 Klassen = keine Klassifikation. Ohne diesen
+        # Check setzt HuggingFace bei num_labels=1 automatisch auf Regression um
+        # (MSELoss) und stirbt dann an Integer-Labels mit einem völlig
+        # irreführenden "mse_loss_out_mps: only defined for floating types".
+        if self.num_labels < 2:
+            only = all_labels[0] if all_labels else "—"
+            raise ValueError(
+                f"Label-Spalte '{self.label_col}' enthält nur einen einzigen Wert "
+                f"({only!r}) bei {total_rows} Zeilen — damit lässt sich keine "
+                "Klassifikation trainieren.\n\n"
+                "Häufigste Ursache: Es wurde ein Split ohne Labels importiert "
+                "(z.B. der 'unsupervised'-Split von IMDB, dort ist label immer -1).\n\n"
+                "Lösungen:\n"
+                "  - Dataset neu importieren und den train/test-Split wählen\n"
+                "  - Prüfen, ob die richtige Spalte als Label erkannt wurde "
+                f"(erkannt: '{self.label_col}', vorhanden: {list(raw[split].features.keys())})"
+            )
 
         # Sanity-Check: fast so viele "Klassen" wie Zeilen = ID-/Index-Spalte,
         # kein Klassifikations-Label. Klare Meldung statt kryptischem Crash.
@@ -419,6 +439,14 @@ class Plugin(TrainPlugin):
         else:
             device_info = "CPU"
 
+        # Merken, damit die Analyse-Seite das echte Geraet zeigen kann statt es
+        # aus den fp16/bf16-Flags zu raten.
+        self.device_used = (
+            "cuda" if torch.cuda.is_available()
+            else "mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+            else "cpu"
+        )
+
         MessageProtocol.status("training", f"Gerät: {device_info}")
 
         total_steps = (
@@ -600,6 +628,13 @@ class Plugin(TrainPlugin):
             "total_steps":      total_steps,
             "best_epoch":       best_epoch,
             "training_duration_seconds": duration,
+            # Ohne diese Felder zeigte die Analyse-Seite fest "xlm-roberta"
+            # und n_train/n_val = 0 an, egal was tatsaechlich trainiert wurde.
+            "architecture":     getattr(self, "model_type", "") or "unbekannt",
+            "num_labels":       int(self.num_labels),
+            "n_train":          int(len(self.train_dataset)) if self.train_dataset is not None else 0,
+            "n_val":            int(len(self.eval_dataset)) if self.eval_dataset is not None else 0,
+            "device":           getattr(self, "device_used", "cpu"),
         }
 
     # ─── 6. Export ─────────────────────────────────────────────────────────

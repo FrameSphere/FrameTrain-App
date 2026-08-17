@@ -183,13 +183,23 @@ pub async fn start_dev_training(
         };
         registry_set_pid(&DEV_TRAIN_PROC, child.id());
 
-        // Stderr in separatem Thread loggen
+        // Stderr in separatem Thread loggen. Die letzten Zeilen werden
+        // aufgehoben und der Fehlermeldung angehängt — ohne sie stand im
+        // Fehlerdialog nur der nackte Exit-Code, und der Python-Traceback
+        // (also die einzige verwertbare Information) war nirgends zu sehen.
+        let stderr_tail: std::sync::Arc<StdMutex<Vec<String>>> =
+            std::sync::Arc::new(StdMutex::new(Vec::new()));
         if let Some(stderr) = child.stderr.take() {
             let jid2 = jid.clone();
             let ah2  = ah.clone();
+            let tail = std::sync::Arc::clone(&stderr_tail);
             thread::spawn(move || {
                 for line in BufReader::new(stderr).lines().flatten() {
                     eprintln!("[DevTrain STDERR] {}", line);
+                    if let Ok(mut t) = tail.lock() {
+                        t.push(line.clone());
+                        if t.len() > 40 { let excess = t.len() - 40; t.drain(0..excess); }
+                    }
                     // Stderr-Zeilen auch als Output-Event senden
                     let _ = ah2.emit("dev-training-output", serde_json::json!({
                         "job_id": jid2, "line": format!("[ERR] {}", line)
@@ -262,9 +272,24 @@ pub async fn start_dev_training(
                 "data": { "model_path": out_p, "final_metrics": { "total_epochs": 0, "total_steps": step } }
             }));
         } else if !json_error {
+            let code = status.and_then(|s| s.code());
+            let code_text = match code {
+                Some(c) => format!("Exit-Code {}", c),
+                None    => "durch ein Signal beendet".to_string(),
+            };
+            let tail: Vec<String> = stderr_tail.lock().map(|t| t.clone()).unwrap_or_default();
+            let error_msg = if tail.is_empty() {
+                format!(
+                    "Script beendet mit {} — keine Fehlerausgabe erhalten.\n\n\
+                     Prüfe, ob das Skript gespeichert wurde und ob es auf stdout/stderr schreibt.",
+                    code_text
+                )
+            } else {
+                format!("Script beendet mit {}.\n\n{}", code_text, tail.join("\n"))
+            };
             let _ = ah.emit("training-error", serde_json::json!({
                 "job_id": jid,
-                "data": { "error": format!("Script beendet mit Exit-Code {:?}", status.and_then(|s| s.code())) }
+                "data": { "error": error_msg, "exit_code": code, "stderr": tail }
             }));
         }
 

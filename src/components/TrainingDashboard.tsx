@@ -63,13 +63,34 @@ export function getSession(id: string): TrainingSession | undefined {
 
 // ── Error Analysis ────────────────────────────────────────────────────────
 
-type ErrorCategory = 'memory' | 'dataset' | 'packages' | 'cuda' | 'config' | 'code' | 'unknown';
+type ErrorCategory = 'memory' | 'dataset' | 'labels' | 'architecture' | 'packages' | 'cuda' | 'config' | 'code' | 'unknown';
 
 function analyzeError(errorMsg: string, t: (key: string) => string): { category: ErrorCategory; title: string; hint: string } {
   const e = (errorMsg ?? '').toLowerCase();
   if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
     return { category: 'memory', title: t('trainingDashboard.errorRecovery.memoryCategoryTitle'), hint: t('trainingDashboard.errorRecovery.memoryCategoryHint') };
-  if (e.includes('cuda') || e.includes('mps') || e.includes('device'))
+
+  // Label-/Klassenprobleme VOR der Geräte-Prüfung: PyTorch meldet den
+  // Regressions-Fallback bei num_labels=1 als "mse_loss_out_mps: only defined
+  // for floating types". Wer nur auf "mps" prüft, verkauft dem Nutzer einen
+  // Datenfehler als Hardwareproblem und schickt ihn zu FP16/CPU-Einstellungen.
+  if (e.includes('mse_loss') || e.includes('only defined for floating types')
+      || e.includes('label-spalte') || e.includes('label column')
+      || e.includes('num_labels') || e.includes('nur einen einzigen wert'))
+    return { category: 'labels', title: t('trainingDashboard.errorRecovery.labelsCategoryTitle'), hint: t('trainingDashboard.errorRecovery.labelsCategoryHint') };
+
+  if (e.includes('wird noch nicht unterstützt') || e.includes('not yet supported')
+      || e.includes('modell-architektur') || e.includes('model architecture')
+      || e.includes('unsupported architecture'))
+    return { category: 'architecture', title: t('trainingDashboard.errorRecovery.architectureCategoryTitle'), hint: t('trainingDashboard.errorRecovery.architectureCategoryHint') };
+
+  // Geräte-Fehler nur bei echten Geräte-Meldungen, nicht bei jedem Vorkommen
+  // von "mps"/"device" irgendwo in einem Traceback.
+  if (e.includes('cuda error') || e.includes('cuda unavailable') || e.includes('no cuda')
+      || e.includes('cuda is not available') || e.includes('mps not available')
+      || e.includes('mps backend') || e.includes('device-side assert')
+      || e.includes('no gpu') || e.includes('device not found')
+      || /device .*(unavailable|not available|mismatch)/.test(e))
     return { category: 'cuda', title: t('trainingDashboard.errorRecovery.cudaCategoryTitle'), hint: t('trainingDashboard.errorRecovery.cudaCategoryHint') };
   if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
     return { category: 'dataset', title: t('trainingDashboard.errorRecovery.datasetCategoryTitle'), hint: t('trainingDashboard.errorRecovery.datasetCategoryHint') };

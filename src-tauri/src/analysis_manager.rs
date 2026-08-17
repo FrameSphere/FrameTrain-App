@@ -291,7 +291,16 @@ pub fn save_full_analysis_data(
         Err(e) => { eprintln!("[Analysis] Verzeichnis: {}", e); return; }
     };
 
-    let duration_secs = Utc::now().timestamp() - started_at_secs;
+    // Bevorzugt die von der Engine gemessene Trainingsdauer. Die Differenz zu
+    // "jetzt minus Startzeit" erklaerte, warum Trainingsdialog, Analyse-Header
+    // und "Dauer pro Epoche" drei verschiedene Laufzeiten anzeigten.
+    let wall_clock_secs = Utc::now().timestamp() - started_at_secs;
+    let duration_secs = complete_data
+        .get("final_metrics")
+        .and_then(|m| m.get("training_duration_seconds"))
+        .and_then(|v| v.as_i64())
+        .filter(|d| *d > 0)
+        .unwrap_or(wall_clock_secs);
 
     // ── Epoch Summaries aus Step-Logs berechnen ──────────────────────────────
     let mut epoch_losses: std::collections::BTreeMap<i64, Vec<f64>> = std::collections::BTreeMap::new();
@@ -379,10 +388,17 @@ pub fn save_full_analysis_data(
     let total_steps    = step_logs.last().and_then(|l| l["step"].as_i64()).unwrap_or(0);
 
     // ── Config aufbereiten ───────────────────────────────────────────────────
-    let hardware_device = if config_json.get("fp16").and_then(|v| v.as_bool()).unwrap_or(false)
-        || config_json.get("bf16").and_then(|v| v.as_bool()).unwrap_or(false) {
-        "gpu"
-    } else { "cpu" };
+    // Das tatsaechlich benutzte Geraet meldet die Engine. Die alte Ableitung
+    // aus den fp16/bf16-Flags war schlicht geraten und zeigte auf Apple
+    // Silicon immer "cpu", auch wenn auf MPS trainiert wurde.
+    let hardware_device: String = final_metrics
+        .get("device").and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            if config_json.get("fp16").and_then(|v| v.as_bool()).unwrap_or(false)
+                || config_json.get("bf16").and_then(|v| v.as_bool()).unwrap_or(false) { "gpu".to_string() }
+            else { "cpu".to_string() }
+        });
 
     let system_ram: f64 = {
         #[cfg(target_os = "macos")] {
@@ -414,14 +430,24 @@ pub fn save_full_analysis_data(
             "system_ram_gb":  (system_ram * 10.0).round() / 10.0,
         },
         "model_info": {
-            "architecture": "xlm-roberta",
+            // Werte kommen aus final_metrics der Engine. Früher stand hier
+            // fest "xlm-roberta" bzw. 0 — unabhängig davon, was trainiert
+            // wurde. Das machte die Analyse-Seite als Beleg wertlos.
+            "architecture": final_metrics.get("architecture").and_then(|v| v.as_str()).unwrap_or("unbekannt"),
+            "num_labels":   final_metrics.get("num_labels").and_then(|v| v.as_u64()),
             "lora_active":  config_json.get("use_lora").and_then(|v| v.as_bool()).unwrap_or(false),
         },
         "dataset_info": {
-            "n_train":       0,
+            "n_train":       final_metrics.get("n_train").and_then(|v| v.as_u64()).unwrap_or(0),
             "has_validation": sum_val_loss.is_some(),
-            "n_val":         0,
+            "n_val":         final_metrics.get("n_val").and_then(|v| v.as_u64()).unwrap_or(0),
             "max_seq_length": config_json.get("max_seq_length").and_then(|v| v.as_u64()).unwrap_or(128),
+        },
+        "classification_metrics": {
+            "accuracy":  final_metrics.get("accuracy").and_then(|v| v.as_f64()),
+            "f1":        final_metrics.get("f1").and_then(|v| v.as_f64()),
+            "precision": final_metrics.get("precision").and_then(|v| v.as_f64()),
+            "recall":    final_metrics.get("recall").and_then(|v| v.as_f64()),
         },
         "epoch_summaries": epoch_summaries,
         "step_logs": step_logs,

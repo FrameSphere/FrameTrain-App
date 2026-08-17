@@ -512,6 +512,49 @@ pub async fn download_huggingface_model(
         return Err(format!("Repo '{}' enthält keine unterstützten Modell-Dateien.", repo_id));
     }
 
+    // Redundante Gewichtsformate aussortieren.
+    //
+    // HF-Repos hinterlegen dieselben Gewichte oft mehrfach: safetensors,
+    // pytorch_model.bin, tf_model.h5, flax_model.msgpack, rust_model.ot.
+    // Für das Training wird genau eines gebraucht. Ohne diesen Filter lud
+    // distilbert-base-uncased 1,09 GB statt ~270 MB und distilgpt2 1,57 GB
+    // statt ~350 MB — und die RAM-Schätzung, die auf der Downloadgröße
+    // aufsetzt, war entsprechend um Faktor 4 zu hoch.
+    let is_torch = |n: &str| n.ends_with(".safetensors") || n.ends_with(".bin")
+        || n.ends_with(".pt") || n.ends_with(".pth") || n.ends_with(".ckpt");
+    let has_torch = relevant.iter().any(|f| is_torch(&f.filename.to_lowercase()));
+    let has_safetensors = relevant.iter()
+        .any(|f| f.filename.to_lowercase().ends_with(".safetensors"));
+
+    let relevant: Vec<&HuggingFaceFile> = if has_torch {
+        let kept: Vec<&HuggingFaceFile> = relevant.iter().copied().filter(|f| {
+            let n = f.filename.to_lowercase();
+            // Gewichte anderer Frameworks
+            if n.ends_with(".msgpack") || n.ends_with(".h5") || n.ends_with(".keras")
+                || n.ends_with(".tflite") || n.ends_with(".pb") || n.ends_with(".npz")
+                || n.ends_with(".ot") {
+                return false;
+            }
+            // PyTorch-Duplikat, wenn safetensors vorliegen
+            if has_safetensors && n.ends_with(".bin") && n.contains("model") {
+                return false;
+            }
+            true
+        }).collect();
+        // Absicherung: falls der Filter wider Erwarten alle Gewichte entfernt
+        // hat, lieber zu viel laden als ein leeres Modellverzeichnis anlegen.
+        if kept.iter().any(|f| is_torch(&f.filename.to_lowercase())) {
+            if kept.len() < relevant.len() {
+                println!("[HF Download] {} redundante Gewichtsdateien übersprungen", relevant.len() - kept.len());
+            }
+            kept
+        } else {
+            relevant
+        }
+    } else {
+        relevant
+    };
+
     // Gesamtgröße für ETA und Prozentanzeige
     let total_size: u64 = relevant.iter().map(|f| f.size.unwrap_or(0)).sum();
     println!("[HF Download] {} Dateien, ~{} MB", relevant.len(), total_size / (1024 * 1024));

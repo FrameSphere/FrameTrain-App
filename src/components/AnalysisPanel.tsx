@@ -50,6 +50,11 @@ interface FullTrainingData {
   exported_at: string; training_summary: Record<string, any>; config: Record<string, any>;
   hardware: Record<string, any>; model_info: Record<string, any>; dataset_info: Record<string, any>;
   epoch_summaries: EpochSummary[]; step_logs: LogEntry[]; derived_stats: Record<string, any>;
+  /** Fehlt bei Läufen aus älteren Versionen — dann wird die Karte ausgeblendet. */
+  classification_metrics?: {
+    accuracy?: number | null; f1?: number | null;
+    precision?: number | null; recall?: number | null;
+  } | null;
 }
 interface AIAnalysisReport { version_id: string; report_text: string; provider: string; model: string; generated_at: string; /** Sprache bei der Erstellung; fehlt bei Berichten aus älteren Versionen. */ language?: Language | null; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
@@ -1080,6 +1085,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
 
   const [report, setReport] = useState<AIAnalysisReport | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  /** Persistente Fehlermeldung der KI-Analyse — Toasts blenden zu schnell aus. */
+  const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
   const [aiRecommendedParams, setAiRecommendedParams] = useState<Record<string, any> | null>(null);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -1330,6 +1337,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     const meta = PROVIDER_META[aiProvider];
     if (meta.needsKey && !aiApiKey.trim()) { notifyError(t('common.error'), `${meta.label}-Key konfigurieren.`); return; }
     setGeneratingReport(true);
+    setAiAnalysisError(null);
     try {
       const resolvedModel = resolveModel(aiProvider, aiSettings.selectedModel, aiSettings.ollamaModel);
       const text = await callAIClient(aiSettings, {
@@ -1344,7 +1352,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       setReport(newReport); setAiRecommendedParams(extractAIRecommendedParams(text));
       setChatMessages([{ role: 'assistant', content: text }]); setShowChat(true);
       success(t('common.success'), t('analysisPanel.aiAnalysis.createdWith', { provider: providerLabel(aiProvider) }));
-    } catch (e: any) { notifyError(t('common.error'), String(e)); }
+    } catch (e: any) {
+      // Ohne sichtbaren Zustand wirkte ein Fehlschlag wie "der Button tut
+      // nichts" — genau so verhielt sich die Seite bei einem abgekuendigten
+      // Provider-Modell.
+      setAiAnalysisError(String(e));
+      notifyError(t('common.error'), String(e));
+    }
     finally { setGeneratingReport(false); }
   };
 
@@ -1652,6 +1666,43 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 {hasVal && epochSummaries.length > 0 && <EpochDurationBar summaries={epochSummaries} />}
               </div>
 
+              {/* 4b. Klassifikations-Metriken.
+                   Die Engine liefert accuracy/f1/precision/recall im
+                   Manifest wie im complete-Event — angezeigt wurde bisher
+                   ausschliesslich der Loss, also gerade nicht die Zahl, an
+                   der man ein Klassifikationsmodell beurteilt. */}
+              {fullData?.classification_metrics && (
+                (() => {
+                  const cm = fullData.classification_metrics;
+                  const entries: Array<[string, number | null | undefined]> = [
+                    [t('analysisPanel.classification.accuracy'), cm.accuracy],
+                    [t('analysisPanel.classification.f1'), cm.f1],
+                    [t('analysisPanel.classification.precision'), cm.precision],
+                    [t('analysisPanel.classification.recall'), cm.recall],
+                  ];
+                  const available = entries.filter(([, v]) => typeof v === 'number' && v > 0);
+                  if (available.length === 0) return null;
+                  return (
+                    <div className="bg-white/5 rounded-xl border border-white/10 p-4">
+                      <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                        <Target className="w-4 h-4 text-emerald-400" />
+                        {t('analysisPanel.classification.title')}
+                      </h3>
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        {available.map(([label, value]) => (
+                          <div key={label} className="rounded-lg bg-black/20 border border-white/5 p-3">
+                            <p className="text-gray-400 text-xs mb-1">{label}</p>
+                            <p className="text-white text-lg font-semibold tabular-nums">
+                              {((value as number) * 100).toFixed(1)}%
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+
               {/* 5. Hardware + Dataset Info */}
               {fullData && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1747,6 +1798,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 <div>
                   <div className="text-amber-300 text-sm font-medium">{t('analysisPanel.aiAnalysis.notEnabledTitle')}</div>
                   <div className="text-amber-400/70 text-xs mt-0.5">{t('analysisPanel.aiAnalysis.notEnabledDescription')}</div>
+                </div>
+              </div>
+            )}
+
+            {aiAnalysisError && !generatingReport && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 mb-3">
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="min-w-0 space-y-1">
+                  <p className="text-red-300 text-xs font-medium">{t('analysisPanel.aiAnalysis.failedTitle')}</p>
+                  <p className="text-red-200/80 text-xs break-words">{aiAnalysisError}</p>
                 </div>
               </div>
             )}

@@ -9,7 +9,7 @@ import {
   Upload, FolderOpen, Download, Trash2, Search,
   HardDrive, Cloud, CheckCircle, Loader2, Database,
   Calendar, ExternalLink, X, RefreshCw, ChevronDown,
-  Scissors, Layers, FileText, Filter, AlertTriangle,
+  Scissors, Layers, FileText, Filter, AlertTriangle, AlertCircle,
   Zap, Heart, Info,
 } from 'lucide-react';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
@@ -339,6 +339,29 @@ function DatasetStructureGuide() {
               ))}
             </div>
 
+            {/* Erwartete Spalten. Der Guide zeigte bisher nur die
+                Ordnerstruktur — welche Spalten eine CSV/JSONL haben muss,
+                stand nirgends, und ohne 'text'/'label' scheitert das
+                Training mit einem unverständlichen Fehler. */}
+            {current.id === 'flatfile' && (
+              <div className="rounded-lg bg-white/5 border border-white/10 p-3 space-y-2">
+                <p className="text-xs font-semibold text-white">
+                  {t('datasetUpload.structureGuide.schema.title')}
+                </p>
+                <div className="font-mono text-xs text-gray-300 bg-black/30 rounded-md p-2 overflow-x-auto">
+                  text,label<br />
+                  Der Film war grossartig,1<br />
+                  Totale Zeitverschwendung,0
+                </div>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  {t('datasetUpload.structureGuide.schema.columns')}
+                </p>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  {t('datasetUpload.structureGuide.schema.alternatives')}
+                </p>
+              </div>
+            )}
+
             {/* Hinweis */}
             <div className={`flex items-start gap-2 text-xs ${current.hintColor}`}>
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
@@ -413,6 +436,8 @@ export default function DatasetUpload() {
   const [selectedHfDataset, setSelectedHfDataset] = useState<HuggingFaceDataset | null>(null);
   const [hfDatasetName, setHfDatasetName] = useState('');
   const [downloading, setDownloading] = useState(false);
+  /** Bleibt im Dialog stehen, auch wenn der Fehler-Toast längst weg ist. */
+  const [hfDownloadError, setHfDownloadError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{
     status: string; currentFile: string; currentFileIndex: number;
     totalFiles: number; downloadedBytes: number; totalBytes: number;
@@ -700,6 +725,7 @@ export default function DatasetUpload() {
   };
 
   const handleHfDownload = async () => {
+    setHfDownloadError(null);
     if (!selectedHfDataset || !hfDatasetName.trim() || !selectedModelId) {
       warning(t('datasetUpload.importModal.hf.missingFieldsTitle'), t('datasetUpload.importModal.hf.missingFieldsDetail')); return;
     }
@@ -713,6 +739,10 @@ export default function DatasetUpload() {
       setHfResults([]); setShowImportModal(false); setDownloadProgress(null);
       await loadDatasets();
     } catch (err: unknown) {
+      // Zusaetzlich zum Toast persistent im Dialog anzeigen. Toasts blenden
+      // nach wenigen Sekunden aus — wer in der Zeit wegsieht, erlebt den
+      // Download als reaktionslos und weiss nicht, dass er fehlgeschlagen ist.
+      setHfDownloadError(String(err));
       error(t('datasetUpload.importModal.hf.downloadError'), String(err));
     } finally {
       setDownloading(false);
@@ -1303,6 +1333,16 @@ export default function DatasetUpload() {
                           placeholder={t('datasetUpload.importModal.hf.localNamePlaceholder')}
                           className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all" />
                       </div>
+
+                      {hfDownloadError && !downloading && (
+                        <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
+                          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-red-300 text-xs font-medium">{t('datasetUpload.importModal.hf.downloadError')}</p>
+                            <p className="text-red-200/80 text-xs break-words">{hfDownloadError}</p>
+                          </div>
+                        </div>
+                      )}
 
                       {downloading && downloadProgress ? (
                         <div className="space-y-3 p-3 rounded-xl bg-black/30 border border-white/5">

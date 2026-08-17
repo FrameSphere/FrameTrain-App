@@ -509,13 +509,35 @@ function highlightPythonToHtml(code: string) {
   }
   flush();
 
+  /**
+   * Wendet ein Replace nur auf Text AUSSERHALB bereits eingefügter HTML-Tags an.
+   *
+   * Ohne diesen Schutz lief der Identifier-Durchlauf über das eigene Markup:
+   * In `<span class="tok-num">` steckt das Python-Keyword `class`, das prompt
+   * ein zweites Mal umschlossen wurde. Das Ergebnis war kaputtes HTML, das im
+   * Editor als literaler Text `class="tok-num">2` auftauchte und den Code
+   * praktisch unlesbar machte.
+   */
+  const replaceOutsideTags = (
+    input: string,
+    pattern: RegExp,
+    replacer: (...args: any[]) => string,
+  ): string =>
+    input
+      .split(/(<[^>]*>)/g)
+      .map(part => (part.startsWith('<') && part.endsWith('>') ? part : part.replace(pattern, replacer as any)))
+      .join('');
+
   const highlightCode = (s: string) => {
     let out = escapeHtml(s);
-    out = out.replace(/\b\d+(\.\d+)?\b/g, '<span class="tok-num">$&</span>');
-    out = out.replace(/\b(def)\s+([A-Za-z_][A-Za-z0-9_]*)/g, '<span class="tok-kw">$1</span> <span class="tok-fn">$2</span>');
-    out = out.replace(/\b(class)\s+([A-Za-z_][A-Za-z0-9_]*)/g, '<span class="tok-kw">$1</span> <span class="tok-cl">$2</span>');
-    out = out.replace(/(^|\n)(\s*)(@[\w\.]+)/g, '$1$2<span class="tok-de">$3</span>');
-    out = out.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g, (m, w: string) => {
+    out = replaceOutsideTags(out, /\b\d+(\.\d+)?\b/g, (m: string) => `<span class="tok-num">${m}</span>`);
+    out = replaceOutsideTags(out, /\b(def)\s+([A-Za-z_][A-Za-z0-9_]*)/g,
+      (_m: string, kw: string, name: string) => `<span class="tok-kw">${kw}</span> <span class="tok-fn">${name}</span>`);
+    out = replaceOutsideTags(out, /\b(class)\s+([A-Za-z_][A-Za-z0-9_]*)/g,
+      (_m: string, kw: string, name: string) => `<span class="tok-kw">${kw}</span> <span class="tok-cl">${name}</span>`);
+    out = replaceOutsideTags(out, /(^|\n)(\s*)(@[\w.]+)/g,
+      (_m: string, pre: string, ws: string, dec: string) => `${pre}${ws}<span class="tok-de">${dec}</span>`);
+    out = replaceOutsideTags(out, /\b([A-Za-z_][A-Za-z0-9_]*)\b/g, (_m: string, w: string) => {
       if (KEYWORDS.has(w)) return `<span class="tok-kw">${w}</span>`;
       if (BUILTINS.has(w)) return `<span class="tok-bi">${w}</span>`;
       return w;
@@ -1197,11 +1219,24 @@ interface DevTrainPanelProps {
   modelInfo: ModelInfo | null;
   selectedVersionPath: string;
   datasets: DatasetInfo[];
+  /** Im Dropdown gewähltes Dataset — bestimmt, was als DATASET_PATH ankommt. */
+  selectedDatasetId?: string | null;
   onNavigateToAnalysis: (vid: string) => void;
   userData?: { userId: string; email: string; apiKey: string; password: string };
 }
 
-export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets, onNavigateToAnalysis, userData }: DevTrainPanelProps) {
+export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets: allDatasets, selectedDatasetId, onNavigateToAnalysis, userData }: DevTrainPanelProps) {
+  // Das ausgewählte Dataset muss an Position 0 stehen: DATASET_PATH (ohne
+  // Suffix) ist der Pfad, den Skripte und Template verwenden. Vorher wurde
+  // stumm immer das erste Dataset der Liste übergeben — wer im Dropdown ein
+  // anderes wählte, trainierte unbemerkt auf fremden Daten.
+  const datasets = useMemo(() => {
+    if (!selectedDatasetId) return allDatasets;
+    const idx = allDatasets.findIndex(d => d.id === selectedDatasetId);
+    if (idx <= 0) return allDatasets;
+    return [allDatasets[idx], ...allDatasets.filter((_, i) => i !== idx)];
+  }, [allDatasets, selectedDatasetId]);
+
   // Globale Legacy-Scripts einmalig in den User-Key übernehmen
   useEffect(() => { migrateLegacyDevScripts(userData?.userId); }, [userData?.userId]);
   const { currentTheme } = useTheme();
@@ -1648,11 +1683,24 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   }, [dismissed]);
 
   const handleStart = async () => {
-    if (isDirty) {
-      error('Ungespeicherte Änderungen', 'Bitte speichere dein Skript zuerst mit Cmd+S oder dem Speichern-Button.');
-      return;
-    }
     if (!script.trim() || !modelInfo) { error('Fehler', 'Kein Modell ausgewählt oder Skript leer.'); return; }
+
+    // Ungespeicherte Änderungen automatisch sichern, statt den Start
+    // abzulehnen. Die alte Variante warf nur einen Toast — wer ihn verpasste,
+    // sah scheinbar gar keine Reaktion und rätselte, warum sich nichts tut.
+    if (isDirty) {
+      if (currentScriptId) {
+        updateScript(currentScriptId, script, userData?.userId);
+      } else {
+        const autoName = `Dev Train ${new Date().toLocaleString(language === 'de' ? 'de-DE' : 'en-US')}`;
+        saveScript(autoName, script, userData?.userId);
+        const newest = loadScripts(userData?.userId)[0];
+        if (newest) setCurrentScriptId(newest.id);
+      }
+      setSavedScript(script);
+      setIsDirty(false);
+      success(t('devTrainPanel.notifications.autoSavedTitle'), t('devTrainPanel.notifications.autoSavedDetail'));
+    }
 
     setRunning(true); setOutput(''); setLoss([]);
 

@@ -24,6 +24,7 @@ import {
   Puzzle,
   Ban,
   Heart,
+  AlertTriangle,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -82,6 +83,43 @@ function formatDownloads(n: number | undefined): string {
 }
 
 // ============ Plugin-Badge ============
+
+/**
+ * HuggingFace-`pipeline_tag` -> Architektur-Hinweis.
+ *
+ * Der Tag steht in den Suchergebnissen bereits zur Verfügung und ist ein
+ * verlässlicheres Signal als der Modellname. Ohne ihn wurde z.B.
+ * `distilbert/distilgpt2` als Encoder geführt und erst beim Trainingsstart
+ * abgewiesen — nach über 1,5 GB Download.
+ */
+const UNSUPPORTED_PIPELINE_TAGS: Record<string, string> = {
+  'text-generation': 'Textgenerierung (Decoder-Modell)',
+  'text2text-generation': 'Text-zu-Text (Seq2Seq)',
+  translation: 'Übersetzung (Seq2Seq)',
+  summarization: 'Zusammenfassung (Seq2Seq)',
+  'automatic-speech-recognition': 'Spracherkennung',
+  'text-to-image': 'Bildgenerierung',
+  'text-to-speech': 'Sprachsynthese',
+  conversational: 'Dialog (Decoder-Modell)',
+};
+
+/** Prüft ein HF-Suchergebnis, bevor irgendetwas heruntergeladen wird. */
+export function checkHfModelSupport(
+  modelId: string,
+  pipelineTag?: string,
+): { supported: boolean; reason?: string } {
+  const tagReason = pipelineTag ? UNSUPPORTED_PIPELINE_TAGS[pipelineTag] : undefined;
+  if (tagReason) {
+    return {
+      supported: false,
+      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation.`,
+    };
+  }
+  const result = detectPlugin(modelId);
+  return result.supported === true
+    ? { supported: true }
+    : { supported: false, reason: (result as { supported: false; reason: string }).reason };
+}
 
 function PluginBadge({ modelNameOrPath, configJson }: { modelNameOrPath: string; configJson?: ModelConfig }) {
   const result = detectPlugin(modelNameOrPath, configJson);
@@ -1070,6 +1108,26 @@ function HuggingFaceImportPanel({
             <span className="text-gray-500 text-xs">{t('modelManager.card.pluginLabel')}</span>
             <PluginBadge modelNameOrPath={selected.id} />
           </div>
+
+          {/* Vor dem Download warnen statt erst beim Trainingsstart */}
+          {(() => {
+            const support = checkHfModelSupport(selected.id, selected.pipeline_tag);
+            if (support.supported) return null;
+            return (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-amber-300 text-xs font-medium">
+                    {t('modelManager.importModal.hf.unsupportedTitle')}
+                  </p>
+                  <p className="text-amber-200/80 text-xs leading-relaxed">{support.reason}</p>
+                  <p className="text-amber-200/60 text-xs">
+                    {t('modelManager.importModal.hf.unsupportedHint')}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Download Progress Display */}
           {downloading && downloadProgress ? (

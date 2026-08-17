@@ -38,7 +38,9 @@
       "apiKeyInvalid": "API-Key muss mit \"ft_\" beginnen und mindestens 24 Zeichen lang sein",
       "passwordShort": "Passwort muss mindestens 6 Zeichen lang sein",
       "loginFailed": "Anmeldung fehlgeschlagen"
-    }
+    },
+    "noKeyLink": "Noch kein API-Key? Im Dashboard erstellen",
+    "noKeyHint": "Dort legst du auch das Passwort fest, mit dem du dich hier anmeldest."
   },
   "settings": {
     "title": "Einstellungen",
@@ -172,7 +174,9 @@
         "groqWarning": "Quality / Max kann das Groq Free Tier Rate-Limit erreichen (6k TPM). Nutze besser Balanced oder Minimal."
       },
       "show": "Anzeigen",
-      "hide": "Verbergen"
+      "hide": "Verbergen",
+      "customModelLabel": "Eigene Modell-ID",
+      "customModelHint": "Überschreibt die Auswahl oben. Nötig, wenn der Anbieter ein Modell abgekündigt hat."
     },
     "system": {
       "packagesTitle": "Python-Pakete (Training)",
@@ -466,6 +470,8 @@
         "localNamePlaceholder": "Name für die lokale Speicherung",
         "downloadButton": "Modell herunterladen",
         "downloadNote": "Download-Dauer hängt von der Modellgröße ab",
+        "unsupportedTitle": "Für Training nicht geeignet",
+        "unsupportedHint": "Der Download ist weiterhin möglich, ein Training mit diesem Modell wird aber fehlschlagen.",
         "cancelDownload": "Download abbrechen",
         "preparingFile": "Wird vorbereitet…",
         "fileProgress": "Datei {current} von {total}",
@@ -729,7 +735,9 @@
       "sendErrorFailDetail": "Konnte Fehler nicht senden. Prüfe deine Internetverbindung.",
       "networkError": "Netzwerkfehler:",
       "savedTitle": "Gespeichert",
-      "savedDetail": "Trainings-Skript „{name}“ gespeichert."
+      "savedDetail": "Trainings-Skript „{name}“ gespeichert.",
+      "autoSavedTitle": "Skript gespeichert",
+      "autoSavedDetail": "Ungespeicherte Änderungen wurden vor dem Start automatisch gesichert."
     },
     "relativeTime": {
       "justNow": "gerade eben",
@@ -1209,7 +1217,11 @@
           "title": "Unbekannter Fehler",
           "hint": "Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen."
         }
-      }
+      },
+      "labelsCategoryTitle": "Label-Problem im Dataset",
+      "labelsCategoryHint": "Die Label-Spalte enthält nicht genug verschiedene Klassen. Häufig wurde ein Split ohne Labels importiert (z. B. der 'unsupervised'-Split von IMDB, dort ist label immer -1). Dataset neu importieren und train/test verwenden.",
+      "architectureCategoryTitle": "Architektur nicht unterstützt",
+      "architectureCategoryHint": "Dieses Modell ist kein Encoder für Sequenzklassifikation. Nutze BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa oder ein verwandtes Encoder-Modell."
     }
   },
   "synapse": {
@@ -2000,7 +2012,8 @@
       "coach": {
         "button": "Im KI-Coach weiterführen"
       },
-      "createdWith": "Erstellt mit {provider}"
+      "createdWith": "Erstellt mit {provider}",
+      "failedTitle": "KI-Analyse fehlgeschlagen"
     },
     "templates": {
       "title": "Gespeicherte Parameter-Templates",
@@ -2015,7 +2028,14 @@
       "aiDescription": "KI-empfohlene Parameter · {date} · {provider}",
       "savedDetail": "„{name}“ ist jetzt beim Training abrufbar."
     },
-    "noJsonNote": "Diese Analyse enthält keine übernehmbaren Parameter."
+    "noJsonNote": "Diese Analyse enthält keine übernehmbaren Parameter.",
+    "classification": {
+      "title": "Klassifikations-Metriken",
+      "accuracy": "Accuracy",
+      "f1": "F1-Score",
+      "precision": "Precision",
+      "recall": "Recall"
+    }
   },
   "datasetUpload": {
     "title": "Datasets",
@@ -2186,6 +2206,11 @@
           "label": "Pascal VOC",
           "hint": "Gleicher Basename in images/ und annotations/ – z.B. bild1.jpg ↔ bild1.xml."
         }
+      },
+      "schema": {
+        "title": "Erwartete Spalten (Textklassifikation)",
+        "columns": "Pflicht: eine Textspalte und eine Label-Spalte. Labels sind Zahlen oder Kategorienamen — es müssen mindestens zwei verschiedene Werte vorkommen.",
+        "alternatives": "Erkannte Spaltennamen — Text: text, sentence, content, input, document, title, body, description, question. Label: label, labels, category, class, target, sentiment."
       }
     },
     "analysisPreview": {

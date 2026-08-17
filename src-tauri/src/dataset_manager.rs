@@ -1110,6 +1110,13 @@ pub async fn list_datasets_for_model(
                         test_ratio:  test_count  as f64 / total,
                     });
                     d.status = "split".to_string();
+                } else if let Some(info) = detect_flat_split_files(&storage) {
+                    // Flache Dateien train.csv / val.csv / test.csv — genau die
+                    // Struktur, die der Hilfe-Dialog zeigt. Ohne diesen Zweig
+                    // meldete die App "Kein Split" für ihr eigenes dokumentiertes
+                    // Layout und verlangte einen manuellen Split.
+                    d.split_info = Some(info);
+                    d.status = "split".to_string();
                 }
             }
             d
@@ -1823,8 +1830,141 @@ pub async fn get_dataset_filter_options() -> Result<serde_json::Value, String> {
     }))
 }
 
-#[derive(Debug, Deserialize)]
-struct HfParquetFile { url: String, filename: String, size: Option<u64>, split: Option<String> }
+#[derive(Debug, Deserialize, Clone)]
+struct HfParquetFile {
+    url: String,
+    filename: String,
+    size: Option<u64>,
+    split: Option<String>,
+    #[serde(default)]
+    config: Option<String>,
+}
+
+/// Haengt bei Namenskollision ein Suffix an: 0000.parquet, 0000_1.parquet, ...
+fn unique_file_name(dir: &Path, base: &str, extension: &str) -> String {
+    let candidate = format!("{}.{}", base, extension);
+    if !dir.join(&candidate).exists() { return candidate; }
+    let mut i = 1usize;
+    loop {
+        let c = format!("{}_{}.{}", base, i, extension);
+        if !dir.join(&c).exists() { return c; }
+        i += 1;
+    }
+}
+
+/// Erkennt Datasets, deren Splits als flache Dateien vorliegen
+/// (`train.csv`, `val.jsonl`, `test.parquet`, …) statt als Unterordner.
+///
+/// Genau dieses Layout zeigt der Hilfe-Dialog beim lokalen Import; es wurde
+/// bisher trotzdem als "Kein Split" eingestuft.
+fn detect_flat_split_files(storage: &Path) -> Option<SplitInfo> {
+    let entries = fs::read_dir(storage).ok()?;
+    let (mut train_count, mut val_count, mut test_count) = (0usize, 0usize, 0usize);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+        let ext_ok = path.extension().and_then(|e| e.to_str())
+            .map(|e| is_row_splittable(e) || e.eq_ignore_ascii_case("txt")
+                 || e.eq_ignore_ascii_case("arrow"))
+            .unwrap_or(false);
+        if !ext_ok { continue; }
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s.to_lowercase(),
+            None => continue,
+        };
+        match stem.as_str() {
+            "train" | "training" => train_count += 1,
+            "val" | "valid" | "validation" | "dev" => val_count += 1,
+            "test" | "testing" | "eval" => test_count += 1,
+            _ => {}
+        }
+    }
+    // Ein einzelnes train.csv ist noch kein Split.
+    if train_count == 0 || (val_count == 0 && test_count == 0) { return None; }
+    let total = (train_count + val_count + test_count).max(1) as f64;
+    Some(SplitInfo {
+        train_count, val_count, test_count,
+        train_ratio: train_count as f64 / total,
+        val_ratio:   val_count   as f64 / total,
+        test_ratio:  test_count  as f64 / total,
+    })
+}
+
+/// Ordnet einen HuggingFace-Splitnamen einem lokalen Split-Verzeichnis zu.
+/// `None` = Split ohne verwertbare Labels bzw. unbekannt -> wird uebersprungen.
+fn map_hf_split(split: &str) -> Option<&'static str> {
+    match split.to_lowercase().as_str() {
+        "train" | "training" => Some("train"),
+        "validation" | "valid" | "val" | "dev" => Some("val"),
+        "test" | "testing" | "eval" => Some("test"),
+        _ => None,
+    }
+}
+
+/// Waehlt aus der HF-Parquet-Liste genau eine Config und deren beschriftete
+/// Splits aus.
+///
+/// Ohne diese Auswahl landeten alle Splits als gleichnamige `0000.parquet` im
+/// selben Zielordner und ueberschrieben sich gegenseitig — uebrig blieb der
+/// zuletzt geschriebene. Bei IMDB war das `unsupervised`, wo jedes Label -1 ist;
+/// das Training bekam dadurch nur eine einzige Klasse zu sehen.
+fn select_hf_parquet_files(files: &[HfParquetFile]) -> (Vec<(HfParquetFile, String)>, Vec<String>) {
+    let mut warnings: Vec<String> = Vec::new();
+    if files.is_empty() { return (Vec::new(), warnings); }
+
+    // Configs in Reihenfolge des ersten Auftretens sammeln.
+    let mut configs: Vec<String> = Vec::new();
+    for f in files {
+        let c = f.config.clone().unwrap_or_else(|| "default".to_string());
+        if !configs.contains(&c) { configs.push(c); }
+    }
+
+    let files_of = |cfg: &str| -> Vec<HfParquetFile> {
+        files.iter()
+            .filter(|f| f.config.as_deref().unwrap_or("default") == cfg)
+            .cloned().collect()
+    };
+
+    // Bevorzugt die Config, die einen train-Split mitbringt.
+    let chosen = configs.iter()
+        .find(|c| files_of(c).iter().any(|f|
+            f.split.as_deref().map(|s| map_hf_split(s) == Some("train")).unwrap_or(false)))
+        .cloned()
+        .unwrap_or_else(|| configs[0].clone());
+
+    if configs.len() > 1 {
+        warnings.push(format!(
+            "Dataset hat {} Konfigurationen ({}). Importiert wurde '{}'.",
+            configs.len(), configs.join(", "), chosen));
+    }
+
+    let candidates = files_of(&chosen);
+    let mut selected: Vec<(HfParquetFile, String)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for f in &candidates {
+        let split_name = f.split.clone().unwrap_or_default();
+        match map_hf_split(&split_name) {
+            Some(dir) => selected.push((f.clone(), dir.to_string())),
+            None => {
+                if !split_name.is_empty() && !skipped.contains(&split_name) {
+                    skipped.push(split_name);
+                }
+            }
+        }
+    }
+    if !skipped.is_empty() {
+        warnings.push(format!(
+            "Splits ohne verwertbare Labels uebersprungen: {}.", skipped.join(", ")));
+    }
+
+    // Notfall: keine bekannten Splitnamen -> alles als train behandeln,
+    // damit ungewoehnlich benannte Datasets nicht komplett leer ankommen.
+    if selected.is_empty() {
+        warnings.push("Keine Standard-Splits erkannt — alle Dateien werden als 'train' importiert.".to_string());
+        selected = candidates.into_iter().map(|f| (f, "train".to_string())).collect();
+    }
+    (selected, warnings)
+}
 
 #[tauri::command]
 pub async fn download_huggingface_dataset(
@@ -1867,17 +2007,30 @@ async fn download_parquet_direct(
     datasets_dir: PathBuf, repo_id: String, user_id: String,
 ) -> Result<DatasetInfo, String> {
     use std::time::Instant;
-    let total_files  = files.len();
-    let total_bytes: u64 = files.iter().filter_map(|f| f.size).sum();
+    // Genau eine Config + nur beschriftete Splits, jeder in sein eigenes
+    // Unterverzeichnis — sonst ueberschreiben sich die gleichnamigen
+    // 0000.parquet-Dateien der einzelnen Splits gegenseitig.
+    let (selected, mut select_warnings) = select_hf_parquet_files(&files);
+    if selected.is_empty() {
+        return Err("Keine importierbaren Parquet-Dateien im Dataset gefunden.".to_string());
+    }
+    let total_files  = selected.len();
+    let total_bytes: u64 = selected.iter().filter_map(|(f, _)| f.size).sum();
     let t0 = Instant::now();
     let mut global_dl: u64 = 0;
-    for (file_idx, hf_file) in files.iter().enumerate() {
-        let fname = if hf_file.filename.is_empty() { format!("file_{}.parquet", file_idx) } else { hf_file.filename.clone() };
+    for (file_idx, (hf_file, split_dir)) in selected.iter().enumerate() {
+        let base_name = if hf_file.filename.is_empty() { format!("file_{}.parquet", file_idx) } else { hf_file.filename.clone() };
+        let split_path = target.join(split_dir);
+        fs::create_dir_all(&split_path).map_err(|e| format!("mkdir '{}': {}", split_dir, e))?;
+        // Innerhalb eines Splits kann es mehrere Shards mit gleichem Namen geben.
+        let stem = Path::new(&base_name).file_stem().and_then(|s| s.to_str()).unwrap_or("data");
+        let ext  = Path::new(&base_name).extension().and_then(|s| s.to_str()).unwrap_or("parquet");
+        let fname = unique_file_name(&split_path, stem, ext);
         let response = client.get(&hf_file.url).header("User-Agent", "FrameTrain-Desktop/1.0").send().await
             .map_err(|e| format!("HTTP GET '{}': {}", fname, e))?;
         if !response.status().is_success() { return Err(format!("HTTP {} fuer '{}'", response.status(), fname)); }
         let file_total = hf_file.size.or_else(|| response.content_length()).unwrap_or(0);
-        let mut out_file = tokio::fs::File::create(target.join(&fname)).await
+        let mut out_file = tokio::fs::File::create(split_path.join(&fname)).await
             .map_err(|e| format!("Erstellen '{}': {}", fname, e))?;
         let mut file_dl: u64 = 0;
         let mut stream = response.bytes_stream();
@@ -1917,9 +2070,11 @@ async fn download_parquet_direct(
         message: format!("Fertig! ({} Dateien, {:.1} MB)", file_count, total_size as f64 / 1_048_576.0) });
     // FIX Bug 2: Typ nach Download neu erkennen statt immer MultiShard zu setzen.
     let detected = detect_dataset_type(&target);
+    let mut warnings = detected.warnings;
+    warnings.append(&mut select_warnings);
     let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
         Some(repo_id), &target, total_size, file_count, "unused", None,
-        detected.detected_type, detected.pairing_status, detected.warnings);
+        detected.detected_type, detected.pairing_status, warnings);
     upsert_metadata(&datasets_dir, &info)?;
     if let Ok(db_path) = app_handle.path().app_data_dir().map(|p| p.join("frametrain.db")) {
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
@@ -2252,4 +2407,79 @@ pub async fn save_dataset_yaml(
     fs::write(&yaml_path, &yaml).map_err(|e| format!("Schreiben: {}", e))?;
     eprintln!("[Dataset] dataset.yaml gespeichert: {:?}", yaml_path);
     Ok(yaml_path.to_string_lossy().to_string())
+}
+#[cfg(test)]
+mod hf_split_selection_tests {
+    use super::{select_hf_parquet_files, map_hf_split, HfParquetFile};
+
+    fn f(config: &str, split: &str, size: u64) -> HfParquetFile {
+        HfParquetFile {
+            url: format!("https://example/{}/{}", config, split),
+            // Auf HuggingFace heissen die Dateien ALLER Splits gleich.
+            filename: "0000.parquet".to_string(),
+            size: Some(size),
+            split: Some(split.to_string()),
+            config: Some(config.to_string()),
+        }
+    }
+
+    #[test]
+    fn imdb_nimmt_train_und_test_aber_nicht_unsupervised() {
+        // Realer Aufbau von stanfordnlp/imdb. Der unsupervised-Split hat
+        // durchgehend label = -1; landete er als letzte Datei im Zielordner,
+        // sah das Training nur eine einzige Klasse.
+        let files = vec![
+            f("plain_text", "test", 19_500_000),
+            f("plain_text", "train", 20_000_000),
+            f("plain_text", "unsupervised", 40_100_000),
+        ];
+        let (selected, warnings) = select_hf_parquet_files(&files);
+
+        let dirs: Vec<&str> = selected.iter().map(|(_, d)| d.as_str()).collect();
+        assert_eq!(selected.len(), 2, "unsupervised muss aussortiert werden");
+        assert!(dirs.contains(&"train"));
+        assert!(dirs.contains(&"test"));
+        assert!(!dirs.contains(&"unsupervised"));
+        assert!(warnings.iter().any(|w| w.contains("unsupervised")));
+    }
+
+    #[test]
+    fn jeder_split_bekommt_ein_eigenes_verzeichnis() {
+        // Kernpunkt: gleiche Dateinamen duerfen sich nicht ueberschreiben.
+        let files = vec![f("default", "train", 10), f("default", "validation", 5)];
+        let (selected, _) = select_hf_parquet_files(&files);
+        assert_eq!(selected.len(), 2);
+        assert!(selected.iter().all(|(file, _)| file.filename == "0000.parquet"));
+        let mut dirs: Vec<&str> = selected.iter().map(|(_, d)| d.as_str()).collect();
+        dirs.sort();
+        assert_eq!(dirs, vec!["train", "val"]);
+    }
+
+    #[test]
+    fn mehrere_configs_werden_auf_eine_reduziert() {
+        let files = vec![
+            f("en", "train", 10),
+            f("en", "test", 5),
+            f("de", "train", 10),
+        ];
+        let (selected, warnings) = select_hf_parquet_files(&files);
+        assert!(selected.iter().all(|(file, _)| file.config.as_deref() == Some("en")));
+        assert!(warnings.iter().any(|w| w.contains("Konfigurationen")));
+    }
+
+    #[test]
+    fn unbekannte_splitnamen_landen_als_train() {
+        let files = vec![f("default", "kompletter_datensatz", 10)];
+        let (selected, warnings) = select_hf_parquet_files(&files);
+        assert_eq!(selected.len(), 1, "nichts darf verloren gehen");
+        assert_eq!(selected[0].1, "train");
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn splitnamen_werden_normalisiert() {
+        assert_eq!(map_hf_split("validation"), Some("val"));
+        assert_eq!(map_hf_split("Training"), Some("train"));
+        assert_eq!(map_hf_split("unsupervised"), None);
+    }
 }

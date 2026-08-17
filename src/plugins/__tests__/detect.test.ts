@@ -242,3 +242,40 @@ describe('detectPlugin – Priorität & Routing', () => {
     if (result.supported) expect(result.plugin.id).toBe('hf-encoder');
   });
 });
+
+// ── Regressionen aus dem E2E-Test vom 17.08.2026 ────────────────────────────
+describe('Decoder-Modelle werden nicht als Encoder erkannt', () => {
+  it('"distilbert/distilgpt2" → false (Org-Name darf nicht gewinnen)', () => {
+    // Der Organisationsname enthaelt "distilbert", das Modell ist ein GPT-2.
+    // Frueher meldete die App "HF Encoder (Generic) – unterstuetzt" und wies
+    // das Modell erst beim Trainingsstart ab — nach 1,57 GB Download.
+    expect(detectHFEncoder('distilbert/distilgpt2')).toBe(false);
+  });
+
+  it('"distilgpt2" allein → false', () => {
+    expect(detectHFEncoder('distilgpt2')).toBe(false);
+  });
+
+  it('config.json mit model_type="gpt2" → false', () => {
+    expect(detectHFEncoder('irgendein/pfad', { model_type: 'gpt2' })).toBe(false);
+  });
+
+  it('config.json schlaegt widersprechenden Pfadnamen', () => {
+    // Pfad sagt "bert", config.json sagt "llama" — config.json gewinnt.
+    expect(detectHFEncoder('meine-bert-modelle/checkpoint', { model_type: 'llama' })).toBe(false);
+  });
+
+  it('detectPlugin nennt bei gpt2 den Grund', () => {
+    const result = detectPlugin('distilbert/distilgpt2', { model_type: 'gpt2' });
+    expect(result.supported).toBe(false);
+    expect((result as { supported: false; reason: string }).reason).toMatch(/Decoder/i);
+  });
+
+  it('Encoder in Unterordner-Layout bleibt erkannt', () => {
+    expect(detectHFEncoder('/Users/x/models/distilbert-base-uncased/versions/ver_abc123')).toBe(true);
+  });
+
+  it('Org-Token bleibt gueltig, wenn der Modellname nicht widerspricht', () => {
+    expect(detectHFEncoder('funnel-transformer/small')).toBe(true);
+  });
+});
