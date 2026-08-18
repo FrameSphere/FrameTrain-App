@@ -656,11 +656,18 @@ export default function TrainingDashboard({
   // Eigene Dev-Train-Scripts melden meist nur step/total_steps und kein
   // progress_percent — der Balken blieb dann bei 0 %, obwohl "Step 30 / 60"
   // danebenstand. Fehlt der Prozentwert, wird er aus den Schritten abgeleitet.
+  // Der Schrittzaehler blieb in Einzelfaellen hinter dem Loss-Verlauf zurueck
+  // ("Step 30 / 60", waehrend der Chart schon Punkt 60 zeigte). Solange die
+  // Ursache nicht gefunden ist, gilt der weiter fortgeschrittene der beiden
+  // Werte — die Anzeige widerspricht sich damit nicht mehr selbst.
+  const lastLossStep = lossPoints.length ? (lossPoints[lossPoints.length - 1].step ?? 0) : 0;
+  const shownStep = Math.max(progress?.step ?? 0, lastLossStep);
+
   const percent = (() => {
     if (!progress) return 0;
     const given = progress.progress_percent ?? 0;
     if (given > 0) return Math.min(100, given);
-    const step = progress.step ?? 0;
+    const step = shownStep;
     const total = progress.total_steps ?? 0;
     if (total > 0 && step > 0) return Math.min(100, (step / total) * 100);
     const ep = progress.epoch ?? 0;
@@ -778,7 +785,7 @@ export default function TrainingDashboard({
           {progress && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-gray-400">
-                <span>{t('trainingDashboard.progress.epochStep').replace('{epoch}', String(progress.epoch)).replace('{totalEpochs}', String(progress.total_epochs)).replace('{step}', String(progress.step)).replace('{totalSteps}', String(progress.total_steps))}</span>
+                <span>{t('trainingDashboard.progress.epochStep').replace('{epoch}', String(progress.epoch)).replace('{totalEpochs}', String(progress.total_epochs)).replace('{step}', String(shownStep)).replace('{totalSteps}', String(progress.total_steps))}</span>
                 <span className="font-mono">{Math.round(percent)}%</span>
               </div>
               <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">

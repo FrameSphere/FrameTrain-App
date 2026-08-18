@@ -1557,7 +1557,9 @@
       "noVersions": "No Versions",
       "pluginSupported": "{name} – supported",
       "pluginUnsupported": "Not yet supported",
-      "devModeButton": "Dev Train Mode →"
+      "devModeButton": "Dev Train Mode →",
+      "imageArchNote": "Image training uses a torchvision backbone with ImageNet weights. The downloaded HuggingFace weights are not used.",
+      "imageArchLabel": "Architecture"
     },
     "datasetBlock": {
       "label": "Dataset",

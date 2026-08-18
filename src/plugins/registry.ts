@@ -49,11 +49,15 @@ export function detectPlugin(
   // Ein pauschales "wird nicht unterstützt" ließ Nutzer erst nach dem
   // vollständigen Download und der kompletten Konfiguration auflaufen.
   const modelType = configJson?.model_type?.toLowerCase();
-  const known = modelType ? KNOWN_UNSUPPORTED[modelType] : undefined;
+  // Ohne config.json ist die Modell-ID die einzige Quelle. Vorher bekamen
+  // Whisper, T5, CLIP oder Llama dann denselben nichtssagenden Satz wie jedes
+  // unbekannte Modell — obwohl der Grund bekannt ist.
+  const known = (modelType ? KNOWN_UNSUPPORTED[modelType] : undefined)
+    ?? knownReasonFromId(trimmed);
   if (known) {
     return {
       supported: false,
-      reason: `${known} FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte).`,
+      reason: `${known} FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte). Verfügbare Plugins: ${PLUGINS.map((p) => p.name).join(', ')}.`,
     };
   }
 
@@ -61,6 +65,20 @@ export function detectPlugin(
     supported: false,
     reason: `Dieses Modell wird noch nicht unterstützt${modelType ? ` (Architektur: ${modelType})` : ''}. Aktuell verfügbar: ${PLUGINS.map((p) => p.name).join(', ')}.`,
   };
+}
+
+
+/**
+ * Sucht eine bekannte Architektur im Modellnamen, wenn keine config.json
+ * vorliegt. Nur an Wortgrenzen, damit "bert" nicht in "albert" trifft.
+ */
+function knownReasonFromId(modelPathOrId: string): string | undefined {
+  const normalized = modelPathOrId.toLowerCase().replace(/\\/g, '/');
+  for (const [key, reason] of Object.entries(KNOWN_UNSUPPORTED)) {
+    const token = key.replace(/_/g, '[-_]?');
+    if (new RegExp(`(^|[^a-z0-9])${token}([^a-z0-9]|$)`, 'i').test(normalized)) return reason;
+  }
+  return undefined;
 }
 
 /**
@@ -81,7 +99,14 @@ const KNOWN_UNSUPPORTED: Record<string, string> = {
   mt5: 'mT5 ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
   bart: 'BART ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
   marian: 'Marian ist ein Übersetzungsmodell (Seq2Seq), kein reiner Encoder.',
-  whisper: 'Whisper ist ein Audio-Seq2Seq-Modell.',
+  whisper: 'Whisper ist ein Audio-Seq2Seq-Modell für Spracherkennung.',
+  wav2vec2: 'Wav2Vec2 ist ein Audio-Modell für Spracherkennung, kein Text-Encoder.',
+  hubert: 'HuBERT ist ein Audio-Modell für Sprache, kein Text-Encoder.',
+  speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
+  detr: 'DETR ist ein Objekterkennungs-Modell, kein Bildklassifikator — für Objekterkennung nutze ein YOLO-Modell.',
+  blip: 'BLIP ist ein multimodales Bild-Text-Modell, kein Bildklassifikator.',
+  segformer: 'SegFormer ist ein Segmentierungs-Modell, kein Bildklassifikator.',
+  sam: 'SAM (Segment Anything) ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   clip: 'CLIP ist ein multimodales Embedding-Modell.',
 };
 

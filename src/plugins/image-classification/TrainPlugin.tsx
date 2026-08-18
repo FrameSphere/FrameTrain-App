@@ -17,6 +17,11 @@ export default function ImageClassificationTrainPlugin(_props: TrainPluginProps)
         Training wird über das Training-Panel gestartet. Wähle ein Dataset im Format
         &quot;Ordner pro Klasse&quot; (folder_class) und starte das Training dort.
       </p>
+      <p className="text-amber-300/80 text-xs">
+        Hinweis: Trainiert wird ein torchvision-Backbone mit ImageNet-Gewichten
+        (Architektur im Training-Panel wählbar). Die heruntergeladenen
+        HuggingFace-Gewichte werden dabei nicht verwendet.
+      </p>
     </div>
   );
 }

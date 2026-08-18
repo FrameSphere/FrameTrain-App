@@ -94,6 +94,12 @@ export function detectHFEncoder(modelPathOrId: string, configJson?: ModelConfig)
     'funnel',
     'mpnet',
     'ernie',
+    // Verbreitete Encoder, deren Name die Architektur nicht nennt.
+    // sentence-transformers/all-MiniLM-L6-v2 ist ein BERT, wurde aber als
+    // "nicht unterstuetzt" gemeldet — eines der meistgenutzten Modelle ueberhaupt.
+    'minilm',
+    'mobilebert',
+    'tinybert',
     'bert',
     'xlm',
   ];

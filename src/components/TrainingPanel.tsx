@@ -1129,6 +1129,10 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   }, [selectedModelId, selectedDatasetId]);
   const selectedModelTree = modelsWithVersions.find(m => m.id === selectedModelId);
   const selectedVersionTree = selectedModelTree?.versions.find(v => v.id === selectedVersionId);
+  // Bildklassifikation trainiert ein torchvision-Backbone, nicht die
+  // heruntergeladenen HuggingFace-Gewichte. Ohne dieses Feld stand die Wahl
+  // fest auf resnet18 — sichtbar war das nirgends.
+  const [imageArch, setImageArch] = useState('resnet18');
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
   const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
   const isSupported     = detection?.supported === true;
@@ -1160,7 +1164,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
           ? config.lora_target_modules.split(',').map(m => m.trim()).filter(m => m)
           : config.lora_target_modules,
         task_type: detection?.supported ? detection.plugin.taskType : 'seq_classification',
-        plugin_config: detection?.supported ? (detection.plugin.defaultPluginConfig ?? {}) : {},
+        plugin_config: detection?.supported
+          ? {
+              ...(detection.plugin.defaultPluginConfig ?? {}),
+              ...(detection.plugin.id === 'image-classification' ? { arch: imageArch } : {}),
+            }
+          : {},
       };
       
       const job = await invoke<TrainingJob>('start_training', {
@@ -1475,6 +1484,23 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                     <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20"><AlertTriangle className="w-4 h-4 text-amber-400" /><span className="text-amber-300 text-xs">{t('trainingPanel.modelBlock.pluginUnsupported')}</span></div>
                     <button onClick={() => setMode('dev')} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"><Code2 className="w-3.5 h-3.5" /> {t('trainingPanel.modelBlock.devModeButton')}</button>
                   </div>
+              )}
+
+              {/* Bildklassifikation: Backbone waehlbar machen und offenlegen,
+                  dass nicht die heruntergeladenen Gewichte trainiert werden. */}
+              {selectedModel && isSupported && detection.plugin.id === 'image-classification' && (
+                <div className="space-y-2 mt-2 px-3 py-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                  <p className="text-blue-200 text-xs">{t('trainingPanel.modelBlock.imageArchNote')}</p>
+                  <label className="block text-blue-300/80 text-[11px]">{t('trainingPanel.modelBlock.imageArchLabel')}</label>
+                  <select
+                    value={imageArch}
+                    onChange={e => setImageArch(e.target.value)}
+                    className="w-full bg-slate-900/60 border border-white/10 rounded-lg px-3 py-2 text-white text-xs"
+                  >
+                    {['resnet18','resnet50','efficientnet_b0','efficientnet_b4','vit_b_16','mobilenet_v3_small','mobilenet_v3_large']
+                      .map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
               )}
             </div>
 
