@@ -653,10 +653,25 @@ export default function TrainingDashboard({
   // Zahl geraten — dann lieber "—" zeigen als eine erfundene Laufzeit.
   const durationLabel = isTerminal && elapsed === 0 ? '—' : formatDuration(elapsed);
 
+  // Eigene Dev-Train-Scripts melden meist nur step/total_steps und kein
+  // progress_percent — der Balken blieb dann bei 0 %, obwohl "Step 30 / 60"
+  // danebenstand. Fehlt der Prozentwert, wird er aus den Schritten abgeleitet.
+  const percent = (() => {
+    if (!progress) return 0;
+    const given = progress.progress_percent ?? 0;
+    if (given > 0) return Math.min(100, given);
+    const step = progress.step ?? 0;
+    const total = progress.total_steps ?? 0;
+    if (total > 0 && step > 0) return Math.min(100, (step / total) * 100);
+    const ep = progress.epoch ?? 0;
+    const eps = progress.total_epochs ?? 0;
+    return eps > 0 && ep > 0 ? Math.min(100, (ep / eps) * 100) : 0;
+  })();
+
   const eta = (() => {
-    if (!progress || !isRunning || progress.progress_percent <= 1) return null;
+    if (!progress || !isRunning || percent <= 1) return null;
     const elapsedSec = elapsed / 1000;
-    const totalSec = elapsedSec / (progress.progress_percent / 100);
+    const totalSec = elapsedSec / (percent / 100);
     const remaining = totalSec - elapsedSec;
     if (remaining <= 0) return null;
     return formatDuration(remaining * 1000);
@@ -692,7 +707,7 @@ export default function TrainingDashboard({
         </div>
         {progress && (
           <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${progress.progress_percent}%` }} />
+            <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
           </div>
         )}
         <Maximize2 className="w-3.5 h-3.5 text-gray-500 group-hover:text-white transition-all flex-shrink-0" />
@@ -719,7 +734,7 @@ export default function TrainingDashboard({
               </h2>
               <p className="text-gray-500 text-xs">
                 {modelName} · {datasetName} · {mode === 'dev' ? t('trainingDashboard.modeDev') : t('trainingDashboard.modeStandard')}
-                {progress && ` · ${Math.round(progress.progress_percent)}%`}
+                {progress && ` · ${Math.round(percent)}%`}
               </p>
             </div>
           </div>
@@ -764,10 +779,10 @@ export default function TrainingDashboard({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-gray-400">
                 <span>{t('trainingDashboard.progress.epochStep').replace('{epoch}', String(progress.epoch)).replace('{totalEpochs}', String(progress.total_epochs)).replace('{step}', String(progress.step)).replace('{totalSteps}', String(progress.total_steps))}</span>
-                <span className="font-mono">{Math.round(progress.progress_percent)}%</span>
+                <span className="font-mono">{Math.round(percent)}%</span>
               </div>
               <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
-                <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${progress.progress_percent}%` }} />
+                <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
               </div>
             </div>
           )}

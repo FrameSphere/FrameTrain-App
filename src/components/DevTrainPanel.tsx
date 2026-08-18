@@ -2349,7 +2349,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
             {progress && (
               <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                 <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`}
-                  style={{ width: `${progress.progress_percent ?? 0}%` }} />
+                  style={{ width: `${devProgressPercent(progress)}%` }} />
               </div>
             )}
 
@@ -2523,6 +2523,25 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
   );
 }
 
+/**
+ * Fortschritt in Prozent fuer eigene Dev-Train-Scripts.
+ *
+ * Die meisten Scripts melden nur step/total_steps. Ohne diese Ableitung blieb
+ * der Balken bei 0 %, obwohl daneben "Step 30 / 60" stand.
+ */
+export function devProgressPercent(p: {
+  progress_percent?: number; step?: number; total_steps?: number;
+  epoch?: number; total_epochs?: number;
+} | null | undefined): number {
+  if (!p) return 0;
+  const given = p.progress_percent ?? 0;
+  if (given > 0) return Math.min(100, given);
+  const step = p.step ?? 0, total = p.total_steps ?? 0;
+  if (total > 0 && step > 0) return Math.min(100, (step / total) * 100);
+  const ep = p.epoch ?? 0, eps = p.total_epochs ?? 0;
+  return eps > 0 && ep > 0 ? Math.min(100, (ep / eps) * 100) : 0;
+}
+
 // ── Default Script Generator ──────────────────────────────────────────────
 
 function generateDefaultScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
@@ -2566,6 +2585,7 @@ BATCH_SIZE  = 8
 LR          = 2e-5
 MAX_LENGTH  = 128
 MAX_STEPS   = 60      # -1 = ganzes Dataset. Klein halten beim Ausprobieren.
+MAX_EVAL    = 500     # 0 = kompletten Eval-Split auswerten
 TEXT_COL    = None    # None = automatisch erkennen
 LABEL_COL   = None    # None = automatisch erkennen
 
@@ -2651,6 +2671,13 @@ eval_ds = dataset.get("validation") or dataset.get("test")
 if eval_ds is None:
     split = train_ds.train_test_split(test_size=0.1, seed=42)
     train_ds, eval_ds = split["train"], split["test"]
+
+# Eval-Split deckeln: eine Auswertung ueber 25.000 Beispiele dauert laenger
+# als das ganze Training mit MAX_STEPS. Zufaellig ziehen, nicht die ersten N —
+# viele Splits sind nach Label sortiert und ergaeben sonst nur eine Klasse.
+if MAX_EVAL and len(eval_ds) > MAX_EVAL:
+    eval_ds = eval_ds.shuffle(seed=42).select(range(MAX_EVAL))
+    print(f"Eval-Split auf {MAX_EVAL} Beispiele begrenzt", flush=True)
 
 text_col, label_col = pick_columns(train_ds)
 num_labels = len(set(train_ds[label_col]))
