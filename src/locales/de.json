@@ -1644,7 +1644,9 @@
       "loraTargetModules": "Target Modules",
       "loraTargetModulesTooltip": "Komma-getrennt, z.B. q_proj,v_proj",
       "loraTargetModulesPlaceholder": "q_proj,v_proj",
-      "loraHint": "LoRA aktivieren um massiv RAM zu sparen — ideal für Modelle >1B Parameter. QLoRA (4-bit) reduziert den Bedarf um ~75%."
+      "loraHint": "LoRA aktivieren um massiv RAM zu sparen — ideal für Modelle >1B Parameter. QLoRA (4-bit) reduziert den Bedarf um ~75%.",
+      "maxEvalSamples": "Max Eval Samples",
+      "maxEvalSamplesTooltip": "0 = kompletten Eval-Split auswerten. Sonst nur die ersten N Beispiele — spart bei grossen Datasets viel Zeit."
     },
     "optimizerOptions": {
       "adamw": "AdamW",

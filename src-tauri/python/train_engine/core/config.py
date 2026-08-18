@@ -64,6 +64,9 @@ class TrainingConfig:
 
     # Evaluation & Speichern
     eval_steps: int = 500
+    # 0 = kompletten Eval-Split nutzen. Sonst nur die ersten N Beispiele —
+    # sonst kostet ein 40-Schritte-Testlauf eine Auswertung ueber 25.000 Zeilen.
+    max_eval_samples: int = 0
     eval_strategy: str = "epoch"
     save_steps: int = 500
     save_strategy: str = "epoch"

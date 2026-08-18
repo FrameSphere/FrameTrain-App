@@ -61,7 +61,7 @@ export interface TrainingConfig {
   // Regularisierung
   dropout: number; max_grad_norm: number; label_smoothing: number;
   // Evaluation & Saving
-  eval_strategy: string; eval_steps: number;
+  eval_strategy: string; eval_steps: number; max_eval_samples: number;
   save_steps: number; save_total_limit: number; logging_steps: number;
   seed: number;
   // Datenlader
@@ -137,7 +137,7 @@ export const DEFAULT_CONFIG: TrainingConfig = {
   optimizer: 'adamw', scheduler: 'linear',
   adam_beta1: 0.9, adam_beta2: 0.999, adam_epsilon: 1e-8,
   dropout: 0.1, max_grad_norm: 1.0, label_smoothing: 0.0,
-  eval_strategy: 'epoch', eval_steps: 500, save_steps: 500,
+  eval_strategy: 'epoch', eval_steps: 500, max_eval_samples: 0, save_steps: 500,
   save_total_limit: 3, logging_steps: 10, seed: 42,
   num_workers: 4, pin_memory: true,
   gradient_checkpointing: false, group_by_length: false,
@@ -529,6 +529,7 @@ ALLE VERFÜGBAREN METRIKEN (du kannst ALLE davon in deinem JSON verwenden):
 --- EVALUATION & SAVING ---
 - eval_strategy: "epoch"|"steps"|"no"
 - eval_steps: number (Eval alle N Schritte, wenn eval_strategy="steps")
+- max_eval_samples: number (Eval nur auf den ersten N Beispielen; 0 = alle)
 - save_steps: number (Checkpoint alle N Schritte)
 - save_total_limit: number (Max. gespeicherte Checkpoints)
 - logging_steps: number (Log alle N Schritte)
@@ -1580,6 +1581,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 <Field label={t('trainingPanel.fields.labelSmoothing')}><NumInput value={config.label_smoothing} onChange={v => updateConfig({ label_smoothing: v })} step={0.01} min={0} max={0.3} /></Field>
                 <Field label={t('trainingPanel.fields.warmupSteps')} tooltip={t('trainingPanel.fields.warmupStepsTooltip')}><NumInput value={config.warmup_steps} onChange={v => updateConfig({ warmup_steps: v })} min={0} step={10} /></Field>
                 <Field label={t('trainingPanel.fields.maxSteps')} tooltip={t('trainingPanel.fields.maxStepsTooltip')}><NumInput value={config.max_steps} onChange={v => updateConfig({ max_steps: v })} min={-1} step={100} /></Field>
+                <Field label={t('trainingPanel.fields.maxEvalSamples')} tooltip={t('trainingPanel.fields.maxEvalSamplesTooltip')}><NumInput value={config.max_eval_samples} onChange={v => updateConfig({ max_eval_samples: v })} min={0} step={100} /></Field>
                 <Field label={t('trainingPanel.fields.evalStrategy')}><SelectInput value={config.eval_strategy} onChange={v => updateConfig({ eval_strategy: v })} options={[{value:'epoch',label:t('trainingPanel.fields.evalStrategyEpoch')},{value:'steps',label:t('trainingPanel.fields.evalStrategySteps')},{value:'no',label:t('trainingPanel.fields.evalStrategyNone')}]} /></Field>
                 <Field label={t('trainingPanel.fields.evalSteps')} tooltip={t('trainingPanel.fields.evalStepsTooltip')}><NumInput value={config.eval_steps} onChange={v => updateConfig({ eval_steps: v })} min={1} step={100} /></Field>
                 <Field label={t('trainingPanel.fields.saveSteps')}><NumInput value={config.save_steps} onChange={v => updateConfig({ save_steps: v })} min={1} step={100} /></Field>

@@ -297,6 +297,22 @@ class Plugin(TrainPlugin):
             tokenize_fn, batched=True,
             remove_columns=train_raw.column_names
         )
+        # Eval-Split optional deckeln. Ohne das kostet ein kurzer Testlauf
+        # (Max Steps = 40) eine Auswertung ueber den kompletten Split — bei
+        # imdb sind das 25.000 Beispiele pro Evaluation.
+        max_eval = int(getattr(self.config, "max_eval_samples", 0) or 0)
+        if 0 < max_eval < len(eval_raw):
+            MessageProtocol.status(
+                "loading_data",
+                f"Eval-Split auf {max_eval} von {len(eval_raw)} Beispielen begrenzt "
+                "(Max Eval Samples).",
+            )
+            # Zufaellig ziehen, nicht die ersten N: viele Splits sind nach
+            # Label sortiert (imdb: erst 12.500x Klasse 0, dann Klasse 1).
+            # Ein Praefix haette nur eine Klasse enthalten — die Auswertung
+            # meldete dann Accuracy 0.0 statt eines brauchbaren Werts.
+            eval_raw = eval_raw.shuffle(seed=self.config.seed).select(range(max_eval))
+
         self.eval_dataset = eval_raw.map(
             tokenize_fn, batched=True,
             remove_columns=eval_raw.column_names
@@ -520,6 +536,21 @@ class Plugin(TrainPlugin):
                         learning_rate=lr,
                         metrics=extra_metrics,
                     )
+
+            def on_step_end(self, args, state, control, **kwargs):
+                # Eine Evaluation ueber einen grossen Split dauert laenger als
+                # das ganze Training mit Max Steps. Ohne diese Meldung stand
+                # der Fortschritt minutenlang still und sah aus wie ein Absturz.
+                if control.should_evaluate and plugin_ref.eval_dataset is not None:
+                    MessageProtocol.status(
+                        "evaluating",
+                        f"Evaluierung laeuft ueber {len(plugin_ref.eval_dataset)} "
+                        f"Beispiele - das kann bei grossen Datasets dauern.",
+                    )
+
+            def on_evaluate(self, args, state, control, **kwargs):
+                if not plugin_ref.is_stopped:
+                    MessageProtocol.status("training", "Evaluierung abgeschlossen, Training laeuft weiter.")
 
             def on_epoch_end(self, args, state, control, **kwargs):
                 if plugin_ref.is_stopped:

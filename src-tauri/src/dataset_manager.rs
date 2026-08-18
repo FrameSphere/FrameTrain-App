@@ -1857,6 +1857,58 @@ fn unique_file_name(dir: &Path, base: &str, extension: &str) -> String {
 ///
 /// Genau dieses Layout zeigt der Hilfe-Dialog beim lokalen Import; es wurde
 /// bisher trotzdem als "Kein Split" eingestuft.
+/// Holt die Zeilenzahlen je Split vom HuggingFace datasets-server.
+///
+/// Der `/parquet`-Endpunkt liefert nur Dateigroessen. Ohne die Zeilenzahlen
+/// zeigte die Dataset-Karte die Anzahl Dateien an — bei imdb also "1 / 0 / 1"
+/// statt "25000 / 0 / 25000". Schlaegt der Aufruf fehl, gibt es `None` und die
+/// Karte verhaelt sich wie bisher.
+async fn fetch_hf_split_sizes(
+    repo_id: &str,
+    selected: &[(HfParquetFile, String)],
+) -> Option<SplitInfo> {
+    if selected.is_empty() { return None; }
+    let url = format!(
+        "https://datasets-server.huggingface.co/size?dataset={}",
+        urlencoding::encode(repo_id)
+    );
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(&url)
+        .send().await.ok()?
+        .json().await.ok()?;
+    let splits = body.get("size")?.get("splits")?.as_array()?;
+
+    // Nur die Konfiguration zaehlen, aus der wir tatsaechlich Dateien geladen haben.
+    let used_config = selected.first().and_then(|(f, _)| f.config.clone());
+    let (mut train, mut val, mut test) = (0usize, 0usize, 0usize);
+    let mut found = false;
+    for entry in splits {
+        let cfg = entry.get("config").and_then(|v| v.as_str());
+        if let (Some(used), Some(cfg)) = (used_config.as_deref(), cfg) {
+            if used != cfg { continue; }
+        }
+        let name = entry.get("split").and_then(|v| v.as_str()).unwrap_or("");
+        let rows = entry.get("num_rows").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        // Nur Splits zaehlen, die wir auch heruntergeladen haben.
+        let dir = match map_hf_split(name) { Some(d) => d, None => continue };
+        if !selected.iter().any(|(_, d)| d == dir) { continue; }
+        match dir {
+            "train" => train += rows,
+            "val"   => val   += rows,
+            _        => test += rows,
+        }
+        found = true;
+    }
+    if !found || train + val + test == 0 { return None; }
+    let total = (train + val + test) as f64;
+    Some(SplitInfo {
+        train_count: train, val_count: val, test_count: test,
+        train_ratio: train as f64 / total,
+        val_ratio:   val as f64 / total,
+        test_ratio:  test as f64 / total,
+    })
+}
+
 /// Zaehlt die Datenzeilen einer zeilenbasierten Datei (CSV/TSV ohne Kopfzeile).
 /// Fuer Formate, die sich so nicht lesen lassen (z.B. Parquet), gibt es `None`.
 fn count_text_rows(path: &Path) -> Option<usize> {
@@ -2089,8 +2141,13 @@ async fn download_parquet_direct(
     let detected = detect_dataset_type(&target);
     let mut warnings = detected.warnings;
     warnings.append(&mut select_warnings);
+    // Zeilenzahlen je Split von HuggingFace nachladen. Ohne sie stand auf der
+    // Dataset-Karte "1 / 0 / 1" (Datei-Zahlen) statt "25000 / 0 / 25000" — der
+    // Nutzer konnte nicht erkennen, wie viele Daten er ueberhaupt hat.
+    let hf_split_info = fetch_hf_split_sizes(&repo_id, &selected).await;
+    let hf_status = if hf_split_info.is_some() { "split" } else { "unused" };
     let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
-        Some(repo_id), &target, total_size, file_count, "unused", None,
+        Some(repo_id), &target, total_size, file_count, hf_status, hf_split_info,
         detected.detected_type, detected.pairing_status, warnings);
     upsert_metadata(&datasets_dir, &info)?;
     if let Ok(db_path) = app_handle.path().app_data_dir().map(|p| p.join("frametrain.db")) {

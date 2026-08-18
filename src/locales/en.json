@@ -1644,7 +1644,9 @@
       "loraTargetModules": "Target Modules",
       "loraTargetModulesTooltip": "Comma-separated, e.g. q_proj,v_proj",
       "loraTargetModulesPlaceholder": "q_proj,v_proj",
-      "loraHint": "Enable LoRA to massively reduce RAM usage — ideal for models >1B parameters. QLoRA (4-bit) cuts requirements by ~75%."
+      "loraHint": "Enable LoRA to massively reduce RAM usage — ideal for models >1B parameters. QLoRA (4-bit) cuts requirements by ~75%.",
+      "maxEvalSamples": "Max Eval Samples",
+      "maxEvalSamplesTooltip": "0 = evaluate the full eval split. Otherwise only the first N examples — saves a lot of time on large datasets."
     },
     "optimizerOptions": {
       "adamw": "AdamW",

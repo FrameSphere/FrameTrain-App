@@ -384,8 +384,17 @@ pub fn save_full_analysis_data(
         .or(final_loss).unwrap_or(0.0);
     let sum_val_loss   = final_metrics.get("final_val_loss").and_then(|v| v.as_f64())
         .or(final_val);
-    let total_epochs   = config_json.get("epochs").and_then(|v| v.as_u64()).unwrap_or(0);
-    let total_steps    = step_logs.last().and_then(|l| l["step"].as_i64()).unwrap_or(0);
+    // Die Engine meldet die tatsaechlich durchlaufenen Epochen. Der Wert aus
+    // der Config ist nur der Plan — bei Max Steps bricht das Training mitten
+    // in der ersten Epoche ab, die Analyse behauptete trotzdem "3 Epochen".
+    let total_epochs   = final_metrics.get("total_epochs").and_then(|v| v.as_u64())
+        .or_else(|| config_json.get("epochs").and_then(|v| v.as_u64()))
+        .unwrap_or(0);
+    let total_steps    = final_metrics.get("total_steps").and_then(|v| v.as_i64())
+        .or_else(|| step_logs.last().and_then(|l| l["step"].as_i64()))
+        .unwrap_or(0);
+    // best_epoch kommt ebenfalls aus der Engine statt fest auf null zu stehen.
+    let best_epoch = final_metrics.get("best_epoch").and_then(|v| v.as_i64());
 
     // ── Config aufbereiten ───────────────────────────────────────────────────
     // Das tatsaechlich benutzte Geraet meldet die Engine. Die alte Ableitung
@@ -421,7 +430,7 @@ pub fn save_full_analysis_data(
             "final_val_loss":            sum_val_loss,
             "total_epochs":              total_epochs,
             "total_steps":               total_steps,
-            "best_epoch":                null,
+            "best_epoch":                best_epoch,
             "training_duration_seconds": duration_secs,
         },
         "config": config_json,

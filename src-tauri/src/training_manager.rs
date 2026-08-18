@@ -100,6 +100,8 @@ pub struct TrainingConfig {
     #[serde(default = "default_true")]         pub pin_memory: bool,
 
     #[serde(default = "default_eval_steps")]   pub eval_steps: u32,
+    /// 0 = kompletten Eval-Split nutzen, sonst nur die ersten N Beispiele.
+    #[serde(default)]                          pub max_eval_samples: u32,
     #[serde(default = "default_strategy")]     pub eval_strategy: String,
     #[serde(default = "default_eval_steps")]   pub save_steps: u32,
     #[serde(default = "default_strategy")]     pub save_strategy: String,
@@ -180,7 +182,7 @@ impl Default for TrainingConfig {
             lora_target_modules: vec!["query".to_string(), "value".to_string()],
             load_in_8bit: false, load_in_4bit: false,
             max_seq_length: 128, num_workers: 0, pin_memory: false,
-            eval_steps: 500, eval_strategy: "epoch".to_string(),
+            eval_steps: 500, max_eval_samples: 0, eval_strategy: "epoch".to_string(),
             save_steps: 500, save_strategy: "epoch".to_string(), save_total_limit: 3,
             logging_steps: 10, seed: 42,
             dataloader_drop_last: false, group_by_length: false, gradient_checkpointing: false,
