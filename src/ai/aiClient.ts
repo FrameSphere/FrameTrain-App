@@ -43,13 +43,28 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   return data?.content?.[0]?.text || '';
 }
 
+/**
+ * Modelle, die vor der Antwort unsichtbar "nachdenken".
+ *
+ * Ihre Reasoning-Tokens zaehlen gegen max_tokens, tauchen aber nicht in
+ * `content` auf. Ein knappes Budget (z.B. 20 Tokens fuer einen Chat-Titel)
+ * wird komplett vom Reasoning aufgebraucht — die Antwort kommt dann leer
+ * zurueck, ohne Fehler. Deshalb bekommen diese Modelle einen Aufschlag.
+ */
+const REASONING_MODEL_PATTERN = /gpt-oss|^o[1-9]([-.]|$)|qwen3|deepseek-r1|compound/i;
+const REASONING_RESERVE = 1024;
+
+export function effectiveMaxTokens(model: string, maxTokens: number): number {
+  return REASONING_MODEL_PATTERN.test(model) ? maxTokens + REASONING_RESERVE : maxTokens;
+}
+
 async function callOpenAICompat(url: string, apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      max_tokens: maxTokens,
+      max_tokens: effectiveMaxTokens(model, maxTokens),
       temperature,
       messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
     }),

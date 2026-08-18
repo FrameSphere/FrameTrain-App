@@ -1221,7 +1221,9 @@
       "labelsCategoryTitle": "Label problem in dataset",
       "labelsCategoryHint": "The label column does not contain enough distinct classes. Often a split without labels was imported (e.g. IMDB's 'unsupervised' split, where label is always -1). Re-import the dataset and use train/test.",
       "architectureCategoryTitle": "Architecture not supported",
-      "architectureCategoryHint": "This model is not an encoder for sequence classification. Use BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa or a related encoder model."
+      "architectureCategoryHint": "This model is not an encoder for sequence classification. Use BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa or a related encoder model.",
+      "showFull": "Show full error message",
+      "showLess": "Show less"
     }
   },
   "synapse": {

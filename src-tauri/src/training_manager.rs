@@ -435,6 +435,9 @@ impl Default for TrainingState {
 
 // ============ Hilfsfunktionen ============
 
+/// Interpreter-Auswahl fuer alle Trainingswege (auch Dev Train/Dev Test).
+pub fn resolve_python_path() -> String { get_python_path() }
+
 fn get_python_path() -> String {
     println!("[Python] Suche Python mit torch...");
 

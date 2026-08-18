@@ -65,7 +65,7 @@ export function getSession(id: string): TrainingSession | undefined {
 
 type ErrorCategory = 'memory' | 'dataset' | 'labels' | 'architecture' | 'packages' | 'cuda' | 'config' | 'code' | 'unknown';
 
-function analyzeError(errorMsg: string, t: (key: string) => string): { category: ErrorCategory; title: string; hint: string } {
+export function analyzeError(errorMsg: string, t: (key: string) => string): { category: ErrorCategory; title: string; hint: string } {
   const e = (errorMsg ?? '').toLowerCase();
   if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
     return { category: 'memory', title: t('trainingDashboard.errorRecovery.memoryCategoryTitle'), hint: t('trainingDashboard.errorRecovery.memoryCategoryHint') };
@@ -92,16 +92,31 @@ function analyzeError(errorMsg: string, t: (key: string) => string): { category:
       || e.includes('no gpu') || e.includes('device not found')
       || /device .*(unavailable|not available|mismatch)/.test(e))
     return { category: 'cuda', title: t('trainingDashboard.errorRecovery.cudaCategoryTitle'), hint: t('trainingDashboard.errorRecovery.cudaCategoryHint') };
-  if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
-    return { category: 'dataset', title: t('trainingDashboard.errorRecovery.datasetCategoryTitle'), hint: t('trainingDashboard.errorRecovery.datasetCategoryHint') };
   if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module')
       || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
     return { category: 'packages', title: t('trainingDashboard.errorRecovery.packagesCategoryTitle'), hint: t('trainingDashboard.errorRecovery.packagesCategoryHint') };
+
+  // Python-Fehlertypen VOR der Dataset-Pruefung. Ein Traceback aus einem
+  // Dev-Train-Script nennt fast immer DATASET_PATH — vorher wurde deshalb
+  // jeder NameError als "Dataset / Pfad Fehler" ausgegeben und der Nutzer
+  // suchte den Fehler im Dataset statt in seinem Code.
+  if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('nameerror')
+      || e.includes('typeerror') || e.includes('attributeerror') || e.includes('keyerror')
+      || e.includes('indexerror') || e.includes('unboundlocalerror')
+      || e.includes('zerodivisionerror') || e.includes('recursionerror'))
+    return { category: 'code', title: t('trainingDashboard.errorRecovery.codeCategoryTitle'), hint: t('trainingDashboard.errorRecovery.codeCategoryHint') };
+
+  // Nur echte Datei-/Dataset-Meldungen. Ein blosses "path" irgendwo im
+  // Traceback reicht nicht — das steht in jedem Python-Stacktrace.
+  if (e.includes('filenotfounderror') || e.includes('file not found')
+      || e.includes('no such file') || e.includes('dataset')
+      || e.includes('existiert nicht') || e.includes('keine daten-dateien')
+      || e.includes('permission denied') || e.includes('isadirectoryerror'))
+    return { category: 'dataset', title: t('trainingDashboard.errorRecovery.datasetCategoryTitle'), hint: t('trainingDashboard.errorRecovery.datasetCategoryHint') };
+
   // \b-Grenzen: sonst matchen deutsche Wörter wie "E**inf**ach" oder "Fi**nan**zen"
   if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
     return { category: 'config', title: t('trainingDashboard.errorRecovery.configCategoryTitle'), hint: t('trainingDashboard.errorRecovery.configCategoryHint') };
-  if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror'))
-    return { category: 'code', title: t('trainingDashboard.errorRecovery.codeCategoryTitle'), hint: t('trainingDashboard.errorRecovery.codeCategoryHint') };
   return { category: 'unknown', title: t('trainingDashboard.errorRecovery.unknownCategoryTitle'), hint: t('trainingDashboard.errorRecovery.unknownCategoryHint') };
 }
 
@@ -269,7 +284,10 @@ function ErrorRecoveryPanel({
   const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
+  const [errorExpanded, setErrorExpanded] = useState(false);
   const { category, title, hint } = analyzeError(errorMsg, t);
+  // Mehr als drei Zeilen? Dann lohnt der Aufklapp-Button.
+  const errorIsLong = errorMsg.split('\n').length > 3 || errorMsg.length > 240;
 
   // Fehler-Logs an das FrameTrain-Team senden
   const handleSendReport = async () => {
@@ -366,7 +384,25 @@ function ErrorRecoveryPanel({
 
       {/* Error text */}
       <div className="px-4 py-3 bg-black/20 border-b border-red-500/10">
-        <pre className="text-red-300/80 text-[10px] font-mono whitespace-pre-wrap line-clamp-3 leading-relaxed">{errorMsg}</pre>
+        {/* break-all: lange Dateipfade wurden sonst abgeschnitten statt umgebrochen,
+            wodurch der Python-Traceback unsichtbar blieb. */}
+        <pre
+          className={`text-red-300/80 text-[10px] font-mono whitespace-pre-wrap break-all leading-relaxed ${
+            errorExpanded ? 'max-h-72 overflow-y-auto' : 'line-clamp-3'
+          }`}
+        >
+          {errorMsg}
+        </pre>
+        {errorIsLong && (
+          <button
+            onClick={() => setErrorExpanded(v => !v)}
+            className="mt-2 text-[10px] text-red-300/70 hover:text-red-200 underline underline-offset-2"
+          >
+            {errorExpanded
+              ? t('trainingDashboard.errorRecovery.showLess')
+              : t('trainingDashboard.errorRecovery.showFull')}
+          </button>
+        )}
       </div>
 
       {/* Actions */}
@@ -523,11 +559,19 @@ export default function TrainingDashboard({
 
   eventsRef.current = events;
 
+  // Die Uhr laeuft nur, solange das Training laeuft. Vorher zaehlte sie auch
+  // nach einem Abbruch weiter — ein sofort gescheitertes Dev-Script zeigte so
+  // spaeter "Laufzeit 6h 43m".
+  const isTerminal =
+    job?.status === 'completed' || job?.status === 'failed' || job?.status === 'stopped';
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isTerminal) return;
+    setElapsed(Date.now() - startedAt);
     const id = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
     return () => clearInterval(id);
-  }, [isOpen, startedAt]);
+  }, [isOpen, startedAt, isTerminal]);
+
 
   useEffect(() => {
     if (!job) return;
@@ -605,6 +649,10 @@ export default function TrainingDashboard({
     return `${s}s`;
   };
 
+  // Wurde nie live gemessen (Dashboard erst nach dem Ende geoeffnet), ist eine
+  // Zahl geraten — dann lieber "—" zeigen als eine erfundene Laufzeit.
+  const durationLabel = isTerminal && elapsed === 0 ? '—' : formatDuration(elapsed);
+
   const eta = (() => {
     if (!progress || !isRunning || progress.progress_percent <= 1) return null;
     const elapsedSec = elapsed / 1000;
@@ -638,7 +686,7 @@ export default function TrainingDashboard({
           </p>
           {progress && (
             <p className="text-gray-500 text-[10px]">
-              {t('trainingDashboard.minimized.epochInfo').replace('{epoch}', String(progress.epoch)).replace('{total}', String(progress.total_epochs)).replace('{loss}', progress.train_loss?.toFixed(4) ?? '—').replace('{duration}', formatDuration(elapsed))}
+              {t('trainingDashboard.minimized.epochInfo').replace('{epoch}', String(progress.epoch)).replace('{total}', String(progress.total_epochs)).replace('{loss}', progress.train_loss?.toFixed(4) ?? '—').replace('{duration}', durationLabel)}
             </p>
           )}
         </div>
@@ -701,7 +749,7 @@ export default function TrainingDashboard({
               { label: t('trainingDashboard.metrics.trainLoss'), value: progress?.train_loss?.toFixed(4) ?? '—', sub: lossImprovement != null ? `${lossImprovement > 0 ? '↓' : '↑'} ${Math.abs(lossImprovement).toFixed(1)}% ${t('trainingDashboard.metrics.trainLossSub').replace('{dir}', '').replace('{pct}', '')}` : undefined, icon: <TrendingDown className="w-4 h-4" />, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
               { label: t('trainingDashboard.metrics.valLoss'),   value: progress?.val_loss?.toFixed(4) ?? '—', icon: <BarChart3 className="w-4 h-4" />, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
               { label: t('trainingDashboard.metrics.learningRate'), value: progress?.learning_rate?.toExponential(2) ?? (config?.learning_rate?.toExponential(2) ?? '—'), icon: <Zap className="w-4 h-4" />, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
-              { label: t('trainingDashboard.metrics.duration'),  value: formatDuration(elapsed), sub: eta ? t('trainingDashboard.metrics.eta').replace('{eta}', eta) : (isCompleted ? t('trainingDashboard.metrics.completed') : isStopped ? t('trainingDashboard.metrics.stopped') : undefined), icon: <Clock className="w-4 h-4" />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
+              { label: t('trainingDashboard.metrics.duration'),  value: durationLabel, sub: eta ? t('trainingDashboard.metrics.eta').replace('{eta}', eta) : (isCompleted ? t('trainingDashboard.metrics.completed') : isStopped ? t('trainingDashboard.metrics.stopped') : undefined), icon: <Clock className="w-4 h-4" />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
             ].map(m => (
               <div key={m.label} className={`p-4 rounded-xl border ${m.bg} space-y-1`}>
                 <div className={`flex items-center gap-1.5 ${m.color}`}>{m.icon}<span className="text-xs">{m.label}</span></div>

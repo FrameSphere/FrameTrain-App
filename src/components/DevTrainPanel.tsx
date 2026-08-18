@@ -2532,150 +2532,224 @@ function generateDefaultScript(model: ModelInfo | null, datasets: DatasetInfo[],
   const outputPathDefault  = outputPath.replace('<job_id>', 'dev_train').replace('{wird beim Start gesetzt}', 'dev_train');
 
   return `#!/usr/bin/env python3
-# FrameTrain – Dev Train Script
-# Passe dieses Template an dein Modell und Dataset an.
+# FrameTrain - Dev Train Script
+#
+# Dieses Template laeuft so wie es ist. Aendere es nach Belieben.
+# Fortschritt erscheint in FrameTrain, sobald eine JSON-Zeile mit
+# {"type": "progress", ...} auf stdout geschrieben wird - genau das macht
+# der FrameTrainCallback weiter unten.
 
+import json
 import os
 import sys
 from pathlib import Path
 
-# ── Pfade (von FrameTrain als ENV-Vars gesetzt) ─────────────────────────
+import numpy as np
+from datasets import load_from_disk, load_dataset
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
+)
+
+# -- Pfade (von FrameTrain als ENV-Vars gesetzt) --------------------------
 MODEL_PATH   = os.environ.get("MODEL_PATH",   "${modelPathDefault}")
 DATASET_PATH = os.environ.get("DATASET_PATH", "${datasetPathDefault}")
 OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${outputPathDefault}")
 
-# ── Imports ───────────────────────────────────────────────────────────────
-# TODO: Importiere torch, transformers, datasets, etc.
-# import torch
-# from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from datasets import load_from_disk, load_dataset
+# -- Hyperparameter -------------------------------------------------------
+EPOCHS      = 1
+BATCH_SIZE  = 8
+LR          = 2e-5
+MAX_LENGTH  = 128
+MAX_STEPS   = 60      # -1 = ganzes Dataset. Klein halten beim Ausprobieren.
+TEXT_COL    = None    # None = automatisch erkennen
+LABEL_COL   = None    # None = automatisch erkennen
 
-# ── Dataset laden ─────────────────────────────────────────────────────────
+
+def emit(kind: str, **data):
+    """Sendet ein Event an FrameTrain (eine JSON-Zeile pro Event)."""
+    print(json.dumps({"type": kind, "data": data}), flush=True)
+
+
+# -- Dataset laden --------------------------------------------------------
 def load_frametrain_dataset(path: str):
     """
-    FrameTrain liefert DATASET_PATH meistens als lokalen Ordner.
-    - Wenn das Dataset via datasets.Dataset(Dict).save_to_disk() gespeichert wurde:
-      => load_from_disk(path) benutzen.
-    - Sonst versuchen wir JSON/JSONL/CSV/TSV Dateien im Ordner zu finden und mit load_dataset(...) zu laden.
+    FrameTrain liefert DATASET_PATH als lokalen Ordner.
+    - save_to_disk-Dataset  -> load_from_disk(path)
+    - sonst: JSON/JSONL/CSV/TSV/Parquet im Split-Layout train/ val/ test/
     """
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"DATASET_PATH existiert nicht: {path}")
 
-    # HuggingFace save_to_disk Marker
-    if p.is_dir() and ((p / "dataset_info.json").exists() or (p / "state.json").exists() or (p / "dataset_dict.json").exists()):
+    if p.is_dir() and any((p / m).exists() for m in
+                          ("dataset_info.json", "state.json", "dataset_dict.json")):
         return load_from_disk(str(p))
 
-    # FrameTrain Split-Ordner Struktur:
-    #   <DATASET_PATH>/train/train.json
-    #   <DATASET_PATH>/val/validation.json
-    #   <DATASET_PATH>/test/test.json
-    if p.is_dir():
-        def pick_file(*parts: str):
-            f = p.joinpath(*parts)
-            return f if f.exists() else None
+    EXTS = (".json", ".jsonl", ".csv", ".tsv", ".parquet")
 
-        train_f = pick_file("train", "train.json") or pick_file("train", "train.jsonl") or pick_file("train", "train.csv") or pick_file("train", "train.tsv")
-        val_f   = pick_file("val", "validation.json") or pick_file("val", "val.json") or pick_file("val", "validation.jsonl") or pick_file("val", "validation.csv") or pick_file("val", "validation.tsv")
-        test_f  = pick_file("test", "test.json") or pick_file("test", "test.jsonl") or pick_file("test", "test.csv") or pick_file("test", "test.tsv")
+    def files_in(sub: str):
+        d = p / sub
+        if not d.is_dir():
+            return []
+        return sorted(f for f in d.rglob("*") if f.suffix.lower() in EXTS)
 
-        if train_f:
-            data_files = {"train": str(train_f)}
-            if val_f:  data_files["validation"] = str(val_f)
-            if test_f: data_files["test"] = str(test_f)
+    data_files = {}
+    for split, sub_names in (("train", ["train"]),
+                             ("validation", ["val", "validation"]),
+                             ("test", ["test"])):
+        for sub in sub_names:
+            found = files_in(sub)
+            if found:
+                data_files[split] = [str(f) for f in found]
+                break
 
-            ext = train_f.suffix.lower()
-            if ext in [".json", ".jsonl"]:
-                return load_dataset("json", data_files=data_files)
-            if ext == ".tsv":
-                return load_dataset("csv", data_files=data_files, delimiter="\\t")
-            return load_dataset("csv", data_files=data_files)
+    if not data_files:
+        loose = sorted(f for f in p.rglob("*") if f.suffix.lower() in EXTS)
+        if not loose:
+            raise RuntimeError(f"Keine Daten-Dateien in {path} gefunden.")
+        data_files["train"] = [str(f) for f in loose]
 
-    # Dateien im Ordner suchen (train/validation/test.*)
-    if p.is_dir():
-        files = list(p.rglob("*.json")) + list(p.rglob("*.jsonl")) + list(p.rglob("*.csv")) + list(p.rglob("*.tsv"))
-        if not files:
-            raise RuntimeError(
-                "Konnte keine Daten-Dateien im DATASET_PATH finden. "
-                "Wenn es ein gespeichertes HF-Dataset ist, stelle sicher dass dataset_info.json/state.json vorhanden ist."
-            )
+    ext = Path(data_files["train"][0]).suffix.lower()
+    if ext in (".json", ".jsonl"):
+        return load_dataset("json", data_files=data_files)
+    if ext == ".parquet":
+        return load_dataset("parquet", data_files=data_files)
+    if ext == ".tsv":
+        return load_dataset("csv", data_files=data_files, delimiter="\\t")
+    return load_dataset("csv", data_files=data_files)
 
-        # Heuristik: train/validation/test nach Dateinamen
-        def pick(split: str):
-            for f in files:
-                name = f.name.lower()
-                if split in name:
-                    return f
-            return None
 
-        train_f = pick("train")
-        val_f   = pick("valid") or pick("val") or pick("validation")
-        test_f  = pick("test")
+def pick_columns(ds):
+    """Text- und Label-Spalte erraten, falls nicht oben festgelegt."""
+    cols = list(ds.features.keys())
+    text = TEXT_COL or next(
+        (c for c in ("text", "sentence", "content", "review", "input") if c in cols),
+        None,
+    )
+    label = LABEL_COL or next(
+        (c for c in ("label", "labels", "target", "class") if c in cols), None
+    )
+    if text is None or label is None:
+        raise RuntimeError(
+            f"Text-/Label-Spalte nicht gefunden. Vorhanden: {cols}. "
+            "Setze TEXT_COL / LABEL_COL oben im Script."
+        )
+    return text, label
 
-        data_files = {}
-        if train_f: data_files["train"] = str(train_f)
-        if val_f:   data_files["validation"] = str(val_f)
-        if test_f:  data_files["test"] = str(test_f)
-        if not data_files:
-            # Fallback: alles als train
-            data_files["train"] = [str(f) for f in files]
 
-        # Loader nach Extension wählen
-        ext = (train_f or val_f or test_f or files[0]).suffix.lower()
-        if ext in [".json", ".jsonl"]:
-            return load_dataset("json", data_files=data_files)
-        if ext == ".csv":
-            return load_dataset("csv", data_files=data_files)
-        if ext == ".tsv":
-            return load_dataset("csv", data_files=data_files, delimiter="\\t")
+emit("status", stage="loading", message="Dataset wird geladen ...")
+dataset = load_frametrain_dataset(DATASET_PATH)
+print("Dataset geladen:", dataset, flush=True)
 
-    # Wenn path eine Datei ist
-    if p.is_file():
-        ext = p.suffix.lower()
-        if ext in [".json", ".jsonl"]:
-            return load_dataset("json", data_files=str(p))
-        if ext == ".csv":
-            return load_dataset("csv", data_files=str(p))
-        if ext == ".tsv":
-            return load_dataset("csv", data_files=str(p), delimiter="\\t")
+train_ds = dataset["train"]
+eval_ds = dataset.get("validation") or dataset.get("test")
+if eval_ds is None:
+    split = train_ds.train_test_split(test_size=0.1, seed=42)
+    train_ds, eval_ds = split["train"], split["test"]
 
-    raise RuntimeError(f"Unbekanntes Dataset-Format: {path}")
+text_col, label_col = pick_columns(train_ds)
+num_labels = len(set(train_ds[label_col]))
+if num_labels < 2:
+    raise RuntimeError(
+        f"Label-Spalte '{label_col}' hat nur einen Wert - damit laesst sich "
+        "keine Klassifikation trainieren."
+    )
+print(f"Spalten: text='{text_col}', label='{label_col}', Klassen={num_labels}", flush=True)
 
-try:
-    dataset = load_frametrain_dataset(DATASET_PATH)
-    print("✅ Dataset geladen:", dataset)
-except Exception as e:
-    print(f"❌ Fehler beim Laden des Datasets: {e}")
-    exit(1)
+# -- Modell & Tokenizer ---------------------------------------------------
+emit("status", stage="loading", message="Modell wird geladen ...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_PATH, num_labels=num_labels
+)
+print(f"Modell geladen von {MODEL_PATH}", flush=True)
 
-# ── Modell & Tokenizer ────────────────────────────────────────────────────
-try:
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH, num_labels=2)
-    print(f"✅ Modell und Tokenizer geladen von {MODEL_PATH}")
-except Exception as e:
-    print(f"❌ Fehler beim Laden des Modells oder Tokenizers: {e}")
-    exit(1)
 
-# ── Training ──────────────────────────────────────────────────────────────
-num_epochs = 5  # Definiere die Anzahl der Epochen
-for epoch in range(num_epochs):
-    for batch in dataset:
-        # forward pass
-        # loss berechnen
-        # backward pass
-        # optimizer step
+def tokenize(batch):
+    return tokenizer(batch[text_col], truncation=True, max_length=MAX_LENGTH)
 
-# ── Metriken ──────────────────────────────────────────────────────────────
-# TODO: Berechne Metriken (Loss, Accuracy, etc.)
-# train_loss = ...
-# val_loss = ...
 
-# ── Speichern ─────────────────────────────────────────────────────────────
-# TODO: Speichere Modell und Tokenizer
-# model.save_pretrained(OUTPUT_PATH)
-# tokenizer.save_pretrained(OUTPUT_PATH)
+keep = {label_col}
+train_tok = train_ds.map(tokenize, batched=True,
+                         remove_columns=[c for c in train_ds.column_names if c not in keep])
+eval_tok = eval_ds.map(tokenize, batched=True,
+                       remove_columns=[c for c in eval_ds.column_names if c not in keep])
+if label_col != "labels":
+    train_tok = train_tok.rename_column(label_col, "labels")
+    eval_tok = eval_tok.rename_column(label_col, "labels")
 
-print("✅ Skript abgeschlossen!")
+
+# -- Fortschritt an FrameTrain melden -------------------------------------
+class FrameTrainCallback(TrainerCallback):
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        emit(
+            "progress",
+            epoch=int(state.epoch or 0),
+            total_epochs=EPOCHS,
+            step=state.global_step,
+            total_steps=state.max_steps or 0,
+            train_loss=logs.get("loss"),
+            val_loss=logs.get("eval_loss"),
+            learning_rate=logs.get("learning_rate", LR),
+        )
+
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+    return {"accuracy": float((preds == labels).mean())}
+
+
+args = TrainingArguments(
+    output_dir=OUTPUT_PATH,
+    num_train_epochs=EPOCHS,
+    max_steps=MAX_STEPS,
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=BATCH_SIZE,
+    learning_rate=LR,
+    logging_steps=5,
+    eval_strategy="no" if MAX_STEPS > 0 else "epoch",
+    save_strategy="no",
+    report_to=[],
+    disable_tqdm=True,
+)
+
+trainer = Trainer(
+    model=model,
+    args=args,
+    train_dataset=train_tok,
+    eval_dataset=eval_tok,
+    data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
+    compute_metrics=compute_metrics,
+    callbacks=[FrameTrainCallback()],
+)
+
+emit("status", stage="training", message="Training laeuft ...")
+trainer.train()
+
+metrics = trainer.evaluate()
+print("Eval:", metrics, flush=True)
+
+# -- Speichern ------------------------------------------------------------
+model.save_pretrained(OUTPUT_PATH)
+tokenizer.save_pretrained(OUTPUT_PATH)
+print(f"Modell gespeichert unter {OUTPUT_PATH}", flush=True)
+
+emit(
+    "complete",
+    model_path=OUTPUT_PATH,
+    final_metrics={
+        "accuracy": metrics.get("eval_accuracy"),
+        "val_loss": metrics.get("eval_loss"),
+        "total_epochs": EPOCHS,
+    },
+)
 `;
 }

@@ -454,6 +454,10 @@ class Plugin(TrainPlugin):
             * self.config.epochs
             // max(self.config.gradient_accumulation_steps, 1)
         )
+        # Max Steps deckelt die Gesamtzahl — sonst zeigt die UI "Step 20 / 9375",
+        # obwohl das Training nach 60 Schritten endet.
+        if int(self.config.max_steps) > 0:
+            total_steps = int(self.config.max_steps)
 
         # ── Progress-Callback ──────────────────────────────────────────────
         plugin_ref = self
@@ -467,6 +471,9 @@ class Plugin(TrainPlugin):
                 if plugin_ref.is_stopped:
                     control.should_training_stop = True
                     return
+                # Der Trainer kennt die tatsaechliche Schrittzahl am genauesten
+                # (beruecksichtigt drop_last, max_steps, verteiltes Training).
+                nonlocal_total = getattr(state, "max_steps", 0)
 
                 # Eval-Logs und Train-Logs separat behandeln
                 is_eval = "eval_loss" in logs
@@ -483,7 +490,7 @@ class Plugin(TrainPlugin):
                         epoch=int(state.epoch or 0),
                         total_epochs=plugin_ref.config.epochs,
                         step=state.global_step,
-                        total_steps=total_steps,
+                        total_steps=nonlocal_total or total_steps,
                         train_loss=plugin_ref._last_train_loss,
                         val_loss=v_loss,
                         learning_rate=plugin_ref._last_lr,
@@ -507,7 +514,7 @@ class Plugin(TrainPlugin):
                         epoch=epoch,
                         total_epochs=plugin_ref.config.epochs,
                         step=step,
-                        total_steps=total_steps,
+                        total_steps=nonlocal_total or total_steps,
                         train_loss=t_loss,
                         val_loss=None,
                         learning_rate=lr,
@@ -528,16 +535,48 @@ class Plugin(TrainPlugin):
 
         # warmup: ratio hat Vorrang, steps nur wenn ratio=0
         warmup_steps = self.config.warmup_steps if self.config.warmup_ratio == 0 else 0
+        warmup_ratio = self.config.warmup_ratio if warmup_steps == 0 else 0.0
 
-        training_args = TrainingArguments(
+        # Optimizer-Name der UI auf HuggingFace-Bezeichner abbilden.
+        # Ohne diese Zuordnung lief jedes Training stillschweigend mit AdamW,
+        # egal was in der UI ausgewaehlt war.
+        optim_name = {
+            "adamw": "adamw_torch",
+            "adam": "adamw_torch",   # HF kennt kein reines Adam; AdamW ist der Ersatz
+            "sgd": "sgd",
+            "adafactor": "adafactor",
+        }.get(str(self.config.optimizer).lower(), "adamw_torch")
+
+        # max_steps: HuggingFace ueberschreibt damit num_train_epochs.
+        # -1 (Default) = alle Epochen durchlaufen.
+        max_steps = int(self.config.max_steps) if int(self.config.max_steps) > 0 else -1
+
+        # eval_steps nur sinnvoll, wenn schrittbasiert evaluiert wird
+        eval_steps = (
+            max(int(self.config.eval_steps), 1)
+            if str(self.config.eval_strategy).lower() == "steps"
+            else None
+        )
+
+        # TrainingArguments-Felder aendern sich zwischen transformers-Versionen
+        # (5.x hat z.B. group_by_length entfernt). Unbekannte Argumente werden
+        # daher verworfen statt das Training mit einem TypeError abzubrechen.
+        ta_kwargs = dict(
             output_dir=str(output_dir),
             num_train_epochs=self.config.epochs,
+            max_steps=max_steps,
             per_device_train_batch_size=self.config.batch_size,
             per_device_eval_batch_size=self.config.batch_size,
             gradient_accumulation_steps=self.config.gradient_accumulation_steps,
             learning_rate=self.config.learning_rate,
             weight_decay=self.config.weight_decay,
             warmup_steps=warmup_steps,
+            warmup_ratio=warmup_ratio,
+            optim=optim_name,
+            adam_beta1=self.config.adam_beta1,
+            adam_beta2=self.config.adam_beta2,
+            adam_epsilon=self.config.adam_epsilon,
+            group_by_length=self.config.group_by_length,
             lr_scheduler_type=self.config.scheduler,
             max_grad_norm=self.config.max_grad_norm,
             label_smoothing_factor=self.config.label_smoothing,
@@ -545,6 +584,7 @@ class Plugin(TrainPlugin):
             bf16=use_bf16,
             gradient_checkpointing=self.config.gradient_checkpointing,
             eval_strategy=self.config.eval_strategy,
+            **({"eval_steps": eval_steps} if eval_steps is not None else {}),
             # Checkpointing: immer steps-basiert damit stop_training() einen
             # Checkpoint findet, auch wenn keine Epoche abgeschlossen wurde.
             # save_total_limit=2: aktuellsten + einen Backup halten,
@@ -563,6 +603,21 @@ class Plugin(TrainPlugin):
             disable_tqdm=True,
             load_best_model_at_end=False,  # False weil save_strategy != eval_strategy
         )
+
+        import inspect as _inspect
+        _supported = set(_inspect.signature(TrainingArguments.__init__).parameters)
+        _dropped = sorted(k for k in ta_kwargs if k not in _supported)
+        if _dropped:
+            MessageProtocol.status(
+                "training",
+                "Hinweis: diese Einstellungen kennt die installierte "
+                f"transformers-Version ({__import__('transformers').__version__}) "
+                f"nicht und werden ignoriert: {', '.join(_dropped)}",
+            )
+            for k in _dropped:
+                ta_kwargs.pop(k, None)
+
+        training_args = TrainingArguments(**ta_kwargs)
 
         data_collator = DataCollatorWithPadding(
             tokenizer=self.tokenizer,
@@ -617,6 +672,16 @@ class Plugin(TrainPlugin):
 
         duration = int(time.time() - self._start_time)
 
+        # Tatsaechlich durchlaufene Epochen. Bei Max Steps bricht das Training
+        # mitten in einer Epoche ab — die Analyse-Seite meldete dann trotzdem
+        # die geplanten 3 Epochen.
+        epochs_done = getattr(self._trainer.state, "epoch", None)
+        total_epochs = (
+            max(1, round(float(epochs_done)))
+            if epochs_done is not None
+            else self.config.epochs
+        )
+
         return {
             "final_train_loss": float(train_loss),
             "final_val_loss":   float(eval_result.get("eval_loss", 0.0)),
@@ -624,7 +689,7 @@ class Plugin(TrainPlugin):
             "f1":               float(eval_result.get("eval_f1", 0.0)),
             "precision":        float(eval_result.get("eval_precision", 0.0)),
             "recall":           float(eval_result.get("eval_recall", 0.0)),
-            "total_epochs":     self.config.epochs,
+            "total_epochs":     int(total_epochs),
             "total_steps":      total_steps,
             "best_epoch":       best_epoch,
             "training_duration_seconds": duration,

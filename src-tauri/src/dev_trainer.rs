@@ -79,19 +79,14 @@ fn registry_stop(reg: &StdMutex<DevProcEntry>) {
     if let Some(pid) = pid { kill_process_tree(pid); }
 }
 
-// Gleiche Python-Pfad-Erkennung wie training_manager
+// Dieselbe Python-Auswahl wie das normale Training.
+//
+// Vorher nahm der Dev-Trainer schlicht das erste `python3` auf dem PATH — ohne
+// zu pruefen, ob dort ueberhaupt torch installiert ist. Ein Script, das im
+// normalen Training laeuft, starb im Dev-Train mit ModuleNotFoundError, weil
+// beide Wege unterschiedliche Interpreter benutzten.
 fn get_python_path() -> String {
-    let candidates = if cfg!(target_os = "windows") {
-        vec!["python", "python3"]
-    } else {
-        vec!["python3", "python"]
-    };
-    for cmd in &candidates {
-        if Command::new(cmd).arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
-            return cmd.to_string();
-        }
-    }
-    "python3".to_string()
+    crate::training_manager::resolve_python_path()
 }
 
 /// Startet ein user-geschriebenes Python-Script.
@@ -166,6 +161,10 @@ pub async fn start_dev_training(
 
         // Env-Variablen setzen
         cmd.env("OUTPUT_PATH", &out_p);
+        // Ohne das puffert Python seine Ausgabe blockweise, sobald stdout eine
+        // Pipe ist: Der Nutzer sieht waehrend des gesamten Laufs nichts und
+        // bekommt alle print()-Zeilen erst am Ende auf einmal.
+        cmd.env("PYTHONUNBUFFERED", "1");
         for (k, v) in &env_vars {
             cmd.env(k, v);
         }
@@ -189,11 +188,12 @@ pub async fn start_dev_training(
         // (also die einzige verwertbare Information) war nirgends zu sehen.
         let stderr_tail: std::sync::Arc<StdMutex<Vec<String>>> =
             std::sync::Arc::new(StdMutex::new(Vec::new()));
+        let mut stderr_handle: Option<thread::JoinHandle<()>> = None;
         if let Some(stderr) = child.stderr.take() {
             let jid2 = jid.clone();
             let ah2  = ah.clone();
             let tail = std::sync::Arc::clone(&stderr_tail);
-            thread::spawn(move || {
+            stderr_handle = Some(thread::spawn(move || {
                 for line in BufReader::new(stderr).lines().flatten() {
                     eprintln!("[DevTrain STDERR] {}", line);
                     if let Ok(mut t) = tail.lock() {
@@ -205,7 +205,7 @@ pub async fn start_dev_training(
                         "job_id": jid2, "line": format!("[ERR] {}", line)
                     }));
                 }
-            });
+            }));
         }
 
         let mut json_error = false;
@@ -261,6 +261,10 @@ pub async fn start_dev_training(
         }
 
         let status = child.wait().ok();
+        // Auf den stderr-Leser warten, bevor der Tail gelesen wird — sonst
+        // meldet die App "keine Fehlerausgabe erhalten", obwohl der Traceback
+        // nur noch im Puffer stand.
+        if let Some(h) = stderr_handle { let _ = h.join(); }
         let success = status.map(|s| s.success()).unwrap_or(false);
         let was_stopped = registry_clear(&DEV_TRAIN_PROC);
 
@@ -375,6 +379,7 @@ pub async fn start_dev_test(
            .stderr(Stdio::piped());
 
         cmd.env("OUTPUT_PATH", &out_p);
+        cmd.env("PYTHONUNBUFFERED", "1");
         for (k, v) in &env_vars {
             cmd.env(k, v);
         }
@@ -396,11 +401,12 @@ pub async fn start_dev_test(
         // Stderr: loggen, als Output-Event senden, letzte Zeilen für Fehlerdetails sammeln
         let stderr_tail: std::sync::Arc<StdMutex<Vec<String>>> =
             std::sync::Arc::new(StdMutex::new(Vec::new()));
+        let mut stderr_handle: Option<thread::JoinHandle<()>> = None;
         if let Some(stderr) = child.stderr.take() {
             let jid2 = jid.clone();
             let ah2  = ah.clone();
             let tail = std::sync::Arc::clone(&stderr_tail);
-            thread::spawn(move || {
+            stderr_handle = Some(thread::spawn(move || {
                 for line in BufReader::new(stderr).lines().flatten() {
                     eprintln!("[DevTest STDERR] {}", line);
                     let _ = ah2.emit("dev-test-output", serde_json::json!({
@@ -411,7 +417,7 @@ pub async fn start_dev_test(
                         if v.len() > 30 { let n = v.len() - 30; v.drain(0..n); }
                     }
                 }
-            });
+            }));
         }
 
         if let Some(stdout) = child.stdout.take() {
@@ -424,6 +430,7 @@ pub async fn start_dev_test(
         }
 
         let status = child.wait().ok();
+        if let Some(h) = stderr_handle { let _ = h.join(); }
         let exit_code = status.and_then(|s| s.code()).unwrap_or(-1);
         let was_stopped = registry_clear(&DEV_TEST_PROC);
 
@@ -440,7 +447,14 @@ pub async fn start_dev_test(
                     "job_id": jid,
                     "exit_code": exit_code,
                     "data": {
-                        "error": format!("Script beendet mit Exit-Code {}", exit_code),
+                        "error": if details.is_empty() {
+                            format!(
+                                "Script beendet mit Exit-Code {} — keine Fehlerausgabe erhalten.",
+                                exit_code
+                            )
+                        } else {
+                            format!("Script beendet mit Exit-Code {}.\n\n{}", exit_code, details)
+                        },
                         "details": details
                     }
                 }));

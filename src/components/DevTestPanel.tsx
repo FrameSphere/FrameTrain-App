@@ -920,67 +920,140 @@ function generateDefaultTestScript(model: ModelInfo | null, datasets: DatasetInf
   const outputPathDefault  = outputPath.replace('<job_id>', 'dev_test').replace('{wird beim Start gesetzt}', 'dev_test');
 
   return `#!/usr/bin/env python3
-# FrameTrain – Dev Test Script
-# Eigenes Inference- / Evaluierungs-Skript
+# FrameTrain - Dev Test Script
+#
+# Laeuft so wie es ist: laedt Modell + Test-Split, macht Inference und
+# schreibt einen Bericht nach OUTPUT_PATH/results.json.
 
-import os
 import json
+import os
 from pathlib import Path
 
-# ── Pfade (von FrameTrain als ENV-Vars gesetzt) ─────────────────────────
+import numpy as np
+import torch
+from datasets import load_from_disk, load_dataset
+from sklearn.metrics import classification_report, confusion_matrix
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+# -- Pfade (von FrameTrain als ENV-Vars gesetzt) --------------------------
 MODEL_PATH   = os.environ.get("MODEL_PATH",   "${modelPathDefault}")
 DATASET_PATH = os.environ.get("DATASET_PATH", "${datasetPathDefault}")
 OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${outputPathDefault}")
 
-# ── Imports ───────────────────────────────────────────────────────────────
-# TODO: Importiere Bibliotheken nach Bedarf
-# import torch
-# from transformers import AutoModelForSequenceClassification, AutoTokenizer
-# from datasets import load_from_disk, load_dataset
-# import numpy as np
-# from sklearn.metrics import classification_report, confusion_matrix
+BATCH_SIZE = 16
+MAX_LENGTH = 128
+MAX_SAMPLES = 500   # None = alles auswerten
+TEXT_COL   = None   # None = automatisch erkennen
+LABEL_COL  = None   # None = automatisch erkennen
 
-# ── Modell & Tokenizer laden ──────────────────────────────────────────────
-print(f"✅ Lade Modell aus: {MODEL_PATH}")
-# tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-# model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-# model.eval()
 
-# ── Dataset laden ─────────────────────────────────────────────────────────
-print(f"✅ Lade Dataset aus: {DATASET_PATH}")
-# dataset = load_from_disk(DATASET_PATH)  # oder load_dataset(...)
-# test_data = dataset["test"]  # oder dataset["validation"]
+def load_frametrain_dataset(path: str):
+    """Laedt ein FrameTrain-Dataset (save_to_disk oder Split-Ordner)."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"DATASET_PATH existiert nicht: {path}")
 
-# ── Inference ────────────────────────────────────────────────────────────
-# Beispiel: einzelner Text
-# texts = ["Das ist ein Testtext.", "Noch ein Beispiel."]
-# inputs = tokenizer(texts, return_tensors="pt", truncation=True, padding=True)
-# with torch.no_grad():
-#     outputs = model(**inputs)
-# predictions = outputs.logits.argmax(dim=-1).tolist()
-# print("Predictions:", predictions)
+    if p.is_dir() and any((p / m).exists() for m in
+                          ("dataset_info.json", "state.json", "dataset_dict.json")):
+        return load_from_disk(str(p))
 
-# ── Batch-Evaluation ─────────────────────────────────────────────────────
-# all_preds = []
-# all_labels = []
-# for example in test_data:
-#     inputs = tokenizer(example["text"], return_tensors="pt", truncation=True, padding=True)
-#     with torch.no_grad():
-#         outputs = model(**inputs)
-#     pred = outputs.logits.argmax(dim=-1).item()
-#     all_preds.append(pred)
-#     all_labels.append(example["label"])
-#
-# print(classification_report(all_labels, all_preds))
+    EXTS = (".json", ".jsonl", ".csv", ".tsv", ".parquet")
 
-# ── Ergebnisse speichern ──────────────────────────────────────────────────
-# Path(OUTPUT_PATH).mkdir(parents=True, exist_ok=True)
-# results = {"predictions": all_preds, "labels": all_labels}
-# with open(f"{OUTPUT_PATH}/results.json", "w") as f:
-#     json.dump(results, f, indent=2)
-# print(f"✅ Ergebnisse gespeichert: {OUTPUT_PATH}/results.json")
+    def files_in(sub: str):
+        d = p / sub
+        return sorted(f for f in d.rglob("*") if f.suffix.lower() in EXTS) if d.is_dir() else []
 
-print("✅ Test-Skript abgeschlossen!")
+    data_files = {}
+    for split, subs in (("train", ["train"]),
+                        ("validation", ["val", "validation"]),
+                        ("test", ["test"])):
+        for sub in subs:
+            found = files_in(sub)
+            if found:
+                data_files[split] = [str(f) for f in found]
+                break
+
+    if not data_files:
+        loose = sorted(f for f in p.rglob("*") if f.suffix.lower() in EXTS)
+        if not loose:
+            raise RuntimeError(f"Keine Daten-Dateien in {path} gefunden.")
+        data_files["train"] = [str(f) for f in loose]
+
+    ext = Path(next(iter(data_files.values()))[0]).suffix.lower()
+    if ext in (".json", ".jsonl"):
+        return load_dataset("json", data_files=data_files)
+    if ext == ".parquet":
+        return load_dataset("parquet", data_files=data_files)
+    if ext == ".tsv":
+        return load_dataset("csv", data_files=data_files, delimiter="\\t")
+    return load_dataset("csv", data_files=data_files)
+
+
+print(f"Lade Dataset aus: {DATASET_PATH}", flush=True)
+dataset = load_frametrain_dataset(DATASET_PATH)
+
+# Bevorzugt der Test-Split, sonst validation, sonst train.
+eval_ds = dataset.get("test") or dataset.get("validation") or dataset["train"]
+
+cols = list(eval_ds.features.keys())
+text_col = TEXT_COL or next(
+    (c for c in ("text", "sentence", "content", "review", "input") if c in cols), None)
+label_col = LABEL_COL or next(
+    (c for c in ("label", "labels", "target", "class") if c in cols), None)
+if text_col is None:
+    raise RuntimeError(f"Text-Spalte nicht gefunden. Vorhanden: {cols}. Setze TEXT_COL oben.")
+
+if MAX_SAMPLES and len(eval_ds) > MAX_SAMPLES:
+    eval_ds = eval_ds.select(range(MAX_SAMPLES))
+print(f"Auswertung auf {len(eval_ds)} Beispielen (Spalte '{text_col}')", flush=True)
+
+print(f"Lade Modell aus: {MODEL_PATH}", flush=True)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+model.eval()
+
+device = (
+    "cuda" if torch.cuda.is_available()
+    else "mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    else "cpu"
+)
+model.to(device)
+print(f"Geraet: {device}", flush=True)
+
+# -- Inference ------------------------------------------------------------
+all_preds = []
+texts = eval_ds[text_col]
+for start in range(0, len(texts), BATCH_SIZE):
+    batch = texts[start:start + BATCH_SIZE]
+    inputs = tokenizer(batch, return_tensors="pt", truncation=True,
+                       padding=True, max_length=MAX_LENGTH).to(device)
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    all_preds.extend(logits.argmax(dim=-1).cpu().tolist())
+    print(f"  {min(start + BATCH_SIZE, len(texts))}/{len(texts)} ausgewertet", flush=True)
+
+results = {"predictions": all_preds, "n": len(all_preds), "device": device}
+
+# -- Bericht, falls Labels vorhanden --------------------------------------
+if label_col is not None:
+    all_labels = list(eval_ds[label_col])
+    acc = float(np.mean(np.array(all_preds) == np.array(all_labels)))
+    print(f"\\nAccuracy: {acc:.4f}\\n", flush=True)
+    print(classification_report(all_labels, all_preds, zero_division=0), flush=True)
+    print("Confusion Matrix:", flush=True)
+    print(confusion_matrix(all_labels, all_preds), flush=True)
+    results["labels"] = all_labels
+    results["accuracy"] = acc
+    results["report"] = classification_report(
+        all_labels, all_preds, zero_division=0, output_dict=True)
+else:
+    print("Keine Label-Spalte gefunden - nur Vorhersagen, keine Metriken.", flush=True)
+
+# -- Speichern ------------------------------------------------------------
+Path(OUTPUT_PATH).mkdir(parents=True, exist_ok=True)
+with open(f"{OUTPUT_PATH}/results.json", "w") as f:
+    json.dump(results, f, indent=2)
+print(f"Ergebnisse gespeichert: {OUTPUT_PATH}/results.json", flush=True)
 `;
 }
 

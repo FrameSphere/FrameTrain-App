@@ -1857,9 +1857,21 @@ fn unique_file_name(dir: &Path, base: &str, extension: &str) -> String {
 ///
 /// Genau dieses Layout zeigt der Hilfe-Dialog beim lokalen Import; es wurde
 /// bisher trotzdem als "Kein Split" eingestuft.
+/// Zaehlt die Datenzeilen einer zeilenbasierten Datei (CSV/TSV ohne Kopfzeile).
+/// Fuer Formate, die sich so nicht lesen lassen (z.B. Parquet), gibt es `None`.
+fn count_text_rows(path: &Path) -> Option<usize> {
+    let ext = path.extension().and_then(|e| e.to_str())?.to_lowercase();
+    if !matches!(ext.as_str(), "csv" | "tsv" | "jsonl" | "txt") { return None; }
+    let content = fs::read_to_string(path).ok()?;
+    let lines = content.lines().filter(|l| !l.trim().is_empty()).count();
+    // Bei CSV/TSV ist die erste Zeile der Header und keine Datenzeile.
+    Some(if matches!(ext.as_str(), "csv" | "tsv") { lines.saturating_sub(1) } else { lines })
+}
+
 fn detect_flat_split_files(storage: &Path) -> Option<SplitInfo> {
     let entries = fs::read_dir(storage).ok()?;
     let (mut train_count, mut val_count, mut test_count) = (0usize, 0usize, 0usize);
+    let mut found_any = false;
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() { continue; }
@@ -1872,13 +1884,18 @@ fn detect_flat_split_files(storage: &Path) -> Option<SplitInfo> {
             Some(s) => s.to_lowercase(),
             None => continue,
         };
+        // Zeilen zaehlen statt Dateien: sonst meldete die App fuer
+        // train.csv/val.csv/test.csv "1 / 1 / 1" und 33/33/33 Prozent,
+        // egal wie die Daten tatsaechlich verteilt sind.
+        let n = count_text_rows(&path).unwrap_or(1);
         match stem.as_str() {
-            "train" | "training" => train_count += 1,
-            "val" | "valid" | "validation" | "dev" => val_count += 1,
-            "test" | "testing" | "eval" => test_count += 1,
+            "train" | "training" => { train_count += n; found_any = true; }
+            "val" | "valid" | "validation" | "dev" => { val_count += n; found_any = true; }
+            "test" | "testing" | "eval" => { test_count += n; found_any = true; }
             _ => {}
         }
     }
+    if !found_any { return None; }
     // Ein einzelnes train.csv ist noch kein Split.
     if train_count == 0 || (val_count == 0 && test_count == 0) { return None; }
     let total = (train_count + val_count + test_count).max(1) as f64;
@@ -2481,5 +2498,70 @@ mod hf_split_selection_tests {
         assert_eq!(map_hf_split("validation"), Some("val"));
         assert_eq!(map_hf_split("Training"), Some("train"));
         assert_eq!(map_hf_split("unsupervised"), None);
+    }
+}
+
+#[cfg(test)]
+mod flat_split_tests {
+    use super::*;
+    use std::fs;
+
+    fn write(dir: &Path, name: &str, rows: usize) {
+        let mut s = String::from("text,label\n");
+        for i in 0..rows {
+            s.push_str(&format!("Beispiel {},{}\n", i, i % 2));
+        }
+        fs::write(dir.join(name), s).unwrap();
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ft_flat_{}_{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn flache_train_val_test_dateien_gelten_als_split() {
+        let d = tmp("basic");
+        write(&d, "train.csv", 80);
+        write(&d, "val.csv", 10);
+        write(&d, "test.csv", 10);
+        let info = detect_flat_split_files(&d).expect("Split sollte erkannt werden");
+        // Zeilen, nicht Dateien — sonst stuende hier ueberall 1.
+        assert_eq!(info.train_count, 80);
+        assert_eq!(info.val_count, 10);
+        assert_eq!(info.test_count, 10);
+        assert!((info.train_ratio - 0.8).abs() < 1e-9);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn einzelnes_train_csv_ist_kein_split() {
+        let d = tmp("only_train");
+        write(&d, "train.csv", 50);
+        assert!(detect_flat_split_files(&d).is_none());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn fremde_dateinamen_ergeben_keinen_split() {
+        let d = tmp("foreign");
+        write(&d, "daten.csv", 50);
+        write(&d, "mehr.csv", 10);
+        assert!(detect_flat_split_files(&d).is_none());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn validation_und_dev_zaehlen_als_val() {
+        let d = tmp("aliases");
+        write(&d, "training.csv", 30);
+        write(&d, "validation.csv", 6);
+        let info = detect_flat_split_files(&d).expect("Split sollte erkannt werden");
+        assert_eq!(info.train_count, 30);
+        assert_eq!(info.val_count, 6);
+        assert_eq!(info.test_count, 0);
+        let _ = fs::remove_dir_all(&d);
     }
 }
