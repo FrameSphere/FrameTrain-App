@@ -17,16 +17,64 @@ export type CoachConfigPatch = Record<string, number | boolean | string>;
 
 const APPLY_CONFIG_EVENT = 'ft_coach_apply_config';
 
-export function applyCoachConfig(patch: CoachConfigPatch) {
+/**
+ * Wie viele Seiten gerade auf Config-Patches hoeren.
+ *
+ * Ohne diesen Zaehler ging jeder Patch verloren, der ausgeloest wurde, waehrend
+ * das Training-Panel nicht gemountet war — also im Normalfall, denn den Coach
+ * fragt man von der Seite aus, auf der man gerade ist. Der Chip meldete
+ * trotzdem "Übernommen".
+ */
+let applyListeners = 0;
+
+/** Zuletzt vorgemerkter Patch, den das Training beim Öffnen übernimmt. */
+let pendingPatch: { patch: CoachConfigPatch; at: number } | null = null;
+
+/** So lange bleibt ein vorgemerkter Patch gueltig (Zeit zum Hinnavigieren). */
+const PENDING_PATCH_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Übergibt einen Config-Patch ans Training.
+ *
+ * @returns true, wenn eine gemountete Seite ihn sofort übernommen hat;
+ *          false, wenn er nur vorgemerkt wurde (Training noch nicht offen).
+ */
+export function applyCoachConfig(patch: CoachConfigPatch): boolean {
+  if (applyListeners === 0) {
+    pendingPatch = { patch, at: Date.now() };
+    return false;
+  }
   try {
     window.dispatchEvent(new CustomEvent<CoachConfigPatch>(APPLY_CONFIG_EVENT, { detail: patch }));
-  } catch { /* ignore */ }
+    return true;
+  } catch {
+    pendingPatch = { patch, at: Date.now() };
+    return false;
+  }
 }
 
 export function onApplyCoachConfig(handler: (patch: CoachConfigPatch) => void) {
   const listener = (e: Event) => handler((e as CustomEvent<CoachConfigPatch>).detail || {});
   window.addEventListener(APPLY_CONFIG_EVENT, listener as EventListener);
-  return () => window.removeEventListener(APPLY_CONFIG_EVENT, listener as EventListener);
+  applyListeners += 1;
+  return () => {
+    window.removeEventListener(APPLY_CONFIG_EVENT, listener as EventListener);
+    applyListeners = Math.max(0, applyListeners - 1);
+  };
+}
+
+/**
+ * Beim Mounten des Trainings: einen vorgemerkten Patch abholen.
+ * Gibt jeden Patch nur einmal heraus.
+ */
+export function consumePendingCoachConfig(): CoachConfigPatch | null {
+  if (pendingPatch && Date.now() - pendingPatch.at < PENDING_PATCH_TTL_MS) {
+    const p = pendingPatch.patch;
+    pendingPatch = null;
+    return p;
+  }
+  pendingPatch = null;
+  return null;
 }
 
 // ── 2. Allgemeine Kommandos (seitenspezifische Aktionen) ────────────────────

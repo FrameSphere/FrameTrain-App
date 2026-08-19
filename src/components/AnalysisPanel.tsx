@@ -1316,8 +1316,23 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       if (ctxLossRed !== null) lines.push(`Loss-Reduktion: ${ctxLossRed}% | Overfitting-Gap: ${ctxGap ?? 'N/A'}%`);
       if (ctxAvgNorm !== null) lines.push(`\u00d8 Grad Norm: ${ctxAvgNorm} | Max: ${ctxMaxNorm ?? 'N/A'}`);
       lines.push(`\nConfig: epochs=${cfg.epochs} batch=${cfg.batch_size} lr=${cfg.learning_rate} opt=${cfg.optimizer} sched=${cfg.scheduler}`);
+      // Diese Felder fehlten im Prompt. Die KI bemaengelte daraufhin ein
+      // "fehlendes Warm-up", obwohl warmup_ratio gesetzt war — sie konnte es
+      // schlicht nicht sehen.
+      lines.push(`Regularisierung: warmup_ratio=${cfg.warmup_ratio} warmup_steps=${cfg.warmup_steps} weight_decay=${cfg.weight_decay} max_grad_norm=${cfg.max_grad_norm} label_smoothing=${cfg.label_smoothing} dropout=${cfg.dropout}`);
+      lines.push(`Ablauf: max_steps=${cfg.max_steps} grad_accum=${cfg.gradient_accumulation_steps} eval_strategy=${cfg.eval_strategy} eval_steps=${cfg.eval_steps} grad_checkpointing=${cfg.gradient_checkpointing}`);
       lines.push(`LoRA: ${cfg.use_lora} | fp16: ${cfg.fp16} | seq_len: ${cfg.max_seq_length}`);
       lines.push(`Hardware: ${hw.device?.toUpperCase()} ${hw.system_ram_gb}GB RAM | Val-Set: ${ds.has_validation ? 'Ja' : 'NEIN'}`);
+      // Ohne Architektur und Datenmenge bewertete die KI ins Blaue hinein.
+      lines.push(`Modell: architecture=${mi?.architecture ?? 'unbekannt'} num_labels=${mi?.num_labels ?? 'N/A'} lora_active=${mi?.lora_active ?? false}`);
+      lines.push(`Daten: n_train=${ds.n_train ?? 'N/A'} n_val=${ds.n_val ?? 'N/A'}`);
+      // Die Qualitaetsmetriken lagen vor, wurden aber nie mitgeschickt — die
+      // KI konnte deshalb gar nicht beurteilen, wie gut das Modell wirklich ist.
+      const cm = fullData.classification_metrics;
+      if (cm) {
+        const pct = (v?: number) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : 'N/A');
+        lines.push(`Qualitaet: accuracy=${pct(cm.accuracy)} f1=${pct(cm.f1)} precision=${pct(cm.precision)} recall=${pct(cm.recall)}`);
+      }
       if (fullData.epoch_summaries?.length > 0) {
         lines.push('\nEpochen:');
         for (const e of fullData.epoch_summaries) lines.push(`E${e.epoch}: Ø=${e.avg_train_loss?.toFixed(4)} Min=${e.min_train_loss?.toFixed(4)} Val=${e.val_loss?.toFixed(4) ?? 'N/A'}`);

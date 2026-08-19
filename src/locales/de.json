@@ -406,7 +406,9 @@
     "confirm": "Bestätigen?",
     "automationOn": "Automation an — Coach darf Training starten/stoppen (mit Bestätigung)",
     "automationOff": "Automation aus — klicke, um Training-Aktionen freizuschalten",
-    "thinkingLabel": "Denkt nach…"
+    "thinkingLabel": "Denkt nach…",
+    "configQueued": "Vorgemerkt fürs Training",
+    "configQueuedHint": "Der Wert wird übernommen, sobald du die Training-Seite öffnest."
   },
   "modelManager": {
     "title": "Modelle",

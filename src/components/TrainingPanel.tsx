@@ -14,7 +14,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
-import { onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
+import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord } from '../ai/coachContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
@@ -835,9 +835,15 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const updateConfig = useCallback((patch: Partial<TrainingConfig>) => setConfig(c => ({ ...c, ...patch })), []);
 
   // AI Coach darf empfohlene Config-Werte per Klick übernehmen ([[set:…]]-Tool).
-  useEffect(() => onApplyCoachConfig((patch) => {
-    updateConfig(patch as Partial<TrainingConfig>);
-  }), [updateConfig]);
+  useEffect(() => {
+    // Beim Öffnen einen vorgemerkten Patch abholen: Wer den Coach von einer
+    // anderen Seite aus fragt, verlor die Empfehlung bisher komplett.
+    const pending = consumePendingCoachConfig();
+    if (pending) updateConfig(pending as Partial<TrainingConfig>);
+    return onApplyCoachConfig((patch) => {
+      updateConfig(patch as Partial<TrainingConfig>);
+    });
+  }, [updateConfig]);
 
   const [sections, setSections] = useState({ basic: true, optimizer: false, advanced: false, lora: false, ram: true });
   const toggleSection = (k: keyof typeof sections) => setSections(s => ({ ...s, [k]: !s[k] }));

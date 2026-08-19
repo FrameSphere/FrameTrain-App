@@ -406,7 +406,9 @@
     "confirm": "Confirm?",
     "automationOn": "Automation on — coach may start/stop training (with confirmation)",
     "automationOff": "Automation off — click to enable training actions",
-    "thinkingLabel": "Thinking…"
+    "thinkingLabel": "Thinking…",
+    "configQueued": "Queued for training",
+    "configQueuedHint": "The value is applied as soon as you open the Training page."
   },
   "modelManager": {
     "title": "Models",

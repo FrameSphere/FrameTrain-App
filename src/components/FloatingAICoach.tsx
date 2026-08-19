@@ -457,24 +457,40 @@ function SetConfigChip({
   onApply,
 }: {
   summary: string;
-  onApply: () => void;
+  /** true = sofort uebernommen, false = fuers Training vorgemerkt. */
+  onApply: () => boolean;
 }) {
   const { t } = useLanguage();
   const [applied, setApplied] = useState(false);
+  const [queued, setQueued] = useState(false);
   return (
     <button
-      onClick={() => { if (!applied) { onApply(); setApplied(true); } }}
-      disabled={applied}
+      onClick={() => {
+        if (applied || queued) return;
+        // Der Chip darf nur "Übernommen" melden, wenn das Training den Wert
+        // auch bekommen hat. Sonst stand dort ein Haken, waehrend im Panel
+        // weiterhin der alte Wert stand.
+        if (onApply()) setApplied(true); else setQueued(true);
+      }}
+      disabled={applied || queued}
       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium transition-all ${
         applied
           ? 'bg-green-500/15 border border-green-500/30 text-green-300'
+          : queued
+          ? 'bg-amber-500/15 border border-amber-500/30 text-amber-200'
           : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 hover:scale-[1.02]'
       }`}
-      title={summary}
+      title={queued ? t('aiCoach.configQueuedHint') : summary}
     >
-      {applied ? <CheckCircle className="w-3 h-3 flex-shrink-0" /> : <Sliders className="w-3 h-3 flex-shrink-0" />}
+      {applied
+        ? <CheckCircle className="w-3 h-3 flex-shrink-0" />
+        : <Sliders className="w-3 h-3 flex-shrink-0" />}
       <span className="truncate max-w-[220px]">
-        {applied ? t('aiCoach.configApplied') : `${t('aiCoach.applyConfig')}: ${summary}`}
+        {applied
+          ? t('aiCoach.configApplied')
+          : queued
+          ? t('aiCoach.configQueued')
+          : `${t('aiCoach.applyConfig')}: ${summary}`}
       </span>
     </button>
   );
