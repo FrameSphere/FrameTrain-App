@@ -22,6 +22,7 @@ import { callAI } from './TrainingPanel';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
+import { detectPlugin } from '../plugins/registry';
 import DiffViewer from './DiffViewer';
 import OpenLibraryModal from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
@@ -913,7 +914,310 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
 
 // ── Default Script Generator ──────────────────────────────────────────────
 
+type ScriptModality = 'text' | 'image' | 'audio' | 'seq2seq';
+
+/** Welche Art Code braucht dieses Modell? Gleiche Erkennung wie im Training. */
+function detectScriptModality(model: ModelInfo | null): ScriptModality {
+  if (!model) return 'text';
+  const r = detectPlugin(
+    model.source_path || model.local_path || model.name,
+    model.model_type ? { model_type: model.model_type } : undefined,
+  );
+  if (!r.supported) return 'text';
+  switch (r.plugin.taskType) {
+    case 'hf_image_classification':
+    case 'image_classification':
+      return 'image';
+    case 'audio_classification':
+      return 'audio';
+    case 'seq2seq':
+      return 'seq2seq';
+    default:
+      return 'text';
+  }
+}
+
 function generateDefaultTestScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
+  const modality = detectScriptModality(model);
+  if (modality !== 'text') {
+    return generateMediaTestScript(modality, model, datasets, outputPath);
+  }
+  return generateTextTestScript(model, datasets, outputPath);
+}
+
+/**
+ * Bild-, Audio- und Seq2Seq-Skripte. Sie laden dieselben Daten wie die
+ * Test-Engine-Plugins: Bild/Audio als Ordner pro Klasse, Seq2Seq als
+ * Tabellendatei mit Quell- und Zielspalte.
+ */
+function generateMediaTestScript(
+  modality: Exclude<ScriptModality, 'text'>,
+  model: ModelInfo | null,
+  datasets: DatasetInfo[],
+  outputPath: string,
+): string {
+  const ds = datasets[0];
+  const modelPathDefault   = model?.local_path || model?.source_path || model?.name || '';
+  const datasetPathDefault = ds?.storage_path || '';
+  const outputPathDefault  = outputPath.replace('<job_id>', 'dev_test').replace('{wird beim Start gesetzt}', 'dev_test');
+
+  if (modality === 'seq2seq') {
+    return `#!/usr/bin/env python3
+# FrameTrain - Dev Test Script (Seq2Seq)
+#
+# Laedt Modell + Test-Split, erzeugt Text und vergleicht ihn mit der Zielspalte.
+
+import csv
+import json
+import os
+from pathlib import Path
+
+import torch
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+MODEL_PATH   = os.environ.get("MODEL_PATH",   "${modelPathDefault}")
+DATASET_PATH = os.environ.get("DATASET_PATH", "${datasetPathDefault}")
+OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${outputPathDefault}")
+
+MAX_SAMPLES    = 100
+MAX_NEW_TOKENS = 64
+TASK_PREFIX    = ""     # z.B. "summarize: " fuer T5
+SOURCE_COL     = None   # None = automatisch erkennen
+TARGET_COL     = None
+
+EXTS = (".csv", ".tsv", ".json", ".jsonl", ".parquet")
+
+
+def load_rows(path: str):
+    # Erste Tabellendatei aus test/, sonst val/ bzw. train/.
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"DATASET_PATH existiert nicht: {path}")
+
+    files = []
+    for sub in ("test", "val", "validation", "train", ""):
+        d = p / sub if sub else p
+        if d.is_dir():
+            files = sorted(f for f in d.rglob("*") if f.suffix.lower() in EXTS)
+        if files:
+            break
+    if not files:
+        raise RuntimeError(f"Keine Tabellendatei in {path} gefunden.")
+
+    f = files[0]
+    print(f"Datei: {f}", flush=True)
+    if f.suffix.lower() == ".parquet":
+        import pandas as pd
+        return pd.read_parquet(f).to_dict("records")
+    if f.suffix.lower() in (".json", ".jsonl"):
+        raw = f.read_text(encoding="utf-8").strip()
+        if raw.startswith("["):
+            return json.loads(raw)
+        return [json.loads(l) for l in raw.splitlines() if l.strip()]
+    delim = "\\t" if f.suffix.lower() == ".tsv" else ","
+    with open(f, newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh, delimiter=delim))
+
+
+rows = load_rows(DATASET_PATH)
+if MAX_SAMPLES:
+    rows = rows[:MAX_SAMPLES]
+cols = list(rows[0].keys()) if rows else []
+source_col = SOURCE_COL or next((c for c in ("source", "input", "text", "article", "document", "de") if c in cols), None)
+target_col = TARGET_COL or next((c for c in ("target", "output", "summary", "translation", "en") if c in cols), None)
+if source_col is None:
+    raise RuntimeError(f"Quellspalte nicht gefunden. Vorhanden: {cols}. Setze SOURCE_COL oben.")
+print(f"{len(rows)} Beispiele | Quelle='{source_col}' | Ziel='{target_col}'", flush=True)
+
+print(f"Lade Modell aus: {MODEL_PATH}", flush=True)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_PATH)
+model.eval()
+device = (
+    "cuda" if torch.cuda.is_available()
+    else "mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    else "cpu"
+)
+model.to(device)
+print(f"Geraet: {device}", flush=True)
+
+predictions, exact = [], 0
+for i, row in enumerate(rows, 1):
+    src = TASK_PREFIX + str(row[source_col])
+    inputs = tokenizer(src, return_tensors="pt", truncation=True, max_length=512).to(device)
+    with torch.no_grad():
+        out = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS)
+    pred = tokenizer.decode(out[0], skip_special_tokens=True).strip()
+    tgt = str(row[target_col]).strip() if target_col else None
+    if tgt is not None and pred == tgt:
+        exact += 1
+    predictions.append({"source": str(row[source_col]), "predicted": pred, "target": tgt})
+    if i <= 5:
+        print(f"  [{i}] {pred}   (erwartet: {tgt})", flush=True)
+    if i % 20 == 0:
+        print(f"  {i}/{len(rows)} ausgewertet", flush=True)
+
+results = {"predictions": predictions, "n": len(predictions), "device": device}
+if target_col:
+    results["exact_match"] = exact / len(predictions) if predictions else 0.0
+    print(f"\\nExakte Treffer: {results['exact_match']:.4f}", flush=True)
+else:
+    print("Keine Zielspalte gefunden - nur Vorhersagen, keine Metrik.", flush=True)
+
+Path(OUTPUT_PATH).mkdir(parents=True, exist_ok=True)
+with open(f"{OUTPUT_PATH}/results.json", "w") as f:
+    json.dump(results, f, indent=2, ensure_ascii=False)
+print(f"Ergebnisse gespeichert: {OUTPUT_PATH}/results.json", flush=True)
+`;
+  }
+
+  const isImage = modality === 'image';
+  const kindLabel = isImage ? 'Bild' : 'Audio';
+  const exts = isImage
+    ? '{".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}'
+    : '{".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}';
+  const imports = isImage
+    ? `from PIL import Image
+from transformers import AutoImageProcessor, AutoModelForImageClassification`
+    : `import librosa
+from transformers import AutoFeatureExtractor, AutoModelForAudioClassification`;
+  const loadModel = isImage
+    ? `processor = AutoImageProcessor.from_pretrained(MODEL_PATH)
+model = AutoModelForImageClassification.from_pretrained(MODEL_PATH)`
+    : `processor = AutoFeatureExtractor.from_pretrained(MODEL_PATH)
+model = AutoModelForAudioClassification.from_pretrained(MODEL_PATH)
+SAMPLING_RATE = int(getattr(processor, "sampling_rate", 16000) or 16000)`;
+  const prepareInputs = isImage
+    ? `    with Image.open(path) as im:
+        image = im.convert("RGB")
+    inputs = processor(images=[image], return_tensors="pt").to(device)`
+    : `    wave, _ = librosa.load(str(path), sr=SAMPLING_RATE, mono=True)
+    wave = wave[:int(MAX_SECONDS * SAMPLING_RATE)]
+    inputs = processor([wave], sampling_rate=SAMPLING_RATE,
+                       return_tensors="pt", padding=True).to(device)`;
+  const extraConfig = isImage ? '' : 'MAX_SECONDS = 10.0   # laengere Aufnahmen werden gekappt\n';
+
+  return `#!/usr/bin/env python3
+# FrameTrain - Dev Test Script (${kindLabel}klassifikation)
+#
+# Erwartet den Trainings-Aufbau: ein Ordner pro Klasse, optional unter
+# train/ val/ test/. Schreibt einen Bericht nach OUTPUT_PATH/results.json.
+
+import json
+import os
+from pathlib import Path
+
+import numpy as np
+import torch
+from sklearn.metrics import classification_report, confusion_matrix
+${imports}
+
+MODEL_PATH   = os.environ.get("MODEL_PATH",   "${modelPathDefault}")
+DATASET_PATH = os.environ.get("DATASET_PATH", "${datasetPathDefault}")
+OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${outputPathDefault}")
+
+MAX_SAMPLES = 200    # None = alles auswerten
+${extraConfig}EXTS = ${exts}
+
+
+def collect_files(root: Path):
+    # Dateien samt erwarteter Klasse (Ordnername). Bevorzugt test/, dann val/, train/.
+    for sub in ("test", "val", "validation", "train"):
+        if (root / sub).is_dir():
+            root = root / sub
+            break
+    class_dirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
+    files = []
+    if class_dirs:
+        for d in class_dirs:
+            for f in sorted(d.rglob("*")):
+                if f.suffix.lower() in EXTS:
+                    files.append((f, d.name))
+    else:
+        for f in sorted(root.rglob("*")):
+            if f.suffix.lower() in EXTS:
+                files.append((f, None))
+    return files
+
+
+ds_path = Path(DATASET_PATH)
+if not ds_path.exists():
+    raise FileNotFoundError(f"DATASET_PATH existiert nicht: {DATASET_PATH}")
+
+files = collect_files(ds_path)
+if not files:
+    raise RuntimeError(f"Keine ${kindLabel}dateien in {DATASET_PATH} gefunden.")
+if MAX_SAMPLES:
+    files = files[:MAX_SAMPLES]
+print(f"{len(files)} ${kindLabel}dateien gefunden", flush=True)
+
+print(f"Lade Modell aus: {MODEL_PATH}", flush=True)
+${loadModel}
+model.eval()
+device = (
+    "cuda" if torch.cuda.is_available()
+    else "mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    else "cpu"
+)
+model.to(device)
+print(f"Geraet: {device}", flush=True)
+
+# Klassennamen: label_mapping.json des Trainings, sonst config.json
+id2label = {}
+mapping = Path(MODEL_PATH) / "label_mapping.json"
+if mapping.exists():
+    lm = json.loads(mapping.read_text(encoding="utf-8"))
+    if isinstance(lm.get("id2label"), dict):
+        id2label = {int(k): str(v) for k, v in lm["id2label"].items()}
+    elif isinstance(lm.get("classes"), list):
+        id2label = {i: str(c) for i, c in enumerate(lm["classes"])}
+if not id2label:
+    id2label = {int(k): str(v) for k, v in (getattr(model.config, "id2label", {}) or {}).items()}
+label2id = {v: k for k, v in id2label.items()}
+print(f"Klassen: {list(id2label.values()) or '?'}", flush=True)
+
+preds, targets, rows = [], [], []
+for i, (path, cls) in enumerate(files, 1):
+${prepareInputs}
+    with torch.no_grad():
+        logits = model(**inputs).logits[0]
+    probs = torch.softmax(logits, dim=-1)
+    pred_id = int(torch.argmax(probs))
+    preds.append(pred_id)
+    if cls is not None and cls in label2id:
+        targets.append(label2id[cls])
+    rows.append({
+        "file": str(path),
+        "expected": cls,
+        "predicted": id2label.get(pred_id, str(pred_id)),
+        "confidence": float(probs[pred_id]),
+    })
+    if i % 20 == 0 or i == len(files):
+        print(f"  {i}/{len(files)} ausgewertet", flush=True)
+
+results = {"predictions": rows, "n": len(rows), "device": device}
+
+if len(targets) == len(preds) and targets:
+    acc = float(np.mean(np.array(preds) == np.array(targets)))
+    names = [id2label.get(i, str(i)) for i in sorted(id2label)]
+    print(f"\\nAccuracy: {acc:.4f}\\n", flush=True)
+    print(classification_report(targets, preds, target_names=names, zero_division=0), flush=True)
+    print("Confusion Matrix:", flush=True)
+    print(confusion_matrix(targets, preds), flush=True)
+    results["accuracy"] = acc
+    results["report"] = classification_report(
+        targets, preds, target_names=names, zero_division=0, output_dict=True)
+else:
+    print("Keine Klassenordner erkannt - nur Vorhersagen, keine Metriken.", flush=True)
+
+Path(OUTPUT_PATH).mkdir(parents=True, exist_ok=True)
+with open(f"{OUTPUT_PATH}/results.json", "w") as f:
+    json.dump(results, f, indent=2, ensure_ascii=False)
+print(f"Ergebnisse gespeichert: {OUTPUT_PATH}/results.json", flush=True)
+`;
+}
+
+function generateTextTestScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const ds = datasets[0];
   const modelPathDefault   = model?.local_path || model?.source_path || model?.name || '';
   const datasetPathDefault = ds?.storage_path || '';

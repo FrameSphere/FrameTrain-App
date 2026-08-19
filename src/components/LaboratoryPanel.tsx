@@ -23,6 +23,7 @@ import OpenLibraryModal from './OpenLibraryModal';
 import { readUserDevScripts } from '../utils/devScriptStorage';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { dateLocale } from '../utils/dateLocale';
+import { parseDelimitedRows } from './csvRows';
 
 // ── Eigene Dev-Scripts (DevTrain + DevTest) — strikt user-getrennt ───────────
 interface LabSavedScript { id: string; name: string; script: string; savedAt: string; source: 'train' | 'test'; }
@@ -238,20 +239,8 @@ function parseSamples(content: string, fileName: string): LabSample[] {
         try { raw.push(JSON.parse(l)); } catch { raw.push(l.trim()); }
       });
     } else if (effectiveExt === 'csv' || effectiveExt === 'tsv') {
-      const sep = effectiveExt === 'tsv' ? '\t' : ',';
-      const lines = content.split('\n').filter(l => l.trim());
-      const headers = lines[0].split(sep).map(h => h.trim().replace(/^"|"$/g, ''));
-      for (const line of lines.slice(1)) {
-        if (!line.trim()) continue;
-        const vals = line.split(sep).map(v => v.trim().replace(/^"|"$/g, ''));
-        if (headers.length > 1) {
-          const obj: Record<string, string> = {};
-          headers.forEach((h, i) => { obj[h] = vals[i] ?? ''; });
-          raw.push(obj);
-        } else {
-          raw.push(vals[0]);
-        }
-      }
+      // Anfuehrungszeichen beachten: "Bingen: sonnig, 0 Grad" ist ein Feld.
+      raw.push(...parseDelimitedRows(content, effectiveExt === 'tsv' ? '\t' : ','));
     } else {
       // Plain text: jede nicht-leere Zeile
       content.split('\n').filter(l => l.trim()).forEach(l => raw.push(l.trim()));
