@@ -18,6 +18,7 @@ mod test_manager;
 mod plugin_commands;
 mod power_manager;
 mod laboratory_manager;
+mod python_env;
 
 use std::fs;
 use std::sync::{Arc, Mutex};

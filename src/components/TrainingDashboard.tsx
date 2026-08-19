@@ -669,9 +669,10 @@ export default function TrainingDashboard({
   // progress_percent — der Balken blieb dann bei 0 %, obwohl "Step 30 / 60"
   // danebenstand. Fehlt der Prozentwert, wird er aus den Schritten abgeleitet.
   // Der Schrittzaehler blieb in Einzelfaellen hinter dem Loss-Verlauf zurueck
-  // ("Step 30 / 60", waehrend der Chart schon Punkt 60 zeigte). Solange die
-  // Ursache nicht gefunden ist, gilt der weiter fortgeschrittene der beiden
-  // Werte — die Anzeige widerspricht sich damit nicht mehr selbst.
+  // ("Step 30 / 60", waehrend der Chart schon Punkt 60 zeigte). Ursache lag im
+  // TrainingPanel: Progress-Events wurden verworfen solange kein Job-Objekt
+  // stand, die Loss-Punkte aber angehaengt. Das ist behoben; der Vergleich
+  // bleibt als Absicherung, damit sich die Anzeige nie selbst widerspricht.
   const lastLossStep = lossPoints.length ? (lossPoints[lossPoints.length - 1].step ?? 0) : 0;
   const shownStep = Math.max(progress?.step ?? 0, lastLossStep);
 

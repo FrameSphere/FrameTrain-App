@@ -339,22 +339,43 @@
       "footerNote": "Weitere Plugins können später in den Einstellungen installiert werden",
       "installing": "Abhängigkeiten werden installiert",
       "installingDesc": "KI/ML-Pakete werden installiert. PyTorch allein ist mehrere GB groß.",
-      "estimatedTime": "⏱️ Geschätzte Zeit: 10–30 Minuten je nach Internetgeschwindigkeit",
-      "doNotClose": "⏸️ Die App während der Installation NICHT schließen.",
-      "waitNote": "Falls der Browser \"Seite antwortet nicht\" anzeigt, bitte noch etwas warten — die Installation läuft im Hintergrund weiter.",
+      "estimatedTime": "Geschätzte Zeit: 10–30 Minuten je nach Internetgeschwindigkeit",
+      "doNotClose": "Die App während der Installation nicht schließen.",
+      "waitNote": "Wenn das Fenster kurz nicht reagiert, bitte noch etwas warten — die Installation läuft im Hintergrund weiter.",
       "progressComplete": "Abgeschlossen",
       "progressFailed": "Fehlgeschlagen",
       "progressInstalling": "Wird installiert"
     },
     "pluginRegistry": {
       "seq_classification": {
-        "name": "Text-Klassifikation (HuggingFace)",
-        "description": "Trainiert encoder-basierte Modelle (XLM-RoBERTa, BERT, DeBERTa) für Textklassifikation, Sentiment-Analyse, Spam-Filter u.v.m."
+        "name": "HuggingFace-Stack (Text, Bild, Audio, Seq2Seq)",
+        "description": "Trainiert und testet HuggingFace-Modelle: Textklassifikation (BERT, XLM-RoBERTa, DeBERTa), Bildklassifikation (ViT, ResNet, ConvNeXt), Audioklassifikation (Wav2Vec2, HuBERT) und Seq2Seq (T5, BART)."
       },
       "yolo": {
         "name": "YOLO Objekterkennung (Ultralytics)",
         "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
       }
+    },
+    "preflight": {
+      "title": "System-Check",
+      "subtitle": "Dein System wird vor der Installation geprüft",
+      "scanning": "System wird geprüft ...",
+      "pythonFound": "Python {version}",
+      "pythonMissing": "Python nicht gefunden",
+      "pythonInstallHint": "Installiere Python 3.8 oder neuer von python.org",
+      "pythonTooOld": "Version {version} ist zu alt. Python 3.8 oder neuer wird benötigt.",
+      "pipFound": "pip verfügbar",
+      "pipMissing": "pip nicht gefunden",
+      "pipHint": "Ausführen: python3 -m ensurepip --upgrade",
+      "diskFree": "{gb} GB freier Speicher",
+      "diskUnknown": "Freier Speicher unbekannt",
+      "diskHint": "Mindestens 6 GB werden für PyTorch und Modelle gebraucht",
+      "gpuFound": "GPU: {name} — CUDA {cuda} → torch+{index}",
+      "gpuNone": "Keine NVIDIA-GPU — CPU-Modus",
+      "gpuNoneHint": "Training läuft auf der CPU, nur langsamer. Apple Silicon (MPS) wird unterstützt.",
+      "errorsTitle": "Das muss vor dem Weitermachen behoben werden:",
+      "recheck": "Erneut prüfen",
+      "continue": "Weiter"
     }
   },
   "aiCoach": {

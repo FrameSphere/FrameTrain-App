@@ -959,6 +959,14 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     }
   }, [currentJob, trainingState.currentJob]);
 
+  // D-8: Der Schrittzaehler kam aus currentJob.progress, der Loss-Chart aus
+  // lossPoints. Ist currentJob noch nicht gesetzt (Event kommt vor dem Job-
+  // Objekt), verwarf der Progress-Handler die Zahl — die Punkte wurden aber
+  // trotzdem angehaengt. Genau so lief der Chart dem Zaehler davon. Beide
+  // haengen jetzt an derselben Bedingung, wie im TrainingContext auch.
+  const hasJobRef = useRef(false);
+  useEffect(() => { hasJobRef.current = currentJob != null; }, [currentJob]);
+
   // Refs to keep latest callback functions without triggering effect re-runs
   const successRef = useRef(success);
   useEffect(() => {
@@ -978,7 +986,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       if (isDevJob(e.payload.job_id)) return;
       const d = e.payload.data;
       setCurrentJob(j => (j ? { ...j, status: 'running', progress: d } : null));
-      if (d.train_loss != null) {
+      if (hasJobRef.current && d.train_loss != null) {
         setLossPoints(pts => [...pts, { step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined }]);
       }
     }).then(fn => { u1 = fn; });

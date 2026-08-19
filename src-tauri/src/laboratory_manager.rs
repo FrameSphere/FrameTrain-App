@@ -57,77 +57,8 @@ pub struct InferResult {
 // ============ Hilfsfunktionen ============
 
 fn get_python_path() -> String {
-    struct C { path: String, version: (u32, u32, u32) }
-    let mut candidates: Vec<C> = Vec::new();
-
-    if !cfg!(target_os = "windows") {
-        for base in &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
-            for name in &["python3.13", "python3.12", "python3.11", "python3.10", "python3.9", "python3"] {
-                let full = format!("{}/{}", base, name);
-                if let Ok(out) = Command::new(&full).arg("--version").output() {
-                    if out.status.success() {
-                        let vs = String::from_utf8_lossy(&out.stdout);
-                        let vs2 = String::from_utf8_lossy(&out.stderr);
-                        let combined = format!("{}{}", vs, vs2);
-                        if let Some(v) = parse_version(&combined) {
-                            candidates.push(C { path: full, version: v });
-                        }
-                    }
-                }
-            }
-        }
-    }
-    for cmd in &["python3", "python"] {
-        if let Ok(out) = Command::new(cmd).arg("--version").output() {
-            if out.status.success() {
-                let vs = String::from_utf8_lossy(&out.stdout);
-                let vs2 = String::from_utf8_lossy(&out.stderr);
-                let combined = format!("{}{}", vs, vs2);
-                if let Some(v) = parse_version(&combined) {
-                    candidates.push(C { path: cmd.to_string(), version: v });
-                }
-            }
-        }
-    }
-    candidates.sort_by(|a, b| b.version.cmp(&a.version));
-    // Nur echte Duplikate (Symlink auf dieselbe Binärdatei) entfernen
-    candidates.dedup_by(|a, b| {
-        match (std::fs::canonicalize(&a.path), std::fs::canonicalize(&b.path)) {
-            (Ok(x), Ok(y)) => x == y,
-            _ => a.path == b.path,
-        }
-    });
-    // torch + torchvision/torchaudio (falls installiert) müssen zusammenpassen
-    let torch_check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
-    for c in &candidates {
-        let ok = Command::new(&c.path).args(["-c", torch_check]).output()
-            .map(|o| o.status.success()).unwrap_or(false);
-        if ok { return c.path.clone(); }
-    }
-    // Fallback: torch vorhanden, torchvision/torchaudio defekt
-    for c in &candidates {
-        let ok = Command::new(&c.path).args(["-c", "import torch"]).output()
-            .map(|o| o.status.success()).unwrap_or(false);
-        if ok {
-            println!("[Python] ⚠️ torchvision/torchaudio defekt/inkompatibel bei {} — Fix: pip install --upgrade torch torchvision torchaudio", c.path);
-            return c.path.clone();
-        }
-    }
-    candidates.first().map(|c| c.path.clone())
-        .unwrap_or_else(|| if cfg!(target_os = "windows") { "python".to_string() } else { "python3".to_string() })
-}
-
-fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.len() < 2 { return None; }
-    let nums: Vec<&str> = parts[1].split('.').collect();
-    if nums.len() < 2 { return None; }
-    let major = nums[0].parse::<u32>().ok()?;
-    let minor = nums[1].parse::<u32>().ok()?;
-    let patch = nums.get(2)
-        .and_then(|p| p.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().ok())
-        .unwrap_or(0);
-    Some((major, minor, patch))
+    // Gemeinsame Auswahl fuer Training, Tests, Labor und Einrichtung.
+    crate::python_env::resolve_python()
 }
 
 fn get_model_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {

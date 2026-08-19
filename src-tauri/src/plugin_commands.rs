@@ -110,17 +110,9 @@ fn verify_python_available() -> Result<(), String> {
 }
 
 fn get_python_executable() -> String {
-    let candidates: Vec<&str> = if cfg!(target_os = "windows") {
-        vec!["python", "python3"]
-    } else {
-        vec!["python3", "python"]
-    };
-    for cmd in &candidates {
-        if let Ok(out) = Command::new(cmd).arg("--version").output() {
-            if out.status.success() { return cmd.to_string(); }
-        }
-    }
-    "python3".to_string()
+    // Derselbe Interpreter, mit dem spaeter trainiert und getestet wird —
+    // sonst landen die Pakete in einem anderen Python als die Engines nutzen.
+    crate::python_env::resolve_python()
 }
 
 /// Prueft ob eine installierte Version eine Obergrenze ueberschreitet (z.B. numpy < 2.0.0).
@@ -234,31 +226,13 @@ fn get_python_version_string(cmd: &str) -> Option<String> {
 /// Findet Python-Executable UND prüft Version >= 3.8.
 /// Gibt (executable, version_string, version_ok) zurück.
 fn find_valid_python() -> (Option<String>, Option<String>, bool) {
-    let candidates: Vec<&str> = if cfg!(target_os = "windows") {
-        vec!["python", "python3", "python3.12", "python3.11", "python3.10", "python3.9", "python3.8"]
-    } else {
-        vec!["python3", "python", "python3.12", "python3.11", "python3.10", "python3.9", "python3.8"]
-    };
-    for cmd in &candidates {
-        if let Some(ver) = get_python_version_string(cmd) {
-            if let Some((major, minor)) = parse_python_version(&ver) {
-                let ok = major == 3 && minor >= 8;
-                if ok {
-                    return (Some(cmd.to_string()), Some(ver), true);
-                } else if major < 3 || (major == 3 && minor < 8) {
-                    // Python gefunden aber zu alt — weiter suchen
-                    continue;
-                }
-            }
-        }
-    }
-    // Nichts Valides gefunden — schauen ob überhaupt irgendwas da ist
-    for cmd in &candidates {
-        if let Some(ver) = get_python_version_string(cmd) {
-            return (Some(cmd.to_string()), Some(ver), false);
-        }
-    }
-    (None, None, false)
+    // Zeigt genau den Interpreter, den die App nutzt (siehe python_env).
+    let (path, version) = crate::python_env::resolve_python_with_version();
+    let ok = version.as_deref()
+        .and_then(parse_python_version)
+        .map(|(major, minor)| major == 3 && minor >= 8)
+        .unwrap_or(false);
+    (path, version, ok)
 }
 
 /// Prüft ob pip verfügbar ist für das gegebene Python
@@ -509,17 +483,20 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     verify_python_available()?;
     let python = get_python_executable();
 
-    // NLP-Stack
-    let nlp_packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn", "numpy", "accelerate"];
+    // HuggingFace-Stack: deckt Text, Bild, Audio und Seq2Seq ab.
+    // librosa/soundfile (Audio) und pillow (Bild) gehoeren dazu — ohne sie
+    // brechen Audio-Training, Audio-Test und die Bild-Vorlagen ab.
+    let nlp_packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
+                            "numpy", "accelerate", "librosa", "soundfile", "pillow"];
     let nlp_installed = nlp_packages.iter().all(|p| check_package_installed(&python, p).installed);
     let nlp_plugin = PluginInfo {
         id: "seq_classification".to_string(),
         name: "firstLaunch.pluginRegistry.seq_classification.name".to_string(),
         description: "firstLaunch.pluginRegistry.seq_classification.description".to_string(),
-        category: "NLP".to_string(), icon: "🤗".to_string(), built_in: true,
+        category: "NLP".to_string(), icon: String::new(), built_in: true,   // Symbol kommt aus der UI (lucide)
         required_packages: nlp_packages.iter().map(|s| s.to_string()).collect(),
         optional_packages: vec!["peft".to_string()],
-        estimated_size_mb: 2500, install_time_minutes: 3, priority: 1,
+        estimated_size_mb: 2800, install_time_minutes: 4, priority: 1,
         is_selected: true, is_installed: nlp_installed,
     };
 
@@ -530,7 +507,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
         id: "yolo".to_string(),
         name: "firstLaunch.pluginRegistry.yolo.name".to_string(),
         description: "firstLaunch.pluginRegistry.yolo.description".to_string(),
-        category: "Vision".to_string(), icon: "🎯".to_string(), built_in: true,
+        category: "Vision".to_string(), icon: String::new(), built_in: true,
         required_packages: yolo_packages.iter().map(|s| s.to_string()).collect(),
         optional_packages: vec![],
         estimated_size_mb: 1500, install_time_minutes: 2, priority: 2,
@@ -544,7 +521,9 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
     verify_python_available()?;
     let python = get_python_executable();
-    let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn", "numpy", "pandas", "pyarrow", "accelerate", "ultralytics"];
+    let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
+                        "numpy", "pandas", "pyarrow", "accelerate", "librosa", "soundfile",
+                        "pillow", "ultralytics"];
     let status: Vec<DependencyStatus> = packages.iter().map(|p| check_package_installed(&python, p)).collect();
     let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
     if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
@@ -600,6 +579,10 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
             ("huggingface_hub", "HuggingFace Hub"),
             ("scikit-learn",    "Scikit-Learn"),
             ("accelerate",      "Accelerate"),
+            // Bild und Audio laufen ueber denselben Stack:
+            ("pillow",          "Pillow (Bild)"),
+            ("librosa",         "Librosa (Audio)"),
+            ("soundfile",       "SoundFile (Audio)"),
         ]);
     }
     if plugin_ids.iter().any(|id| id == "yolo") {
@@ -760,6 +743,8 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                 "accelerate"      => "accelerate>=0.24.0",
                 "ultralytics"     => "ultralytics>=8.0.0",
                 "pillow"          => "pillow>=9.0.0",
+                "librosa"         => "librosa>=0.10.0",
+                "soundfile"       => "soundfile>=0.12.0",
                 "opencv-python"   => "opencv-python>=4.8.0",
                 other             => other,
             };

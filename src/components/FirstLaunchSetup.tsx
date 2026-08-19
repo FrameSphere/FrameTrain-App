@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from '@tauri-apps/api/event';
-import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain } from 'lucide-react';
+import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain, ScanEye } from 'lucide-react';
 import { useTheme, type Theme, type ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import AIAssistantSettingsPanel from './AIAssistantSettingsPanel';
@@ -19,6 +19,16 @@ interface PluginInfo {
   is_selected?: boolean;
   is_installed?: boolean;
 }
+
+/** Symbol je Plugin — lucide statt Emoji (das Backend liefert nur eine Kategorie). */
+function pluginIcon(plugin: PluginInfo, className: string) {
+  return plugin.category === 'Vision'
+    ? <ScanEye className={className} />
+    : <Brain className={className} />;
+}
+
+/** Ohne diesen Stack kann die App nichts trainieren — er bleibt gesetzt. */
+const REQUIRED_PLUGIN_ID = 'seq_classification';
 
 interface InstallProgress {
   plugin_id: string;
@@ -104,7 +114,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [pluginsLoadError, setPluginsLoadError] = useState<string | null>(null);
   const [pluginsLoading, setPluginsLoading] = useState(false);
-  const [selectedPlugins, setSelectedPlugins] = useState<Set<string>>(new Set(['text']));
+  const [selectedPlugins, setSelectedPlugins] = useState<Set<string>>(new Set([REQUIRED_PLUGIN_ID]));
   const [installing, setInstalling] = useState(false);
   const [installProgress, setInstallProgress] = useState<Map<string, InstallProgress>>(new Map());
   
@@ -204,12 +214,13 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
       const pluginList = await invoke<PluginInfo[]>('get_available_plugins');
       setPlugins(pluginList);
       
-      // Pre-select plugins
-      const preSelected = new Set(['text']);
+      // Vorauswahl kommt aus dem Backend (is_selected). Frueher war zusaetzlich
+      // ein Phantom-Eintrag "text" gesetzt und jedes built_in-Plugin vorgewaehlt —
+      // dadurch stand im Zaehler "3 Plugins" bei zwei sichtbaren, und YOLO liess
+      // sich nicht abwaehlen.
+      const preSelected = new Set<string>([REQUIRED_PLUGIN_ID]);
       pluginList.forEach(p => {
-        if (p.is_selected || p.built_in) {
-          preSelected.add(p.id);
-        }
+        if (p.is_selected) preSelected.add(p.id);
       });
       setSelectedPlugins(preSelected);
     } catch (error) {
@@ -251,7 +262,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   }, [pythonSetupPhase, plugins.length]);
   
   const togglePlugin = (pluginId: string) => {
-    if (pluginId === 'text') return;
+    if (pluginId === REQUIRED_PLUGIN_ID) return;
     
     setSelectedPlugins(prev => {
       const next = new Set(prev);
@@ -430,8 +441,8 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
             <ShieldCheck className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">System Check</h1>
-            <p className="text-gray-300">Checking your system before installation</p>
+            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.preflight.title')}</h1>
+            <p className="text-gray-300">{t('firstLaunch.preflight.subtitle')}</p>
           </div>
         </div>
       </div>
@@ -443,7 +454,7 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
           {loading && (
             <div className="text-center">
               <Loader2 className="w-14 h-14 text-blue-400 animate-spin mx-auto mb-4" />
-              <p className="text-gray-300">Scanning system...</p>
+              <p className="text-gray-300">{t('firstLaunch.preflight.scanning')}</p>
             </div>
           )}
 
@@ -452,36 +463,40 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
             <div className="space-y-3">
               <CheckRow
                 label={result.python_found
-                  ? `Python ${result.python_version ?? ''}`
-                  : 'Python not found'}
+                  ? t('firstLaunch.preflight.pythonFound', { version: result.python_version ?? '' })
+                  : t('firstLaunch.preflight.pythonMissing')}
                 ok={result.python_found && result.python_version_ok}
                 detail={!result.python_found
-                  ? 'Install Python 3.8+ from python.org'
+                  ? t('firstLaunch.preflight.pythonInstallHint')
                   : !result.python_version_ok
-                  ? `Version ${result.python_version} is too old. Python 3.8+ required.`
+                  ? t('firstLaunch.preflight.pythonTooOld', { version: result.python_version ?? '' })
                   : undefined}
               />
               <CheckRow
-                label={result.pip_found ? 'pip available' : 'pip not found'}
+                label={result.pip_found ? t('firstLaunch.preflight.pipFound') : t('firstLaunch.preflight.pipMissing')}
                 ok={result.pip_found}
-                detail={!result.pip_found ? 'Run: python3 -m ensurepip --upgrade' : undefined}
+                detail={!result.pip_found ? t('firstLaunch.preflight.pipHint') : undefined}
               />
               <CheckRow
                 label={result.free_gb > 0
-                  ? `${result.free_gb.toFixed(1)} GB free disk space`
-                  : 'Disk space unknown'}
+                  ? t('firstLaunch.preflight.diskFree', { gb: result.free_gb.toFixed(1) })
+                  : t('firstLaunch.preflight.diskUnknown')}
                 ok={result.free_gb_ok || result.free_gb === 0}
                 detail={!result.free_gb_ok && result.free_gb > 0
-                  ? 'At least 6 GB required for PyTorch + models'
+                  ? t('firstLaunch.preflight.diskHint')
                   : undefined}
               />
               <CheckRow
                 label={result.gpu_info.has_nvidia_gpu
-                  ? `GPU: ${result.gpu_info.gpu_name ?? 'NVIDIA'} — CUDA ${result.gpu_info.cuda_version ?? '?'} → torch+${result.gpu_info.recommended_torch_index}`
-                  : 'No NVIDIA GPU — CPU mode'}
+                  ? t('firstLaunch.preflight.gpuFound', {
+                      name:  result.gpu_info.gpu_name ?? 'NVIDIA',
+                      cuda:  result.gpu_info.cuda_version ?? '?',
+                      index: result.gpu_info.recommended_torch_index,
+                    })
+                  : t('firstLaunch.preflight.gpuNone')}
                 ok={true}
                 detail={!result.gpu_info.has_nvidia_gpu
-                  ? 'Training works on CPU, but is slower. Apple Silicon (MPS) is supported.'
+                  ? t('firstLaunch.preflight.gpuNoneHint')
                   : undefined}
               />
 
@@ -489,7 +504,7 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
               {hasErrors && (
                 <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
                   <p className="text-red-300 font-semibold mb-2 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" /> Issues to fix before continuing:
+                    <AlertCircle className="w-4 h-4" /> {t('firstLaunch.preflight.errorsTitle')}
                   </p>
                   {result.errors.map((e, i) => (
                     <p key={i} className="text-red-300 text-sm mt-1">{e}</p>
@@ -518,7 +533,7 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
             disabled={loading}
             className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/20 disabled:opacity-40"
           >
-            Re-check
+            {t('firstLaunch.preflight.recheck')}
           </button>
           <button
             onClick={onContinue}
@@ -529,7 +544,7 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
                 : `bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 shadow-lg`
             }`}
           >
-            Continue →
+            {t('firstLaunch.preflight.continue')} →
           </button>
         </div>
       </div>
@@ -993,7 +1008,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
             <div className="grid gap-3">
               {plugins.map(plugin => {
                 const isSelected = selectedPlugins.has(plugin.id);
-                const isDisabled = plugin.built_in;
+                const isDisabled = plugin.id === REQUIRED_PLUGIN_ID;
                 
                 return (
                   <div
@@ -1025,7 +1040,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                       {/* Category Badge */}
                       <div className="flex-shrink-0">
                         <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${getCategoryColor(plugin.category)} flex items-center justify-center`}>
-                          <span className="text-2xl">{plugin.icon}</span>
+                          {pluginIcon(plugin, 'w-6 h-6 text-white')}
                         </div>
                       </div>
                       
@@ -1041,7 +1056,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                         </div>
                         <p className="text-sm text-gray-300 mb-2">{t(plugin.description)}</p>
                         
-                        {!plugin.built_in && (
+                        {(
                           <div className="flex items-center gap-3 text-xs text-gray-400">
                             <span className="flex items-center gap-1">
                               <HardDrive className="w-3 h-3" />
@@ -1191,7 +1206,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                   >
                     <div className="flex items-start gap-3">
                       <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${getCategoryColor(plugin.category)} flex items-center justify-center flex-shrink-0`}>
-                        <span className="text-xl">{plugin.icon}</span>
+                        {pluginIcon(plugin, 'w-5 h-5 text-white')}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
