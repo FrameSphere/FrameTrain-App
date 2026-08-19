@@ -88,6 +88,7 @@ jobs:
             rust_target: ''
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -105,9 +106,24 @@ jobs:
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          # Die Azure-Mirrors der GitHub-Runner haengen sporadisch minutenlang an
+          # jammy-security; apt wartet dann ohne Timeout weiter und der Job lief
+          # 60 Minuten ins Leere. Fester Mirror + kurze Netz-Timeouts + Retries,
+          # damit der Schritt entweder zuegig durchlaeuft oder klar scheitert.
+          echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          for attempt in 1 2 3; do
+            echo "apt-get update (Versuch ${attempt}/3)"
+            if sudo apt-get $APT_OPTS update; then break; fi
+            if [ "$attempt" = "3" ]; then
+              echo "apt-get update nach 3 Versuchen fehlgeschlagen"; exit 1
+            fi
+            sleep 15
+          done
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
         run: npm ci
@@ -161,6 +177,10 @@ jobs:
 
   generate-latest-json:
     needs: [build-tauri, create-release]
+    # Faellt eine Plattform der Matrix aus (z.B. Linux), sollen die fertigen
+    # Builds trotzdem ihr latest.json bekommen — sonst haengt der Auto-Update
+    # aller Plattformen an einer einzigen kaputten Matrix-Zeile.
+    if: ${{ !cancelled() && needs.create-release.result == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -229,6 +249,7 @@ jobs:
 
   notify-release:
     needs: [create-release, build-tauri, generate-latest-json]
+    if: ${{ !cancelled() && needs.generate-latest-json.result == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
