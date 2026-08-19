@@ -21,6 +21,40 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# CA-Zertifikate sicherstellen.
+#
+# Python-Framework-Installationen auf macOS bringen keinen CA-Store mit, solange
+# "Install Certificates.command" nicht gelaufen ist. Jeder Download vortrainierter
+# Gewichte (torchvision, HuggingFace) stirbt dann an CERTIFICATE_VERIFY_FAILED —
+# ein Fehler, mit dem niemand rechnet, der nur ein Bildmodell trainieren wollte.
+# certifi liefert einen brauchbaren Store; OpenSSL liest ihn ueber SSL_CERT_FILE.
+def _ensure_ca_certificates() -> None:
+    import os
+    try:
+        import certifi
+    except ImportError:
+        return
+    bundle = certifi.where()
+    if not os.path.exists(bundle):
+        return
+    try:
+        import ssl
+        import urllib.request
+        urllib.request.urlopen("https://download.pytorch.org", timeout=5).close()
+        return  # Standard-Store funktioniert, nichts aendern.
+    except Exception as exc:
+        if "CERTIFICATE_VERIFY" not in str(exc):
+            return  # Kein Zertifikatsproblem (z.B. offline) — nichts aendern.
+    os.environ.setdefault("SSL_CERT_FILE", bundle)
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", bundle)
+    try:
+        ssl._create_default_https_context = lambda *a, **kw: ssl.create_default_context(cafile=bundle)
+    except Exception:
+        pass
+
+
+_ensure_ca_certificates()
+
 from core.config import TrainingConfig
 from core.protocol import MessageProtocol
 

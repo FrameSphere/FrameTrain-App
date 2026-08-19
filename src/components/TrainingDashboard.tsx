@@ -63,7 +63,7 @@ export function getSession(id: string): TrainingSession | undefined {
 
 // ── Error Analysis ────────────────────────────────────────────────────────
 
-type ErrorCategory = 'memory' | 'dataset' | 'labels' | 'architecture' | 'packages' | 'cuda' | 'config' | 'code' | 'unknown';
+type ErrorCategory = 'memory' | 'dataset' | 'labels' | 'architecture' | 'packages' | 'network' | 'cuda' | 'config' | 'code' | 'unknown';
 
 export function analyzeError(errorMsg: string, t: (key: string) => string): { category: ErrorCategory; title: string; hint: string } {
   const e = (errorMsg ?? '').toLowerCase();
@@ -92,6 +92,17 @@ export function analyzeError(errorMsg: string, t: (key: string) => string): { ca
       || e.includes('no gpu') || e.includes('device not found')
       || /device .*(unavailable|not available|mismatch)/.test(e))
     return { category: 'cuda', title: t('trainingDashboard.errorRecovery.cudaCategoryTitle'), hint: t('trainingDashboard.errorRecovery.cudaCategoryHint') };
+  // Netzwerk- und Zertifikatsfehler VOR der Paket-Pruefung: torchvision laedt
+  // vortrainierte Gewichte nach, und ein SSL-Fehler dabei enthaelt das Wort
+  // "torchvision" — die App riet daraufhin zu "pip install", was nichts half.
+  if (e.includes('certificate_verify_failed') || e.includes('certificate verify failed')
+      || e.includes('unable to get local issuer certificate') || e.includes('ssl:')
+      || e.includes('sslcertverificationerror') || e.includes('urlopen error')
+      || e.includes('max retries exceeded') || e.includes('connection refused')
+      || e.includes('connectionerror') || e.includes('name or service not known')
+      || e.includes('temporary failure in name resolution') || e.includes('proxyerror'))
+    return { category: 'network', title: t('trainingDashboard.errorRecovery.networkCategoryTitle'), hint: t('trainingDashboard.errorRecovery.networkCategoryHint') };
+
   if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module')
       || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
     return { category: 'packages', title: t('trainingDashboard.errorRecovery.packagesCategoryTitle'), hint: t('trainingDashboard.errorRecovery.packagesCategoryHint') };

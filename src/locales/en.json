@@ -1225,7 +1225,9 @@
       "architectureCategoryTitle": "Architecture not supported",
       "architectureCategoryHint": "This model is not an encoder for sequence classification. Use BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa or a related encoder model.",
       "showFull": "Show full error message",
-      "showLess": "Show less"
+      "showLess": "Show less",
+      "networkCategoryTitle": "Network or certificate error",
+      "networkCategoryHint": "Downloading pretrained weights failed. On macOS the Python framework often lacks CA certificates: run \"Install Certificates.command\" in the Python folder under /Applications. Otherwise check your internet connection, VPN or proxy."
     }
   },
   "synapse": {

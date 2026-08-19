@@ -1,5 +1,5 @@
 """Image Classification Plugin — task_type: 'image_classification'"""
-import json, shutil, traceback
+import json, shutil, time, traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import torch
@@ -149,6 +149,12 @@ class ImageClassificationPlugin:
         try:
             tr_loader, va_loader, self.classes = _load_datasets(
                 Path(self.config.dataset_path), self.image_size, self.augment, self.config.batch_size)
+            # Fuer die Analyse-Seite: ohne diese Werte stand dort spaeter
+            # "0 Steps", "Dauer 0s" und eine unbekannte Architektur.
+            self._n_train = len(tr_loader.dataset)
+            self._n_val   = len(va_loader.dataset)
+            self._start_time = time.time()
+            self._total_steps = 0
         except (ValueError, ImportError) as e:
             MessageProtocol.error("Daten laden", str(e)); return False
 
@@ -214,6 +220,7 @@ class ImageClassificationPlugin:
                 self._history["val_losses"].append(avg_va)
                 self._history["accuracies"].append(acc)
 
+                self._total_steps = int(getattr(self, "_total_steps", 0)) + int(steps)
                 MessageProtocol.progress(epoch=epoch+1, total_epochs=epochs, step=epoch+1, total_steps=epochs,
                     train_loss=avg_tr, val_loss=avg_va, learning_rate=lr_now,
                     metrics={"accuracy": acc, "top5_accuracy": t5})
@@ -234,10 +241,25 @@ class ImageClassificationPlugin:
                         key=lambda d: int(d.name.split("-")[-1]))
                     for old in all_ckpts[:-2]: shutil.rmtree(old, ignore_errors=True)
 
+            last_train_loss = self._history["train_losses"][-1] if self._history["train_losses"] else 0.0
+            last_val_loss   = self._history["val_losses"][-1]   if self._history["val_losses"]   else 0.0
             self._metrics = {
                 "accuracy":   self._history["accuracies"][-1]   if self._history["accuracies"]   else 0.0,
-                "val_loss":   self._history["val_losses"][-1]    if self._history["val_losses"]    else 0.0,
-                "train_loss": self._history["train_losses"][-1]  if self._history["train_losses"]  else 0.0,
+                "val_loss":   last_val_loss,
+                "train_loss": last_train_loss,
+                # Die Analyse-Seite liest diese Namen. Ohne sie zeigte sie
+                # "Final Train Loss 0.0000" und "Dauer 0s" fuer jedes
+                # Bild-Training — obwohl die Werte vorlagen.
+                "final_train_loss": last_train_loss,
+                "final_val_loss":   last_val_loss,
+                "total_epochs":     len(self._history["train_losses"]),
+                "total_steps":      int(getattr(self, "_total_steps", 0)),
+                "training_duration_seconds": int(time.time() - getattr(self, "_start_time", time.time())),
+                "architecture":     self.arch,
+                "num_labels":       len(self.classes),
+                "n_train":          int(getattr(self, "_n_train", 0)),
+                "n_val":            int(getattr(self, "_n_val", 0)),
+                "device":           str(self.device),
             }
             MessageProtocol.status("train", "Image Classification Training abgeschlossen")
             return True

@@ -56,3 +56,25 @@ describe('analyzeError – echte Kategorien bleiben erhalten', () => {
     expect(cat('Die Modell-Architektur gpt2 wird noch nicht unterstützt')).toBe('architecture');
   });
 });
+
+describe('Netzwerk- und Zertifikatsfehler', () => {
+  it('SSL-Zertifikatsfehler ist kein Paket-Problem', () => {
+    // Beim Bild-Training laedt torchvision Gewichte nach. Das Wort
+    // "torchvision" im Traceback fuehrte zu "Fehlende Python-Pakete"
+    // samt pip-install-Rat — der nichts half.
+    const msg = [
+      'URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed:',
+      'unable to get local issuer certificate (_ssl.c:993)>',
+      '  File ".../torchvision/models/_api.py", line 63, in load_state_dict',
+    ].join('\n');
+    expect(cat(msg)).toBe('network');
+  });
+
+  it('Verbindungsabbruch wird als Netzwerkfehler erkannt', () => {
+    expect(cat('ConnectionError: Max retries exceeded with url: /models/resnet50.pth')).toBe('network');
+  });
+
+  it('Echtes Paket-Problem bleibt Paket-Problem', () => {
+    expect(cat("ModuleNotFoundError: No module named 'torchvision'")).toBe('packages');
+  });
+});
