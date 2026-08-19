@@ -119,7 +119,9 @@ export function checkHfModelSupport(
   if (tagReason) {
     return {
       supported: false,
-      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation.`,
+      // Der Satz nannte frueher nur Sequenzklassifikation. Seit 1.2.17 kommen
+      // Bild, Audio und Seq2Seq dazu — die alte Formulierung log den Nutzer an.
+      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), Bildklassifikation, Audioklassifikation, Seq2Seq (T5/BART) sowie YOLO-Objekterkennung.`,
     };
   }
   const result = detectPlugin(modelId);

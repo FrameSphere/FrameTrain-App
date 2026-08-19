@@ -147,6 +147,18 @@ def cap_eval_dataset(eval_ds, max_eval_samples: int, seed: int):
     return eval_ds.shuffle(seed=seed).select(range(n))
 
 
+
+def _epoch_number(state, config) -> int:
+    """
+    Epochen 1-basiert und gedeckelt.
+
+    HuggingFace zaehlt als Fliesskomma (0.0 ... 3.0). Aus `int(state.epoch)`
+    entstanden dadurch die Nummern 0,1,2 UND 3 — die Analyse meldete fuer einen
+    Lauf ueber 3 Epochen anschliessend "4 Epochen".
+    """
+    raw = float(getattr(state, "epoch", 0) or 0)
+    return max(1, min(int(config.epochs), int(raw) + 1))
+
 def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
     """
     Meldet Fortschritt und Evaluierungs-Phasen ans Frontend.
@@ -187,7 +199,7 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
                                       "eval_samples_per_second", "eval_steps_per_second")
                          and isinstance(v, (int, float))}
                 MessageProtocol.progress(
-                    epoch=int(state.epoch or 0), total_epochs=plugin.config.epochs,
+                    epoch=_epoch_number(state, plugin.config), total_epochs=plugin.config.epochs,
                     step=state.global_step, total_steps=total,
                     train_loss=getattr(plugin, "_last_train_loss", None),
                     val_loss=logs.get("eval_loss"),
@@ -200,7 +212,7 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
                 plugin._last_train_loss = t_loss
                 plugin._last_lr = lr
                 MessageProtocol.progress(
-                    epoch=int(state.epoch or 0), total_epochs=plugin.config.epochs,
+                    epoch=_epoch_number(state, plugin.config), total_epochs=plugin.config.epochs,
                     step=state.global_step, total_steps=total,
                     train_loss=t_loss, val_loss=None, learning_rate=lr, metrics={},
                 )

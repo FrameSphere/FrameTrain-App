@@ -2140,7 +2140,7 @@
       "tabLocal": "Lokaler Ordner",
       "tabHuggingFace": "Hugging Face",
       "local": {
-        "supportedFormats": ".csv .jsonl .json .parquet .txt  ·  Bilder: Ordner pro Klasse  ·  YOLO/ COCO/ Pascal VOC",
+        "supportedFormats": ".csv .jsonl .json .parquet .txt Bilder/ Audio/ YOLO/ COCO/ VOC/",
         "dropzoneIdle": "Dataset-Ordner hierher ziehen",
         "dropzoneDragging": "Ordner hier ablegen",
         "dropzoneSubtitle": "Flat Files, YOLO, COCO, Pascal VOC, Audio/Transkript, …",

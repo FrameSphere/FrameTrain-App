@@ -13,6 +13,7 @@ import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { sendAppErrorReport } from '../utils/errorReport';
+import { firstUsableLoss, lossImprovementPct } from './lossStats';
 import { dateLocale } from '../utils/dateLocale';
 
 // ── Session Storage ───────────────────────────────────────────────────────
@@ -695,11 +696,10 @@ export default function TrainingDashboard({
     return formatDuration(remaining * 1000);
   })();
 
-  const firstLoss = lossPoints[0]?.train_loss;
+  // Bezugspunkt ist der erste Punkt mit echtem Loss — siehe lossStats.ts.
+  const firstLoss = firstUsableLoss(lossPoints);
   const lastLoss  = lossPoints[lossPoints.length - 1]?.train_loss;
-  const lossImprovement = firstLoss != null && lastLoss != null && firstLoss !== lastLoss
-    ? ((firstLoss - lastLoss) / firstLoss * 100)
-    : null;
+  const lossImprovement = lossImprovementPct(lossPoints);
 
   // ── Minimized floating bar ──
 

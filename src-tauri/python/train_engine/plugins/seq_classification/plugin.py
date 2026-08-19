@@ -503,7 +503,7 @@ class Plugin(TrainPlugin):
                         and isinstance(v, (int, float))
                     }
                     MessageProtocol.progress(
-                        epoch=int(state.epoch or 0),
+                        epoch=max(1, min(int(plugin_ref.config.epochs), int(float(state.epoch or 0)) + 1)),
                         total_epochs=plugin_ref.config.epochs,
                         step=state.global_step,
                         total_steps=nonlocal_total or total_steps,
@@ -514,7 +514,9 @@ class Plugin(TrainPlugin):
                     )
                 else:
                     step   = state.global_step
-                    epoch  = int(state.epoch or 0)
+                    # 1-basiert und gedeckelt: sonst erzeugte das letzte Log bei
+                    # epoch=3.0 eine vierte Epoche in der Analyse.
+                    epoch  = max(1, min(int(plugin_ref.config.epochs), int(float(state.epoch or 0)) + 1))
                     t_loss = logs.get("loss", logs.get("train_loss", 0.0))
                     lr     = logs.get("learning_rate", plugin_ref.config.learning_rate)
                     plugin_ref._last_train_loss = t_loss

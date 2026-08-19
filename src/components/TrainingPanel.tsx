@@ -1163,7 +1163,13 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
   const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
-  const isImagePlugin   = detection?.supported === true && detection.plugin.id === 'image-classification';
+  // Beide Bild-Plugins: Sequenzlaenge ist dort ohne Bedeutung.
+  const isImagePlugin   = detection?.supported === true
+    && (detection.plugin.id === 'image-classification'
+        || detection.plugin.id === 'hf-image-classification');
+  // Der torchvision-Hinweis gilt nur fuers alte Plugin — das neue trainiert
+  // ja gerade die heruntergeladenen Gewichte.
+  const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
 
   // Beim Wechsel des Modelltyps sinnvolle Startwerte setzen. Vorher galt fuer
   // jedes Modell 2e-5 — fuer Bild- und Seq2Seq-Training deutlich zu klein.
@@ -1530,7 +1536,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
               {/* Bildklassifikation: Backbone waehlbar machen und offenlegen,
                   dass nicht die heruntergeladenen Gewichte trainiert werden. */}
-              {selectedModel && isSupported && detection.plugin.id === 'image-classification' && (
+              {selectedModel && isTorchvisionPlugin && (
                 <div className="space-y-2 mt-2 px-3 py-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
                   <p className="text-blue-200 text-xs">{t('trainingPanel.modelBlock.imageArchNote')}</p>
                   <p className="text-blue-300/70 text-[11px]">{t('trainingPanel.modelBlock.imageIgnoredNote')}</p>
