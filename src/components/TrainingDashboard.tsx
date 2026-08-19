@@ -571,6 +571,15 @@ export default function TrainingDashboard({
 
   eventsRef.current = events;
 
+  // Jeder Lauf faengt mit leerem Log an. Vorher blieben die Eintraege des
+  // vorherigen Trainings stehen — im zweiten Lauf stand oben "Abgeschlossen"
+  // vom ersten, und der neue Start fehlte ganz, weil "schon gestartet" galt.
+  useEffect(() => {
+    setEvents([]);
+    prevEpochRef.current = -1;
+    prevStatusRef.current = '';
+  }, [sessionId]);
+
   // Die Uhr laeuft nur, solange das Training laeuft. Vorher zaehlte sie auch
   // nach einem Abbruch weiter — ein sofort gescheitertes Dev-Script zeigte so
   // spaeter "Laufzeit 6h 43m".
@@ -698,6 +707,9 @@ export default function TrainingDashboard({
   })();
 
   // Bezugspunkt ist der erste Punkt mit echtem Loss — siehe lossStats.ts.
+  // Der letzte Fortschritts-Event am Ende meldet oft nur den Eval-Loss.
+  // Ohne Rueckfall stand in der Kachel dann "—", obwohl Chart und Log den
+  // finalen Train Loss zeigten.
   const firstLoss = firstUsableLoss(lossPoints);
   const lastLoss  = lossPoints[lossPoints.length - 1]?.train_loss;
   const lossImprovement = lossImprovementPct(lossPoints);
@@ -780,7 +792,7 @@ export default function TrainingDashboard({
           {/* Metrics strip */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: t('trainingDashboard.metrics.trainLoss'), value: progress?.train_loss?.toFixed(4) ?? '—', sub: lossImprovement != null ? `${lossImprovement > 0 ? '↓' : '↑'} ${Math.abs(lossImprovement).toFixed(1)}% ${t('trainingDashboard.metrics.trainLossSub').replace('{dir}', '').replace('{pct}', '')}` : undefined, icon: <TrendingDown className="w-4 h-4" />, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+              { label: t('trainingDashboard.metrics.trainLoss'), value: (progress?.train_loss ?? lastLoss)?.toFixed(4) ?? '—', sub: lossImprovement != null ? `${lossImprovement > 0 ? '↓' : '↑'} ${Math.abs(lossImprovement).toFixed(1)}% ${t('trainingDashboard.metrics.trainLossSub').replace('{dir}', '').replace('{pct}', '')}` : undefined, icon: <TrendingDown className="w-4 h-4" />, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
               { label: t('trainingDashboard.metrics.valLoss'),   value: progress?.val_loss?.toFixed(4) ?? '—', icon: <BarChart3 className="w-4 h-4" />, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
               { label: t('trainingDashboard.metrics.learningRate'), value: progress?.learning_rate?.toExponential(2) ?? (config?.learning_rate?.toExponential(2) ?? '—'), icon: <Zap className="w-4 h-4" />, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
               { label: t('trainingDashboard.metrics.duration'),  value: durationLabel, sub: eta ? t('trainingDashboard.metrics.eta').replace('{eta}', eta) : (isCompleted ? t('trainingDashboard.metrics.completed') : isStopped ? t('trainingDashboard.metrics.stopped') : undefined), icon: <Clock className="w-4 h-4" />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
