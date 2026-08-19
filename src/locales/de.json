@@ -2452,6 +2452,7 @@
       "skippedLabel": "{count} übersprungen",
       "openAnalysisButton": "Analyse öffnen",
       "allDoneTitle": "Alle Samples bewertet!",
+      "noSamplesLoaded": "Keine Samples geladen — lade oben in der Konfiguration Samples aus einem Dataset.",
       "toAnalysisButton": "Zur Auswertung"
     },
     "analysis": {

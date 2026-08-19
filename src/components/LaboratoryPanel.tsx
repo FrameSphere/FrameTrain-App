@@ -51,6 +51,9 @@ interface ModelWithVersionTree { id: string; name: string; versions: VersionTree
 
 type LabInputKind = 'text' | 'image' | 'audio' | 'tensor';
 
+/** Zeilen, die aus einer Parquet-Datei als Samples geladen werden (Backend deckelt bei 500). */
+const PARQUET_SAMPLE_ROWS = 200;
+
 interface LabSample {
   id: string;
   index: number;
@@ -189,6 +192,17 @@ function extractLabelField(obj: unknown): string | undefined {
   return undefined;
 }
 
+/** Objekt-Zeilen (Parquet-Preview) in Samples umwandeln — gleiche Feld-Erkennung wie parseSamples. */
+function samplesFromRows(rows: unknown[]): LabSample[] {
+  return rows.map((item, i) => ({
+    id: `p_${Date.now()}_${i}`,
+    index: i,
+    text: extractTextField(item),
+    label: extractLabelField(item),
+    rawData: item,
+  }));
+}
+
 function parseSamples(content: string, fileName: string): LabSample[] {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
   const raw: unknown[] = [];
@@ -298,6 +312,11 @@ function AccuracyDonut({
   const R = 30; const C = 2 * Math.PI * R;
   const correctPct = correct / total;
   const wrongPct   = wrong   / total;
+  // Die Ringe zeigen die Verteilung aller Samples, die Zahl in der Mitte aber
+  // dieselbe Quote wie "Accuracy (bewertet)": uebersprungene Samples sind nicht
+  // bewertet und duerfen die Trefferquote nicht druecken.
+  const ratedCount = correct + wrong;
+  const accuracyPct = ratedCount > 0 ? correct / ratedCount : 0;
 
   const correctArc = C * correctPct;
   const wrongArc   = C * wrongPct;
@@ -325,7 +344,7 @@ function AccuracyDonut({
         })}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-white font-bold text-sm">{total > 0 ? ((correct / total) * 100).toFixed(0) : 0}%</span>
+        <span className="text-white font-bold text-sm">{ratedCount > 0 ? `${(accuracyPct * 100).toFixed(0)}%` : '–'}</span>
         <span className="text-gray-500 text-[9px]">{centerLabel}</span>
       </div>
     </div>
@@ -364,6 +383,9 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
             const correct = s.results.filter(r => r.userRating === 'correct').length;
             const wrong   = s.results.filter(r => r.userRating === 'wrong').length;
             const total   = s.results.length;
+            // "bewertet" meint korrekt + falsch — uebersprungene Samples sind
+            // gesehen, aber nicht bewertet.
+            const rated   = correct + wrong;
             return (
               <div key={s.id} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/[0.07] transition-all group">
                 <div className="flex items-start justify-between gap-3">
@@ -371,7 +393,7 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
                     <p className="text-white font-medium text-sm truncate">{s.name}</p>
                     <p className="text-gray-500 text-xs">{s.modelName} · {s.versionName}</p>
                     <div className="flex items-center gap-3 mt-1.5">
-                      <span className="text-[10px] text-gray-500">{total}/{s.totalSamples} {t('laboratoryPanel.sessionsModal.ratedLabel')}</span>
+                      <span className="text-[10px] text-gray-500">{t('laboratoryPanel.sessionsModal.ratedLabel', { tested: rated, total: s.totalSamples })}</span>
                       {total > 0 && (
                         <>
                           <span className="text-[10px] text-emerald-400 inline-flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" />{correct}</span>
@@ -1196,8 +1218,20 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       }
 
       const allSamples: LabSample[] = [];
+      const fileErrors: string[] = [];
       for (const file of filtered) {
         try {
+          // Parquet ist binaer: read_dataset_file liefert dafuer nur einen
+          // Platzhaltertext. Die Zeilen kommen deshalb ueber den Parquet-Preview.
+          if (/\.parquet$/i.test(file.name)) {
+            const pq = await invoke<{ rows?: unknown[]; total_rows?: number }>(
+              'preview_parquet_file', { filePath: file.path, maxRows: PARQUET_SAMPLE_ROWS }
+            );
+            const rows = Array.isArray(pq?.rows) ? pq.rows : [];
+            console.log(`[Lab] Parquet gelesen: ${file.name}, Zeilen: ${rows.length} von ${pq?.total_rows ?? '?'}`);
+            allSamples.push(...samplesFromRows(rows));
+            continue;
+          }
           const content = await invoke<string>('read_dataset_file', { filePath: file.path });
           console.log(`[Lab] Datei gelesen: ${file.name}, Länge: ${content.length}`);
           const parsed = parseSamples(content, file.name);
@@ -1205,13 +1239,16 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           allSamples.push(...parsed);
         } catch (fileErr) {
           console.warn(`[Lab] Fehler beim Lesen von ${file.name}:`, fileErr);
+          fileErrors.push(`${file.name}: ${String(fileErr)}`);
         }
       }
 
       if (allSamples.length === 0) {
         warning(
           t('laboratoryPanel.setup.notifications.noSamples'),
-          t('laboratoryPanel.setup.notifications.noSamplesDetail', { count: filtered.length }),
+          fileErrors.length > 0
+            ? fileErrors.join('\n')
+            : t('laboratoryPanel.setup.notifications.noSamplesDetail', { count: filtered.length }),
         );
         return;
       }
@@ -2008,8 +2045,16 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
             </>
           )}
 
+          {/* ── Keine Samples geladen (z.B. nach Modellwechsel) ── */}
+          {phase === 'testing' && session && !currentSample && samples.length === 0 && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm bg-white/5 border-white/10 text-gray-400">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{t('laboratoryPanel.testing.noSamplesLoaded')}</span>
+            </div>
+          )}
+
           {/* ── Abgeschlossen ── */}
-          {phase === 'testing' && session && !currentSample && (
+          {phase === 'testing' && session && !currentSample && samples.length > 0 && (
             <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-8 text-center space-y-3">
               <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
               <p className="text-white font-semibold">{t('laboratoryPanel.testing.allDoneTitle')}</p>

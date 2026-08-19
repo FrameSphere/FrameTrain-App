@@ -35,6 +35,10 @@ export default function GenericTestPanel({
   const [single, setSingle] = useState<{ predicted: string; confidence?: number; top: TopPred[]; ms: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Die Engine meldet waehrend des Ladens Status-Zeilen ("Lade Bildmodell...").
+  // Ohne sie sieht der Nutzer bei einem langsamen Kaltstart nur einen Spinner.
+  const [status, setStatus] = useState<string | null>(null);
+
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '');
   const [maxSamples, setMaxSamples] = useState<number | ''>(50);
   const [running, setRunning] = useState(false);
@@ -46,7 +50,7 @@ export default function GenericTestPanel({
 
   const runSingle = async () => {
     if (!input.trim()) { setError(singleLabel + ' fehlt.'); return; }
-    setError(null); setSingle(null); setSingleBusy(true);
+    setError(null); setSingle(null); setStatus(null); setSingleBusy(true);
     try {
       const testId = await invoke<string>('test_single_input', {
         versionId,
@@ -65,14 +69,18 @@ export default function GenericTestPanel({
             top: d?.top_predictions ?? [],
             ms: Math.round((d?.inference_time ?? 0) * 1000),
           });
+          setStatus(null);
           setSingleBusy(false);
         });
       const offErr = await listen<{ test_id?: string; data?: { error?: string } }>(
         'test-error', e => {
           setError(e.payload.data?.error ?? 'Unbekannter Fehler');
+          setStatus(null);
           setSingleBusy(false);
         });
-      unlistenRef.current.push(off, offErr);
+      const offSt = await listen<{ data?: { message?: string } }>(
+        'test-status', e => { setStatus(e.payload.data?.message ?? null); });
+      unlistenRef.current.push(off, offErr, offSt);
     } catch (e) {
       setError(String(e)); setSingleBusy(false);
     }
@@ -81,7 +89,7 @@ export default function GenericTestPanel({
   const runDataset = async () => {
     const ds = datasets.find(d => d.id === datasetId);
     if (!ds) { setError('Kein Dataset ausgewählt.'); return; }
-    setError(null); setSummary(null); setProgress(null); setRunning(true);
+    setError(null); setSummary(null); setProgress(null); setStatus(null); setRunning(true);
     try {
       const job = await invoke<{ id: string }>('start_test', {
         modelId, modelName, versionId, versionName,
@@ -106,13 +114,17 @@ export default function GenericTestPanel({
             accuracy: d?.accuracy ?? null,
             correct: d?.correct_predictions ?? null,
           });
+          setStatus(null);
           setRunning(false);
         });
       const offE = await listen<{ data?: { error?: string } }>('test-error', e => {
         setError(e.payload.data?.error ?? 'Unbekannter Fehler');
+        setStatus(null);
         setRunning(false);
       });
-      unlistenRef.current.push(offP, offC, offE);
+      const offSt = await listen<{ data?: { message?: string } }>(
+        'test-status', e => { setStatus(e.payload.data?.message ?? null); });
+      unlistenRef.current.push(offP, offC, offE, offSt);
       void job;
     } catch (e) {
       setError(String(e)); setRunning(false);
@@ -146,6 +158,12 @@ export default function GenericTestPanel({
           {singleBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
           Auswerten
         </button>
+
+        {singleBusy && (
+          <p className="text-gray-400 text-[11px]">
+            {status ?? 'Test-Engine wird gestartet…'}
+          </p>
+        )}
 
         {single && (
           <div className="rounded-xl bg-slate-900/60 border border-white/10 p-4 space-y-2">
@@ -213,6 +231,12 @@ export default function GenericTestPanel({
                 </button>
               )}
             </div>
+
+            {running && !progress && (
+              <p className="text-gray-400 text-[11px]">
+                {status ?? 'Test-Engine wird gestartet…'}
+              </p>
+            )}
 
             {progress && (
               <div className="space-y-1">

@@ -2452,6 +2452,7 @@
       "skippedLabel": "{count} skipped",
       "openAnalysisButton": "Open Analysis",
       "allDoneTitle": "All samples rated!",
+      "noSamplesLoaded": "No samples loaded — load samples from a dataset in the configuration above.",
       "toAnalysisButton": "Go to Analysis"
     },
     "analysis": {
