@@ -49,14 +49,16 @@ interface ModelInfo {
 interface VersionTreeItem { id: string; name: string; is_root: boolean; version_number: number; }
 interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
 
+type LabInputKind = 'text' | 'image' | 'audio' | 'tensor';
+
 interface LabSample {
   id: string;
   index: number;
   text: string;          // Haupttext für die Inference
   label?: string;        // Erwartetes Label (optional)
   rawData: unknown;      // Original-Daten aus Datei
-  imagePath?: string;    // Bild-Sample: absoluter Dateipfad (Canvas-Bildmodelle)
-  isImage?: boolean;     // true → Bild-Inferenz statt Text/Tensor
+  filePath?: string;     // Datei-Sample: absoluter Pfad (Bild-/Audio-Modelle)
+  fileKind?: 'image' | 'audio';  // gesetzt → Datei-Inferenz statt Text/Tensor
 }
 
 interface TopPred { label: string; score: number; }
@@ -785,6 +787,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   // Konkrete Fehlermeldung vom Server-Start (inline sichtbar, nicht nur als Toast)
   const [serverErrorMsg, setServerErrorMsg] = useState<string | null>(null);
   const [serverVersionId, setServerVersionId] = useState<string | null>(null);
+  const [serverInputKind, setServerInputKind] = useState<LabInputKind | null>(null);
+  const [serverModality,  setServerModality]  = useState<string | null>(null);
   const serverStatusRef = useRef<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   // Samples
@@ -905,16 +909,23 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   ]);
 
   useEffect(() => {
-    const unlisten = listen<{ status: string; version_id?: string; message?: string }>(
+    const unlisten = listen<{ status: string; version_id?: string; message?: string; input_kind?: string; modality?: string }>(
       'lab-server-status',
       e => {
-        const { status, version_id, message } = e.payload;
-        console.log('[Lab] Server-Status:', status, version_id, message);
+        const { status, version_id, message, input_kind, modality } = e.payload;
+        console.log('[Lab] Server-Status:', status, version_id, message, modality);
         setServerStatus(status as typeof serverStatus);
         serverStatusRef.current = status as typeof serverStatus;
         if (status === 'ready' && version_id) setServerVersionId(version_id);
+        if (status === 'ready') {
+          setServerInputKind((input_kind as LabInputKind) ?? 'text');
+          setServerModality(modality ?? 'text');
+        }
+        if (status === 'loading') { setServerInputKind(null); setServerModality(null); }
         if (status === 'error') {
           setServerVersionId(null);
+          setServerInputKind(null);
+          setServerModality(null);
           setServerErrorMsg(message ?? null);
           if (message) error(t('laboratoryPanel.setup.notifications.modelLoadError'), message);
         }
@@ -1007,7 +1018,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         lines.push(`  Sample: ${currentSampleIdx + 1}/${samples.length}`);
         lines.push(`  Tests durchgeführt: ${testedCount}/${samples.length}`);
         if (testResult) {
-          lines.push(`  Letztes Ergebnis: "${testResult.predicted}" (Confidence: ${(testResult.confidence ?? 0).toFixed(2)})`);
+          lines.push(testResult.confidence != null
+            ? `  Letztes Ergebnis: "${testResult.predicted}" (Confidence: ${testResult.confidence.toFixed(2)})`
+            : `  Letztes Ergebnis: "${testResult.predicted}" (generierter Text, keine Konfidenz)`);
           if (testError) lines.push(`  ⚠️ Fehler: ${testError}`);
         }
         if (testing) {
@@ -1111,6 +1124,17 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
 
   const currentSample = samples[currentSampleIdx] ?? null;
+  // Erwartet der geladene Server eine andere Eingabeart als das aktuelle Sample?
+  const inputMismatch: 'inputMismatchImage' | 'inputMismatchAudio' | 'inputMismatchText' | null =
+    !currentSample || !serverInputKind || serverInputKind === 'tensor'
+      ? null
+      : serverInputKind === 'image' && currentSample.fileKind !== 'image'
+      ? 'inputMismatchImage'
+      : serverInputKind === 'audio' && currentSample.fileKind !== 'audio'
+      ? 'inputMismatchAudio'
+      : serverInputKind === 'text' && currentSample.fileKind
+      ? 'inputMismatchText'
+      : null;
   const results       = session?.results ?? [];
   const testedCount   = results.filter(r => r.userRating !== 'skipped').length;
 
@@ -1130,28 +1154,32 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
       // Bild-Dataset (ImageFolder): Dateien sind Bilder → als Bild-Samples laden,
       // Label = übergeordneter Ordnername. Kein Text-Parsing.
-      const IMG_EXT = /\.(jpe?g|png|bmp|webp|gif|tiff?)$/i;
+      const IMG_EXT   = /\.(jpe?g|png|bmp|webp|gif|tiff?)$/i;
+      const AUDIO_EXT = /\.(wav|mp3|flac|ogg|m4a|aac)$/i;
       const imageFiles = filtered.filter(f => IMG_EXT.test(f.name));
-      if (imageFiles.length > 0 && imageFiles.length >= filtered.length * 0.5) {
-        const imgSamples: LabSample[] = imageFiles.map((f, i) => {
+      const audioFiles = filtered.filter(f => AUDIO_EXT.test(f.name));
+      const mediaFiles = imageFiles.length >= audioFiles.length ? imageFiles : audioFiles;
+      const mediaKind: 'image' | 'audio' = imageFiles.length >= audioFiles.length ? 'image' : 'audio';
+      if (mediaFiles.length > 0 && mediaFiles.length >= filtered.length * 0.5) {
+        const mediaSamples: LabSample[] = mediaFiles.map((f, i) => {
           const parts = f.path.split(/[/\\]/);
           const folderLabel = parts.length >= 2 ? parts[parts.length - 2] : undefined;
           return {
-            id: `img_${Date.now()}_${i}`,
+            id: `${mediaKind}_${Date.now()}_${i}`,
             index: i,
             text: f.name,
             label: folderLabel,
             rawData: { path: f.path, name: f.name },
-            imagePath: f.path,
-            isImage: true,
+            filePath: f.path,
+            fileKind: mediaKind,
           };
         });
-        setSamples(imgSamples);
-        const dsImg = datasets.find(d => d.id === selectedSampleDatasetId);
-        setSourceFileName(dsImg?.name ?? 'Dataset');
+        setSamples(mediaSamples);
+        const dsMedia = datasets.find(d => d.id === selectedSampleDatasetId);
+        setSourceFileName(dsMedia?.name ?? 'Dataset');
         success(
           t('laboratoryPanel.setup.notifications.loadSuccess'),
-          t('laboratoryPanel.setup.notifications.loadSuccessDetail', { count: imgSamples.length, fileCount: imageFiles.length }),
+          t('laboratoryPanel.setup.notifications.loadSuccessDetail', { count: mediaSamples.length, fileCount: mediaFiles.length }),
         );
         return;
       }
@@ -1294,7 +1322,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           inference_ms: number;
         }>('lab_infer_sample', {
           text: currentSample.text,
-          imagePath: currentSample.isImage ? currentSample.imagePath ?? null : null,
+          filePath: currentSample.fileKind ? currentSample.filePath ?? null : null,
         });
 
         setTestResult({
@@ -1310,7 +1338,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           MODEL_PATH: modelPath,
           ...Object.fromEntries(dsRefs.map(r => [r.key, r.value])),
           LAB_SAMPLE_INPUT: currentSample.text,
-          LAB_IMAGE_PATH: currentSample.isImage ? currentSample.imagePath ?? '' : '',
+          LAB_IMAGE_PATH: currentSample.fileKind === 'image' ? currentSample.filePath ?? '' : '',
+          LAB_FILE_PATH:  currentSample.fileKind ? currentSample.filePath ?? '' : '',
         };
 
         const u1 = await listen<{ predicted?: string; confidence?: number; top_predictions?: TopPred[]; error?: string }>('lab-script-result', e => {
@@ -1717,7 +1746,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     {serverStatus === 'loading'
                       ? t('laboratoryPanel.testing.serverBannerLoading')
                       : serverStatus === 'error'
-                      ? t('laboratoryPanel.testing.serverBannerError')
+                      ? serverErrorMsg ?? t('laboratoryPanel.testing.serverBannerError')
                       : t('laboratoryPanel.testing.serverBannerIdle')}
                   </span>
                   {(serverStatus === 'idle' || serverStatus === 'error') && selectedVersionId && (
@@ -1728,6 +1757,14 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {t('laboratoryPanel.setup.loadModelButton')}
                     </button>
                   )}
+                </div>
+              )}
+
+              {/* Eingabeart passt nicht zum Modell */}
+              {engineMode === 'engine' && serverStatus === 'ready' && inputMismatch && (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm bg-amber-500/10 border-amber-500/20 text-amber-300">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{t(`laboratoryPanel.testing.${inputMismatch}`)}</span>
                 </div>
               )}
 
@@ -1793,13 +1830,21 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     <span className="text-white font-medium text-sm">{t('laboratoryPanel.testing.sampleCardTitle', { index: currentSample.index + 1 })}</span>
                   </div>
 
-                  {currentSample.isImage && currentSample.imagePath ? (
+                  {currentSample.fileKind && currentSample.filePath ? (
                     <div className="rounded-xl bg-black/30 border border-white/10 p-3 flex flex-col items-center gap-2">
-                      <img
-                        src={convertFileSrc(currentSample.imagePath)}
-                        alt={currentSample.text}
-                        className="max-h-40 max-w-full rounded-lg object-contain"
-                      />
+                      {currentSample.fileKind === 'image' ? (
+                        <img
+                          src={convertFileSrc(currentSample.filePath)}
+                          alt={currentSample.text}
+                          className="max-h-40 max-w-full rounded-lg object-contain"
+                        />
+                      ) : (
+                        <audio
+                          controls
+                          src={convertFileSrc(currentSample.filePath)}
+                          className="w-full"
+                        />
+                      )}
                       <span className="text-gray-400 text-[10px] font-mono truncate max-w-full">{currentSample.text}</span>
                     </div>
                   ) : (

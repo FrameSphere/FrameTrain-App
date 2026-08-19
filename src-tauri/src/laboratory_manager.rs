@@ -34,6 +34,10 @@ pub struct LabServer {
     pub model_path: String,
     /// Canvas-Modell (DynamicGraphModule) statt HuggingFace — anderes Request-Format
     pub is_canvas:  bool,
+    /// Was der Server erwartet: "text" | "image" | "audio" (vom Python-Server gemeldet)
+    pub input_kind: String,
+    /// Aufgabenbereich: "text" | "image" | "audio" | "seq2seq" | "canvas"
+    pub modality:   String,
 }
 
 #[derive(Default)]
@@ -273,8 +277,8 @@ pub async fn lab_start_model_server(
                 .collect();
             return fail(format!(
                 "Keine config.json in {} — kein HuggingFace-Format. \
-                 Die Lab-Inferenz benötigt ein HF-Klassifikationsmodell. \
-                 Vorhandene Dateien: {}",
+                 Die Lab-Inferenz benötigt ein HuggingFace-Modell \
+                 (Text, Bild, Audio oder Seq2Seq). Vorhandene Dateien: {}",
                 version_path,
                 if contents.is_empty() { "(leer)".to_string() } else { contents.join(", ") }
             ));
@@ -365,6 +369,8 @@ pub async fn lab_start_model_server(
         // Auf "ready" warten (max. 120 Sekunden – grosse Modelle auf CPU brauchen Zeit)
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut server_ready = false;
+        let mut input_kind   = if canvas { "tensor".to_string() } else { "text".to_string() };
+        let mut modality     = if canvas { "canvas".to_string() } else { "text".to_string() };
 
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -382,7 +388,16 @@ pub async fn lab_start_model_server(
                     println!("[LabServer] Startup-Zeile: {}", line);
                     if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
                         match msg.get("type").and_then(|t| t.as_str()) {
-                            Some("ready") => { server_ready = true; break; }
+                            Some("ready") => {
+                                if let Some(k) = msg.get("input_kind").and_then(|v| v.as_str()) {
+                                    input_kind = k.to_string();
+                                }
+                                if let Some(m) = msg.get("modality").and_then(|v| v.as_str()) {
+                                    modality = m.to_string();
+                                }
+                                server_ready = true;
+                                break;
+                            }
                             Some("error") => {
                                 let m = msg.get("message").and_then(|m| m.as_str())
                                     .unwrap_or("Unbekannter Fehler").to_string();
@@ -418,11 +433,17 @@ pub async fn lab_start_model_server(
                     version_id: vid.clone(),
                     model_path: mp,
                     is_canvas: canvas,
+                    input_kind: input_kind.clone(),
+                    modality: modality.clone(),
                 });
                 s.status = ServerStatus::Ready;
             }
-            let _ = ah.emit("lab-server-status",
-                serde_json::json!({ "status": "ready", "version_id": vid }));
+            let _ = ah.emit("lab-server-status", serde_json::json!({
+                "status": "ready",
+                "version_id": vid,
+                "input_kind": input_kind,
+                "modality": modality,
+            }));
             println!("[LabServer] Bereit fuer Inferenz.");
         }
     });
@@ -430,12 +451,12 @@ pub async fn lab_start_model_server(
     Ok(())
 }
 
-/// Fuehrt Inferenz auf einem einzelnen Text durch.
+/// Fuehrt Inferenz auf einem einzelnen Sample durch (Text oder Datei).
 /// Schnell (~50ms) weil das Modell bereits geladen ist.
 #[tauri::command]
 pub fn lab_infer_sample(
     text: String,
-    image_path: Option<String>,
+    file_path: Option<String>,
     state: tauri::State<'_, Arc<Mutex<LabState>>>,
 ) -> Result<InferResult, String> {
     let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
@@ -445,13 +466,24 @@ pub fn lab_infer_sample(
         let server = s.server.as_mut()
             .ok_or_else(|| "Kein Modell geladen. Bitte warte bis das Modell fertig geladen ist.".to_string())?;
 
-        // Bild-Sample: Pfad direkt an den Canvas-Server (Preprocessing per IR im Python)
-        let img = image_path.as_deref().map(str::trim).filter(|p| !p.is_empty());
-        let req = if let Some(path) = img {
-            if !server.is_canvas {
-                return Err("Bild-Inferenz wird aktuell nur für Canvas-Modelle (Synapse Builder) unterstützt.".to_string());
-            }
+        // Datei-Sample (Bild/Audio): Pfad statt Text an den Server
+        let file = file_path.as_deref().map(str::trim).filter(|p| !p.is_empty());
+
+        let req = if let (Some(path), true) = (file, server.is_canvas) {
+            // Canvas: Preprocessing per IR im Python
             serde_json::json!({ "input": path, "input_type": "image" }).to_string()
+        } else if !server.is_canvas && matches!(server.input_kind.as_str(), "image" | "audio") {
+            let kind = if server.input_kind == "image" { "Bild" } else { "Audio" };
+            let path = file.ok_or_else(|| format!(
+                "Dieses Modell erwartet eine {}-Datei. Lade im Labor {}-Samples aus einem Dataset.",
+                kind, kind
+            ))?;
+            serde_json::json!({ "file_path": path }).to_string()
+        } else if !server.is_canvas && file.is_some() {
+            return Err(format!(
+                "Dieses Modell erwartet {}, es wurde aber eine Datei ausgewählt.                  Passt das Dataset zum Modell?",
+                if server.modality == "seq2seq" { "Text zum Umformulieren" } else { "Text" }
+            ));
         } else if server.is_canvas {
             // Canvas-Modelle erwarten einen Zahlen-Tensor statt Text
             let nums: Vec<f64> = text
@@ -528,6 +560,8 @@ pub fn lab_get_server_status(
         "status": s.status,
         "version_id": s.server.as_ref().map(|srv| &srv.version_id),
         "model_path": s.server.as_ref().map(|srv| &srv.model_path),
+        "input_kind": s.server.as_ref().map(|srv| &srv.input_kind),
+        "modality":   s.server.as_ref().map(|srv| &srv.modality),
     }))
 }
 
