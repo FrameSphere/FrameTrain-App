@@ -72,7 +72,17 @@ fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Groesse und Dateizahl eines Modells.
+///
+/// Trainierte Versionen liegen unter `versions/` im selben Ordner. Sie zaehlten
+/// bisher mit — distilbert stand mit "12 Dateien / 512 MB" da, obwohl das
+/// Modell selbst 6 Dateien und 256 MB hat. Die Karte beschreibt das Modell,
+/// nicht den gesamten Plattenverbrauch, also bleiben Versionen aussen vor.
 fn calculate_dir_size(path: &Path) -> Result<(u64, usize), String> {
+    calculate_dir_size_inner(path, true)
+}
+
+fn calculate_dir_size_inner(path: &Path, skip_versions: bool) -> Result<(u64, usize), String> {
     let mut size: u64 = 0;
     let mut count: usize = 0;
     if path.is_file() {
@@ -84,7 +94,10 @@ fn calculate_dir_size(path: &Path) -> Result<(u64, usize), String> {
             size += fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             count += 1;
         } else if p.is_dir() {
-            let (s, c) = calculate_dir_size(&p)?;
+            if skip_versions && p.file_name().map(|n| n == "versions").unwrap_or(false) {
+                continue;
+            }
+            let (s, c) = calculate_dir_size_inner(&p, false)?;
             size += s; count += c;
         }
     }
@@ -773,4 +786,41 @@ pub fn cleanup_incomplete_download(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod dir_size_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn versions_ordner_zaehlt_nicht_zur_modellgroesse() {
+        // Befund aus dem E2E-Test: die Modell-Karte zeigte "12 Dateien / 512 MB"
+        // fuer ein Modell mit 6 Dateien — die trainierte Version war mitgezaehlt.
+        let base = std::env::temp_dir().join(format!("ft_modelsize_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("versions/ver_abc")).unwrap();
+        fs::write(base.join("config.json"), vec![b'x'; 100]).unwrap();
+        fs::write(base.join("model.safetensors"), vec![b'x'; 900]).unwrap();
+        fs::write(base.join("versions/ver_abc/model.safetensors"), vec![b'x'; 5000]).unwrap();
+
+        let (size, count) = calculate_dir_size(&base).unwrap();
+        assert_eq!(count, 2, "nur die Modelldateien selbst");
+        assert_eq!(size, 1000, "die trainierte Version zaehlt nicht mit");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn unterordner_ohne_versions_zaehlen_weiter_mit() {
+        let base = std::env::temp_dir().join(format!("ft_modelsize2_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("tokenizer")).unwrap();
+        fs::write(base.join("config.json"), vec![b'x'; 10]).unwrap();
+        fs::write(base.join("tokenizer/vocab.txt"), vec![b'x'; 90]).unwrap();
+
+        let (size, count) = calculate_dir_size(&base).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(size, 100);
+        let _ = fs::remove_dir_all(&base);
+    }
 }

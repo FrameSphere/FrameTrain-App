@@ -92,14 +92,21 @@ function formatDownloads(n: number | undefined): string {
  * `distilbert/distilgpt2` als Encoder geführt und erst beim Trainingsstart
  * abgewiesen — nach über 1,5 GB Download.
  */
+/**
+ * Aufgabenarten, für die es kein Plugin gibt.
+ *
+ * Seq2Seq (Übersetzung, Zusammenfassung) und Audio sind seit 1.2.17 abgedeckt
+ * und stehen deshalb nicht mehr hier — sonst wies der Import-Dialog Modelle ab,
+ * die inzwischen trainierbar sind, noch bevor die Erkennung überhaupt lief.
+ */
 const UNSUPPORTED_PIPELINE_TAGS: Record<string, string> = {
   'text-generation': 'Textgenerierung (Decoder-Modell)',
-  'text2text-generation': 'Text-zu-Text (Seq2Seq)',
-  translation: 'Übersetzung (Seq2Seq)',
-  summarization: 'Zusammenfassung (Seq2Seq)',
-  'automatic-speech-recognition': 'Spracherkennung',
   'text-to-image': 'Bildgenerierung',
   'text-to-speech': 'Sprachsynthese',
+  'text-to-audio': 'Audiogenerierung',
+  'image-to-image': 'Bild-zu-Bild',
+  'object-detection': 'Objekterkennung (dafür ein YOLO-Modell nutzen)',
+  'image-segmentation': 'Bildsegmentierung',
   conversational: 'Dialog (Decoder-Modell)',
 };
 

@@ -1,0 +1,15 @@
+{
+  "task_type": "hf_image_classification",
+  "name": "Image Classification (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert das heruntergeladene HuggingFace-Bildmodell selbst (ViT, DeiT, ConvNeXt, Swin, ResNet, BEiT).",
+  "supported_architectures": [
+    "vit", "deit", "beit", "swin", "swinv2", "convnext", "convnextv2",
+    "resnet", "regnet", "efficientnet", "mobilenet_v2", "mobilevit",
+    "levit", "poolformer", "dinat", "cvt"
+  ],
+  "dataset_formats": ["folder_class", "pre_split"],
+  "metrics": ["train_loss", "val_loss", "accuracy", "f1", "precision", "recall"]
+}

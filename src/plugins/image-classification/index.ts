@@ -52,6 +52,8 @@ const imageClassificationPlugin: ModelPlugin = {
   name: 'Image Classification',
   description: 'Transfer Learning fuer Bildklassifikation: ResNet, EfficientNet, ViT, MobileNet. Erwartet einen Ordner pro Klasse (ImageFolder).',
   taskType: 'image_classification',
+  // Nur der Klassifikationskopf wird trainiert — das vertraegt 1e-3.
+  defaultTrainingConfig: { learning_rate: 1e-3, batch_size: 32, epochs: 10 },
   defaultPluginConfig: { arch: 'resnet18', image_size: 224, freeze_base: true, unfreeze_at: -1, pretrained: true, augment: true },
   detect: detectImageClassification,
   TrainComponent: ImageClassificationTrainPlugin,

@@ -1164,6 +1164,19 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
   const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
   const isImagePlugin   = detection?.supported === true && detection.plugin.id === 'image-classification';
+
+  // Beim Wechsel des Modelltyps sinnvolle Startwerte setzen. Vorher galt fuer
+  // jedes Modell 2e-5 — fuer Bild- und Seq2Seq-Training deutlich zu klein.
+  const pluginIdForDefaults = detection?.supported ? detection.plugin.id : null;
+  const appliedDefaultsFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pluginIdForDefaults || appliedDefaultsFor.current === pluginIdForDefaults) return;
+    appliedDefaultsFor.current = pluginIdForDefaults;
+    const defaults = detection?.supported ? detection.plugin.defaultTrainingConfig : undefined;
+    if (defaults && Object.keys(defaults).length > 0) {
+      updateConfig(defaults as Partial<TrainingConfig>);
+    }
+  }, [pluginIdForDefaults, detection, updateConfig]);
   const isSupported     = detection?.supported === true;
   const pluginId        = detection?.supported ? detection.plugin.id : null;
 

@@ -30,19 +30,30 @@ describe('Text-Encoder werden erkannt', () => {
   });
 });
 
-describe('Decoder und Seq2Seq werden abgelehnt', () => {
+describe('Decoder-Modelle werden abgelehnt – dafuer gibt es kein Plugin', () => {
   it.each([
     'gpt2', 'distilbert/distilgpt2', 'meta-llama/Llama-3.2-1B',
     'Qwen/Qwen2.5-0.5B', 'mistralai/Mistral-7B-v0.1',
-    't5-small', 'google/flan-t5-base', 'facebook/bart-base', 'google/mt5-small',
   ])('%s', (id) => expect(pluginOf(id)).toBeNull());
 });
 
-describe('Audio- und Sprachmodelle werden abgelehnt', () => {
+describe('Seq2Seq wird seit 1.2.17 unterstuetzt', () => {
+  it.each([
+    't5-small', 'google/flan-t5-base', 'facebook/bart-base',
+    'google/mt5-small', 'Helsinki-NLP/opus-mt-de-en',
+  ])('%s -> seq2seq', (id) => expect(pluginOf(id)).toBe('seq2seq'));
+});
+
+describe('Audio wird seit 1.2.17 unterstuetzt', () => {
   it.each([
     'openai/whisper-tiny', 'facebook/wav2vec2-base-960h',
-    'microsoft/speecht5_tts', 'pyannote/segmentation-3.0',
-  ])('%s', (id) => expect(pluginOf(id)).toBeNull());
+    'microsoft/wavlm-base', 'MIT/ast-finetuned-audioset-10-10-0.4593',
+  ])('%s -> audio-classification', (id) => expect(pluginOf(id)).toBe('audio-classification'));
+
+  it('Sprachsynthese bleibt abgelehnt – das ist kein Klassifikator', () => {
+    expect(pluginOf('microsoft/speecht5_tts')).toBeNull();
+    expect(pluginOf('suno/bark')).toBeNull();
+  });
 });
 
 describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
@@ -52,7 +63,7 @@ describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
     'facebook/deit-base-patch16-224',
     'google/efficientnet-b0',
     'timm/mobilenetv3_small_100',
-  ])('%s -> image-classification', (id) => expect(pluginOf(id)).toBe('image-classification'));
+  ])('%s -> hf-image-classification', (id) => expect(pluginOf(id)).toBe('hf-image-classification'));
 
   it('DETR ist Objekterkennung, kein Klassifikator', () => {
     // Matchte frueher auf den Teilstring "resnet".
@@ -71,6 +82,13 @@ describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
   it('config.json schlaegt den Namen', () => {
     expect(detectPlugin('mein/resnet-ordner', { model_type: 'clip' }).supported).toBe(false);
   });
+
+  it('torchvision-Modelle bleiben beim alten Plugin', () => {
+    // framework=torchvision heisst: keine HF-Gewichte, also das Backbone-Plugin.
+    const r = detectPlugin('mein/resnet18', { framework: 'torchvision' } as never);
+    expect(r.supported).toBe(true);
+    if (r.supported) expect(r.plugin.id).toBe('image-classification');
+  });
 });
 
 describe('YOLO', () => {
@@ -85,10 +103,7 @@ describe('Ablehnungen nennen den Grund, auch ohne config.json', () => {
   };
 
   it.each([
-    ['openai/whisper-tiny', /Spracherkennung/i],
-    ['facebook/wav2vec2-base-960h', /Audio/i],
     ['microsoft/speecht5_tts', /Text-to-Speech|Sprachsynthese/i],
-    ['t5-small', /Seq2Seq/i],
     ['facebook/detr-resnet-50', /Objekterkennung/i],
     ['openai/clip-vit-base-patch32', /multimodal/i],
     ['meta-llama/Llama-3.2-1B', /Decoder/i],

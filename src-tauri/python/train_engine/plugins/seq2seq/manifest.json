@@ -1,0 +1,13 @@
+{
+  "task_type": "seq2seq",
+  "name": "Seq2Seq (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert Encoder-Decoder-Modelle für Zusammenfassung, Übersetzung und Textumformung (T5, mT5, BART, Pegasus, Marian).",
+  "supported_architectures": [
+    "t5", "mt5", "longt5", "bart", "mbart", "pegasus", "marian", "m2m_100", "blenderbot"
+  ],
+  "dataset_formats": ["csv", "jsonl", "json", "parquet"],
+  "metrics": ["train_loss", "val_loss"]
+}

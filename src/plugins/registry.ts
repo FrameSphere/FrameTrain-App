@@ -11,12 +11,20 @@ import hfEncoderPlugin from './hf-encoder';
 import canvasPlugin from './canvas';
 import yoloPlugin from './yolo';
 import imageClassificationPlugin from './image-classification';
+import hfImageClassificationPlugin from './hf-image-classification';
+import audioClassificationPlugin from './audio-classification';
+import seq2seqPlugin from './seq2seq';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
-  canvasPlugin,              // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
-  yoloPlugin,                // YOLO Object Detection (YOLOv5/v8/v9/v11)
-  imageClassificationPlugin, // ResNet / EfficientNet / ViT / MobileNet
+  canvasPlugin,               // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
+  yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11)
+  // Vor dem torchvision-Plugin: ein heruntergeladenes HuggingFace-Bildmodell
+  // soll auch wirklich trainiert werden, nicht durch ein resnet18 ersetzt.
+  hfImageClassificationPlugin,
+  imageClassificationPlugin,  // torchvision-Backbones (ohne HF-Gewichte)
+  audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
+  seq2seqPlugin,              // T5 / BART / Pegasus / Marian
   xlmRobertaPlugin,
   hfEncoderPlugin,
 ];
@@ -108,13 +116,6 @@ const KNOWN_UNSUPPORTED: Record<string, string> = {
   mistral: 'Mistral ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
   qwen2: 'Qwen ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
   falcon: 'Falcon ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  t5: 'T5 ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
-  mt5: 'mT5 ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
-  bart: 'BART ist ein Encoder-Decoder-Modell (Seq2Seq), kein reiner Encoder.',
-  marian: 'Marian ist ein Übersetzungsmodell (Seq2Seq), kein reiner Encoder.',
-  whisper: 'Whisper ist ein Audio-Seq2Seq-Modell für Spracherkennung.',
-  wav2vec2: 'Wav2Vec2 ist ein Audio-Modell für Spracherkennung, kein Text-Encoder.',
-  hubert: 'HuBERT ist ein Audio-Modell für Sprache, kein Text-Encoder.',
   speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
   detr: 'DETR ist ein Objekterkennungs-Modell, kein Bildklassifikator — für Objekterkennung nutze ein YOLO-Modell.',
   blip: 'BLIP ist ein multimodales Bild-Text-Modell, kein Bildklassifikator.',

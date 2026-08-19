@@ -212,13 +212,16 @@ describe('Smoke-Test – minimales neues Plugin erfüllt Interface', () => {
   // Simuliert was ein Entwickler tun würde, wenn er ein neues Plugin anlegt.
   // Das Plugin wird NICHT in PLUGINS[] eingetragen – wir testen nur den Kontrakt.
 
-  const mockDetect = (modelPath: string) => modelPath.includes('whisper');
+  // Bewusst ein Modelltyp, fuer den es KEIN Plugin gibt. Frueher stand hier
+  // Whisper — seit dem Audio-Plugin ist das unterstuetzt und der Test pruefte
+  // nicht mehr, was er pruefen sollte.
+  const mockDetect = (modelPath: string) => modelPath.includes('bark');
 
-  const whisperPlugin: ModelPlugin = {
-    id: 'whisper',
-    name: 'Whisper',
-    description: 'OpenAI Whisper für Speech Recognition',
-    taskType: 'speech_recognition',
+  const unsupportedPlugin: ModelPlugin = {
+    id: 'text-to-speech-demo',
+    name: 'Text-to-Speech (Demo)',
+    description: 'Beispiel-Plugin fuer Sprachsynthese – nicht registriert',
+    taskType: 'text_to_speech',
     detect: mockDetect,
     TrainComponent: () => null,
     TestComponent: () => null,
@@ -226,39 +229,39 @@ describe('Smoke-Test – minimales neues Plugin erfüllt Interface', () => {
 
   it('minimales Plugin hat alle Pflichtfelder', () => {
     for (const field of REQUIRED_FIELDS) {
-      expect(whisperPlugin[field]).toBeDefined();
+      expect(unsupportedPlugin[field]).toBeDefined();
     }
   });
 
   it('detect-Funktion funktioniert wie erwartet', () => {
-    expect(whisperPlugin.detect('openai/whisper-large-v3')).toBe(true);
-    expect(whisperPlugin.detect('bert-base-uncased')).toBe(false);
+    expect(unsupportedPlugin.detect('suno/bark-small')).toBe(true);
+    expect(unsupportedPlugin.detect('bert-base-uncased')).toBe(false);
   });
 
   it('id ist einzigartig gegenüber registrierten Plugins', () => {
     const existingIds = PLUGINS.map(p => p.id);
-    expect(existingIds).not.toContain(whisperPlugin.id);
+    expect(existingIds).not.toContain(unsupportedPlugin.id);
   });
 
   it('NOCH NICHT in PLUGINS[] – detectPlugin findet es nicht', () => {
-    const result = detectPlugin('openai/whisper-large-v3');
-    // whisper ist noch nicht registriert → supported: false
+    const result = detectPlugin('suno/bark-small');
+    // Sprachsynthese hat kein Plugin → supported: false
     expect(result.supported).toBe(false);
   });
 
-  it('checkDatasetCompat mit unbekannter whisper-ID → Fallback, kein Crash', () => {
-    const result = checkDatasetCompat(whisperPlugin.id, ['.wav', '.mp3']);
+  it('checkDatasetCompat mit unbekannter Plugin-ID → Fallback, kein Crash', () => {
+    const result = checkDatasetCompat(unsupportedPlugin.id, ['.wav', '.mp3']);
     expect(result).toBeDefined();
     expect(result.overallLevel).toBe('ok'); // Fallback-Level
   });
 
   it('nach Registrierung (simuliert via PLUGINS-Push) → detectPlugin findet es', () => {
     // Temporär eintragen, nach Test entfernen
-    PLUGINS.push(whisperPlugin);
+    PLUGINS.push(unsupportedPlugin);
     try {
-      const result = detectPlugin('openai/whisper-large-v3');
+      const result = detectPlugin('suno/bark-small');
       expect(result.supported).toBe(true);
-      if (result.supported) expect(result.plugin.id).toBe('whisper');
+      if (result.supported) expect(result.plugin.id).toBe('text-to-speech-demo');
     } finally {
       PLUGINS.pop(); // immer aufräumen
     }
@@ -267,7 +270,7 @@ describe('Smoke-Test – minimales neues Plugin erfüllt Interface', () => {
   it('nach Entfernen aus PLUGINS[] → detectPlugin findet es wieder nicht', () => {
     // Sicherstellen dass der finally-Block oben funktioniert hat (whisper wieder raus)
     expect(PLUGINS.map(p => p.id)).not.toContain('whisper');
-    const result = detectPlugin('openai/whisper-large-v3');
+    const result = detectPlugin('suno/bark-small');
     expect(result.supported).toBe(false);
   });
 });

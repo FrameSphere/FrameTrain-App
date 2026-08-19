@@ -50,6 +50,15 @@ export interface ModelPlugin {
   /** Optional: Default plugin_config, wird 1:1 an Python weitergereicht */
   defaultPluginConfig?: Record<string, unknown>;
   /**
+   * Sinnvolle Startwerte der Trainings-Konfiguration für diesen Modelltyp.
+   *
+   * Ein einziger Standardwert passt nicht mehr: 2e-5 ist für Transformer
+   * richtig, für Bild-Transfer-Learning mit eingefrorenem Backbone aber viel
+   * zu klein (im direkten Vergleich 50 % statt 100 % Accuracy) und für T5
+   * ebenfalls zu niedrig.
+   */
+  defaultTrainingConfig?: Record<string, number | string | boolean>;
+  /**
    * Erkennt ob ein Modell von diesem Plugin unterstützt wird.
    * @param modelPathOrId  Lokaler Pfad oder HuggingFace Model-ID
    * @param configJson     Optional: bereits geladenes config.json des Modells
