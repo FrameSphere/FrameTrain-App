@@ -971,10 +971,14 @@ function ReportText({ text }: { text: string }) {
   );
 }
 
-/** Torchvision-Backbones des Bild-Plugins — dort ist Sequenzlaenge sinnlos. */
+/**
+ * Architekturen ohne Textsequenz — dort ist `max_seq_length` bedeutungslos.
+ * Betrifft Bildmodelle (torchvision und HuggingFace) sowie Audiomodelle.
+ */
 function isImageArchitecture(arch?: string): boolean {
   if (!arch) return false;
-  return /^(resnet|efficientnet|vit_b|mobilenet)/i.test(arch);
+  return /^(resnet|efficientnet|vit|deit|beit|swin|convnext|regnet|mobilenet|mobilevit|levit|poolformer|cvt|wav2vec2|hubert|wavlm|unispeech|sew|whisper|ast)/i
+    .test(arch);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1761,7 +1765,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
           {epochSummaries.length > 0 && (
             <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
               <button onClick={() => setShowEpochTable(p => !p)} className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Target className="w-4 h-4" />{t('analysisPanel.epochTable.title').replace('{count}', String(epochSummaries.length))}</h3>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Target className="w-4 h-4" />{t('analysisPanel.epochTable.title').replace('{count}', String(fullData?.training_summary?.total_epochs ?? epochSummaries.length))}</h3>
                 {showEpochTable ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
               </button>
               {showEpochTable && (

@@ -1,0 +1,10 @@
+{
+  "task_type": "seq2seq",
+  "name": "Seq2Seq (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz für trainierte Encoder-Decoder-Modelle (Zusammenfassung, Übersetzung).",
+  "input_type": "text",
+  "output_format": "text"
+}

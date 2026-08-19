@@ -1,0 +1,10 @@
+{
+  "task_type": "audio_classification",
+  "name": "Audio Classification",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz für trainierte Audioklassifikations-Modelle.",
+  "input_type": "audio",
+  "output_format": "classification"
+}

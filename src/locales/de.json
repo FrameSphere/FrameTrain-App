@@ -1979,7 +1979,7 @@
       "title": "Dataset & Modell"
     },
     "epochTable": {
-      "title": "Epoch-Zusammenfassung ({count} Epochen)",
+      "title": "Epoch-Zusammenfassung ({count} Epochen trainiert)",
       "colEpoch": "Epoche",
       "colAvgTrainLoss": "Ø Train Loss",
       "colMinLoss": "Min Loss",

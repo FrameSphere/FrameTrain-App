@@ -1,11 +1,15 @@
 import type { TestPluginProps } from '../types';
-import { ImageIcon } from 'lucide-react';
+import GenericTestPanel from '../GenericTestPanel';
 
-export default function HFImageTestPlugin(_props: TestPluginProps) {
+export default function HFImageTestPlugin(props: TestPluginProps) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-6 flex items-center gap-3">
-      <ImageIcon className="w-5 h-5 text-emerald-300" />
-      <p className="text-gray-400 text-sm">Bild auswählen und klassifizieren lassen.</p>
-    </div>
+    <GenericTestPanel
+      {...props}
+      taskType="hf_image_classification"
+      inputKind="file"
+      singleLabel="Einzelnes Bild"
+      singlePlaceholder="Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png"
+      resultLabel="Erkannte Klasse"
+    />
   );
 }

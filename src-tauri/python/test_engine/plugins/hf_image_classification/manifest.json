@@ -1,0 +1,10 @@
+{
+  "task_type": "hf_image_classification",
+  "name": "Image Classification (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz für trainierte HuggingFace-Bildmodelle.",
+  "input_type": "image",
+  "output_format": "classification"
+}
