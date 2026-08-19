@@ -52,12 +52,18 @@ export function detectPlugin(
   // Ohne config.json ist die Modell-ID die einzige Quelle. Vorher bekamen
   // Whisper, T5, CLIP oder Llama dann denselben nichtssagenden Satz wie jedes
   // unbekannte Modell — obwohl der Grund bekannt ist.
-  const known = (modelType ? KNOWN_UNSUPPORTED[modelType] : undefined)
-    ?? knownReasonFromId(trimmed);
-  if (known) {
+  const knownKey = (modelType && KNOWN_UNSUPPORTED[modelType] ? modelType : undefined)
+    ?? knownKeyFromId(trimmed);
+  const known = knownKey ? KNOWN_UNSUPPORTED[knownKey] : undefined;
+  if (known && knownKey) {
+    // Der Hinweis auf Text-Encoder gehoert nur zu Textmodellen. Bei einem
+    // Bildmodell wie DETR stand er sinnlos daneben.
+    const textHint = TEXT_DOMAIN_KEYS.has(knownKey)
+      ? ' FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte).'
+      : '';
     return {
       supported: false,
-      reason: `${known} FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte). Verfügbare Plugins: ${PLUGINS.map((p) => p.name).join(', ')}.`,
+      reason: `${known}${textHint} Verfügbare Plugins: ${PLUGINS.map((p) => p.name).join(', ')}.`,
     };
   }
 
@@ -72,14 +78,21 @@ export function detectPlugin(
  * Sucht eine bekannte Architektur im Modellnamen, wenn keine config.json
  * vorliegt. Nur an Wortgrenzen, damit "bert" nicht in "albert" trifft.
  */
-function knownReasonFromId(modelPathOrId: string): string | undefined {
+function knownKeyFromId(modelPathOrId: string): string | undefined {
   const normalized = modelPathOrId.toLowerCase().replace(/\\/g, '/');
-  for (const [key, reason] of Object.entries(KNOWN_UNSUPPORTED)) {
+  for (const key of Object.keys(KNOWN_UNSUPPORTED)) {
     const token = key.replace(/_/g, '[-_]?');
-    if (new RegExp(`(^|[^a-z0-9])${token}([^a-z0-9]|$)`, 'i').test(normalized)) return reason;
+    if (new RegExp(`(^|[^a-z0-9])${token}([^a-z0-9]|$)`, 'i').test(normalized)) return key;
   }
   return undefined;
 }
+
+/** Architekturen aus der Textwelt — nur dort passt der Encoder-Hinweis. */
+const TEXT_DOMAIN_KEYS = new Set([
+  'gpt2', 'gptj', 'gpt_neo', 'gpt_neox', 'llama', 'mistral', 'mixtral',
+  'qwen2', 'qwen', 'falcon', 'phi', 'gemma', 'bloom', 'mpt', 'opt',
+  't5', 'mt5', 'bart', 'pegasus', 'marian',
+]);
 
 /**
  * Architekturen, die häufig gesucht werden, für die es aber kein Plugin gibt.

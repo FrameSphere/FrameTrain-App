@@ -1563,7 +1563,8 @@
       "pluginUnsupported": "Noch nicht unterstützt",
       "devModeButton": "Dev Train Mode →",
       "imageArchNote": "Bild-Training nutzt ein torchvision-Backbone mit ImageNet-Gewichten. Die heruntergeladenen HuggingFace-Gewichte werden dabei nicht verwendet.",
-      "imageArchLabel": "Architektur"
+      "imageArchLabel": "Architektur",
+      "imageIgnoredNote": "Das Bild-Plugin nutzt: Epochen, Batch Size, Learning Rate, Weight Decay, Label Smoothing. Optimizer (AdamW) und Scheduler (Cosine) sind fest; Warmup, Gradient Accumulation, Max Steps, Mixed Precision und LoRA werden hier nicht ausgewertet."
     },
     "datasetBlock": {
       "label": "Dataset",
@@ -2139,7 +2140,7 @@
       "tabLocal": "Lokaler Ordner",
       "tabHuggingFace": "Hugging Face",
       "local": {
-        "supportedFormats": ".csv .jsonl .json .parquet .txt YOLO/ COCO/ Pascal VOC/ Audio+TXT",
+        "supportedFormats": ".csv .jsonl .json .parquet .txt  ·  Bilder: Ordner pro Klasse  ·  YOLO/ COCO/ Pascal VOC",
         "dropzoneIdle": "Dataset-Ordner hierher ziehen",
         "dropzoneDragging": "Ordner hier ablegen",
         "dropzoneSubtitle": "Flat Files, YOLO, COCO, Pascal VOC, Audio/Transkript, …",

@@ -971,6 +971,12 @@ function ReportText({ text }: { text: string }) {
   );
 }
 
+/** Torchvision-Backbones des Bild-Plugins — dort ist Sequenzlaenge sinnlos. */
+function isImageArchitecture(arch?: string): boolean {
+  if (!arch) return false;
+  return /^(resnet|efficientnet|vit_b|mobilenet)/i.test(arch);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AI System Prompt
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1734,7 +1740,12 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                   <div className="bg-white/5 rounded-xl border border-white/10 p-4">
                     <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2"><Database className="w-4 h-4 text-purple-400" />{t('analysisPanel.datasetModel.title')}</h3>
                     <div className="space-y-1.5 text-xs">
-                      {Object.entries({ ...fullData.dataset_info, ...fullData.model_info }).map(([k, v]) =>
+                      {Object.entries({ ...fullData.dataset_info, ...fullData.model_info })
+                        // Sequenzlaenge gibt es nur bei Textmodellen. Bei einem
+                        // Bild-Training stand hier "max_seq_length 128", ohne
+                        // dass der Wert irgendetwas bedeutet haette.
+                        .filter(([k]) => !(k === 'max_seq_length' && isImageArchitecture(fullData.model_info?.architecture)))
+                        .map(([k, v]) =>
                         v !== null && v !== undefined ? (
                           <div key={k} className="flex justify-between"><span className="text-gray-400">{k}</span><span className="text-white font-medium">{String(v)}</span></div>
                         ) : null

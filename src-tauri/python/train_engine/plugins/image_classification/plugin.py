@@ -10,6 +10,20 @@ from core.config import TrainingConfig
 from core.protocol import MessageProtocol
 
 
+def _classification_scores(labels: List[int], preds: List[int]) -> Dict[str, float]:
+    """F1/Precision/Recall wie beim Textplugin — sonst zeigt die Analyse-Seite
+    fuer Bildmodelle nur eine einzelne Accuracy-Kachel."""
+    if not labels or not preds or len(labels) != len(preds):
+        return {}
+    try:
+        from sklearn.metrics import precision_recall_fscore_support
+    except ImportError:
+        return {}
+    p, r, f1, _ = precision_recall_fscore_support(
+        labels, preds, average="weighted", zero_division=0)
+    return {"precision": float(p), "recall": float(r), "f1": float(f1)}
+
+
 def _build_backbone(arch: str, num_classes: int, pretrained: bool) -> nn.Module:
     try:
         from torchvision import models
@@ -198,15 +212,23 @@ class ImageClassificationPlugin:
                 # Val
                 self.model.eval()
                 val_loss = val_correct = val_n = top5 = 0
+                # Vorhersagen sammeln: ohne sie gab es auf der Analyse-Seite nur
+                # Accuracy, waehrend Textmodelle dort F1/Precision/Recall zeigen.
+                epoch_preds: List[int] = []
+                epoch_labels: List[int] = []
                 with torch.no_grad():
                     for vx, vy in va_loader:
                         if self.is_stopped: break
                         vx, vy = vx.to(self.device), vy.to(self.device)
                         vo = self.model(vx)
                         val_loss    += criterion(vo, vy).item()
-                        val_correct += (vo.argmax(1) == vy).sum().item()
+                        preds        = vo.argmax(1)
+                        val_correct += (preds == vy).sum().item()
                         top5        += (vo.topk(min(5, vo.size(1)), dim=1).indices == vy.unsqueeze(1)).any(dim=1).sum().item()
                         val_n       += vy.size(0)
+                        epoch_preds.extend(preds.cpu().tolist())
+                        epoch_labels.extend(vy.cpu().tolist())
+                self._last_preds, self._last_labels = epoch_preds, epoch_labels
 
                 avg_tr = total_loss / max(steps, 1)
                 avg_va = val_loss   / max(len(va_loader), 1)
@@ -260,6 +282,8 @@ class ImageClassificationPlugin:
                 "n_train":          int(getattr(self, "_n_train", 0)),
                 "n_val":            int(getattr(self, "_n_val", 0)),
                 "device":           str(self.device),
+                **_classification_scores(getattr(self, "_last_labels", []),
+                                         getattr(self, "_last_preds", [])),
             }
             MessageProtocol.status("train", "Image Classification Training abgeschlossen")
             return True

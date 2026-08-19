@@ -16,6 +16,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord } from '../ai/coachContext';
+import { clampNumber, parseNumberInput } from './numberInput';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
@@ -205,7 +206,27 @@ function Field({ label, tooltip, children }: { label: string; tooltip?: string; 
 }
 
 function NumInput({ value, onChange, min, max, step = 'any' }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number | 'any' }) {
-  return <input type="number" value={value} min={min} max={max} step={step} onChange={e => onChange(parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-all" />;
+  // Waehrend des Tippens gilt der Rohtext, sonst loescht das Rendern das
+  // gerade getippte Dezimaltrennzeichen wieder (siehe numberInput.ts).
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft ?? String(value)}
+      min={min}
+      max={max}
+      step={step}
+      onChange={e => {
+        const raw = e.target.value;
+        setDraft(raw);
+        const parsed = parseNumberInput(raw);
+        if (parsed !== null) onChange(clampNumber(parsed, min, max));
+      }}
+      onBlur={() => setDraft(null)}
+      className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-all"
+    />
+  );
 }
 
 function SelectInput({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
@@ -1139,8 +1160,10 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   // heruntergeladenen HuggingFace-Gewichte. Ohne dieses Feld stand die Wahl
   // fest auf resnet18 — sichtbar war das nirgends.
   const [imageArch, setImageArch] = useState('resnet18');
+
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
   const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
+  const isImagePlugin   = detection?.supported === true && detection.plugin.id === 'image-classification';
   const isSupported     = detection?.supported === true;
   const pluginId        = detection?.supported ? detection.plugin.id : null;
 
@@ -1497,6 +1520,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               {selectedModel && isSupported && detection.plugin.id === 'image-classification' && (
                 <div className="space-y-2 mt-2 px-3 py-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
                   <p className="text-blue-200 text-xs">{t('trainingPanel.modelBlock.imageArchNote')}</p>
+                  <p className="text-blue-300/70 text-[11px]">{t('trainingPanel.modelBlock.imageIgnoredNote')}</p>
                   <label className="block text-blue-300/80 text-[11px]">{t('trainingPanel.modelBlock.imageArchLabel')}</label>
                   <select
                     value={imageArch}
@@ -1585,7 +1609,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 <Field label={t('trainingPanel.fields.epochs')} tooltip={t('trainingPanel.fields.epochsTooltip')}><NumInput value={config.epochs} onChange={v => updateConfig({ epochs: v })} min={1} max={100} step={1} /></Field>
                 <Field label={t('trainingPanel.fields.batchSize')}><NumInput value={config.batch_size} onChange={v => updateConfig({ batch_size: v })} min={1} step={1} /></Field>
                 <Field label={t('trainingPanel.fields.learningRate')} tooltip={t('trainingPanel.fields.learningRateTooltip')}><NumInput value={config.learning_rate} onChange={v => updateConfig({ learning_rate: v })} step={0.000001} /></Field>
-                <Field label={t('trainingPanel.fields.maxSeqLength')} tooltip={t('trainingPanel.fields.maxSeqLengthTooltip')}><NumInput value={config.max_seq_length} onChange={v => updateConfig({ max_seq_length: v })} min={16} max={512} step={16} /></Field>
+                {/* Sequenzlaenge gibt es nur bei Textmodellen — beim Bild-Plugin
+                    stand sie da, ohne irgendeine Wirkung zu haben. */}
+                {!isImagePlugin && (
+                  <Field label={t('trainingPanel.fields.maxSeqLength')} tooltip={t('trainingPanel.fields.maxSeqLengthTooltip')}><NumInput value={config.max_seq_length} onChange={v => updateConfig({ max_seq_length: v })} min={16} max={512} step={16} /></Field>
+                )}
                 <Field label={t('trainingPanel.fields.warmupRatio')}><NumInput value={config.warmup_ratio} onChange={v => updateConfig({ warmup_ratio: v })} step={0.01} min={0} max={0.3} /></Field>
                 <Field label={t('trainingPanel.fields.gradientAccumulation')} tooltip={t('trainingPanel.fields.gradientAccumulationTooltip')}><NumInput value={config.gradient_accumulation_steps} onChange={v => updateConfig({ gradient_accumulation_steps: v })} min={1} step={1} /></Field>
               </div>
