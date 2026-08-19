@@ -24,6 +24,7 @@ import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPyth
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { sendAppErrorReport } from '../utils/errorReport';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
+import { detectScriptModality, type ScriptModality } from './scriptModality';
 import DiffViewer from './DiffViewer';
 import { dateLocale } from '../utils/dateLocale';
 
@@ -2545,6 +2546,350 @@ export function devProgressPercent(p: {
 // ── Default Script Generator ──────────────────────────────────────────────
 
 function generateDefaultScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
+  const modality = detectScriptModality(model);
+  if (modality !== 'text') {
+    return generateMediaTrainScript(modality, model, datasets, outputPath);
+  }
+  return generateTextTrainScript(model, datasets, outputPath);
+}
+
+/**
+ * Trainings-Vorlagen fuer Bild, Audio und Seq2Seq. Sie melden dieselben
+ * Events wie die Text-Vorlage (status/progress/complete) und schreiben
+ * label_mapping.json, damit Labor und Tests spaeter Klassennamen zeigen.
+ */
+function generateMediaTrainScript(
+  modality: Exclude<ScriptModality, 'text'>,
+  model: ModelInfo | null,
+  datasets: DatasetInfo[],
+  outputPath: string,
+): string {
+  const ds = datasets[0];
+  const modelPathDefault   = model?.local_path || model?.source_path || model?.name || '';
+  const datasetPathDefault = ds?.storage_path || '';
+  const outputPathDefault  = outputPath.replace('<job_id>', 'dev_train').replace('{wird beim Start gesetzt}', 'dev_train');
+
+  const header = `#!/usr/bin/env python3
+# FrameTrain - Dev Train Script
+#
+# Dieses Template laeuft so wie es ist. Aendere es nach Belieben.
+# Fortschritt erscheint in FrameTrain, sobald eine JSON-Zeile mit
+# {"type": "progress", ...} auf stdout geschrieben wird - genau das macht
+# der FrameTrainCallback weiter unten.
+
+import json
+import os
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+from transformers import Trainer, TrainerCallback, TrainingArguments
+
+MODEL_PATH   = os.environ.get("MODEL_PATH",   "${modelPathDefault}")
+DATASET_PATH = os.environ.get("DATASET_PATH", "${datasetPathDefault}")
+OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${outputPathDefault}")
+
+
+def emit(kind: str, **data):
+    # Sendet ein Event an FrameTrain (eine JSON-Zeile pro Event).
+    print(json.dumps({"type": kind, "data": data}), flush=True)
+
+
+class FrameTrainCallback(TrainerCallback):
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        emit(
+            "progress",
+            # state.epoch laeuft von 0.0 hoch - 1-basiert melden wie die Engine
+            epoch=min(EPOCHS, int(state.epoch or 0) + 1),
+            total_epochs=EPOCHS,
+            step=state.global_step,
+            total_steps=state.max_steps or 0,
+            train_loss=logs.get("loss"),
+            val_loss=logs.get("eval_loss"),
+            learning_rate=logs.get("learning_rate", LR),
+        )
+`;
+
+  if (modality === 'seq2seq') {
+    return `${header}
+from transformers import (
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    DataCollatorForSeq2Seq,
+)
+
+# -- Hyperparameter -------------------------------------------------------
+EPOCHS      = 1
+BATCH_SIZE  = 4
+LR          = 3e-4
+MAX_SOURCE  = 256
+MAX_TARGET  = 64
+MAX_STEPS   = 60      # -1 = ganzes Dataset
+TASK_PREFIX = ""      # z.B. "summarize: " fuer T5
+SOURCE_COL  = None    # None = automatisch erkennen
+TARGET_COL  = None
+
+EXTS = (".csv", ".tsv", ".json", ".jsonl", ".parquet")
+
+
+def load_rows(path: str, split: str):
+    import csv
+
+    p = Path(path) / split
+    if not p.is_dir():
+        p = Path(path)
+    files = sorted(f for f in p.rglob("*") if f.suffix.lower() in EXTS)
+    if not files:
+        return []
+    f = files[0]
+    if f.suffix.lower() == ".parquet":
+        import pandas as pd
+        return pd.read_parquet(f).to_dict("records")
+    if f.suffix.lower() in (".json", ".jsonl"):
+        raw = f.read_text(encoding="utf-8").strip()
+        return json.loads(raw) if raw.startswith("[") else [json.loads(l) for l in raw.splitlines() if l.strip()]
+    delim = "\\t" if f.suffix.lower() == ".tsv" else ","
+    with open(f, newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh, delimiter=delim))
+
+
+emit("status", stage="loading", message="Daten werden geladen ...")
+train_rows = load_rows(DATASET_PATH, "train")
+eval_rows = load_rows(DATASET_PATH, "val") or load_rows(DATASET_PATH, "validation") or load_rows(DATASET_PATH, "test")
+if not train_rows:
+    raise RuntimeError(f"Keine Trainingsdaten in {DATASET_PATH} gefunden.")
+
+cols = list(train_rows[0].keys())
+source_col = SOURCE_COL or next((c for c in ("source", "input", "text", "article", "document", "de") if c in cols), None)
+target_col = TARGET_COL or next((c for c in ("target", "output", "summary", "translation", "en") if c in cols), None)
+if source_col is None or target_col is None:
+    raise RuntimeError(f"Quell-/Zielspalte nicht gefunden. Vorhanden: {cols}")
+print(f"{len(train_rows)} Trainings- / {len(eval_rows)} Eval-Beispiele | '{source_col}' -> '{target_col}'", flush=True)
+
+emit("status", stage="loading", message="Modell wird geladen ...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_PATH)
+
+
+class Seq2SeqRows(Dataset):
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, i):
+        row = self.rows[i]
+        enc = tokenizer(TASK_PREFIX + str(row[source_col]), truncation=True, max_length=MAX_SOURCE)
+        lab = tokenizer(text_target=str(row[target_col]), truncation=True, max_length=MAX_TARGET)
+        enc["labels"] = lab["input_ids"]
+        return enc
+
+
+args = TrainingArguments(
+    output_dir=OUTPUT_PATH,
+    num_train_epochs=EPOCHS,
+    max_steps=MAX_STEPS,
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=BATCH_SIZE,
+    learning_rate=LR,
+    logging_steps=5,
+    eval_strategy="no" if MAX_STEPS > 0 else "epoch",
+    save_strategy="no",
+    report_to=[],
+    disable_tqdm=True,
+)
+
+trainer = Trainer(
+    model=model,
+    args=args,
+    train_dataset=Seq2SeqRows(train_rows),
+    eval_dataset=Seq2SeqRows(eval_rows) if eval_rows else None,
+    data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model),
+    callbacks=[FrameTrainCallback()],
+)
+
+emit("status", stage="training", message="Training laeuft ...")
+trainer.train()
+
+metrics = trainer.evaluate() if eval_rows else {}
+print("Eval:", metrics, flush=True)
+
+model.save_pretrained(OUTPUT_PATH)
+tokenizer.save_pretrained(OUTPUT_PATH)
+print(f"Modell gespeichert unter {OUTPUT_PATH}", flush=True)
+
+emit(
+    "complete",
+    model_path=OUTPUT_PATH,
+    final_metrics={
+        "accuracy": None,
+        "val_loss": metrics.get("eval_loss"),
+        "total_epochs": EPOCHS,
+    },
+)
+`;
+  }
+
+  const isImage = modality === 'image';
+  const kindLabel = isImage ? 'Bild' : 'Audio';
+  const exts = isImage
+    ? '{".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}'
+    : '{".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}';
+  const imports = isImage
+    ? `from PIL import Image
+from transformers import AutoImageProcessor, AutoModelForImageClassification`
+    : `import librosa
+from transformers import AutoFeatureExtractor, AutoModelForAudioClassification`;
+  const hyper = isImage
+    ? `EPOCHS     = 1
+BATCH_SIZE = 8
+LR         = 5e-5
+MAX_STEPS  = 40      # -1 = ganzes Dataset`
+    : `EPOCHS      = 1
+BATCH_SIZE  = 4
+LR          = 3e-5
+MAX_STEPS   = 40      # -1 = ganzes Dataset
+MAX_SECONDS = 10.0    # laengere Aufnahmen werden gekappt`;
+  const loadModel = isImage
+    ? `processor = AutoImageProcessor.from_pretrained(MODEL_PATH)
+model = AutoModelForImageClassification.from_pretrained(
+    MODEL_PATH, num_labels=len(classes), id2label=id2label, label2id=label2id,
+    ignore_mismatched_sizes=True,
+)`
+    : `processor = AutoFeatureExtractor.from_pretrained(MODEL_PATH)
+SAMPLING_RATE = int(getattr(processor, "sampling_rate", 16000) or 16000)
+model = AutoModelForAudioClassification.from_pretrained(
+    MODEL_PATH, num_labels=len(classes), id2label=id2label, label2id=label2id,
+    ignore_mismatched_sizes=True,
+)`;
+  const itemBody = isImage
+    ? `        with Image.open(path) as im:
+            image = im.convert("RGB")
+        pixel = processor(images=image, return_tensors="pt")["pixel_values"][0]
+        return {"pixel_values": pixel, "labels": label}`
+    : `        wave, _ = librosa.load(str(path), sr=SAMPLING_RATE, mono=True)
+        feats = processor(
+            wave, sampling_rate=SAMPLING_RATE, return_tensors="pt",
+            padding="max_length", truncation=True,
+            max_length=int(MAX_SECONDS * SAMPLING_RATE),
+        )
+        return {"input_values": feats["input_values"][0], "labels": label}`;
+
+  return `${header}
+${imports}
+
+# -- Hyperparameter -------------------------------------------------------
+${hyper}
+
+EXTS = ${exts}
+
+
+def collect(root: Path):
+    # Dateien samt Klasse (Ordnername) einsammeln.
+    class_dirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
+    items = []
+    for d in class_dirs:
+        for f in sorted(d.rglob("*")):
+            if f.suffix.lower() in EXTS:
+                items.append((f, d.name))
+    return items
+
+
+emit("status", stage="loading", message="Daten werden geladen ...")
+root = Path(DATASET_PATH)
+if not root.exists():
+    raise FileNotFoundError(f"DATASET_PATH existiert nicht: {DATASET_PATH}")
+
+train_items = collect(root / "train") if (root / "train").is_dir() else collect(root)
+eval_root = next((root / s for s in ("val", "validation", "test") if (root / s).is_dir()), None)
+eval_items = collect(eval_root) if eval_root else []
+if not train_items:
+    raise RuntimeError(f"Keine ${kindLabel}dateien mit Klassenordnern in {DATASET_PATH} gefunden.")
+
+classes = sorted({cls for _, cls in train_items})
+id2label = {i: c for i, c in enumerate(classes)}
+label2id = {c: i for i, c in id2label.items()}
+print(f"{len(train_items)} Trainings- / {len(eval_items)} Eval-Dateien | Klassen: {classes}", flush=True)
+
+emit("status", stage="loading", message="Modell wird geladen ...")
+${loadModel}
+
+
+class FileDataset(Dataset):
+    def __init__(self, items):
+        self.items = items
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        path, cls = self.items[i]
+        label = label2id[cls]
+${itemBody}
+
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+    return {"accuracy": float((preds == labels).mean())}
+
+
+args = TrainingArguments(
+    output_dir=OUTPUT_PATH,
+    num_train_epochs=EPOCHS,
+    max_steps=MAX_STEPS,
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=BATCH_SIZE,
+    learning_rate=LR,
+    logging_steps=5,
+    eval_strategy="no" if MAX_STEPS > 0 else "epoch",
+    save_strategy="no",
+    report_to=[],
+    disable_tqdm=True,
+    remove_unused_columns=False,
+)
+
+trainer = Trainer(
+    model=model,
+    args=args,
+    train_dataset=FileDataset(train_items),
+    eval_dataset=FileDataset(eval_items) if eval_items else None,
+    compute_metrics=compute_metrics,
+    callbacks=[FrameTrainCallback()],
+)
+
+emit("status", stage="training", message="Training laeuft ...")
+trainer.train()
+
+metrics = trainer.evaluate() if eval_items else {}
+print("Eval:", metrics, flush=True)
+
+# -- Speichern ------------------------------------------------------------
+Path(OUTPUT_PATH).mkdir(parents=True, exist_ok=True)
+model.save_pretrained(OUTPUT_PATH)
+processor.save_pretrained(OUTPUT_PATH)
+# Klassennamen, damit Labor und Tests spaeter Namen statt 0/1 zeigen
+with open(f"{OUTPUT_PATH}/label_mapping.json", "w") as f:
+    json.dump({"classes": classes}, f, ensure_ascii=False, indent=2)
+print(f"Modell gespeichert unter {OUTPUT_PATH}", flush=True)
+
+emit(
+    "complete",
+    model_path=OUTPUT_PATH,
+    final_metrics={
+        "accuracy": metrics.get("eval_accuracy"),
+        "val_loss": metrics.get("eval_loss"),
+        "total_epochs": EPOCHS,
+    },
+)
+`;
+}
+
+function generateTextTrainScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const ds = datasets[0];
   const modelPathDefault  = model?.local_path || model?.source_path || model?.name || '';
   const datasetPathDefault = ds?.storage_path || '';
@@ -2718,7 +3063,8 @@ class FrameTrainCallback(TrainerCallback):
             return
         emit(
             "progress",
-            epoch=int(state.epoch or 0),
+            # state.epoch laeuft von 0.0 hoch - 1-basiert melden wie die Engine
+            epoch=min(EPOCHS, int(state.epoch or 0) + 1),
             total_epochs=EPOCHS,
             step=state.global_step,
             total_steps=state.max_steps or 0,

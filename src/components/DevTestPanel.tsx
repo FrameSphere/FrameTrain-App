@@ -22,7 +22,7 @@ import { callAI } from './TrainingPanel';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
-import { detectPlugin } from '../plugins/registry';
+import { detectScriptModality, type ScriptModality } from './scriptModality';
 import DiffViewer from './DiffViewer';
 import OpenLibraryModal from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
@@ -913,29 +913,6 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
 }
 
 // ── Default Script Generator ──────────────────────────────────────────────
-
-type ScriptModality = 'text' | 'image' | 'audio' | 'seq2seq';
-
-/** Welche Art Code braucht dieses Modell? Gleiche Erkennung wie im Training. */
-function detectScriptModality(model: ModelInfo | null): ScriptModality {
-  if (!model) return 'text';
-  const r = detectPlugin(
-    model.source_path || model.local_path || model.name,
-    model.model_type ? { model_type: model.model_type } : undefined,
-  );
-  if (!r.supported) return 'text';
-  switch (r.plugin.taskType) {
-    case 'hf_image_classification':
-    case 'image_classification':
-      return 'image';
-    case 'audio_classification':
-      return 'audio';
-    case 'seq2seq':
-      return 'seq2seq';
-    default:
-      return 'text';
-  }
-}
 
 function generateDefaultTestScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const modality = detectScriptModality(model);
