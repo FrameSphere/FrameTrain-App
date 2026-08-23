@@ -115,6 +115,13 @@ export function checkHfModelSupport(
   modelId: string,
   pipelineTag?: string,
 ): { supported: boolean; reason?: string } {
+  // Zuerst die Plugin-Erkennung: ein echtes YOLO-Modell traegt den
+  // pipeline_tag "object-detection", wird aber vom YOLO-Plugin trainiert.
+  // Frueher gewann der Tag — dann stand bei Ultralytics/YOLO11 "Für Training
+  // nicht geeignet ... dafür ein YOLO-Modell nutzen".
+  const result = detectPlugin(modelId);
+  if (result.supported) return { supported: true };
+
   const tagReason = pipelineTag ? UNSUPPORTED_PIPELINE_TAGS[pipelineTag] : undefined;
   if (tagReason) {
     return {
@@ -124,10 +131,7 @@ export function checkHfModelSupport(
       reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), Bildklassifikation, Audioklassifikation, Seq2Seq (T5/BART) sowie YOLO-Objekterkennung.`,
     };
   }
-  const result = detectPlugin(modelId);
-  return result.supported === true
-    ? { supported: true }
-    : { supported: false, reason: (result as { supported: false; reason: string }).reason };
+  return { supported: false, reason: (result as { supported: false; reason: string }).reason };
 }
 
 function PluginBadge({ modelNameOrPath, configJson }: { modelNameOrPath: string; configJson?: ModelConfig }) {

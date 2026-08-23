@@ -15,7 +15,7 @@ class YOLOPlugin:
         self._yaml_path: Optional[str] = None
         self._output_dir: Optional[Path] = None
         pc = config.plugin_config or {}
-        self.yolo_model   = pc.get("yolo_model",   "yolov8n.pt")
+        self.yolo_model   = pc.get("yolo_model") or ""
         self.task         = pc.get("task",          "detect")
         self.imgsz        = int(pc.get("imgsz",    640))
         self.patience     = int(pc.get("patience",  50))
@@ -42,11 +42,63 @@ class YOLOPlugin:
         if yaml_path is None:
             return False
         self._yaml_path = str(yaml_path)
+        self.yolo_model = self._resolve_weights()
         self._output_dir = Path(self.config.output_path)
         self._output_dir.mkdir(parents=True, exist_ok=True)
         MessageProtocol.status("setup",
             f"YOLO Setup OK\n  Model: {self.yolo_model}\n  Task: {self.task}\n  YAML: {self._yaml_path}")
         return True
+
+    # Suffixe, an denen Ultralytics die Aufgabe einer Gewichtsdatei erkennt.
+    _TASK_SUFFIX = {"segment": "-seg", "pose": "-pose", "classify": "-cls", "obb": "-obb"}
+    # Groessenreihenfolge: klein zuerst, damit ein Fine-Tuning auf einem Laptop nicht ausufert.
+    _SIZE_ORDER = ["n", "s", "m", "l", "x"]
+
+    def _resolve_weights(self) -> str:
+        """Waehlt die Startgewichte.
+
+        Ohne diesen Schritt wurde immer 'yolov8n.pt' geladen – Ultralytics holte
+        das Modell aus dem Netz, und das vom Nutzer importierte YOLO11 lag
+        ungenutzt daneben.
+        """
+        explicit = str(self.yolo_model or "").strip()
+        if explicit:
+            # Ein konkreter Pfad hat Vorrang; ein blosser Name geht an Ultralytics.
+            if Path(explicit).exists() or not explicit.endswith(".pt"):
+                return explicit
+            local = Path(self.config.model_path or "") / explicit
+            if local.exists():
+                return str(local)
+            return explicit
+
+        model_dir = Path(self.config.model_path or "")
+        candidates = sorted(model_dir.glob("*.pt")) if model_dir.is_dir() else []
+        if not candidates:
+            MessageProtocol.status("setup",
+                "Keine .pt-Gewichte im Modellordner – Ultralytics laedt yolov8n.pt aus dem Netz.")
+            return "yolov8n.pt"
+
+        wanted = self._TASK_SUFFIX.get(self.task, "")
+        other  = [s for t, s in self._TASK_SUFFIX.items() if s != wanted]
+        def matches_task(p: Path) -> bool:
+            stem = p.stem.lower()
+            if wanted:
+                return stem.endswith(wanted)
+            # detect: alles ohne Aufgaben-Suffix
+            return not any(stem.endswith(s) for s in other)
+
+        pool = [p for p in candidates if matches_task(p)] or candidates
+
+        def rank(p: Path):
+            stem = p.stem.lower()
+            base = stem[:-len(wanted)] if wanted and stem.endswith(wanted) else stem
+            size = base[-1] if base and base[-1] in self._SIZE_ORDER else ""
+            return (self._SIZE_ORDER.index(size) if size else len(self._SIZE_ORDER),
+                    p.stat().st_size if p.exists() else 0)
+
+        chosen = sorted(pool, key=rank)[0]
+        MessageProtocol.status("setup", f"Startgewichte: {chosen.name} (aus dem importierten Modell)")
+        return str(chosen)
 
     def _find_or_build_yaml(self, root: Path) -> Optional[Path]:
         for c in [root/"dataset.yaml", root/"data.yaml"]:

@@ -350,32 +350,135 @@ fn check_basename_pairing(primary_dir: &Path, secondary_dir: &Path) -> PairingSt
     }
 }
 
-pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
-    let mut warnings  = Vec::new();
-    let dir_names     = list_subdir_names(path);
-    let dir_names_lc: Vec<String> = dir_names.iter().map(|s| s.to_lowercase()).collect();
-    let root_files    = list_files_in_dir(path);
-    let root_exts: std::collections::HashSet<String> = root_files.iter()
-        .filter_map(|f| f.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()))
-        .collect();
-    let (_, total_file_count) = dir_size(path);
-    let all_extensions = collect_extensions(path);
+/// Ein YOLO/VOC-Dataset, das bereits in train/val/test aufgeteilt auf der
+/// Platte liegt. Ultralytics kennt zwei Schreibweisen, beide sind hier gemeint:
+///   Nested:  images/train + labels/train
+///   Grouped: train/images + train/labels
+#[derive(Debug, Clone)]
+pub struct SplitLayout {
+    /// "nested" oder "grouped"
+    pub style:      &'static str,
+    pub images_dir: String,
+    pub labels_dir: String,
+    /// Nur Splits, die tatsaechlich Bilder enthalten: (kanonischer Name, Ordnername, Bildanzahl)
+    pub splits:     Vec<(String, String, usize)>,
+    pub has_xml:    bool,
+}
 
-    // 1. Pre-Split
-    let split_dirs: Vec<&str> = ["train","val","valid","test","validation","training","testing"]
-        .iter().filter(|&&s| dir_names_lc.contains(&s.to_string())).copied().collect();
-    if split_dirs.len() >= 2 {
-        return DatasetAnalysis { detected_type: DatasetType::PreSplit, confidence: 95,
-            pairing_status: None, warnings: vec![], file_count: total_file_count,
-            dir_count: dir_names.len(), extensions: all_extensions,
-            schema_hint: Some(serde_json::json!({ "split_dirs": split_dirs })) };
+impl SplitLayout {
+    /// Relativer Pfad zum Bilderordner eines Splits, wie ihn die dataset.yaml braucht.
+    pub fn images_path_for(&self, dir_name: &str) -> String {
+        if self.style == "nested" { format!("{}/{}", self.images_dir, dir_name) }
+        else                      { format!("{}/{}", dir_name, self.images_dir) }
+    }
+    pub fn count_of(&self, canonical: &str) -> usize {
+        self.splits.iter().find(|(c, _, _)| c == canonical).map(|(_, _, n)| *n).unwrap_or(0)
+    }
+}
+
+/// Ordnernamen wie "training"/"validation" auf train/val/test normalisieren.
+fn canonical_split_name(name: &str) -> Option<&'static str> {
+    match name.to_lowercase().as_str() {
+        "train" | "training"                 => Some("train"),
+        "val" | "valid" | "validation" | "dev" => Some("val"),
+        "test" | "testing"                   => Some("test"),
+        _ => None,
+    }
+}
+
+fn count_images_in(dir: &Path) -> usize {
+    list_files_in_dir(dir).iter()
+        .filter(|f| f.extension().and_then(|e| e.to_str()).map(is_image).unwrap_or(false))
+        .count()
+}
+
+fn dir_has_xml(dir: &Path) -> bool {
+    list_files_in_dir(dir).iter()
+        .any(|f| f.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("xml")).unwrap_or(false))
+}
+
+/// Erkennt ein bereits aufgeteiltes Bild+Label-Dataset.
+///
+/// Vorher fiel genau dieses Layout durch alle Zweige und landete bei
+/// "Unbekannt, 0 % Konfidenz": `list_files_in_dir("images")` findet keine
+/// Dateien, weil dort nur die Split-Unterordner liegen.
+pub fn detect_split_layout(path: &Path) -> Option<SplitLayout> {
+    let dir_names = list_subdir_names(path);
+    let find_dir = |cands: &[&str]| -> Option<String> {
+        dir_names.iter().find(|d| cands.contains(&d.to_lowercase().as_str())).cloned()
+    };
+    const IMG_DIRS: &[&str] = &["images", "imgs", "image"];
+    const LBL_DIRS: &[&str] = &["labels", "label", "annotations", "annotation"];
+
+    // Nested: images/<split> + labels/<split>
+    if let (Some(img_dir), Some(lbl_dir)) = (find_dir(IMG_DIRS), find_dir(LBL_DIRS)) {
+        let img_base = path.join(&img_dir);
+        let lbl_base = path.join(&lbl_dir);
+        let mut splits  = Vec::new();
+        let mut has_xml = false;
+        for sub in list_subdir_names(&img_base) {
+            let Some(canon) = canonical_split_name(&sub) else { continue };
+            let n = count_images_in(&img_base.join(&sub));
+            if n == 0 { continue; }
+            // Der passende Label-Ordner muss existieren, sonst ist es kein Paar.
+            let lbl_sub = list_subdir_names(&lbl_base).into_iter()
+                .find(|d| canonical_split_name(d) == Some(canon))?;
+            has_xml |= dir_has_xml(&lbl_base.join(&lbl_sub));
+            splits.push((canon.to_string(), sub, n));
+        }
+        if !splits.is_empty() {
+            splits.sort_by_key(|(c, _, _)| match c.as_str() { "train" => 0, "val" => 1, _ => 2 });
+            return Some(SplitLayout { style: "nested", images_dir: img_dir, labels_dir: lbl_dir, splits, has_xml });
+        }
     }
 
-    // 2. YOLO / PascalVOC
-    // Zuerst: existierende dataset.yaml / data.yaml auslesen wenn vorhanden
-    let existing_yaml: Option<serde_json::Value> = [
-        "dataset.yaml", "data.yaml", "yolov5.yaml", "yolov8.yaml"
-    ].iter().find_map(|name| {
+    // Grouped: <split>/images + <split>/labels
+    let mut splits  = Vec::new();
+    let mut has_xml = false;
+    let mut img_name = String::new();
+    let mut lbl_name = String::new();
+    for dir in &dir_names {
+        let Some(canon) = canonical_split_name(dir) else { continue };
+        let split_root = path.join(dir);
+        let subs = list_subdir_names(&split_root);
+        let Some(img_sub) = subs.iter().find(|d| IMG_DIRS.contains(&d.to_lowercase().as_str())) else { continue };
+        let Some(lbl_sub) = subs.iter().find(|d| LBL_DIRS.contains(&d.to_lowercase().as_str())) else { continue };
+        let n = count_images_in(&split_root.join(img_sub));
+        if n == 0 { continue; }
+        has_xml |= dir_has_xml(&split_root.join(lbl_sub));
+        img_name = img_sub.clone();
+        lbl_name = lbl_sub.clone();
+        splits.push((canon.to_string(), dir.clone(), n));
+    }
+    if !splits.is_empty() {
+        splits.sort_by_key(|(c, _, _)| match c.as_str() { "train" => 0, "val" => 1, _ => 2 });
+        return Some(SplitLayout { style: "grouped", images_dir: img_name, labels_dir: lbl_name, splits, has_xml });
+    }
+    None
+}
+
+/// Prueft Bild/Label-Paarung ueber alle Splits hinweg.
+fn pairing_across_splits(path: &Path, layout: &SplitLayout) -> PairingStatus {
+    let mut total = PairingStatus { is_paired: true, ..Default::default() };
+    for (_, dir_name, _) in &layout.splits {
+        let (img_dir, lbl_dir) = if layout.style == "nested" {
+            (path.join(&layout.images_dir).join(dir_name), path.join(&layout.labels_dir).join(dir_name))
+        } else {
+            (path.join(dir_name).join(&layout.images_dir), path.join(dir_name).join(&layout.labels_dir))
+        };
+        let p = check_basename_pairing(&img_dir, &lbl_dir);
+        total.primary_count += p.primary_count;
+        total.paired_count  += p.paired_count;
+        total.is_paired     &= p.is_paired;
+        for o in p.orphan_primaries   { if total.orphan_primaries.len()   < 20 { total.orphan_primaries.push(o); } }
+        for o in p.orphan_secondaries { if total.orphan_secondaries.len() < 20 { total.orphan_secondaries.push(o); } }
+    }
+    total
+}
+
+/// Liest eine vorhandene data.yaml/dataset.yaml als flache Key-Value-Map.
+fn read_existing_dataset_yaml(path: &Path) -> Option<serde_json::Value> {
+    ["dataset.yaml", "data.yaml", "yolov5.yaml", "yolov8.yaml"].iter().find_map(|name| {
         let p = path.join(name);
         if !p.exists() { return None; }
         let content = fs::read_to_string(&p).ok()?;
@@ -393,7 +496,63 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
             }
         }
         Some(serde_json::Value::Object(map))
-    });
+    })
+}
+
+pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
+    let mut warnings  = Vec::new();
+    let dir_names     = list_subdir_names(path);
+    let dir_names_lc: Vec<String> = dir_names.iter().map(|s| s.to_lowercase()).collect();
+    let root_files    = list_files_in_dir(path);
+    let root_exts: std::collections::HashSet<String> = root_files.iter()
+        .filter_map(|f| f.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()))
+        .collect();
+    let (_, total_file_count) = dir_size(path);
+    let all_extensions = collect_extensions(path);
+
+    // 0. Bereits aufgeteiltes YOLO / Pascal VOC (images/train + labels/train o. train/images ...).
+    //    Muss vor dem Pre-Split-Zweig stehen: sonst wird "train/images" nur als
+    //    generischer Pre-Split gemeldet und die Bild/Label-Paarung geht verloren.
+    if let Some(layout) = detect_split_layout(path) {
+        let pairing = pairing_across_splits(path, &layout);
+        if !pairing.is_paired {
+            warnings.push(format!("{} Bild(er) ohne Label.", pairing.orphan_primaries.len()));
+        }
+        if layout.count_of("val") == 0 {
+            warnings.push("Kein Validierungs-Split gefunden – nur Training.".to_string());
+        }
+        let splits_json: serde_json::Map<String, serde_json::Value> = layout.splits.iter()
+            .map(|(canon, dir, n)| (canon.clone(), serde_json::json!({ "dir": dir, "count": n })))
+            .collect();
+        return DatasetAnalysis {
+            detected_type: if layout.has_xml { DatasetType::PascalVoc } else { DatasetType::YoloBbox },
+            confidence: 95,
+            pairing_status: Some(pairing), warnings, file_count: total_file_count,
+            dir_count: dir_names.len(), extensions: all_extensions,
+            schema_hint: Some(serde_json::json!({
+                "images_dir":   layout.images_dir,
+                "labels_dir":   layout.labels_dir,
+                "is_split":     true,
+                "split_style":  layout.style,
+                "splits":       splits_json,
+                "dataset_yaml": read_existing_dataset_yaml(path),
+            })),
+        };
+    }
+
+    // 1. Pre-Split
+    let split_dirs: Vec<&str> = ["train","val","valid","test","validation","training","testing"]
+        .iter().filter(|&&s| dir_names_lc.contains(&s.to_string())).copied().collect();
+    if split_dirs.len() >= 2 {
+        return DatasetAnalysis { detected_type: DatasetType::PreSplit, confidence: 95,
+            pairing_status: None, warnings: vec![], file_count: total_file_count,
+            dir_count: dir_names.len(), extensions: all_extensions,
+            schema_hint: Some(serde_json::json!({ "split_dirs": split_dirs })) };
+    }
+
+    // 2. YOLO / PascalVOC
+    // Zuerst: existierende dataset.yaml / data.yaml auslesen wenn vorhanden
+    let existing_yaml: Option<serde_json::Value> = read_existing_dataset_yaml(path);
 
     let img_dir_name = dir_names.iter()
         .find(|d| matches!(d.to_lowercase().as_str(), "images"|"imgs"|"image")).cloned();
@@ -590,7 +749,119 @@ fn read_class_names(base: &Path) -> Vec<String> {
             }
         }
     }
+    // Viele YOLO-Datensaetze bringen keine classes.txt mit, sondern nur eine
+    // data.yaml mit dem names-Block. Ohne diesen Zweig landeten die
+    // Platzhalter 'KlasseA'/'KlasseB' in der generierten dataset.yaml.
+    for candidate in &["dataset.yaml", "data.yaml", "yolov5.yaml", "yolov8.yaml", "data.yml"] {
+        let p = base.join(candidate);
+        if !p.exists() { continue; }
+        if let Ok(content) = fs::read_to_string(&p) {
+            let names = parse_yaml_class_names(&content);
+            if !names.is_empty() { return names; }
+        }
+    }
     vec![]
+}
+
+/// Liest den `names:`-Block einer Ultralytics-data.yaml.
+/// Unterstuetzt alle drei gebraeuchlichen Schreibweisen:
+///   names: ['a', 'b']        (Inline-Liste)
+///   names:\n  - 'a'\n  - 'b' (Block-Liste)
+///   names:\n  0: a\n  1: b   (Index-Map, YOLOv8-Stil)
+fn parse_yaml_class_names(content: &str) -> Vec<String> {
+    let unquote = |s: &str| -> String {
+        s.trim().trim_matches(|c| c == '"' || c == '\'').trim().to_string()
+    };
+    let mut lines = content.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') { continue; }
+        let Some(rest) = trimmed.strip_prefix("names:") else { continue };
+        // Kommentar am Zeilenende abschneiden
+        let rest = rest.split('#').next().unwrap_or("").trim();
+
+        // Fall 1: Inline-Liste
+        if let Some(inner) = rest.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+            let names: Vec<String> = inner.split(',')
+                .map(unquote).filter(|s| !s.is_empty()).collect();
+            if !names.is_empty() { return names; }
+            continue;
+        }
+        if !rest.is_empty() { continue; }
+
+        // Fall 2/3: Folgezeilen einsammeln, bis ein neuer Top-Level-Key kommt.
+        let mut indexed: Vec<(usize, String)> = Vec::new();
+        let mut listed:  Vec<String> = Vec::new();
+        while let Some(next) = lines.peek() {
+            let raw = *next;
+            let t = raw.trim();
+            if t.is_empty() || t.starts_with('#') { lines.next(); continue; }
+            // Ein Eintrag muss eingerueckt sein, sonst beginnt ein neuer Key.
+            let indented = raw.starts_with(' ') || raw.starts_with('\t');
+            if !indented { break; }
+            let t = t.split(" #").next().unwrap_or(t).trim();
+            if let Some(item) = t.strip_prefix("- ") {
+                listed.push(unquote(item));
+            } else if let Some((k, v)) = t.split_once(':') {
+                if let Ok(idx) = k.trim().parse::<usize>() {
+                    indexed.push((idx, unquote(v)));
+                } else { break; }
+            } else { break; }
+            lines.next();
+        }
+        if !listed.is_empty() { return listed.into_iter().filter(|s| !s.is_empty()).collect(); }
+        if !indexed.is_empty() {
+            indexed.sort_by_key(|(i, _)| *i);
+            return indexed.into_iter().map(|(_, n)| n).filter(|s| !s.is_empty()).collect();
+        }
+    }
+    vec![]
+}
+
+/// Schreibt die dataset.yaml fuer ein bereits aufgeteiltes Dataset.
+///
+/// Im Gegensatz zu `generate_dataset_yaml` werden nur Splits eingetragen, die
+/// wirklich Bilder enthalten – ein leerer images/test-Ordner (der in vielen
+/// Datensaetzen herumliegt) laesst Ultralytics sonst mit
+/// "No images found" abbrechen.
+pub fn generate_split_dataset_yaml(base: &Path, layout: &SplitLayout) -> Result<(), String> {
+    let class_names = read_class_names(base);
+    let nc = class_names.len();
+    let names_block = if nc > 0 {
+        class_names.iter()
+            .map(|n| format!("  - '{}'", n.replace('\'', "\\\'")))
+            .collect::<Vec<_>>().join("\n")
+    } else {
+        "  # Klassen hier eintragen:\n  - 'KlasseA'\n  - 'KlasseB'".to_string()
+    };
+
+    let mut split_lines = String::new();
+    for (canon, dir_name, count) in &layout.splits {
+        split_lines.push_str(&format!(
+            "{}: {}  # {} Bilder\n", canon, layout.images_path_for(dir_name), count
+        ));
+    }
+    // Ultralytics braucht einen val-Eintrag; ohne eigenen Val-Split auf train zeigen.
+    if layout.count_of("val") == 0 {
+        if let Some((_, train_dir, _)) = layout.splits.iter().find(|(c, _, _)| c == "train") {
+            split_lines.push_str(&format!(
+                "val: {}  # kein eigener Val-Split vorhanden\n", layout.images_path_for(train_dir)
+            ));
+        }
+    }
+
+    let yaml = format!(
+        "# FrameTrain \u{2013} dataset.yaml (Ultralytics/YOLO-kompatibel)\n\
+         # Dataset war beim Import bereits aufgeteilt, die Splits wurden uebernommen.\n\
+         # Labels werden automatisch gesucht: 'images' im Pfad wird zu 'labels' ersetzt.\n\
+         path: {}  # absoluter Pfad zum Dataset-Root\n\
+         {}\n\
+         nc: {}\n\
+         names:\n{}\n",
+        base.display(), split_lines, nc, names_block
+    );
+    fs::write(base.join("dataset.yaml"), &yaml).map_err(|e| format!("Schreiben: {}", e))?;
+    Ok(())
 }
 
 /// Generiert eine dataset.yaml die YOLO / Ultralytics direkt lesen kann.
@@ -999,10 +1270,32 @@ print(json.dumps({{"train": len(train_idx), "val": val_count, "test": test_count
 /// jede Datei landet anteilig (train_r/val_r/test_r) in train/val/test, mit Header/Schema
 /// in jeder resultierenden Datei erhalten. Nur unbekannte/binaere Formate (die nicht
 /// row-splittable sind) werden weiterhin als ganze Datei einem Split zugeteilt.
+/// Dateien, die im Dataset-Root herumliegen, aber keine Trainingsdaten sind:
+/// Hilfsskripte, Konfigurationen, READMEs. Diese landeten frueher wahllos in
+/// train/ bzw. test/ – bei einem YOLO-Ordner wanderte so die data.yaml
+/// (die einzige Quelle der Klassennamen) nach test/.
+fn is_auxiliary_file(path: &Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+    let ext  = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if matches!(ext.as_str(), "py" | "yaml" | "yml" | "md" | "sh" | "toml" | "ini" | "cfg" | "log" | "cache" | "pyc") {
+        return true;
+    }
+    matches!(name.as_str(), "readme" | "license" | "classes.txt" | "obj.names" | "obj.data" | "requirements.txt")
+}
+
 fn split_flat_files(base: &Path, train_r: f64, val_r: f64, test_r: f64) -> Result<SplitInfo, String> {
-    let files = collect_files(base);
+    let all_files = collect_files(base);
+    let skipped   = all_files.iter().filter(|f| is_auxiliary_file(f)).count();
+    let files: Vec<PathBuf> = all_files.into_iter().filter(|f| !is_auxiliary_file(f)).collect();
     let n = files.len();
-    if n == 0 { return Err("Keine Dateien im Dataset-Root.".to_string()); }
+    if n == 0 {
+        return Err(if skipped > 0 {
+            format!("Im Dataset-Root liegen nur Hilfsdateien ({} Stueck, z. B. Skripte oder data.yaml), keine Trainingsdaten. \
+                     Falls das Dataset bereits train/val-Ordner mitbringt, ist kein Split noetig.", skipped)
+        } else {
+            "Keine Dateien im Dataset-Root.".to_string()
+        });
+    }
 
     let train_dir = base.join("train"); let val_dir = base.join("val"); let test_dir = base.join("test");
     let mut warnings: Vec<String> = Vec::new();
@@ -1186,17 +1479,41 @@ pub async fn import_local_dataset(
         fs::copy(src, target.join(src.file_name().unwrap())).map_err(|e| format!("Copy: {}", e))?;
     }
     let (size, files) = dir_size(&target);
+
+    // Bringt das Dataset seine train/val/test-Aufteilung schon mit, wird sie
+    // uebernommen. Ohne das galt ein fertiges YOLO-Dataset als "Kein Split",
+    // das Training blieb gesperrt und der erzwungene Split im Dataset-Manager
+    // haette die Bild/Label-Paare zerrissen.
+    let existing_layout = if src.is_dir() { detect_split_layout(&target) } else { None };
+    let (status, split_info) = match &existing_layout {
+        Some(layout) => {
+            let (tr, va, te) = (layout.count_of("train"), layout.count_of("val"), layout.count_of("test"));
+            let total = (tr + va + te).max(1) as f64;
+            ("split", Some(SplitInfo {
+                train_count: tr, val_count: va, test_count: te,
+                train_ratio: tr as f64 / total,
+                val_ratio:   va as f64 / total,
+                test_ratio:  te as f64 / total,
+            }))
+        }
+        None => ("unused", None),
+    };
+
     let info = make_info(&dataset_id, &dataset_name, &model_id, "local",
-        Some(source_path), &target, size, files, "unused", None,
+        Some(source_path), &target, size, files, status, split_info,
         analysis.detected_type.clone(), analysis.pairing_status, analysis.warnings);
     // dataset.yaml für YOLO/Pascal generieren falls noch nicht vorhanden
     if matches!(info.dataset_type, DatasetType::YoloBbox | DatasetType::PascalVoc) {
-        let hint = &analysis.schema_hint;
-        let img_dir = hint.as_ref().and_then(|s| s.get("images_dir")).and_then(|v| v.as_str()).unwrap_or("images");
-        let lbl_dir = hint.as_ref()
-            .and_then(|s| s.get("labels_dir").or_else(|| s.get("annotations_dir")))
-            .and_then(|v| v.as_str()).unwrap_or("labels");
-        generate_dataset_yaml(&target, img_dir, lbl_dir, false).ok();
+        if let Some(layout) = &existing_layout {
+            generate_split_dataset_yaml(&target, layout).ok();
+        } else {
+            let hint = &analysis.schema_hint;
+            let img_dir = hint.as_ref().and_then(|s| s.get("images_dir")).and_then(|v| v.as_str()).unwrap_or("images");
+            let lbl_dir = hint.as_ref()
+                .and_then(|s| s.get("labels_dir").or_else(|| s.get("annotations_dir")))
+                .and_then(|v| v.as_str()).unwrap_or("labels");
+            generate_dataset_yaml(&target, img_dir, lbl_dir, false).ok();
+        }
         eprintln!("[Dataset] Import: dataset.yaml -> {:?}", target.join("dataset.yaml"));
     }
     upsert_metadata(&datasets_dir, &info)?;
@@ -2620,5 +2937,187 @@ mod flat_split_tests {
         assert_eq!(info.val_count, 6);
         assert_eq!(info.test_count, 0);
         let _ = fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod split_layout_tests {
+    use super::{detect_split_layout, detect_dataset_type, parse_yaml_class_names,
+                read_class_names, generate_split_dataset_yaml, is_auxiliary_file, DatasetType};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let p = std::env::temp_dir().join(format!("ft_ds_test_{}_{}_{}", tag, std::process::id(), n));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            TempDir(p)
+        }
+        fn path(&self) -> &Path { &self.0 }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+
+    /// Legt ein Bild/Label-Paar an. Der Bildinhalt ist egal, nur die Endung zaehlt.
+    fn make_pair(img_dir: &Path, lbl_dir: &Path, stem: &str) {
+        fs::create_dir_all(img_dir).unwrap();
+        fs::create_dir_all(lbl_dir).unwrap();
+        fs::write(img_dir.join(format!("{}.jpg", stem)), b"x").unwrap();
+        fs::write(lbl_dir.join(format!("{}.txt", stem)), b"0 0.5 0.5 0.1 0.1").unwrap();
+    }
+
+    /// Der Aufbau von Karols Ski-Dataset: images/train + labels/train,
+    /// dazu ein leerer images/test-Ordner und eine data.yaml im Root.
+    fn build_nested(root: &Path) {
+        for (split, n) in [("train", 3), ("val", 2)] {
+            for i in 0..n {
+                make_pair(&root.join("images").join(split), &root.join("labels").join(split), &format!("{}_{}", split, i));
+            }
+        }
+        fs::create_dir_all(root.join("images/test")).unwrap();
+        fs::create_dir_all(root.join("labels/test")).unwrap();
+        fs::write(root.join("data.yaml"),
+            "train: images/train\nval: images/val\n\nnc: 3\nnames:\n  - 'Tree'\n  - 'Stone'\n  - 'Person'\n").unwrap();
+    }
+
+    #[test]
+    fn nested_yolo_split_wird_erkannt() {
+        let dir = TempDir::new("nested");
+        build_nested(dir.path());
+        let layout = detect_split_layout(dir.path()).expect("images/train + labels/train muss erkannt werden");
+        assert_eq!(layout.style, "nested");
+        assert_eq!(layout.images_dir, "images");
+        assert_eq!(layout.labels_dir, "labels");
+        assert_eq!(layout.count_of("train"), 3);
+        assert_eq!(layout.count_of("val"), 2);
+        // Leerer test-Ordner darf nicht als Split gelten.
+        assert_eq!(layout.count_of("test"), 0);
+        assert_eq!(layout.splits.len(), 2);
+    }
+
+    #[test]
+    fn grouped_yolo_split_wird_erkannt() {
+        let dir = TempDir::new("grouped");
+        for (split, n) in [("train", 4), ("valid", 1)] {
+            for i in 0..n {
+                make_pair(&dir.path().join(split).join("images"), &dir.path().join(split).join("labels"), &format!("{}_{}", split, i));
+            }
+        }
+        let layout = detect_split_layout(dir.path()).expect("train/images + train/labels muss erkannt werden");
+        assert_eq!(layout.style, "grouped");
+        assert_eq!(layout.count_of("train"), 4);
+        // "valid" muss auf "val" normalisiert werden.
+        assert_eq!(layout.count_of("val"), 1);
+    }
+
+    #[test]
+    fn detect_meldet_yolo_statt_unbekannt() {
+        // Das war der eigentliche Fehler: 0 % Konfidenz, "Dataset-Typ konnte
+        // nicht erkannt werden" – und damit blieb das Training gesperrt.
+        let dir = TempDir::new("detect");
+        build_nested(dir.path());
+        // Beiwerk, das im echten Ordner ebenfalls herumliegt.
+        fs::write(dir.path().join("shuffel.py"), b"# helper").unwrap();
+        fs::create_dir_all(dir.path().join("raw")).unwrap();
+
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::YoloBbox), "erkannt als {:?}", a.detected_type);
+        assert!(a.confidence >= 90, "Konfidenz war {}", a.confidence);
+        let hint = a.schema_hint.expect("schema_hint fehlt");
+        assert_eq!(hint["is_split"], serde_json::json!(true));
+        assert_eq!(hint["splits"]["train"]["count"], serde_json::json!(3));
+        assert!(a.pairing_status.unwrap().is_paired);
+    }
+
+    #[test]
+    fn pascal_voc_split_wird_als_voc_erkannt() {
+        let dir = TempDir::new("voc");
+        fs::create_dir_all(dir.path().join("images/train")).unwrap();
+        fs::create_dir_all(dir.path().join("annotations/train")).unwrap();
+        fs::write(dir.path().join("images/train/a.jpg"), b"x").unwrap();
+        fs::write(dir.path().join("annotations/train/a.xml"), b"<annotation/>").unwrap();
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::PascalVoc), "erkannt als {:?}", a.detected_type);
+    }
+
+    #[test]
+    fn klassennamen_kommen_aus_der_data_yaml() {
+        let dir = TempDir::new("names");
+        build_nested(dir.path());
+        assert_eq!(read_class_names(dir.path()), vec!["Tree", "Stone", "Person"]);
+    }
+
+    #[test]
+    fn yaml_namen_in_allen_drei_schreibweisen() {
+        assert_eq!(parse_yaml_class_names("nc: 2\nnames: ['a', \"b\"]\n"), vec!["a", "b"]);
+        assert_eq!(parse_yaml_class_names("names:\n  - 'a'\n  - b\nnc: 2\n"), vec!["a", "b"]);
+        assert_eq!(parse_yaml_class_names("names:\n  1: b\n  0: a\n"), vec!["a", "b"]);
+        // Ein Kommentar hinter dem Key darf nicht als Inline-Liste durchgehen.
+        assert_eq!(parse_yaml_class_names("names:  # Klassen\n  - 'a'\n"), vec!["a"]);
+        assert!(parse_yaml_class_names("train: images/train\nnc: 0\n").is_empty());
+    }
+
+    #[test]
+    fn generierte_yaml_laesst_leere_splits_weg() {
+        let dir = TempDir::new("yaml");
+        build_nested(dir.path());
+        let layout = detect_split_layout(dir.path()).unwrap();
+        generate_split_dataset_yaml(dir.path(), &layout).unwrap();
+        let yaml = fs::read_to_string(dir.path().join("dataset.yaml")).unwrap();
+        assert!(yaml.contains("train: images/train"), "{}", yaml);
+        assert!(yaml.contains("val: images/val"), "{}", yaml);
+        // images/test ist leer – ein test-Eintrag laesst Ultralytics abbrechen.
+        assert!(!yaml.contains("test:"), "{}", yaml);
+        assert!(yaml.contains("nc: 3"), "{}", yaml);
+        assert!(yaml.contains("- 'Tree'"), "{}", yaml);
+    }
+
+    #[test]
+    fn ohne_val_split_zeigt_val_auf_train() {
+        let dir = TempDir::new("noval");
+        make_pair(&dir.path().join("images/train"), &dir.path().join("labels/train"), "a");
+        let layout = detect_split_layout(dir.path()).unwrap();
+        generate_split_dataset_yaml(dir.path(), &layout).unwrap();
+        let yaml = fs::read_to_string(dir.path().join("dataset.yaml")).unwrap();
+        assert!(yaml.contains("val: images/train"), "{}", yaml);
+    }
+
+    #[test]
+    fn hilfsdateien_werden_vom_split_ausgenommen() {
+        assert!(is_auxiliary_file(Path::new("/x/data.yaml")));
+        assert!(is_auxiliary_file(Path::new("/x/shuffel.py")));
+        assert!(is_auxiliary_file(Path::new("/x/README.md")));
+        assert!(!is_auxiliary_file(Path::new("/x/train.csv")));
+        assert!(!is_auxiliary_file(Path::new("/x/bild.jpg")));
+    }
+
+    #[test]
+    fn flache_datasets_bleiben_unveraendert() {
+        // Regression: die neue Split-Erkennung darf normale Ordner nicht kapern.
+        let dir = TempDir::new("flat");
+        fs::write(dir.path().join("train.csv"), b"a,b\n1,2\n").unwrap();
+        assert!(detect_split_layout(dir.path()).is_none());
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::FlatFile), "erkannt als {:?}", a.detected_type);
+    }
+
+    #[test]
+    fn ordner_klassifikation_bleibt_erhalten() {
+        // katzen/ und hunde/ heissen nicht train/val – darf kein Split-Layout werden.
+        let dir = TempDir::new("folderclass");
+        for cls in ["katzen", "hunde"] {
+            fs::create_dir_all(dir.path().join(cls)).unwrap();
+            fs::write(dir.path().join(cls).join("a.jpg"), b"x").unwrap();
+        }
+        assert!(detect_split_layout(dir.path()).is_none());
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::FolderClass), "erkannt als {:?}", a.detected_type);
     }
 }

@@ -992,6 +992,14 @@ export default function DatasetUpload() {
                     <p>{t('datasetUpload.splitModal.pairedWarning').replace('{type}', DATASET_TYPE_LABELS[datasetToSplit.dataset_type]?.label ?? '')}</p>
                   </div>
                 </div>
+              ) : !datasetToSplit.dataset_type || datasetToSplit.dataset_type === 'unknown' ? (
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-300 space-y-1">
+                    <p className="font-medium">{t('datasetUpload.splitModal.unknownTypeTitle')}</p>
+                    <p>{t('datasetUpload.splitModal.unknownTypeDesc')}</p>
+                  </div>
+                </div>
               ) : null}
 
               {/* Allgemeine Warnung: Datei-Sicherheit */}
@@ -1000,7 +1008,11 @@ export default function DatasetUpload() {
                 <p className="text-xs text-red-300">{t('datasetUpload.splitModal.dataIntegrityWarning')}</p>
               </div>
 
-              <p className="text-gray-400 text-sm">{t('datasetUpload.splitModal.fileCount').replace('{count}', String(datasetToSplit.file_count))}</p>
+              <p className="text-gray-400 text-sm">{t(
+                !datasetToSplit.dataset_type || datasetToSplit.dataset_type === 'unknown'
+                  ? 'datasetUpload.splitModal.fileCountTotal'
+                  : 'datasetUpload.splitModal.fileCount'
+              ).replace('{count}', String(datasetToSplit.file_count))}</p>
 
               {([
                 { label: t('datasetUpload.splitModal.labelTrain'), color: '#3b82f6', ratio: trainRatio, set: (v: number) => {
@@ -1030,7 +1042,12 @@ export default function DatasetUpload() {
               {(() => {
                 // Bei zeilenbasiertem Split (Flat File/Parquet) beziehen sich die Anteile auf
                 // Zeilen, nicht auf Dateien — Datei-Zahlen wären hier irreführend (z.B. "1/0/0").
-                const isRowSplit = !!datasetToSplit.dataset_type && ['flat_file', 'multi_shard'].includes(datasetToSplit.dataset_type);
+                // Bei unbekanntem Typ ist ebenfalls nicht vorhersagbar, wie viele Dateien
+                // tatsächlich zugeteilt werden: file_count zählt rekursiv alles mit, gesplittet
+                // werden aber nur die Datendateien im Hauptordner (vorher versprach der Dialog
+                // z.B. "3005/376/376" und teilte dann 3 Dateien zu).
+                const isRowSplit = !datasetToSplit.dataset_type
+                  || ['flat_file', 'multi_shard', 'unknown'].includes(datasetToSplit.dataset_type);
                 return (
                   <div className="grid grid-cols-3 gap-2 text-center text-sm">
                     {[
