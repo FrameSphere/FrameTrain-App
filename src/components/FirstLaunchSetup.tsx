@@ -612,7 +612,9 @@ const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
                       : 'bg-white/5 border-white/15 hover:bg-white/10 hover:border-white/30'
                   }`}
                 >
-                  <span className="text-4xl">{meta.flag}</span>
+                  <span className="w-12 h-12 flex items-center justify-center rounded-xl bg-white/10 border border-white/15 text-base font-semibold tracking-wide text-white">
+                    {meta.code}
+                  </span>
                   <div className="text-left">
                     <div className="text-white font-bold text-lg">{meta.nativeLabel}</div>
                     {active && (

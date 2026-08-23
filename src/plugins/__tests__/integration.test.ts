@@ -15,7 +15,7 @@ import { hfEncoderCompatPlugin } from '../hf-encoder/datasetCompat';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const REQUIRED_FIELDS: (keyof ModelPlugin)[] = [
-  'id', 'name', 'description', 'taskType', 'detect', 'TrainComponent', 'TestComponent',
+  'id', 'name', 'description', 'taskType', 'detect', 'TestComponent',
 ];
 
 describe('Typen-Kontrakt – xlmRobertaPlugin', () => {
@@ -45,10 +45,6 @@ describe('Typen-Kontrakt – xlmRobertaPlugin', () => {
 
   it('detect ist eine Funktion', () => {
     expect(typeof xlmRobertaPlugin.detect).toBe('function');
-  });
-
-  it('TrainComponent ist eine Funktion (React-Komponente)', () => {
-    expect(typeof xlmRobertaPlugin.TrainComponent).toBe('function');
   });
 
   it('TestComponent ist eine Funktion (React-Komponente)', () => {
@@ -81,9 +77,6 @@ describe('Typen-Kontrakt – hfEncoderPlugin', () => {
     expect(hfEncoderPlugin.id).not.toBe(xlmRobertaPlugin.id);
   });
 
-  it('TrainComponent ist NICHT dieselbe Funktion wie bei xlm-roberta', () => {
-    expect(hfEncoderPlugin.TrainComponent).not.toBe(xlmRobertaPlugin.TrainComponent);
-  });
 
   it('TestComponent ist NICHT dieselbe Funktion wie bei xlm-roberta', () => {
     expect(hfEncoderPlugin.TestComponent).not.toBe(xlmRobertaPlugin.TestComponent);
@@ -223,7 +216,6 @@ describe('Smoke-Test – minimales neues Plugin erfüllt Interface', () => {
     description: 'Beispiel-Plugin fuer Sprachsynthese – nicht registriert',
     taskType: 'text_to_speech',
     detect: mockDetect,
-    TrainComponent: () => null,
     TestComponent: () => null,
   };
 

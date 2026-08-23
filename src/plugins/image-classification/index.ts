@@ -1,5 +1,4 @@
 import type { ModelPlugin, ModelConfig } from '../types';
-import ImageClassificationTrainPlugin from './TrainPlugin';
 import ImageClassificationTestPlugin from './TestPlugin';
 
 /**
@@ -56,7 +55,6 @@ const imageClassificationPlugin: ModelPlugin = {
   defaultTrainingConfig: { learning_rate: 1e-3, batch_size: 32, epochs: 10 },
   defaultPluginConfig: { arch: 'resnet18', image_size: 224, freeze_base: true, unfreeze_at: -1, pretrained: true, augment: true },
   detect: detectImageClassification,
-  TrainComponent: ImageClassificationTrainPlugin,
   TestComponent: ImageClassificationTestPlugin,
   supportedDatasetTypes: ['folder_class', 'pre_split'],
   preferredDatasetType: 'folder_class',

@@ -1288,7 +1288,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                       : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
                   }`}
                 >
-                  <span className="text-3xl">{meta.flag}</span>
+                  <span className="w-10 h-10 flex items-center justify-center rounded-lg bg-white/10 border border-white/15 text-sm font-semibold tracking-wide text-white">
+                    {meta.code}
+                  </span>
                   <div className="flex-1 text-left">
                     <div className="text-white font-semibold">{meta.nativeLabel}</div>
                     <div className={`text-xs mt-0.5 ${active ? 'text-white/70' : 'text-gray-500'}`}>

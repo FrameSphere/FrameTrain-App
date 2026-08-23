@@ -39,9 +39,7 @@ function emitEvent(event: string, payload: unknown) {
 
 // ── Komponenten ────────────────────────────────────────────────────────────
 
-import XLMRobertaTrainPlugin from '../xlm-roberta/TrainPlugin';
 import XLMRobertaTestPlugin from '../xlm-roberta/TestPlugin';
-import HFEncoderTrainPlugin from '../hf-encoder/TrainPlugin';
 import HFEncoderTestPlugin from '../hf-encoder/TestPlugin';
 import type { DatasetInfo } from '../types';
 
@@ -76,124 +74,6 @@ const BASE_TEST_PROPS = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // XLMRobertaTrainPlugin
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('XLMRobertaTrainPlugin – Rendering', () => {
-  it('rendert ohne Absturz', () => {
-    render(<XLMRobertaTrainPlugin modelPath="/models/xlm-roberta-base" onNavigateToAnalysis={vi.fn()} />);
-    expect(screen.getByText(/Training starten/i)).toBeInTheDocument();
-  });
-
-  it('zeigt modelPath im Header an', () => {
-    render(<XLMRobertaTrainPlugin modelPath="/models/xlm-roberta-base" onNavigateToAnalysis={vi.fn()} />);
-    expect(screen.getByText('/models/xlm-roberta-base')).toBeInTheDocument();
-  });
-
-  it('Epochs-Feld hat Standardwert 3', () => {
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={vi.fn()} />);
-    expect(screen.getByDisplayValue('3')).toBeInTheDocument();
-  });
-
-  it('Batch-Size-Feld hat Standardwert 16', () => {
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={vi.fn()} />);
-    expect(screen.getByDisplayValue('16')).toBeInTheDocument();
-  });
-});
-
-describe('XLMRobertaTrainPlugin – Validierung', () => {
-  beforeEach(() => {
-    mockInvoke.mockReset();
-  });
-
-  it('leeres Dataset-Feld → Fehlermeldung, kein invoke()', async () => {
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={vi.fn()} />);
-    fireEvent.click(screen.getByText(/Training starten/i));
-    await waitFor(() => {
-      expect(screen.getByText(/Bitte wähle ein Dataset/i)).toBeInTheDocument();
-    });
-    expect(mockInvoke).not.toHaveBeenCalled();
-  });
-
-  it('Dataset-Feld mit Wert → invoke() wird aufgerufen', async () => {
-    mockInvoke.mockResolvedValue('job-123');
-    const onNavigate = vi.fn();
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={onNavigate} />);
-
-    await userEvent.type(screen.getByPlaceholderText(/pfad\/zu\/dataset/i), '/data/train.csv');
-    fireEvent.click(screen.getByText(/Training starten/i));
-
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalled());
-  });
-
-  it('invoke() erhält modelPath korrekt', async () => {
-    mockInvoke.mockResolvedValue('job-123');
-    render(<XLMRobertaTrainPlugin modelPath="/models/xlm-roberta-base" onNavigateToAnalysis={vi.fn()} />);
-
-    await userEvent.type(screen.getByPlaceholderText(/pfad\/zu\/dataset/i), '/data/train.csv');
-    fireEvent.click(screen.getByText(/Training starten/i));
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('start_training', expect.objectContaining({
-        modelPath: '/models/xlm-roberta-base',
-      }));
-    });
-  });
-
-  it('invoke() erhält modelType korrekt', async () => {
-    mockInvoke.mockResolvedValue('job-123');
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={vi.fn()} />);
-
-    await userEvent.type(screen.getByPlaceholderText(/pfad\/zu\/dataset/i), '/data/train.csv');
-    fireEvent.click(screen.getByText(/Training starten/i));
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('start_training', expect.objectContaining({
-        modelType: 'xlm-roberta-sequence-classification',
-      }));
-    });
-  });
-
-  it('erfolgreicher Start → onNavigateToAnalysis(jobId) aufgerufen', async () => {
-    mockInvoke.mockResolvedValue('job-abc');
-    const onNavigate = vi.fn();
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={onNavigate} />);
-
-    await userEvent.type(screen.getByPlaceholderText(/pfad\/zu\/dataset/i), '/data/train.csv');
-    fireEvent.click(screen.getByText(/Training starten/i));
-
-    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('job-abc'));
-  });
-});
-
-describe('XLMRobertaTrainPlugin – Loading-State', () => {
-  it('Button zeigt Lade-Text während invoke läuft', async () => {
-    mockInvoke.mockImplementation(() => new Promise(() => {}));
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={vi.fn()} />);
-
-    await userEvent.type(screen.getByPlaceholderText(/pfad\/zu\/dataset/i), '/data/train.csv');
-    fireEvent.click(screen.getByText(/Training starten/i));
-
-    await waitFor(() => {
-      expect(screen.getByText(/Starte Training/i)).toBeInTheDocument();
-    });
-  });
-
-  it('invoke-Fehler → Fehlermeldung sichtbar, Button wieder aktiv', async () => {
-    mockInvoke.mockRejectedValue(new Error('Backend nicht erreichbar'));
-    render(<XLMRobertaTrainPlugin modelPath="/models/test" onNavigateToAnalysis={vi.fn()} />);
-
-    await userEvent.type(screen.getByPlaceholderText(/pfad\/zu\/dataset/i), '/data/train.csv');
-    fireEvent.click(screen.getByText(/Training starten/i));
-
-    await waitFor(() => {
-      expect(screen.getByText(/Backend nicht erreichbar/i)).toBeInTheDocument();
-    });
-    expect(screen.getByText(/Training starten/i)).not.toBeDisabled();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// XLMRobertaTestPlugin – Text-Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('XLMRobertaTestPlugin – Text-Tab (Standard)', () => {
@@ -478,28 +358,6 @@ describe('XLMRobertaTestPlugin – Dataset-Tab', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HFEncoderTrainPlugin
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('HFEncoderTrainPlugin', () => {
-  it('rendert Fallback-Text (kein Formular)', () => {
-    render(<HFEncoderTrainPlugin modelPath="/models/bert-base" onNavigateToAnalysis={vi.fn()} />);
-    expect(screen.getByText(/Training über das Training-Panel/i)).toBeInTheDocument();
-  });
-
-  it('enthält keinen "Training starten"-Button', () => {
-    render(<HFEncoderTrainPlugin modelPath="/models/bert-base" onNavigateToAnalysis={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: /Training starten/i })).not.toBeInTheDocument();
-  });
-
-  it('ruft kein invoke() auf beim Rendern', () => {
-    mockInvoke.mockReset();
-    render(<HFEncoderTrainPlugin modelPath="/models/bert-base" onNavigateToAnalysis={vi.fn()} />);
-    expect(mockInvoke).not.toHaveBeenCalled();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HFEncoderTestPlugin
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('HFEncoderTestPlugin – Single Input', () => {

@@ -276,6 +276,9 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
               </div>
             )}
             <div className="flex items-center gap-4 mt-1.5 text-xs text-gray-400">
+              {/* "Dateien gesamt" war falsch: gelistet werden nur die Dateien in den
+                  bekannten Split- und Medienordnern, nicht jede Datei im Datensatz
+                  (die Karte zaehlt rekursiv alles, z. B. auch mitkopierte Rohdaten). */}
               <span>{t('datasetFileManager.header.totalFiles').replace('{count}', String(files.length))}</span>
               <span className="text-blue-400">{t('datasetFileManager.header.statTrain').replace('{count}', String(stats.train))}</span>
               <span className="text-purple-400">{t('datasetFileManager.header.statVal').replace('{count}', String(stats.val))}</span>

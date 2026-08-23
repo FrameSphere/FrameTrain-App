@@ -5,9 +5,14 @@ import en from '../locales/en.json'
 // ── Typen ────────────────────────────────────────────────────────
 export type Language = 'de' | 'en'
 
-export const LANGUAGE_META: Record<Language, { label: string; flag: string; nativeLabel: string }> = {
-  de: { label: 'Deutsch',  flag: '🇩🇪', nativeLabel: 'Deutsch' },
-  en: { label: 'English',  flag: '🇬🇧', nativeLabel: 'English' },
+/**
+ * `code` ersetzt die frueheren Flaggen-Emojis: Windows liefert fuer
+ * Regional-Indicator-Paare keine Flaggen, dort standen statt der Flagge die
+ * Buchstaben "DE"/"GB" in Kaestchen. Ein Kuerzel sieht ueberall gleich aus.
+ */
+export const LANGUAGE_META: Record<Language, { label: string; code: string; nativeLabel: string }> = {
+  de: { label: 'Deutsch',  code: 'DE', nativeLabel: 'Deutsch' },
+  en: { label: 'English',  code: 'EN', nativeLabel: 'English' },
 }
 
 const LS_KEY = 'ft_language'

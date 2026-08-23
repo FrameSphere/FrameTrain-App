@@ -675,12 +675,22 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
 
         unlistenersRef.current = [ul1, ul2, ul3, ul4];
 
+        if (!activeCanvasModelId) {
+          setLogLines((p) => [...p,
+            "[Synapse] Hinweis: Graph ist nicht gespeichert — das trainierte Modell " +
+            "steht danach nicht im Inferenz-Tab zur Verfuegung. Mit \u201eSpeichern\u201c " +
+            "sichern und erneut trainieren."]);
+        }
+
         const job = await invoke<{
           id: string;
           output_path?: string | null;
         }>("start_training", {
-          modelId: "",
-          modelName: "Synapse Canvas Model",
+          // Ohne die Modell-ID war der Lauf mit keinem gespeicherten Canvas-Modell
+          // verknuepft: die Gewichte landeten nur im Trainings-Output und der
+          // Inferenz-Tab meldete dauerhaft "(kein model.pt)".
+          modelId: activeCanvasModelId ?? "",
+          modelName: activeModelName || "Synapse Canvas Model",
           datasetId: config.selectedDatasetId ?? "",
           datasetName: config.selectedDatasetName ?? "",
           versionId: null,

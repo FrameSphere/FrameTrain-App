@@ -59,13 +59,20 @@ export interface ModelPlugin {
    */
   defaultTrainingConfig?: Record<string, number | string | boolean>;
   /**
+   * Generische Trainings-Felder, die dieses Plugin gar nicht auswertet.
+   *
+   * Das Formular zeigte fuer jedes Modell dieselben Felder. Bei YOLO waren
+   * "Max Seq Length", "Warmup Ratio" und LoRA ohne jede Wirkung, waehrend die
+   * Parameter, auf die es ankommt (imgsz, augment, patience), gar nicht
+   * einstellbar waren.
+   */
+  hiddenTrainingFields?: string[];
+  /**
    * Erkennt ob ein Modell von diesem Plugin unterstützt wird.
    * @param modelPathOrId  Lokaler Pfad oder HuggingFace Model-ID
    * @param configJson     Optional: bereits geladenes config.json des Modells
    */
   detect: (modelPathOrId: string, configJson?: ModelConfig) => boolean;
-  /** Training-Oberfläche */
-  TrainComponent: ComponentType<TrainPluginProps>;
   /** Test-Oberfläche */
   TestComponent: ComponentType<TestPluginProps>;
   /**

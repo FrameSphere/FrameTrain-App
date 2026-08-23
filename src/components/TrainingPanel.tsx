@@ -1,6 +1,6 @@
 // TrainingPanel.tsx – Vollständiges Training-Interface (v5 – LoRA/QLoRA + Error Recovery)
 
-import { useState, useEffect, useRef, useCallback, useContext } from 'react';
+import { useState, useEffect, useRef, useCallback, useContext, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -875,7 +875,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     });
   }, [updateConfig]);
 
-  const [sections, setSections] = useState({ basic: true, optimizer: false, advanced: false, lora: false, ram: true });
+  const [sections, setSections] = useState({ basic: true, optimizer: false, advanced: false, lora: false, plugin: true, ram: true });
   const toggleSection = (k: keyof typeof sections) => setSections(s => ({ ...s, [k]: !s[k] }));
 
   const [showAIAssistant, setShowAIAssistant] = useState(false);
@@ -1184,6 +1184,27 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const isImagePlugin   = detection?.supported === true
     && (detection.plugin.id === 'image-classification'
         || detection.plugin.id === 'hf-image-classification');
+  // Felder, die das erkannte Plugin gar nicht auswertet (siehe
+  // hiddenTrainingFields in der Plugin-Definition).
+  const hiddenFields    = new Set(
+    detection?.supported === true ? (detection.plugin.hiddenTrainingFields ?? []) : []
+  );
+  const showsField      = (key: string) => !hiddenFields.has(key);
+  // Parameter, die nur dieses Plugin kennt (z. B. imgsz/augment/patience bei
+  // YOLO). Sie kamen bisher ausschliesslich aus defaultPluginConfig und waren
+  // nirgends einstellbar. epochs/batch/task_type bleiben aussen vor — die
+  // stehen schon im allgemeinen Teil des Formulars.
+  const PLUGIN_PARAM_BLOCKLIST = ['task_type', 'epochs', 'batch', 'batch_size', 'device'];
+  const pluginParamDefaults = useMemo(() => {
+    const raw = detection?.supported === true ? (detection.plugin.defaultPluginConfig ?? {}) : {};
+    return Object.fromEntries(
+      Object.entries(raw).filter(([k, v]) =>
+        !PLUGIN_PARAM_BLOCKLIST.includes(k) && (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')
+      )
+    ) as Record<string, number | boolean | string>;
+  }, [detection]);
+  const [pluginParams, setPluginParams] = useState<Record<string, number | boolean | string>>({});
+  useEffect(() => { setPluginParams(pluginParamDefaults); }, [pluginParamDefaults]);
   // Der torchvision-Hinweis gilt nur fuers alte Plugin — das neue trainiert
   // ja gerade die heruntergeladenen Gewichte.
   const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
@@ -1232,6 +1253,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
         plugin_config: detection?.supported
           ? {
               ...(detection.plugin.defaultPluginConfig ?? {}),
+              ...pluginParams,
               ...(detection.plugin.id === 'image-classification' ? { arch: imageArch } : {}),
             }
           : {},
@@ -1475,7 +1497,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                           <p className="text-xs text-gray-500">{new Date(job.created_at).toLocaleDateString(dateLocale(language), { day:'2-digit', month:'2-digit', year:'2-digit' })}</p>
                           <p className="text-xs text-gray-600">{new Date(job.created_at).toLocaleTimeString(dateLocale(language), { hour:'2-digit', minute:'2-digit' })}</p>
                           {job.progress && job.progress.progress_percent > 0 && (
-                            <p className="text-xs text-gray-500 mt-1">{job.progress.progress_percent.toFixed(0)}% · {t('trainingPanel.history.epochLabel')} {job.progress.epoch}/{job.progress.total_epochs}</p>
+                            <p className="text-xs text-gray-500 mt-1">{job.progress.progress_percent.toFixed(0)}% · {t('trainingPanel.history.epochLabel').replace('{epoch}', String(job.progress.epoch)).replace('{total}', String(job.progress.total_epochs))}</p>
                           )}
                         </div>
                       </div>
@@ -1483,7 +1505,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                         <div className="mt-2 pt-2 border-t border-white/10 flex gap-4 text-xs text-gray-500">
                           <span>{t('trainingPanel.history.lossLabel')} <span className="text-gray-300">{job.progress.train_loss.toFixed(4)}</span></span>
                           {job.progress.val_loss && <span>{t('trainingPanel.history.valLabel')} <span className="text-gray-300">{job.progress.val_loss.toFixed(4)}</span></span>}
-                          <span>{t('trainingPanel.history.epochLabel')} {job.progress.epoch}/{job.progress.total_epochs}</span>
+                          <span>{t('trainingPanel.history.epochLabel').replace('{epoch}', String(job.progress.epoch)).replace('{total}', String(job.progress.total_epochs))}</span>
                         </div>
                       )}
                     </div>
@@ -1657,10 +1679,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 <Field label={t('trainingPanel.fields.learningRate')} tooltip={t('trainingPanel.fields.learningRateTooltip')}><NumInput value={config.learning_rate} onChange={v => updateConfig({ learning_rate: v })} step={0.000001} /></Field>
                 {/* Sequenzlaenge gibt es nur bei Textmodellen — beim Bild-Plugin
                     stand sie da, ohne irgendeine Wirkung zu haben. */}
-                {!isImagePlugin && (
+                {!isImagePlugin && showsField('max_seq_length') && (
                   <Field label={t('trainingPanel.fields.maxSeqLength')} tooltip={t('trainingPanel.fields.maxSeqLengthTooltip')}><NumInput value={config.max_seq_length} onChange={v => updateConfig({ max_seq_length: v })} min={16} max={512} step={16} /></Field>
                 )}
-                <Field label={t('trainingPanel.fields.warmupRatio')}><NumInput value={config.warmup_ratio} onChange={v => updateConfig({ warmup_ratio: v })} step={0.01} min={0} max={0.3} /></Field>
+                {showsField('warmup_ratio') && (
+                  <Field label={t('trainingPanel.fields.warmupRatio')}><NumInput value={config.warmup_ratio} onChange={v => updateConfig({ warmup_ratio: v })} step={0.01} min={0} max={0.3} /></Field>
+                )}
                 <Field label={t('trainingPanel.fields.gradientAccumulation')} tooltip={t('trainingPanel.fields.gradientAccumulationTooltip')}><NumInput value={config.gradient_accumulation_steps} onChange={v => updateConfig({ gradient_accumulation_steps: v })} min={1} step={1} /></Field>
               </div>
               <div className="grid grid-cols-2 gap-4 pt-1">
@@ -1703,6 +1727,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               </div>
             </SectionCard>
 
+            {showsField('lora') && (
             <SectionCard
               title={t('trainingPanel.sections.lora')}
               icon={<span className="text-violet-400 text-sm font-bold w-4 h-4 flex items-center justify-center">L</span>}
@@ -1741,6 +1766,36 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 )}
               </div>
             </SectionCard>
+            )}
+
+            {/* Parameter, die nur dieses Plugin kennt — bei YOLO etwa imgsz und
+                augment. Sie wirkten schon immer, waren aber nirgends einstellbar. */}
+            {Object.keys(pluginParams).length > 0 && detection?.supported === true && (
+              <SectionCard
+                title={t('trainingPanel.sections.pluginParams').replace('{name}', detection.plugin.name)}
+                icon={<SlidersHorizontal className="w-4 h-4 text-orange-400" />}
+                expanded={sections.plugin}
+                onToggle={() => toggleSection('plugin')}
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  {Object.entries(pluginParams).map(([key, value]) => (
+                    <Field key={key} label={key}>
+                      {typeof value === 'boolean' ? (
+                        <Toggle checked={value} onChange={v => setPluginParams(p => ({ ...p, [key]: v }))} label="" />
+                      ) : typeof value === 'number' ? (
+                        <NumInput value={value} onChange={v => setPluginParams(p => ({ ...p, [key]: v }))} step={Number.isInteger(value) ? 1 : 0.001} />
+                      ) : (
+                        <input
+                          value={String(value)}
+                          onChange={e => setPluginParams(p => ({ ...p, [key]: e.target.value }))}
+                          className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none"
+                        />
+                      )}
+                    </Field>
+                  ))}
+                </div>
+              </SectionCard>
+            )}
 
             <SectionCard title={t('trainingPanel.ramCalculator.title')} icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
               <RamCalculator config={config} modelSizeGb={modelSizeGb} />

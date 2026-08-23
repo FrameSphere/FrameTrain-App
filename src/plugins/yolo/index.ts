@@ -2,7 +2,6 @@
 
 import type { ModelPlugin } from '../types';
 import { detectYOLO } from './detect';
-import YOLOTrainPlugin from './TrainPlugin';
 import YOLOTestPlugin from './TestPlugin';
 
 const yoloPlugin: ModelPlugin = {
@@ -22,8 +21,13 @@ const yoloPlugin: ModelPlugin = {
     patience: 50,
   },
   detect: detectYOLO,
-  TrainComponent: YOLOTrainPlugin,
   TestComponent: YOLOTestPlugin,
+  // Ultralytics kennt weder Sequenzlaenge noch LoRA; Warmup und Scheduler
+  // steuert es selbst ueber lr0/lrf.
+  hiddenTrainingFields: [
+    'max_seq_length', 'warmup_ratio', 'warmup_steps', 'lora', 'gradient_checkpointing',
+    'dropout', 'label_smoothing', 'group_by_length', 'max_grad_norm', 'scheduler',
+  ],
   // Phase 7: Dataset-Kompatibilität
   supportedDatasetTypes: ['yolo_bbox', 'pre_split', 'pascal_voc'],
   preferredDatasetType: 'yolo_bbox',

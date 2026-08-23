@@ -377,6 +377,15 @@ If error contains shape mismatch like "(65536x32 and 128x256)":
 4. VALIDATE: Each Dense node MUST have outputSize set to a number.
 5. REPORT: "dense-2 inputSize: 128→32 korrigiert (war inkompatibel mit dense-1 outputSize=32)"
 
+If error contains "shape '[B, N]' is invalid for input of size M" (reshape mismatch):
+1. THE RESHAPE NODE IS WRONG — not the Dense that follows it. Fixing the Dense
+   leaves the error unchanged and repeats forever.
+2. COMPUTE: features = M / B  (B = first number in the shape, the batch size).
+   Example: shape '[32, 512]' invalid for input of size 2048 → 2048/32 = 64.
+3. FIX FIRST:  set_param(reshapeId, "shape", "-1, <features>")
+4. FIX SECOND: set_param(downstreamDenseId, "inputSize", <features>)
+5. REPORT: "reshape-1 shape: [32,512]→-1,64 korrigiert (2048 Werte / Batch 32), dense-1 inputSize: 512→64"
+
 If error contains LayerNorm mismatch like "normalized_shape=[512] ... input of size[32, 256]":
 1. IDENTIFY: Which LayerNormFlow line is MISMATCH.
 2. FIX: Use set_param(layerNormNodeId, "normalizedShape", upstreamFeatureSize).

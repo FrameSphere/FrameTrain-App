@@ -1,6 +1,5 @@
 import type { ModelPlugin } from '../types';
 import { detectHFImageClassification } from './detect';
-import HFImageTrainPlugin from './TrainPlugin';
 import HFImageTestPlugin from './TestPlugin';
 
 const hfImageClassificationPlugin: ModelPlugin = {
@@ -12,7 +11,6 @@ const hfImageClassificationPlugin: ModelPlugin = {
   defaultTrainingConfig: { learning_rate: 5e-5, batch_size: 16, epochs: 5 },
   defaultPluginConfig: {},
   detect: detectHFImageClassification,
-  TrainComponent: HFImageTrainPlugin,
   TestComponent: HFImageTestPlugin,
   supportedDatasetTypes: ['folder_class', 'pre_split'],
   preferredDatasetType: 'folder_class',

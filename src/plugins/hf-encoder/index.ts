@@ -2,7 +2,6 @@
 
 import type { ModelPlugin } from '../types';
 import { detectHFEncoder } from './detect';
-import HFEncoderTrainPlugin from './TrainPlugin';
 import HFEncoderTestPlugin from './TestPlugin';
 
 const hfEncoderPlugin: ModelPlugin = {
@@ -12,7 +11,6 @@ const hfEncoderPlugin: ModelPlugin = {
   taskType: 'seq_classification',
   defaultPluginConfig: {},
   detect: detectHFEncoder,
-  TrainComponent: HFEncoderTrainPlugin,
   TestComponent: HFEncoderTestPlugin,
   // Phase 7: Dataset-Kompatibilität
   supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],

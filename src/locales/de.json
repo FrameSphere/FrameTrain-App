@@ -1613,6 +1613,7 @@
       "optimizer": "Optimizer & Scheduler",
       "advanced": "Erweitert & Evaluation",
       "lora": "LoRA / QLoRA",
+      "pluginParams": "{name} – Parameter",
       "loraActiveBadge": "Aktiv",
       "ram": "RAM-Rechner"
     },
@@ -2280,7 +2281,7 @@
       "coco_json": "COCO: annotations.json referenziert Bilder per ID – nicht zeilenweise splitten."
     },
     "header": {
-      "totalFiles": "{count} Dateien gesamt",
+      "totalFiles": "{count} Dateien in der Liste",
       "statTrain": "Train: {count}",
       "statVal": "Val: {count}",
       "statTest": "Test: {count}",

@@ -2,7 +2,6 @@
 
 import type { ModelPlugin } from '../types';
 import { detectXLMRoberta } from './detect';
-import XLMRobertaTrainPlugin from './TrainPlugin';
 import XLMRobertaTestPlugin from './TestPlugin';
 
 const xlmRobertaPlugin: ModelPlugin = {
@@ -12,7 +11,6 @@ const xlmRobertaPlugin: ModelPlugin = {
   taskType: 'seq_classification',
   defaultPluginConfig: {},
   detect: detectXLMRoberta,
-  TrainComponent: XLMRobertaTrainPlugin,
   TestComponent: XLMRobertaTestPlugin,
   // Phase 7: Dataset-Kompatibilität
   supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],

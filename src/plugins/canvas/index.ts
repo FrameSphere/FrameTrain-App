@@ -31,8 +31,6 @@ const canvasPlugin: ModelPlugin = {
     if (id.startsWith('canvas_') || id.includes('/canvas_')) return true;
     return false;
   },
-
-  TrainComponent: CanvasTrainStub,
   TestComponent:  CanvasTestStub,
   // Phase 7: Canvas-Modelle sind flexibel, akzeptieren alle Typen.
   // Der User bestimmt selbst was er im Synapse Builder verdrahtet.
