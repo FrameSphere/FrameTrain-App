@@ -2067,6 +2067,11 @@
       "f1": "F1 score",
       "precision": "Precision",
       "recall": "Recall"
+    },
+    "detection": {
+      "title": "Detection metrics",
+      "map50": "mAP@50",
+      "map5095": "mAP@50-95"
     }
   },
   "datasetUpload": {

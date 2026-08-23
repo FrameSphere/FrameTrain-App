@@ -1,6 +1,6 @@
 [package]
 name = "frametrain-desktop"
-version = "1.2.26"
+version = "1.2.27"
 description = "FrameTrain Desktop App"
 authors = ["FrameTrain Team"]
 edition = "2021"

@@ -55,6 +55,11 @@ interface FullTrainingData {
     accuracy?: number | null; f1?: number | null;
     precision?: number | null; recall?: number | null;
   } | null;
+  /** Nur bei Objekterkennung (YOLO); fehlt bei Läufen aus älteren Versionen. */
+  detection_metrics?: {
+    map50?: number | null; map50_95?: number | null;
+    precision?: number | null; recall?: number | null;
+  } | null;
 }
 interface AIAnalysisReport { version_id: string; report_text: string; provider: string; model: string; generated_at: string; /** Sprache bei der Erstellung; fehlt bei Berichten aus älteren Versionen. */ language?: Language | null; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
@@ -1466,6 +1471,9 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     .some(v => v !== null);
   const hasVal         = logs.some(l => l.val_loss != null) || epochSummaries.some(s => s.val_loss != null);
   const hasGradNorm    = logs.some(l => l.grad_norm != null);
+  // Bei Objekterkennung ersetzt die mAP-Karte die Klassifikations-Karte.
+  const hasDetectionMetrics = Object.values(fullData?.detection_metrics ?? {})
+    .some(v => typeof v === 'number' && v > 0);
 
   // ── Early Returns ──────────────────────────────────────────────────────────
 
@@ -1691,12 +1699,45 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 {hasVal && epochSummaries.length > 0 && <EpochDurationBar summaries={epochSummaries} />}
               </div>
 
+              {/* 4a. Detektions-Metriken (YOLO). Accuracy sagt bei einem
+                   Detektor nichts aus — hier zaehlt mAP. */}
+              {(() => {
+                const dm = fullData?.detection_metrics;
+                if (!dm) return null;
+                const entries: Array<[string, number | null | undefined]> = [
+                  [t('analysisPanel.detection.map50'), dm.map50],
+                  [t('analysisPanel.detection.map5095'), dm.map50_95],
+                  [t('analysisPanel.classification.precision'), dm.precision],
+                  [t('analysisPanel.classification.recall'), dm.recall],
+                ];
+                const available = entries.filter(([, v]) => typeof v === 'number' && v > 0);
+                if (available.length === 0) return null;
+                return (
+                  <div className="bg-white/5 rounded-xl border border-white/10 p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                      <Target className="w-4 h-4 text-orange-400" />
+                      {t('analysisPanel.detection.title')}
+                    </h3>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      {available.map(([label, value]) => (
+                        <div key={label} className="rounded-lg bg-black/20 border border-white/5 p-3">
+                          <p className="text-gray-400 text-xs mb-1">{label}</p>
+                          <p className="text-white text-lg font-semibold tabular-nums">
+                            {((value as number) * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* 4b. Klassifikations-Metriken.
                    Die Engine liefert accuracy/f1/precision/recall im
                    Manifest wie im complete-Event — angezeigt wurde bisher
                    ausschliesslich der Loss, also gerade nicht die Zahl, an
                    der man ein Klassifikationsmodell beurteilt. */}
-              {fullData?.classification_metrics && (
+              {fullData?.classification_metrics && !hasDetectionMetrics && (
                 (() => {
                   const cm = fullData.classification_metrics;
                   const entries: Array<[string, number | null | undefined]> = [

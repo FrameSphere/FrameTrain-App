@@ -14,6 +14,7 @@ class YOLOPlugin:
         self.results = None
         self._yaml_path: Optional[str] = None
         self._output_dir: Optional[Path] = None
+        self._device_used: str = "cpu"
         pc = config.plugin_config or {}
         self.yolo_model   = pc.get("yolo_model") or ""
         self.task         = pc.get("task",          "detect")
@@ -153,6 +154,41 @@ class YOLOPlugin:
                 if names: return names
         return [f"class_{i}" for i in sorted(class_ids)] if class_ids else []
 
+    @staticmethod
+    def _sum_prefixed(metrics: Dict[str, Any], prefix: str) -> Optional[float]:
+        """Summiert box/cls/dfl-Loss eines Praefixes ('train/' oder 'val/')."""
+        vals = [float(v) for k, v in metrics.items()
+                if k.startswith(prefix) and k.endswith("_loss") and v is not None]
+        return sum(vals) if vals else None
+
+    def _running_loss(self, trainer) -> float:
+        """Laufender Trainings-Loss (box + cls + dfl) der aktuellen Epoche."""
+        try:
+            tloss = getattr(trainer, "tloss", None)
+            if tloss is not None:
+                items = trainer.label_loss_items(tloss)
+                total = self._sum_prefixed(items, "train/")
+                if total is None:
+                    # label_loss_items kann je nach Task ohne Praefix liefern.
+                    total = sum(float(v) for v in items.values()) if isinstance(items, dict) else None
+                if total is not None:
+                    return float(total)
+        except Exception:
+            pass
+        total = self._sum_prefixed(dict(getattr(trainer, "metrics", None) or {}), "train/")
+        return float(total) if total is not None else 0.0
+
+    @staticmethod
+    def _current_lr(trainer) -> float:
+        # MessageProtocol.progress erwartet ein float, kein None.
+        try:
+            lrs = [float(v) for v in (getattr(trainer, "lr", None) or {}).values()]
+            if lrs:
+                return lrs[0]
+        except Exception:
+            pass
+        return 0.0
+
     def load_data(self) -> None: pass
     def build_model(self) -> None: pass
 
@@ -177,23 +213,69 @@ class YOLOPlugin:
                 device = "mps"
             else:
                 device = "cpu"
+            # Die Analyse-Seite liest das Geraet aus den final_metrics; ohne das
+            # stand dort immer "cpu", auch wenn auf MPS trainiert wurde.
+            self._device_used = "cuda" if device.isdigit() else device
 
-            def on_epoch_end(trainer):
+            # Schritt-Fortschritt ueber den ganzen Lauf: Ultralytics zaehlt in
+            # Batches, die App in Steps. Ohne das stand der Balken je Epoche
+            # minutenlang still.
+            def batches_per_epoch(trainer) -> int:
+                try:
+                    return max(1, len(trainer.train_loader))
+                except Exception:
+                    return 1
+
+            def on_batch_end(trainer):
                 if self.is_stopped:
                     trainer.stop = True
                     return
-                m = trainer.metrics or {}
+                bpe = batches_per_epoch(trainer)
+                done = getattr(trainer, "_ft_batch", 0) + 1
+                trainer._ft_batch = done % bpe
                 ep = trainer.epoch + 1
                 tot = trainer.epochs
-                loss = float(m.get("train/box_loss", 0) + m.get("train/cls_loss", 0))
-                map50 = float(m.get("metrics/mAP50(B)", 0))
-                map5095 = float(m.get("metrics/mAP50-95(B)", 0))
-                MessageProtocol.progress(epoch=ep, total_epochs=tot, step=ep, total_steps=tot,
-                    train_loss=loss, metrics={"mAP50": map50, "mAP50-95": map5095})
-                MessageProtocol.status("train",
-                    f"[Metric] epoch={ep}/{tot} loss={loss:.4f} mAP50={map50:.4f}")
+                step = trainer.epoch * bpe + done
+                MessageProtocol.progress(
+                    epoch=ep, total_epochs=tot, step=step, total_steps=tot * bpe,
+                    train_loss=self._running_loss(trainer),
+                    learning_rate=self._current_lr(trainer))
 
-            self.model.add_callback("on_train_epoch_end", on_epoch_end)
+            def on_fit_epoch_end(trainer):
+                """Feuert nach Training UND Validierung einer Epoche.
+
+                Vorher hing der Callback an 'on_train_epoch_end' – der laeuft vor
+                der Validierung, also enthielt trainer.metrics noch die Werte der
+                vorherigen Epoche (Epoche 1 meldete 0.0, Epoche 2 den Wert von 1).
+                Die Losses stehen ausserdem nicht in trainer.metrics, sondern in
+                label_loss_items(trainer.tloss) – deshalb war der Loss immer 0.0000.
+                """
+                if self.is_stopped:
+                    trainer.stop = True
+                    return
+                m = dict(trainer.metrics or {})
+                ep = trainer.epoch + 1
+                tot = trainer.epochs
+                bpe = batches_per_epoch(trainer)
+                loss = self._running_loss(trainer)
+                val_loss = self._sum_prefixed(m, "val/")
+                map50 = float(m.get("metrics/mAP50(B)", 0.0) or 0.0)
+                map5095 = float(m.get("metrics/mAP50-95(B)", 0.0) or 0.0)
+                metrics = {
+                    "mAP50": map50,
+                    "mAP50-95": map5095,
+                    "precision": float(m.get("metrics/precision(B)", 0.0) or 0.0),
+                    "recall":    float(m.get("metrics/recall(B)",    0.0) or 0.0),
+                }
+                MessageProtocol.progress(
+                    epoch=ep, total_epochs=tot, step=ep * bpe, total_steps=tot * bpe,
+                    train_loss=loss, val_loss=val_loss,
+                    learning_rate=self._current_lr(trainer), metrics=metrics)
+                MessageProtocol.status("train",
+                    f"[Metric] epoch={ep}/{tot} loss={loss:.4f} mAP50={map50:.4f} mAP50-95={map5095:.4f}")
+
+            self.model.add_callback("on_train_batch_end", on_batch_end)
+            self.model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
             self.results = self.model.train(
                 data=self._yaml_path,
                 epochs=self.config.epochs,
@@ -249,8 +331,52 @@ class YOLOPlugin:
         except Exception as e:
             MessageProtocol.error("Save Fehler", str(e)); return False
 
+    def _split_sizes(self) -> Dict[str, int]:
+        """Zaehlt die Bilder je Split anhand der dataset.yaml.
+
+        Die Analyse-Seite zeigte sonst "n_train 0 / n_val 0", obwohl 463 bzw.
+        116 Bilder trainiert wurden.
+        """
+        counts = {"n_train": 0, "n_val": 0}
+        if not self._yaml_path:
+            return counts
+        yaml_path = Path(self._yaml_path)
+        root = yaml_path.parent
+        entries: Dict[str, str] = {}
+        try:
+            for line in yaml_path.read_text(encoding="utf-8").splitlines():
+                line = line.split("#")[0].strip()
+                if ":" not in line:
+                    continue
+                k, v = line.split(":", 1)
+                if k.strip() in ("path", "train", "val"):
+                    entries[k.strip()] = v.strip()
+        except Exception:
+            return counts
+        base = Path(entries.get("path", str(root)))
+        exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+        for key, out in (("train", "n_train"), ("val", "n_val")):
+            rel = entries.get(key)
+            if not rel:
+                continue
+            d = Path(rel) if Path(rel).is_absolute() else base / rel
+            if d.is_dir():
+                counts[out] = sum(1 for f in d.rglob("*")
+                                  if f.is_file() and f.suffix.lower() in exts)
+        return counts
+
     def get_metrics(self) -> Dict[str, Any]:
-        return {"framework":"ultralytics","base_model":self.yolo_model,"task":self.task,**self.validate()}
+        return {
+            "framework":    "ultralytics",
+            "base_model":   self.yolo_model,
+            "task":         self.task,
+            # Von der Analyse-Seite ausgewertet:
+            "architecture": Path(self.yolo_model).stem or "yolo",
+            "device":       self._device_used,
+            "imgsz":        self.imgsz,
+            **self._split_sizes(),
+            **self.validate(),
+        }
 
     def export(self) -> str:
         try:

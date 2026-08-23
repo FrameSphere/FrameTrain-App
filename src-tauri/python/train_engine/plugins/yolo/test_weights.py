@@ -1,4 +1,4 @@
-"""Prueft die Auswahl der Startgewichte.
+"""Prueft Startgewichte, Metriken und Split-Groessen des YOLO-Plugins.
 
 Hintergrund: Das Plugin lud fest 'yolov8n.pt' aus dem Netz, waehrend das vom
 Nutzer importierte YOLO11 (15 .pt-Dateien) ungenutzt daneben lag.
@@ -57,6 +57,75 @@ class ResolveWeightsTest(unittest.TestCase):
         empty = Path(tempfile.mkdtemp())
         p = make_plugin(empty)
         self.assertEqual(p._resolve_weights(), "yolov8n.pt")
+
+
+class FakeTrainer:
+    """Nachbau der Ultralytics-Trainer-Attribute, die der Callback liest."""
+
+    def __init__(self, tloss=(1.5, 2.0, 1.0), metrics=None, lr=None):
+        self.tloss = tloss
+        self.metrics = metrics or {}
+        self.lr = lr or {"lr/pg0": 0.00123}
+
+    def label_loss_items(self, tloss, prefix="train"):
+        keys = ["box_loss", "cls_loss", "dfl_loss"]
+        return {f"{prefix}/{k}": float(v) for k, v in zip(keys, tloss)}
+
+
+class MetricsTest(unittest.TestCase):
+    """Regression: Train Loss stand im Trainingsdialog dauerhaft auf 0.0000.
+
+    Der Callback las trainer.metrics – dort stehen aber nur die
+    Validierungswerte, nicht die Trainings-Losses.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.plugin = make_plugin(self.tmp.name)
+
+    def test_running_loss_summiert_box_cls_dfl(self):
+        self.assertAlmostEqual(self.plugin._running_loss(FakeTrainer()), 4.5)
+
+    def test_running_loss_faellt_auf_metrics_zurueck(self):
+        t = FakeTrainer(tloss=None, metrics={"train/box_loss": 1.0, "train/cls_loss": 0.5})
+        self.assertAlmostEqual(self.plugin._running_loss(t), 1.5)
+
+    def test_val_loss_wird_getrennt_summiert(self):
+        m = {"val/box_loss": 2.0, "val/cls_loss": 1.0, "metrics/mAP50(B)": 0.5}
+        self.assertAlmostEqual(self.plugin._sum_prefixed(m, "val/"), 3.0)
+        self.assertIsNone(self.plugin._sum_prefixed(m, "train/"))
+
+    def test_lernrate_ist_immer_ein_float(self):
+        self.assertAlmostEqual(self.plugin._current_lr(FakeTrainer()), 0.00123)
+        # progress() ruft float() darauf auf – None waere ein Absturz.
+        self.assertIsInstance(self.plugin._current_lr(object()), float)
+
+
+class SplitSizesTest(unittest.TestCase):
+    """Regression: Analyse zeigte "n_train 0 / n_val 0" trotz 463/116 Bildern."""
+
+    def test_zaehlt_bilder_aus_der_dataset_yaml(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for split, n in (("train", 3), ("val", 2)):
+            d = root / "images" / split
+            d.mkdir(parents=True)
+            for i in range(n):
+                (d / f"{i}.jpg").write_bytes(b"x")
+        (root / "dataset.yaml").write_text(
+            f"path: {root}\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  - 'a'\n",
+            encoding="utf-8")
+        p = make_plugin(root)
+        p._yaml_path = str(root / "dataset.yaml")
+        self.assertEqual(p._split_sizes(), {"n_train": 3, "n_val": 2})
+
+    def test_ohne_yaml_keine_erfundenen_zahlen(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p = make_plugin(tmp.name)
+        self.assertEqual(p._split_sizes(), {"n_train": 0, "n_val": 0})
 
 
 if __name__ == "__main__":

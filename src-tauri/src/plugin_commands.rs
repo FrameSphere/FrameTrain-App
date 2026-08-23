@@ -877,6 +877,25 @@ pub async fn handle_plugin_approval(_plugin_id: String, _approved: bool, _rememb
 // YOLO INFERENZ COMMAND
 // ══════════════════════════════════════════════════════════════════
 
+/// Letzte aussagekräftige Zeile einer Python-Ausgabe.
+///
+/// Tracebacks und Ultralytics-Hinweise sind vielzeilig; die entscheidende
+/// Information steht am Ende. Vorher landete der rohe Anfang der Ausgabe
+/// (inklusive Warn-Emoji) ungefiltert in der Oberfläche.
+fn last_meaningful_line(text: &str) -> String {
+    let line = text.lines().rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("Traceback") && !l.starts_with("File \""))
+        .unwrap_or("keine Fehlerausgabe");
+    let cleaned: String = line.chars().filter(|c| !matches!(c, '\u{26a0}' | '\u{fe0f}')).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.chars().count() > 300 {
+        format!("{}…", cleaned.chars().take(300).collect::<String>())
+    } else {
+        cleaned.to_string()
+    }
+}
+
 /// Führt YOLO-Inferenz auf einem einzelnen Bild aus via Ultralytics Python-API.
 #[tauri::command]
 pub async fn run_yolo_inference(
@@ -890,57 +909,103 @@ pub async fn run_yolo_inference(
     // FIX Sicherheit: Pfade werden als sys.argv übergeben statt in den Python-Code
     // interpoliert zu werden (vorher: Code-Injection / Crash bei Anführungszeichen im Pfad).
     let script = r#"
-import sys, json, time
+import sys, json, time, os, contextlib
+
+# Ultralytics schreibt Hinweise ("Unable to automatically guess model task ...")
+# nach stdout. Frueher landeten die vor dem Ergebnis-JSON und der Parser auf der
+# Rust-Seite scheiterte mit "expected value at line 1 column 1". Deshalb geht
+# waehrend der Inferenz alles nach stderr, das JSON wird am Ende bewusst
+# auf das echte stdout geschrieben.
+_real_stdout = sys.stdout
+
+
+def emit(payload):
+    print(json.dumps(payload), file=_real_stdout)
+
+
+def find_weights(path):
+    """Akzeptiert eine .pt-Datei oder einen Modell-/Versionsordner."""
+    if os.path.isfile(path):
+        return path
+    if not os.path.isdir(path):
+        return None
+    preferred = [
+        "model.pt",
+        os.path.join("weights", "best.pt"),
+        os.path.join("weights", "last.pt"),
+        os.path.join("train", "weights", "best.pt"),
+        os.path.join("train", "weights", "last.pt"),
+        "best.pt", "last.pt",
+    ]
+    for rel in preferred:
+        cand = os.path.join(path, rel)
+        if os.path.isfile(cand):
+            return cand
+    for root, _dirs, files in os.walk(path):
+        pts = sorted(f for f in files if f.endswith(".pt"))
+        if pts:
+            return os.path.join(root, pts[0])
+    return None
+
 
 try:
-    from ultralytics import YOLO
-    import os
+    with contextlib.redirect_stdout(sys.stderr):
+        from ultralytics import YOLO
 
-    model_path  = sys.argv[1]
-    image_path  = sys.argv[2]
-    conf        = float(sys.argv[3])
-    iou         = float(sys.argv[4])
+        model_arg   = sys.argv[1]
+        image_path  = sys.argv[2]
+        conf        = float(sys.argv[3])
+        iou         = float(sys.argv[4])
+        task        = sys.argv[5] if len(sys.argv) > 5 else "detect"
 
-    if not os.path.exists(model_path):
-        print(json.dumps({"error": f"Modell nicht gefunden: {model_path}"}))
-        sys.exit(1)
-    if not os.path.exists(image_path):
-        print(json.dumps({"error": f"Bild nicht gefunden: {image_path}"}))
-        sys.exit(1)
+        if not os.path.exists(model_arg):
+            emit({"error": f"Modell nicht gefunden: {model_arg}"})
+            sys.exit(1)
+        weights = find_weights(model_arg)
+        if weights is None:
+            emit({"error": f"Keine Gewichtsdatei (.pt) in {model_arg} gefunden."})
+            sys.exit(1)
+        if not os.path.exists(image_path):
+            emit({"error": f"Bild nicht gefunden: {image_path}"})
+            sys.exit(1)
 
-    model = YOLO(model_path)
-    t0 = time.perf_counter()
-    results = model(image_path, conf=conf, iou=iou, verbose=False)
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        # task explizit setzen, sonst raet Ultralytics und warnt dabei.
+        model = YOLO(weights, task=task)
+        t0 = time.perf_counter()
+        results = model(image_path, conf=conf, iou=iou, verbose=False)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-    detections = []
-    for r in results:
-        boxes = r.boxes
-        if boxes is None:
-            continue
-        names = r.names
-        for box in boxes:
-            cls_id = int(box.cls[0].item())
-            label  = names.get(cls_id, str(cls_id))
-            conf_v = float(box.conf[0].item())
-            xyxy   = box.xyxy[0].tolist()
-            detections.append({
-                "label":      label,
-                "confidence": conf_v,
-                "bbox":       xyxy,
-            })
+        detections = []
+        for r in results:
+            boxes = r.boxes
+            if boxes is None:
+                continue
+            names = r.names
+            for box in boxes:
+                cls_id = int(box.cls[0].item())
+                label  = names.get(cls_id, str(cls_id)) if hasattr(names, "get") else str(cls_id)
+                conf_v = float(box.conf[0].item())
+                xyxy   = box.xyxy[0].tolist()
+                detections.append({
+                    "label":      label,
+                    "confidence": conf_v,
+                    "bbox":       xyxy,
+                })
 
-    print(json.dumps({
+    emit({
         "detections":        detections,
         "inference_time_ms": elapsed_ms,
         "image_path":        image_path,
-    }))
+        "weights_path":      weights,
+    })
 
 except ImportError:
-    print(json.dumps({"error": "ultralytics ist nicht installiert. Installiere es über den First-Launch-Setup."}))
+    emit({"error": "ultralytics ist nicht installiert. Installiere es über den First-Launch-Setup."})
     sys.exit(1)
+except SystemExit:
+    raise
 except Exception as e:
-    print(json.dumps({"error": str(e)}))
+    emit({"error": f"{type(e).__name__}: {e}"})
     sys.exit(1)
 "#;
 
@@ -953,6 +1018,7 @@ except Exception as e:
         .arg(&image_path)
         .arg(format!("{:.4}", conf_threshold))
         .arg(format!("{:.4}", iou_threshold))
+        .arg("detect")
         .output()
         .map_err(|e| format!("Python spawn: {}", e))?;
 
@@ -961,11 +1027,19 @@ except Exception as e:
     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if stdout.is_empty() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(format!("YOLO-Inferenz fehlgeschlagen: {}", stderr));
+        return Err(format!("YOLO-Inferenz fehlgeschlagen: {}", last_meaningful_line(&stderr)));
     }
 
-    let json: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| format!("JSON-Parse: {} (stdout: {})", e, &stdout[..stdout.len().min(200)]))?;
+    // Robust gegen Fremdausgaben: die letzte Zeile nehmen, die als JSON durchgeht.
+    // Ein roher stdout-Auszug in der Fehlermeldung half niemandem weiter.
+    let json: serde_json::Value = stdout.lines().rev()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok())
+        .find(|v| v.is_object())
+        .ok_or_else(|| {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            format!("YOLO-Inferenz lieferte kein Ergebnis: {}",
+                last_meaningful_line(if stderr.is_empty() { &stdout } else { &stderr }))
+        })?;
 
     if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
         return Err(err.to_string());
@@ -991,4 +1065,37 @@ except Exception as e:
     let inference_time_ms = json.get("inference_time_ms").and_then(|t| t.as_f64()).unwrap_or(0.0);
 
     Ok(YoloInferenceResult { detections, inference_time_ms, image_path })
+}
+
+#[cfg(test)]
+mod yolo_error_tests {
+    use super::last_meaningful_line;
+
+    #[test]
+    fn nimmt_die_letzte_zeile_eines_tracebacks() {
+        let tb = "Traceback (most recent call last):\n  File \"/x/y.py\", line 3, in <module>\n\
+                  TypeError: model='/pfad' is not a supported model format.";
+        assert_eq!(last_meaningful_line(tb),
+            "TypeError: model='/pfad' is not a supported model format.");
+    }
+
+    #[test]
+    fn warn_emoji_landet_nicht_in_der_oberflaeche() {
+        // Ultralytics schreibt "WARNING ⚠️ ..." – die App zeigt keine Emojis.
+        let out = last_meaningful_line("WARNING \u{26a0}\u{fe0f} Unable to guess model task");
+        assert!(!out.contains('\u{26a0}'), "{}", out);
+        assert!(out.starts_with("WARNING"), "{}", out);
+    }
+
+    #[test]
+    fn leere_ausgabe_liefert_einen_hinweis() {
+        assert_eq!(last_meaningful_line("   \n\n"), "keine Fehlerausgabe");
+    }
+
+    #[test]
+    fn sehr_lange_zeilen_werden_gekuerzt() {
+        let long = "x".repeat(500);
+        let out = last_meaningful_line(&long);
+        assert_eq!(out.chars().count(), 301, "300 Zeichen plus Auslassungszeichen");
+    }
 }

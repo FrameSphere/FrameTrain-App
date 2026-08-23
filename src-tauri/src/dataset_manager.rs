@@ -1915,13 +1915,46 @@ pub async fn get_dataset_files(
     let dataset_dir  = datasets_dir.join(&dataset_id);
     if !dataset_dir.exists() { return Ok(vec![]); }
     let mut files: Vec<serde_json::Value> = Vec::new();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut push = |file: &Path, split: &str, files: &mut Vec<serde_json::Value>, seen: &mut std::collections::HashSet<PathBuf>| {
+        if !seen.insert(file.to_path_buf()) { return; }
+        if let Ok(meta) = fs::metadata(file) {
+            files.push(serde_json::json!({
+                "name": file.file_name().unwrap_or_default().to_string_lossy(),
+                "path": file.to_string_lossy(), "size": meta.len(),
+                "is_dir": false, "split": split,
+            }));
+        }
+    };
+
+    // Bereits aufgeteiltes Bild/Label-Dataset: die Bilder liegen unter
+    // images/train bzw. train/images. Ohne diesen Zweig meldete das Labor
+    // "Keine Dateien für Split \"val\" gefunden. Verfügbare Splits: images, labels".
+    if let Some(layout) = detect_split_layout(&dataset_dir) {
+        for (canon, dir_name, _) in &layout.splits {
+            let (img_dir, lbl_dir) = if layout.style == "nested" {
+                (dataset_dir.join(&layout.images_dir).join(dir_name),
+                 dataset_dir.join(&layout.labels_dir).join(dir_name))
+            } else {
+                (dataset_dir.join(dir_name).join(&layout.images_dir),
+                 dataset_dir.join(dir_name).join(&layout.labels_dir))
+            };
+            for file in list_files_in_dir(&img_dir) {
+                push(&file, canon, &mut files, &mut seen);
+            }
+            // Labels bekommen ein eigenes Tag, damit die Split-Auswahl im Labor
+            // nur Bilder liefert und nicht zur Haelfte .txt-Dateien.
+            for file in list_files_in_dir(&lbl_dir) {
+                push(&file, "labels", &mut files, &mut seen);
+            }
+        }
+    }
+
     for split in &["train", "val", "test"] {
         let split_dir = dataset_dir.join(split);
         if split_dir.exists() {
             for file in collect_files_recursive(&split_dir) {
-                if let Ok(meta) = fs::metadata(&file) {
-                    files.push(serde_json::json!({ "name": file.file_name().unwrap_or_default().to_string_lossy(), "path": file.to_string_lossy(), "size": meta.len(), "is_dir": false, "split": split }));
-                }
+                push(&file, split, &mut files, &mut seen);
             }
         }
     }
@@ -1931,9 +1964,7 @@ pub async fn get_dataset_files(
         let subdir_path = dataset_dir.join(subdir);
         if subdir_path.exists() {
             for file in list_files_in_dir(&subdir_path) {
-                if let Ok(meta) = fs::metadata(&file) {
-                    files.push(serde_json::json!({ "name": file.file_name().unwrap_or_default().to_string_lossy(), "path": file.to_string_lossy(), "size": meta.len(), "is_dir": false, "split": subdir }));
-                }
+                push(&file, subdir, &mut files, &mut seen);
             }
         }
     }

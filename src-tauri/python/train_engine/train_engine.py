@@ -15,6 +15,7 @@ import argparse
 import json
 import signal
 import sys
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -315,18 +316,34 @@ class Orchestrator:
             if self.plugin.is_stopped: return
 
             MessageProtocol.status("training", "Training gestartet...")
+            train_started = time.time()
             self.plugin.train()
+            train_seconds = int(time.time() - train_started)
             if self.plugin.is_stopped:
                 MessageProtocol.status("stopped", "Training gestoppt")
                 return
 
             MessageProtocol.status("validating", "Finale Validierung...")
-            metrics = self.plugin.validate()
+            metrics = self.plugin.validate() or {}
+            # get_metrics() liefert Zusatzangaben wie Geraet, Architektur und
+            # Datensatzgroessen. Ausgewertet wurde bisher nur validate(),
+            # weshalb die Analyse-Seite "device cpu", "architecture unbekannt"
+            # und "n_train 0" anzeigte, egal was tatsaechlich lief.
+            getter = getattr(self.plugin, "get_metrics", None)
+            if callable(getter):
+                try:
+                    for k, v in (getter() or {}).items():
+                        metrics.setdefault(k, v)
+                except Exception as exc:
+                    MessageProtocol.warning(f"get_metrics(): {exc}")
             metrics.setdefault("final_train_loss", 0.0)
             metrics.setdefault("total_epochs", self.config.epochs)
             metrics.setdefault("total_steps", 0)
             metrics.setdefault("best_epoch", 0)
-            metrics.setdefault("training_duration_seconds", 0)
+            # Gemessene Laufzeit statt 0 – sonst blieb die Spalte NULL und
+            # Analyse wie Versionsliste zeigten bei der Dauer nur "-".
+            if not metrics.get("training_duration_seconds"):
+                metrics["training_duration_seconds"] = train_seconds
 
             MessageProtocol.status("saving", f"Speichere nach: {self.config.output_path}")
             output_path = self.plugin.export()

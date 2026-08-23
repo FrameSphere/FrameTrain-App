@@ -458,6 +458,14 @@ pub fn save_full_analysis_data(
             "precision": final_metrics.get("precision").and_then(|v| v.as_f64()),
             "recall":    final_metrics.get("recall").and_then(|v| v.as_f64()),
         },
+        // Objekterkennung wird nicht ueber Accuracy beurteilt, sondern ueber
+        // mAP. Die Werte lagen in final_metrics, wurden aber nirgends gezeigt.
+        "detection_metrics": {
+            "map50":     final_metrics.get("mAP50").and_then(|v| v.as_f64()),
+            "map50_95":  final_metrics.get("mAP50-95").and_then(|v| v.as_f64()),
+            "precision": final_metrics.get("precision").and_then(|v| v.as_f64()),
+            "recall":    final_metrics.get("recall").and_then(|v| v.as_f64()),
+        },
         "epoch_summaries": epoch_summaries,
         "step_logs": step_logs,
         "derived_stats": {
