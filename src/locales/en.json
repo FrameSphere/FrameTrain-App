@@ -1710,6 +1710,7 @@
     },
     "lossChart": {
       "waitingForData": "Waiting for training data…",
+      "firstValue": "First value: {value} — the curve appears from the second point on",
       "legendTrain": "Train",
       "legendVal": "Val"
     },

@@ -338,7 +338,16 @@ function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelS
 
 export function LossChart({ points }: { points: LossPoint[] }) {
   const { t } = useLanguage();
-  if (points.length < 2) return <div className="h-32 flex items-center justify-center text-gray-600 text-xs">{t('trainingPanel.lossChart.waitingForData')}</div>;
+  // Eine Linie braucht zwei Punkte — aber "Warte auf erste Loss-Werte…" war
+  // falsch, sobald der erste Wert schon da war (Kachel und Log zeigten ihn).
+  if (points.length === 1) {
+    return (
+      <div className="h-32 flex items-center justify-center text-gray-500 text-xs">
+        {t('trainingPanel.lossChart.firstValue').replace('{value}', points[0].train_loss.toFixed(4))}
+      </div>
+    );
+  }
+  if (points.length === 0) return <div className="h-32 flex items-center justify-center text-gray-600 text-xs">{t('trainingPanel.lossChart.waitingForData')}</div>;
   const W = 500; const H = 120; const PAD = { l: 40, r: 12, t: 12, b: 28 };
   const iW = W - PAD.l - PAD.r; const iH = H - PAD.t - PAD.b;
   const trains = points.map(p => p.train_loss); const vals = points.map(p => p.val_loss).filter((v): v is number => v != null);

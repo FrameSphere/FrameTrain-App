@@ -85,7 +85,10 @@ export const NODE_DEFINITIONS: NodeDef[] = [
   // ── DATA ──────────────────────────────────────────────────────────────────
   {
     type: 'input', label: 'Input', category: 'data', icon: '➤',
-    description: 'Model input placeholder for raw data',
+    // Platzhalter fuer Shape-Experimente: die Trainings-Runtime kennt nur die
+    // Loader-Nodes ("Canvas data_type 'input' wird nicht unterstuetzt"). Ohne
+    // diesen Hinweis baute man damit und lief beim ersten Training auf.
+    description: 'Shape placeholder only — not trainable. Use CSV/Image/Parquet Loader as the data source.',
     color: '#60a5fa',
     inputs: [],
     outputs: [{ id: 'out', label: 'Input', portType: 'tensor' }],

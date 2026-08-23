@@ -66,6 +66,41 @@ function isRateLimitError(msg: string): boolean {
          l.includes('tokens per day');
 }
 
+/** True when the request exceeded the provider's size/token limit (not a temporary rate limit). */
+function isRequestTooLargeError(msg: string): boolean {
+  const l = msg.toLowerCase();
+  return l.includes('request too large') || l.includes('reduce your message size')
+      || l.includes('context length') || l.includes('maximum context');
+}
+
+/**
+ * Rohe Anbieter-Fehler in einen Satz uebersetzen, der weiterhilft.
+ *
+ * Vorher stand im Panel der komplette Groq-Text inklusive Organisations-ID:
+ * "Request too large for model ... in organization org_01kp... service tier
+ * 'on_demand' on tokens per minute (TPM): Limit 8000, Requested 8191 ...".
+ * Damit konnte niemand etwas anfangen — und die Org-ID gehoert nicht in die
+ * Oberflaeche.
+ */
+export function friendlyAIError(raw: string, lang: string): string {
+  const limit = raw.match(/Limit (\d+)/i)?.[1];
+  if (isRequestTooLargeError(raw)) {
+    return textFor(lang,
+      `Die Anfrage ist groesser als das Token-Limit deines KI-Zugangs${limit ? ` (${limit} pro Minute)` : ''}. `
+      + 'Stelle in den Einstellungen unter KI-Assistent das Token-Budget auf "Balanced" oder "Minimal".',
+      `The request exceeds your AI provider's token limit${limit ? ` (${limit} per minute)` : ''}. `
+      + 'Set the token budget to "Balanced" or "Minimal" under Settings → AI Assistant.');
+  }
+  if (isRateLimitError(raw)) {
+    return textFor(lang,
+      'Das Limit deines KI-Zugangs ist erreicht. Warte einen Moment und versuche es erneut.',
+      'Your AI provider is rate limiting the request. Wait a moment and try again.');
+  }
+  // Unbekannte Fehler: erste Zeile reicht, der Rest ist Anbieter-Innenleben.
+  const firstLine = raw.split('\n')[0].trim();
+  return firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine;
+}
+
 /** Extract "try again in X.XXs" delay from Groq rate-limit messages. Returns ms or 0. */
 function extractRetryDelayMs(errMsg: string): number {
   const match = errMsg.match(/try again in (\d+\.?\d*)\s*s/i);
@@ -477,7 +512,26 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
   } catch (e: any) {
     const errMsg = String(e?.message ?? e);
     await dbg1.onError(errMsg);
-    if (isRateLimitError(errMsg)) {
+    // Zu grosse Anfrage: einmal mit kleinerer Antwortlaenge wiederholen. Bei Groq
+    // zaehlen Eingabe und max_tokens zusammen aufs Minutenlimit — mit dem Budget
+    // "Maximum" scheiterte deshalb schon der erste Prompt, statt einfach kuerzer
+    // zu antworten.
+    if (isRequestTooLargeError(errMsg)) {
+      const reduced = Math.max(512, Math.floor(getPlanMaxTokens(aiSettings) / 3));
+      try {
+        planReply = await callAI(aiSettings, {
+          system: planSystem,
+          messages: planMessages,
+          maxTokens: reduced,
+          temperature: 0.1,
+          responseLanguage,
+        });
+      } catch (e2: any) {
+        const errMsg2 = String(e2?.message ?? e2);
+        await dbg1.onError(`Retry with reduced maxTokens failed: ${errMsg2}`);
+        return { steps: [], summary: '', error: friendlyAIError(errMsg2, responseLanguage), canResume: false };
+      }
+    } else if (isRateLimitError(errMsg)) {
       const delayMs = extractRetryDelayMs(errMsg);
       if (delayMs > 0 && delayMs <= 30_000) {
         await new Promise(res => setTimeout(res, delayMs));
@@ -500,10 +554,10 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
           };
         }
       } else {
-        return { steps: [], summary: '', error: textFor(responseLanguage, `AI Fehler: ${errMsg}`, `AI error: ${errMsg}`), canResume: false };
+        return { steps: [], summary: '', error: friendlyAIError(errMsg, responseLanguage), canResume: false };
       }
     } else {
-      return { steps: [], summary: '', error: textFor(responseLanguage, `AI Fehler: ${errMsg}`, `AI error: ${errMsg}`) };
+      return { steps: [], summary: '', error: friendlyAIError(errMsg, responseLanguage) };
     }
   }
 
@@ -577,7 +631,7 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
         return {
           steps: currentSteps,
           summary: '',
-          error: textFor(responseLanguage, `AI Fehler (Fix): ${errMsg}`, `AI error (Fix): ${errMsg}`),
+          error: friendlyAIError(errMsg, responseLanguage),
           canResume: true,
           resumeState: {
             messages: fixMessages,

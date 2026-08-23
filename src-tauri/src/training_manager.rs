@@ -826,6 +826,27 @@ fn create_version(
         return Err(format!("Output-Pfad existiert nicht: {}", src.display()));
     }
 
+    // Canvas-Modelle: die trainierten Gewichte zusaetzlich neben graph_metadata.json
+    // legen. Der Inferenz-Tab im Synapse Builder sucht dort nach model.pt und
+    // meldete sonst "(kein model.pt)" — auch direkt nach einem erfolgreichen Lauf.
+    if model_id.starts_with("canvas_") || model_id.starts_with("synapse_") {
+        let model_root = models_dir.join(model_id);
+        for name in ["model.pt", "model_best.pt", "checkpoint.pt"] {
+            let found = version_path.join(name);
+            let found = if found.exists() { Some(found) } else {
+                let nested = version_path.join("final_model").join(name);
+                if nested.exists() { Some(nested) } else { None }
+            };
+            if let Some(src_pt) = found {
+                match fs::copy(&src_pt, model_root.join("model.pt")) {
+                    Ok(_)  => eprintln!("[Canvas] Gewichte -> {:?}", model_root.join("model.pt")),
+                    Err(e) => eprintln!("[Canvas] Gewichte kopieren fehlgeschlagen: {}", e),
+                }
+                break;
+            }
+        }
+    }
+
     let (size, files) = dir_size(&version_path).unwrap_or((0, 0));
     let now = Utc::now().to_rfc3339();
     conn.execute(

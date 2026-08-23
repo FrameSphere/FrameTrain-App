@@ -267,6 +267,17 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
     gradAccum: 1,
   });
 
+  // Vorbelegung nach vorhandener Hardware. Fest "cuda:0" stand auch auf Rechnern
+  // ohne CUDA in der Oberflaeche, waehrend tatsaechlich auf mps trainiert wurde.
+  useEffect(() => {
+    invoke<{ cuda_available: boolean; mps_available: boolean }>('check_training_requirements')
+      .then(r => {
+        const gpu = r.cuda_available ? 'cuda:0' : r.mps_available ? 'mps' : 'cpu';
+        setConfig(c => (c.gpu === 'cuda:0' ? { ...c, gpu } : c));
+      })
+      .catch(() => {});
+  }, []);
+
   const [activeTab, setActiveTab] = useState<"config" | "metrics" | "log" | "inference">("config");
   const [showExportModal, setShowExportModal] = useState(false);
   const [exporting, setExporting] = useState(false);
