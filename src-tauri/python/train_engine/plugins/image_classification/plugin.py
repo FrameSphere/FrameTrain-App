@@ -127,6 +127,17 @@ class ImageClassificationPlugin:
         self.pretrained  = bool(pc.get("pretrained",   True))
         self.augment     = bool(pc.get("augment",      True))
 
+
+    def stop(self) -> None:
+        """Abbruch aus der Oberflaeche.
+
+        Diese Klasse erbt nicht von TrainPlugin, wo stop() definiert ist.
+        Ohne die Methode lief der Signal-Handler der Engine in einen
+        AttributeError: "Stoppen" blieb wirkungslos und das Training lief
+        bis zur letzten Epoche weiter, obwohl is_stopped ueberall geprueft wird.
+        """
+        self.is_stopped = True
+
     def setup(self) -> bool:
         dsp = self.config.dataset_path
         if not dsp or not Path(dsp).exists():

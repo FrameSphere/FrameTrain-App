@@ -19,7 +19,7 @@ interface InferenceResult {
   image_path: string;
 }
 
-export default function YOLOTestPlugin({ modelPath, modelName }: TestPluginProps) {
+export default function YOLOTestPlugin({ modelPath, modelName, versionId }: TestPluginProps) {
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [result, setResult] = useState<InferenceResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -46,6 +46,9 @@ export default function YOLOTestPlugin({ modelPath, modelName }: TestPluginProps
         imagePath,
         confThreshold,
         iouThreshold,
+        // Ohne die Version testet die Inferenz das Basismodell statt des
+        // selbst trainierten Stands.
+        versionId,
       });
       setResult(res);
     } catch (e) {

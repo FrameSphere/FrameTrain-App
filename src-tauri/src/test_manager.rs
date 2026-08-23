@@ -135,7 +135,7 @@ fn get_test_output_dir(app_handle: &tauri::AppHandle, id: &str) -> Result<PathBu
     Ok(dir)
 }
 
-fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) -> Result<String, String> {
+pub(crate) fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) -> Result<String, String> {
     let db_path = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?
         .join("frametrain.db");
     let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;

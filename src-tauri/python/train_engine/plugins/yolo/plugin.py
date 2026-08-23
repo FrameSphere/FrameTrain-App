@@ -28,6 +28,17 @@ class YOLOPlugin:
         self.wd           = float(pc.get("weight_decay", 0.0005))
         self.device_arg   = pc.get("device", "")
 
+
+    def stop(self) -> None:
+        """Abbruch aus der Oberflaeche.
+
+        Diese Klasse erbt nicht von TrainPlugin, wo stop() definiert ist.
+        Ohne die Methode lief der Signal-Handler der Engine in einen
+        AttributeError: "Stoppen" blieb wirkungslos und das Training lief
+        bis zur letzten Epoche weiter, obwohl is_stopped ueberall geprueft wird.
+        """
+        self.is_stopped = True
+
     def setup(self) -> bool:
         try:
             from ultralytics import YOLO  # noqa
@@ -256,6 +267,12 @@ class YOLOPlugin:
                 m = dict(trainer.metrics or {})
                 ep = trainer.epoch + 1
                 tot = trainer.epochs
+                # Ultralytics feuert diesen Callback auch nach der finalen
+                # Validierung, mit bereits hochgezaehltem trainer.epoch. Das
+                # ergab "Epoch 3 / 2 · Step 174 / 116" und ueberschrieb die
+                # Val-Loss-Kachel mit einem leeren Wert.
+                if ep > tot:
+                    return
                 bpe = batches_per_epoch(trainer)
                 loss = self._running_loss(trainer)
                 val_loss = self._sum_prefixed(m, "val/")

@@ -1231,6 +1231,10 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       const job = await invoke<TrainingJob>('start_training', {
         modelId: selectedModelId, modelName: selectedModel?.name ?? '',
         datasetId: selectedDatasetId, datasetName: selectedDataset?.name ?? '', config: configForBackend,
+        // Ohne die Version startete jedes Training wieder beim Original-Modell,
+        // obwohl die Oberflaeche eine Version auswaehlen laesst: ein
+        // fortgesetztes Training war so gar nicht moeglich.
+        versionId: selectedVersionId,
       });
       setCurrentJob(job);
       setCurrentJobContext(job);
@@ -1484,7 +1488,13 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-white">{t('trainingPanel.title')}</h1><p className="text-gray-400 mt-1">{t('trainingPanel.subtitle')}</p></div>
+        <div><h1 className="text-2xl font-bold text-white">{t('trainingPanel.title')}</h1><p className="text-gray-400 mt-1">{
+          // Der feste Untertitel behauptete auch bei YOLO oder Bildmodellen
+          // "Sequenzklassifikations-Modelle".
+          detection?.supported
+            ? t('trainingPanel.subtitleForPlugin').replace('{name}', detection.plugin.name)
+            : t('trainingPanel.subtitle')
+        }</p></div>
         <div className="flex items-center gap-2">
           <button onClick={handleOpenHistory} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 text-sm transition-all">
             <History className="w-4 h-4" />

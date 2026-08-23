@@ -62,6 +62,17 @@ class CanvasPlugin:
         "erneut exportieren — danach steht der vollständige IR zur Verfügung."
     )
 
+
+    def stop(self) -> None:
+        """Abbruch aus der Oberflaeche.
+
+        Diese Klasse erbt nicht von TrainPlugin, wo stop() definiert ist.
+        Ohne die Methode lief der Signal-Handler der Engine in einen
+        AttributeError: "Stoppen" blieb wirkungslos und das Training lief
+        bis zur letzten Epoche weiter, obwohl is_stopped ueberall geprueft wird.
+        """
+        self.is_stopped = True
+
     def setup(self) -> bool:
         try:
             raw_graph = getattr(self.config, "canvas_graph", None) or {}

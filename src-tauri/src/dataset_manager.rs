@@ -1055,11 +1055,17 @@ fn is_row_splittable(ext: &str) -> bool {
     matches!(ext.to_lowercase().as_str(), "parquet" | "csv" | "tsv" | "jsonl" | "json")
 }
 
-/// Findet die Python-Executable (python3 bevorzugt).
-fn find_python_cmd() -> Result<&'static str, String> {
-    use std::process::Command;
-    if Command::new("python3").arg("--version").output().is_ok() { return Ok("python3"); }
-    if Command::new("python").arg("--version").output().is_ok() { return Ok("python"); }
+/// Der Interpreter der App — derselbe wie fuer Training, Tests und Labor.
+///
+/// Frueher suchte diese Datei an drei Stellen selbst nach "python3". Unter
+/// Windows heisst der Interpreter aber "python"; dort scheiterten Parquet-Split,
+/// Parquet-Vorschau und HuggingFace-Download. python_env::resolve_python kennt
+/// beide Namen und bevorzugt ausserdem ein torch-faehiges Python.
+fn find_python_cmd() -> Result<String, String> {
+    let py = crate::python_env::resolve_python();
+    if std::process::Command::new(&py).arg("--version").output().is_ok() {
+        return Ok(py);
+    }
     Err("Python nicht gefunden -- wird für das Splitten strukturierter Dateien (Parquet/CSV/JSON) benötigt.".to_string())
 }
 
@@ -2085,9 +2091,8 @@ except Exception as e:
     sys.exit(1)
 "#);
 
-    let python_cmd = if Command::new("python3").arg("--version").output().is_ok() { "python3" }
-        else if Command::new("python").arg("--version").output().is_ok() { "python" }
-        else { return Err("Python nicht gefunden — Parquet-Preview benötigt Python mit pandas/pyarrow.".to_string()); };
+    let python_cmd = find_python_cmd()
+        .map_err(|_| "Python nicht gefunden — Parquet-Preview benötigt Python mit pandas/pyarrow.".to_string())?;
 
     let output = Command::new(python_cmd)
         .arg("-c").arg(&python_script).arg(&file_path)
@@ -2553,9 +2558,7 @@ except Exception as e:
 "#;
     let script_file = std::env::temp_dir().join("hf_dataset_download.py");
     fs::write(&script_file, python_script).map_err(|e| format!("Script: {}", e))?;
-    let python_cmd = if Command::new("python3").arg("--version").output().is_ok() { "python3" }
-        else if Command::new("python").arg("--version").output().is_ok() { "python" }
-        else { return Err("Python nicht gefunden".to_string()); };
+    let python_cmd = find_python_cmd()?;
     let mut child = Command::new(python_cmd)
         .arg(&script_file).arg(&repo_id).arg(target.to_string_lossy().to_string())
         .stdout(Stdio::piped()).stderr(Stdio::piped())
@@ -2746,9 +2749,22 @@ pub async fn get_dataset_yaml(
     let mut nc: usize   = 0;
     let mut names: Vec<String> = Vec::new();
     let mut in_names    = false;
+    // Kommentare am Zeilenende abschneiden. Ohne das landete "images/train  # 463
+    // Bilder" komplett im Pfad-Feld des Editors und wurde beim Speichern als
+    // Pfad zurueckgeschrieben — Ultralytics fand den Ordner dann nicht mehr.
+    // Betrifft auch mitgebrachte data.yaml-Dateien, die fast immer Kommentare haben.
+    let strip_comment = |s: &str| -> String {
+        match s.find(" #").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
+            Some(i) => s[..i].trim_end().to_string(),
+            None => s.to_string(),
+        }
+    };
     for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') { continue; }
+        let trimmed_raw = line.trim();
+        if trimmed_raw.starts_with('#') { continue; }
+        let stripped = strip_comment(trimmed_raw);
+        let trimmed = stripped.as_str();
+        if trimmed.is_empty() { continue; }
         if in_names {
             if trimmed.starts_with("- ") {
                 let name = trimmed.trim_start_matches("- ").trim().trim_matches('\'').trim_matches('"').to_string();
@@ -3150,5 +3166,36 @@ mod split_layout_tests {
         assert!(detect_split_layout(dir.path()).is_none());
         let a = detect_dataset_type(dir.path());
         assert!(matches!(a.detected_type, DatasetType::FolderClass), "erkannt als {:?}", a.detected_type);
+    }
+}
+
+#[cfg(test)]
+mod yaml_comment_tests {
+    // Der Editor las "images/train  # 463 Bilder" komplett als Pfad ein und
+    // schrieb ihn beim Speichern zurueck. Der Parser sitzt in get_dataset_yaml
+    // (async, braucht AppHandle) — hier wird die Kommentar-Regel selbst geprueft.
+    fn strip_comment(s: &str) -> String {
+        match s.find(" #").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
+            Some(i) => s[..i].trim_end().to_string(),
+            None => s.to_string(),
+        }
+    }
+
+    #[test]
+    fn zeilenkommentar_wird_abgeschnitten() {
+        assert_eq!(strip_comment("train: images/train  # 463 Bilder"), "train: images/train");
+        assert_eq!(strip_comment("val: images/val  # relativer Pfad"), "val: images/val");
+        assert_eq!(strip_comment("nc: 13"), "nc: 13");
+    }
+
+    #[test]
+    fn raute_ohne_leerzeichen_bleibt_teil_des_werts() {
+        // Dateinamen duerfen ein '#' enthalten; nur " #" leitet einen Kommentar ein.
+        assert_eq!(strip_comment("train: bilder#1/train"), "train: bilder#1/train");
+    }
+
+    #[test]
+    fn ganze_kommentarzeile_wird_leer() {
+        assert_eq!(strip_comment("# nur ein Kommentar"), "");
     }
 }

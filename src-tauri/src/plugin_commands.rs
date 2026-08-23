@@ -899,12 +899,26 @@ fn last_meaningful_line(text: &str) -> String {
 /// Führt YOLO-Inferenz auf einem einzelnen Bild aus via Ultralytics Python-API.
 #[tauri::command]
 pub async fn run_yolo_inference(
+    app_handle: AppHandle,
     model_path: String,
     image_path: String,
     conf_threshold: f32,
     iou_threshold: f32,
+    version_id: Option<String>,
 ) -> Result<YoloInferenceResult, String> {
     let python = get_python_executable();
+
+    // Getestet wird die in der Oberflaeche gewaehlte Version. Vorher kam hier
+    // immer der Basis-Modellordner an: die Versionsauswahl blieb wirkungslos
+    // und das eigene Training wurde nie geprueft.
+    let model_path = match version_id.as_deref().filter(|v| !v.is_empty()) {
+        Some(vid) => crate::test_manager::get_version_path(&app_handle, vid)
+            .unwrap_or_else(|e| {
+                eprintln!("[YOLO] Versionspfad nicht aufloesbar ({}), nutze Modellordner", e);
+                model_path.clone()
+            }),
+        None => model_path,
+    };
 
     // FIX Sicherheit: Pfade werden als sys.argv übergeben statt in den Python-Code
     // interpoliert zu werden (vorher: Code-Injection / Crash bei Anführungszeichen im Pfad).
@@ -923,7 +937,7 @@ def emit(payload):
     print(json.dumps(payload), file=_real_stdout)
 
 
-def find_weights(path):
+def find_weights(path, task="detect"):
     """Akzeptiert eine .pt-Datei oder einen Modell-/Versionsordner."""
     if os.path.isfile(path):
         return path
@@ -941,11 +955,34 @@ def find_weights(path):
         cand = os.path.join(path, rel)
         if os.path.isfile(cand):
             return cand
+    # Basis-Modellordner (z. B. Ultralytics/YOLO11) enthalten Gewichte fuer
+    # mehrere Aufgaben. Alphabetisch zu raten lieferte "yolo11l-pose.pt" –
+    # ein Pose-Modell mit der einzigen Klasse "person", also Ergebnisse, die
+    # mit dem geladenen Datensatz nichts zu tun hatten.
+    suffixes = {"segment": "-seg", "pose": "-pose", "classify": "-cls", "obb": "-obb"}
+    wanted = suffixes.get(task, "")
+    others = [s for t, s in suffixes.items() if s != wanted]
+    order = ["n", "s", "m", "l", "x"]
+
+    def fits(name):
+        stem = os.path.splitext(name)[0].lower()
+        if wanted:
+            return stem.endswith(wanted)
+        return not any(stem.endswith(s) for s in others)
+
+    def rank(full):
+        stem = os.path.splitext(os.path.basename(full))[0].lower()
+        base = stem[: -len(wanted)] if wanted and stem.endswith(wanted) else stem
+        size = base[-1] if base and base[-1] in order else ""
+        return (order.index(size) if size else len(order), os.path.getsize(full))
+
+    found = []
     for root, _dirs, files in os.walk(path):
-        pts = sorted(f for f in files if f.endswith(".pt"))
-        if pts:
-            return os.path.join(root, pts[0])
-    return None
+        found.extend(os.path.join(root, f) for f in files if f.endswith(".pt"))
+    if not found:
+        return None
+    pool = [f for f in found if fits(os.path.basename(f))] or found
+    return sorted(pool, key=rank)[0]
 
 
 try:
@@ -961,7 +998,7 @@ try:
         if not os.path.exists(model_arg):
             emit({"error": f"Modell nicht gefunden: {model_arg}"})
             sys.exit(1)
-        weights = find_weights(model_arg)
+        weights = find_weights(model_arg, task)
         if weights is None:
             emit({"error": f"Keine Gewichtsdatei (.pt) in {model_arg} gefunden."})
             sys.exit(1)

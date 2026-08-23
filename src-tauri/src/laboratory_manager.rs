@@ -201,6 +201,18 @@ pub async fn lab_start_model_server(
             ));
         }
         if !vp.join("config.json").exists() {
+            // Ultralytics-Modelle sind keine kaputten HF-Modelle, sondern ein
+            // anderes Format. Die generische "keine config.json"-Meldung las
+            // sich wie ein Defekt.
+            let is_ultralytics = std::fs::read_to_string(vp.join("model.json")).ok()
+                .map(|c| c.contains("\"ultralytics\"")).unwrap_or(false);
+            if is_ultralytics {
+                return fail(
+                    "YOLO-Modelle werden im Labor noch nicht unterstützt — die Lab-Inferenz \
+                     arbeitet mit HuggingFace-Modellen. Einzelbild-Inferenz für dieses Modell \
+                     gibt es im Tests-Bereich.".to_string()
+                );
+            }
             let contents: Vec<String> = std::fs::read_dir(&vp).ok().into_iter().flatten().flatten()
                 .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
                 .filter(|n| !n.starts_with('.'))

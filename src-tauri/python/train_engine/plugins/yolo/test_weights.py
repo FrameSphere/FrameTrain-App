@@ -128,5 +128,33 @@ class SplitSizesTest(unittest.TestCase):
         self.assertEqual(p._split_sizes(), {"n_train": 0, "n_val": 0})
 
 
+class StopTest(unittest.TestCase):
+    """Regression: "Stoppen" blieb wirkungslos, das Training lief zu Ende.
+
+    Die Engine ruft im Signal-Handler plugin.stop(). YOLOPlugin erbt nicht von
+    TrainPlugin, wo die Methode definiert ist – der Handler lief in einen
+    AttributeError.
+    """
+
+    def test_stop_setzt_das_flag(self):
+        p = make_plugin(tempfile.mkdtemp())
+        self.assertFalse(p.is_stopped)
+        p.stop()
+        self.assertTrue(p.is_stopped)
+
+    def test_alle_eigenstaendigen_plugins_haben_stop(self):
+        import importlib
+        for mod in ("plugins.yolo.plugin", "plugins.canvas.plugin",
+                    "plugins.image_classification.plugin"):
+            m = importlib.import_module(mod)
+            classes = [c for c in vars(m).values()
+                       if isinstance(c, type) and c.__module__ == mod
+                       and hasattr(c, "is_stopped") or (isinstance(c, type) and c.__module__ == mod and "Plugin" in c.__name__)]
+            self.assertTrue(classes, f"keine Plugin-Klasse in {mod}")
+            for c in classes:
+                self.assertTrue(callable(getattr(c, "stop", None)),
+                                f"{mod}.{c.__name__} hat kein stop()")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

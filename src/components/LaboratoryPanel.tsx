@@ -846,6 +846,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     return r.supported ? r.plugin : null;
   }, [selectedModel]);
 
+  // Die Lab-Inferenz spricht nur HuggingFace-Formate. Ein YOLO-Modell wurde
+  // trotzdem als Plugin gemeldet, liess Samples laden und scheiterte erst beim
+  // Modell-Laden an der fehlenden config.json — eine Sackgasse.
+  const pluginUnsupportedInLab = detectedPlugin?.id === 'yolo';
+
   const modelPath  = selectedModel?.local_path || selectedModel?.source_path || selectedModel?.name || '';
   const dsRefs     = datasets.map((d, i) => ({ key: i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`, value: d.storage_path || '', name: d.name }));
   const outputPath = `[AppData]/lab_outputs`;
@@ -1582,7 +1587,15 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                           <span className="text-amber-300 text-xs">{t('laboratoryPanel.setup.engineNotSupported')}</span>
                         </div>
                       )}
-                      {engineMode === 'engine' && detectedPlugin && (
+                      {engineMode === 'engine' && detectedPlugin && pluginUnsupportedInLab && (
+                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                          <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                          <span className="text-amber-300 text-xs">
+                            {t('laboratoryPanel.setup.pluginNotInLab', { name: detectedPlugin.name })}
+                          </span>
+                        </div>
+                      )}
+                      {engineMode === 'engine' && detectedPlugin && !pluginUnsupportedInLab && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
                             <CheckCircle className="w-3.5 h-3.5 text-amber-400" />
