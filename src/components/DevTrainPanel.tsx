@@ -33,7 +33,7 @@ import { dateLocale } from '../utils/dateLocale';
 interface SavedScript { id: string; name: string; script: string; savedAt: string; }
 
 const getScriptsKey = (userId?: string) => userId ? `ft_saved_scripts_${userId}` : 'ft_saved_scripts';
-const loadScripts  = (userId?: string): SavedScript[] => { try { return JSON.parse(localStorage.getItem(getScriptsKey(userId)) ?? '[]'); } catch { return []; } };
+const loadScripts  = (userId?: string): SavedScript[] => { try { const parsed = JSON.parse(localStorage.getItem(getScriptsKey(userId)) ?? '[]'); return Array.isArray(parsed) ? parsed.filter((s: unknown): s is SavedScript => !!s && typeof (s as SavedScript).script === 'string') : []; } catch { return []; } };
 const saveScript   = (name: string, script: string, userId?: string) => { const key = getScriptsKey(userId); const all = loadScripts(userId); all.unshift({ id: `sc_${Date.now()}`, name, script, savedAt: new Date().toISOString() }); localStorage.setItem(key, JSON.stringify(all.slice(0, 50))); };
 const deleteScript = (id: string, userId?: string) => { const key = getScriptsKey(userId); localStorage.setItem(key, JSON.stringify(loadScripts(userId).filter(s => s.id !== id))); };
 const updateScript = (id: string, script: string, userId?: string) => { const key = getScriptsKey(userId); const all = loadScripts(userId); const idx = all.findIndex(s => s.id === id); if (idx >= 0) { all[idx] = { ...all[idx], script, savedAt: new Date().toISOString() }; localStorage.setItem(key, JSON.stringify(all)); } };
