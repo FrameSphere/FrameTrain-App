@@ -2553,6 +2553,8 @@
     "inLibrary": "In Library",
     "unverified": "Unverified",
     "notVerified": "Not Verified",
+    "rejected": "Rejected",
+    "rejectedTitle": "This script was rejected by the review — read it yourself before running it.",
     "uploading": "Uploading…",
     "submit": "Submit Script",
     "added": "Added!",
@@ -2574,6 +2576,8 @@
     "unverifiedInfoBody": "This script hasn't been reviewed by FrameTrain yet. Check the code contents before running it.",
     "scriptPreviewTitle": "Script Preview",
     "scriptPreviewLines": "({count} lines)",
+    "scriptPreviewUnavailable": "code not loaded yet",
+    "scriptPreviewUnavailableHint": "The source code is fetched when you add the script to your library.",
     "copyButton": "Copy",
     "copiedButton": "Copied!",
     "upload": {

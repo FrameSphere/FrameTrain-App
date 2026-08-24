@@ -2553,6 +2553,8 @@
     "inLibrary": "In Bibliothek",
     "unverified": "Ungeprüft",
     "notVerified": "Nicht verifiziert",
+    "rejected": "Abgelehnt",
+    "rejectedTitle": "Dieses Skript wurde von der Prüfung abgelehnt — vor dem Ausführen selbst durchlesen.",
     "uploading": "Wird hochgeladen…",
     "submit": "Skript einreichen",
     "added": "Hinzugefügt!",
@@ -2574,6 +2576,8 @@
     "unverifiedInfoBody": "Dieses Skript wurde noch nicht von FrameTrain geprüft. Schau den Code-Inhalt durch bevor du es ausführst.",
     "scriptPreviewTitle": "Skript-Vorschau",
     "scriptPreviewLines": "({count} Zeilen)",
+    "scriptPreviewUnavailable": "Code noch nicht geladen",
+    "scriptPreviewUnavailableHint": "Der Quelltext wird erst beim Hinzufügen zur eigenen Bibliothek geladen.",
     "copyButton": "Kopieren",
     "copiedButton": "Kopiert!",
     "upload": {

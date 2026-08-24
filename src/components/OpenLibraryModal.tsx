@@ -33,6 +33,18 @@ export interface LibraryScript {
   updated_at: string;
   tags: string[];
   script_type?: 'train' | 'test';
+  /**
+   * Von der serverseitigen Pruefung gesetzt. Die App wertete das nicht aus:
+   * abgelehnte Skripte standen als bloss "Ungeprueft" in der Bibliothek,
+   * obwohl die Pruefung sie ausdruecklich verworfen hatte.
+   */
+  rejectedAt?: string | null;
+  rejectedReason?: string | null;
+}
+
+/** Wurde das Skript von der serverseitigen Pruefung abgelehnt? */
+export function isRejected(s: Pick<LibraryScript, 'rejectedAt'>): boolean {
+  return typeof s.rejectedAt === 'string' && s.rejectedAt.length > 0;
 }
 
 // ── Saved Script type (matching DevTrainPanel) ────────────────────────────
@@ -209,6 +221,11 @@ function ScriptDetail({
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const { t } = useLanguage();
+  // Die Listen-Antwort der API enthaelt das Feld "script" nicht — der Code kommt
+  // erst ueber den Download-Endpunkt. Ungeprueft benutzt, riss
+  // script.script.split() die komplette Oberflaeche mit in den Abgrund.
+  const code = typeof script.script === 'string' ? script.script : '';
+  const hasCode = code.length > 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -223,6 +240,10 @@ function ScriptDetail({
             {script.verified ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-[10px] font-semibold flex-shrink-0">
                 <ShieldCheck className="w-3 h-3" /> Verified
+              </span>
+            ) : isRejected(script) ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[10px] font-semibold flex-shrink-0">
+                <ShieldAlert className="w-3 h-3" /> {t('openLibrary.rejected')}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/25 text-amber-300 text-[10px] font-semibold flex-shrink-0">
@@ -250,6 +271,17 @@ function ScriptDetail({
 
         {/* Description */}
         <p className="text-gray-300 text-sm leading-relaxed">{script.description}</p>
+
+        {/* Von der Pruefung abgelehnt — Grund nennen, statt es zu verschweigen. */}
+        {isRejected(script) && (
+          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+            <ShieldAlert className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-red-300 space-y-1">
+              <p className="font-medium">{t('openLibrary.rejectedTitle')}</p>
+              {script.rejectedReason && <p className="text-red-300/80">{script.rejectedReason}</p>}
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="flex items-center gap-5 text-gray-500 text-xs">
@@ -297,7 +329,9 @@ function ScriptDetail({
             <div className="flex items-center gap-2">
               <FileCode className="w-4 h-4 text-gray-400" />
               <span className="text-gray-300 text-sm font-medium">{t('openLibrary.scriptPreviewTitle')}</span>
-              <span className="text-gray-600 text-xs">{t('openLibrary.scriptPreviewLines').replace('{count}', String(script.script.split('\n').length))}</span>
+              <span className="text-gray-600 text-xs">{hasCode
+                ? t('openLibrary.scriptPreviewLines').replace('{count}', String(code.split('\n').length))
+                : t('openLibrary.scriptPreviewUnavailable')}</span>
             </div>
             <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showPreview ? 'rotate-180' : ''}`} />
           </button>
@@ -305,14 +339,14 @@ function ScriptDetail({
             <div className="border-t border-white/10">
               <div className="flex items-center justify-end px-3 py-2 bg-black/20 border-b border-white/5">
                 <button
-                  onClick={() => { navigator.clipboard.writeText(script.script); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                  onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all ${copied ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/25' : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'}`}
                 >
                   {copied ? <><Check className="w-3 h-3" /> {t('openLibrary.copiedButton')}</> : <><Eye className="w-3 h-3" /> {t('openLibrary.copyButton')}</>}
                 </button>
               </div>
               <pre className="p-4 text-[10px] font-mono text-gray-300 overflow-x-auto max-h-80 leading-relaxed whitespace-pre bg-black/20">
-                {script.script}
+                {hasCode ? code : t('openLibrary.scriptPreviewUnavailableHint')}
               </pre>
             </div>
           )}
@@ -520,8 +554,10 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
         <div>
           <p className="text-blue-300 text-sm font-semibold">{t('openLibrary.upload.infoBannerTitle')}</p>
           <p className="text-gray-400 text-xs mt-1 leading-relaxed">
+            {/* Der Uebersetzungstext endet bereits mit "Verified-Badge" — das
+                Fragment daneben stammte aus einer aelteren Fassung und ergab
+                "... erhaelt dann ein Verified-Badge. ✓ Verified -Badge." */}
             {t('openLibrary.upload.infoBannerBody')}
-            <span className="text-emerald-300 mx-1 inline-flex items-center gap-1"><Check className="w-3.5 h-3.5" />Verified</span>-Badge.
           </p>
         </div>
       </div>

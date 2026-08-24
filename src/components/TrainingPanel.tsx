@@ -1,6 +1,7 @@
 // TrainingPanel.tsx – Vollständiges Training-Interface (v5 – LoRA/QLoRA + Error Recovery)
 
 import { useState, useEffect, useRef, useCallback, useContext, useMemo } from 'react';
+import { usePluginParams } from './usePluginParams';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -1192,19 +1193,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const showsField      = (key: string) => !hiddenFields.has(key);
   // Parameter, die nur dieses Plugin kennt (z. B. imgsz/augment/patience bei
   // YOLO). Sie kamen bisher ausschliesslich aus defaultPluginConfig und waren
-  // nirgends einstellbar. epochs/batch/task_type bleiben aussen vor — die
-  // stehen schon im allgemeinen Teil des Formulars.
-  const PLUGIN_PARAM_BLOCKLIST = ['task_type', 'epochs', 'batch', 'batch_size', 'device'];
-  const pluginParamDefaults = useMemo(() => {
-    const raw = detection?.supported === true ? (detection.plugin.defaultPluginConfig ?? {}) : {};
-    return Object.fromEntries(
-      Object.entries(raw).filter(([k, v]) =>
-        !PLUGIN_PARAM_BLOCKLIST.includes(k) && (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')
-      )
-    ) as Record<string, number | boolean | string>;
-  }, [detection]);
-  const [pluginParams, setPluginParams] = useState<Record<string, number | boolean | string>>({});
-  useEffect(() => { setPluginParams(pluginParamDefaults); }, [pluginParamDefaults]);
+  // nirgends einstellbar.
+  const { params: pluginParams, setParams: setPluginParams } = usePluginParams(
+    detection?.supported === true ? detection.plugin.id : null,
+    detection?.supported === true ? detection.plugin.defaultPluginConfig : undefined,
+  );
   // Der torchvision-Hinweis gilt nur fuers alte Plugin — das neue trainiert
   // ja gerade die heruntergeladenen Gewichte.
   const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
