@@ -21,6 +21,7 @@ import { clampNumber, parseNumberInput } from './numberInput';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { openAICoach } from '../ai/aiCoachEvents';
 import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
@@ -373,6 +374,7 @@ export function LossChart({ points }: { points: LossPoint[] }) {
 
 function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: (cfg: Partial<TrainingConfig>) => void; onClose: () => void; onSave: (name: string, desc: string) => void; currentConfig: TrainingConfig; }) {
   const { t } = useLanguage();
+  useEscapeKey(onClose);
   const [userTemplates, setUserTemplates] = useState<MetricsTemplate[]>([]);
   const [tab, setTab] = useState<'builtin' | 'user'>('builtin');
   const [saveName, setSaveName] = useState('');
@@ -595,6 +597,7 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
   const { t } = useLanguage();
   const { settings: aiSettings } = useAISettings();
   const { language } = useLanguage();
+  useEscapeKey(onClose);
   const [goalText, setGoalText] = useState(initialGoal ?? '');
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -892,6 +895,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const [historyJobs, setHistoryJobs] = useState<TrainingJob[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'completed' | 'failed' | 'stopped' | 'running'>('all');
+  useEscapeKey(() => setShowHistory(false), showHistory);
 
   void checkDatasetCompat;
 
@@ -1272,7 +1276,10 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       setSessionIdContext(sessionId);
       setDashStartedAtContext(startedAt);
       setTrainingInfoContext('standard', selectedModel?.name ?? '', selectedDataset?.name ?? '');
-      setTrainingConfigContext(config);
+      // configForBackend (nicht das nackte config) traegt task_type + plugin_config;
+      // nur damit kann der Konfig-Block im Dashboard die je nach Plugin
+      // irrelevanten Felder (z. B. "Max. Sequenzlaenge" bei YOLO) ausblenden.
+      setTrainingConfigContext(configForBackend);
       
       success(t('trainingPanel.notifications.started'), t('trainingPanel.notifications.startedDetail'));
     } catch (err: unknown) { error(t('trainingPanel.notifications.startFailed'), String(err)); }

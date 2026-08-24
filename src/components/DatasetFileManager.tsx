@@ -11,6 +11,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType } from '../plugins/datasetCompatHelpers';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
   const { currentTheme } = useTheme();
   const { success, error } = useNotification();
   const { t } = useLanguage();
+  useEscapeKey(onClose);
 
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [loading, setLoading] = useState(true);

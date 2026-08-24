@@ -31,6 +31,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { detectPlugin } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
 import { dateLocale } from '../utils/dateLocale';
@@ -163,6 +164,7 @@ interface DeleteDialogProps {
 
 function DeleteConfirmDialog({ modelName, onConfirm, onCancel }: DeleteDialogProps) {
   const { t } = useLanguage();
+  useEscapeKey(onCancel);
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
@@ -211,6 +213,7 @@ export default function ModelManager() {
   // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>('local');
+  useEscapeKey(() => setShowImportModal(false), showImportModal);
 
   // ── Local import ──
   const [selectedPath, setSelectedPath] = useState<string | null>(null);

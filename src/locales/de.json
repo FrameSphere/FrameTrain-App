@@ -373,6 +373,8 @@
       "gpuFound": "GPU: {name} — CUDA {cuda} → torch+{index}",
       "gpuNone": "Keine NVIDIA-GPU — CPU-Modus",
       "gpuNoneHint": "Training läuft auf der CPU, nur langsamer. Apple Silicon (MPS) wird unterstützt.",
+      "gpuMps": "Apple Silicon GPU (MPS) — Beschleunigung aktiv",
+      "gpuMpsHint": "Training nutzt die Apple-Silicon-GPU über Metal (MPS) — deutlich schneller als CPU.",
       "errorsTitle": "Das muss vor dem Weitermachen behoben werden:",
       "recheck": "Erneut prüfen",
       "continue": "Weiter"
@@ -733,6 +735,18 @@
         "unknown": {
           "title": "Unbekannter Fehler",
           "hint": "Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen."
+        },
+        "labels": {
+          "title": "Label-/Klassen-Problem",
+          "hint": "Die Label-Spalte passt nicht (z. B. nur ein Wert oder falscher Typ). Prüfe die Klassen im Dataset."
+        },
+        "architecture": {
+          "title": "Architektur nicht unterstützt",
+          "hint": "Diese Modell-Architektur wird noch nicht unterstützt. Wähle ein kompatibles Modell."
+        },
+        "network": {
+          "title": "Netzwerk-/Zertifikatsfehler",
+          "hint": "Download fehlgeschlagen (Netz oder SSL). Verbindung prüfen und erneut versuchen."
         }
       }
     },

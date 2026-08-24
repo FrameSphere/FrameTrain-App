@@ -17,6 +17,7 @@ import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePageContext } from '../contexts/PageContext';
 import { callAI } from './TrainingPanel';
 import OpenLibraryModal from './OpenLibraryModal';
@@ -346,6 +347,7 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
   const [sessions, setSessions] = useState<LabSession[]>([]);
   const { success } = useNotification();
   const { t, language } = useLanguage();
+  useEscapeKey(onClose);
 
   useEffect(() => { setSessions(loadSessions(userId)); }, [userId]);
 

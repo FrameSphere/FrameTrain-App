@@ -21,6 +21,8 @@ import { useLanguage } from '../contexts/LanguageContext';
 import type { TrainingJob, TrainingProgress, LossPoint, ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI, LossChart } from './TrainingPanel';
 import TrainingDashboard from './TrainingDashboard';
+import { classifyError, type ErrorCategory } from '../utils/errorClassify';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { sendAppErrorReport } from '../utils/errorReport';
@@ -75,35 +77,26 @@ function calculateAffectedLines(script: string, edit: CodeEdit): HighlightedLine
 
 // ── Error Categorization ──────────────────────────────────────────────────
 
-type ErrorCategory = 'memory' | 'dataset' | 'packages' | 'cuda' | 'code' | 'config' | 'unknown';
-
+// Kategorie aus der gemeinsamen classifyError-Quelle — dieselbe Einordnung wie
+// im Trainings-Dashboard. Vorher hatte diese Datei eine eigene, abweichende
+// Reihenfolge (nan/inf/loss VOR Code-Fehlern) und stufte denselben Fehler
+// anders ein als das Dashboard.
 function analyzeError(errorMsg: string): { category: ErrorCategory } {
-  const e = (errorMsg ?? '').toLowerCase();
-  if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
-    return { category: 'memory' };
-  if (e.includes('cuda') || e.includes('mps') || e.includes('device'))
-    return { category: 'cuda' };
-  if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
-    return { category: 'dataset' };
-  if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module named')
-      || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
-    return { category: 'packages' };
-  if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
-    return { category: 'config' };
-  if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror') || e.includes('nameerror'))
-    return { category: 'code' };
-  return { category: 'unknown' };
+  return { category: classifyError(errorMsg) };
 }
 
 // Kein Emoji im Fehler-Modal — lucide-Icon je Fehlerkategorie.
 const ERROR_CATEGORY_ICON: Record<ErrorCategory, React.ReactNode> = {
-  memory:   <MemoryStick className="w-7 h-7 text-red-400" />,
-  cuda:     <Zap className="w-7 h-7 text-amber-400" />,
-  dataset:  <Database className="w-7 h-7 text-blue-400" />,
-  packages: <Package className="w-7 h-7 text-purple-400" />,
-  config:   <BarChart3 className="w-7 h-7 text-orange-400" />,
-  code:     <Bug className="w-7 h-7 text-pink-400" />,
-  unknown:  <HelpCircle className="w-7 h-7 text-gray-400" />,
+  memory:       <MemoryStick className="w-7 h-7 text-red-400" />,
+  cuda:         <Zap className="w-7 h-7 text-amber-400" />,
+  dataset:      <Database className="w-7 h-7 text-blue-400" />,
+  packages:     <Package className="w-7 h-7 text-purple-400" />,
+  config:       <BarChart3 className="w-7 h-7 text-orange-400" />,
+  code:         <Bug className="w-7 h-7 text-pink-400" />,
+  labels:       <Database className="w-7 h-7 text-cyan-400" />,
+  architecture: <Package className="w-7 h-7 text-violet-400" />,
+  network:      <Globe className="w-7 h-7 text-sky-400" />,
+  unknown:      <HelpCircle className="w-7 h-7 text-gray-400" />,
 };
 
 // ── Error Modal (Dev Train) ───────────────────────────────────────────────
@@ -134,6 +127,7 @@ function DevTrainErrorModal({
   isSending,
 }: DevTrainErrorModalProps) {
   const { t, language } = useLanguage();
+  useEscapeKey(onClose, isOpen);
   const analysis = analyzeError(errorMessage);
   const [copied, setCopied] = useState(false);
   const [sent, setSent] = useState(false);
@@ -256,6 +250,7 @@ function DevTrainErrorModal({
 
 function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: boolean; defaultName: string; onSave: (name: string) => void; onClose: () => void; }) {
   const { t, language } = useLanguage();
+  useEscapeKey(onClose, isOpen);
   const [name, setName] = useState(defaultName);
 
   useEffect(() => {
@@ -316,6 +311,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
 
 function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; userId?: string; }) {
   const { t, language } = useLanguage();
+  useEscapeKey(onClose);
   const [scripts, setScripts]       = useState<SavedScript[]>([]);
   const [saveName, setSaveName]     = useState('');
   const [showSaveForm, setShowForm] = useState(false);
@@ -593,6 +589,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   // ── Session State ──────────────────────────────────────────────
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [showHistory, setShowHistory]           = useState(false);
+  useEscapeKey(() => setShowHistory(false), showHistory);
   const [isReadonly, setIsReadonly]             = useState(false);
   const [sessionTitle, setSessionTitle]         = useState('');
   const currentSessionIdRef = useRef<string | null>(null);

@@ -5,13 +5,9 @@
  */
 
 import React from 'react';
-import type { ModelPlugin, ModelConfig, TrainPluginProps, TestPluginProps } from '../types';
+import type { ModelPlugin, ModelConfig, TestPluginProps } from '../types';
 
-// Minimale Stub-Komponenten — das Training läuft über TrainingPanel, nicht über TrainComponent.
-const CanvasTrainStub: React.FC<TrainPluginProps> = () =>
-  React.createElement('div', { style: { color: '#94a3b8', fontSize: 12, padding: 16 } },
-    'Canvas-Training läuft über das Training-Panel.');
-
+// Minimale Test-Stub-Komponente — das Training laeuft ueber das TrainingPanel.
 const CanvasTestStub: React.FC<TestPluginProps> = () =>
   React.createElement('div', { style: { color: '#94a3b8', fontSize: 12, padding: 16 } },
     'Test-Interface für Canvas-Modelle — bald verfügbar.');

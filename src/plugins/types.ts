@@ -1,11 +1,6 @@
 import { ComponentType } from 'react';
 import type { DatasetType, PairingStatus } from './datasetCompatHelpers';
 
-export interface TrainPluginProps {
-  modelPath: string;
-  onNavigateToAnalysis: (versionId: string) => void;
-}
-
 export interface DatasetInfo {
   id:              string;
   name:            string;

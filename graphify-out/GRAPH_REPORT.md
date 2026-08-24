@@ -1,16 +1,16 @@
 # Graph Report - desktop-app  (2026-08-24)
 
 ## Corpus Check
-- 238 files · ~351,243 words
+- 240 files · ~351,640 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2771 nodes · 6194 edges · 170 communities (155 shown, 15 thin omitted)
+- 2772 nodes · 6245 edges · 156 communities (141 shown, 15 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 82 edges (avg confidence: 0.68)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `45754c80`
+- Built from commit: `bb556962`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -19,10 +19,10 @@
 - training_manager.rs
 - TrainingPanel.tsx
 - Database
-- DevTrainPanel.tsx
-- DevTestPanel.tsx
-- autoFixHelper.ts
-- useTheme
+- registry.ts
+- LoadedCanvasModel
+- SynapseAICoachPanel.tsx
+- CanvasInferenceServer
 - .status
 - Manager (Cloudflare Worker + D1)
 - AnalysisPanel.tsx
@@ -47,11 +47,10 @@
 - FloatingAICoach.tsx
 - graph-shape-validation.ts
 - yolo/manifest.json
-- AISettingsContext.tsx
-- LanguageContext.tsx
+- Settings.tsx
+- ShellScopeEntryAllowedArgs
 - canvas/manifest.json
 - image_classification/manifest.json
-- DiffViewer.tsx
 - OpenLibraryModal.tsx
 - nodeTypes.ts
 - SynapseAIPanel.tsx
@@ -61,18 +60,15 @@
 - supported_architectures
 - devDependencies
 - dependencies
-- graphIR.ts
+- TrainingConsole.tsx
 - .status
 - ui.test.tsx
 - synapseAgent.ts
 - codeGenerator.ts
-- PageContext.tsx
 - definitions
 - definitions
 - supported_architectures
-- devScriptStorage.ts
 - image-classification/index.ts
-- aiClient.ts
 - properties
 - YOLOPlugin
 - PowerState
@@ -90,7 +86,6 @@
 - auth.rs
 - compilerOptions
 - synapseAgentTools.ts
-- SynapseAICoachPanel.tsx
 - ModelConfig
 - CapabilityRemote
 - CapabilityRemote
@@ -105,13 +100,13 @@
 - Capability
 - desktop-schema.json
 - macOS-schema.json
-- ModelManager.tsx
+- DatasetUpload.tsx
 - synapseOps.ts
 - local
 - local
 - run_dataset_classification
-- registry.ts
-- useAISettings
+- types.ts
+- DevTrainPanel.tsx
 - postcss
 - @testing-library/react
 - @types/node
@@ -128,7 +123,6 @@
 - FrameTrain Favicon (App Icon)
 - Plugin
 - MessageProtocol
-- DatasetUpload.tsx
 - TestConfig
 - Plugin
 - Plugin
@@ -138,24 +132,16 @@
 - test_engine/plugins/hf_image_classification/manifest.json
 - test_engine/plugins/seq2seq/manifest.json
 - Plugin
-- AppContextMenu.tsx
 - ModelLibrary.tsx
 - train_engine/plugins/hf_image_classification/plugin.py
 - make_plugin
 - python_env.rs
 - ir.py
-- synapseDebugLogger.ts
-- CanvasGraphIR
 - user_manager.rs
-- synapseGraphContext.ts
-- canvasModelBridge.ts
 - parse_ir
-- Target
 - Identifier
 - Target
 - shape_propagate.py
-- GradientChatInput.tsx
-- run_op
 - Identifier
 
 ## God Nodes (most connected - your core abstractions)
@@ -163,12 +149,12 @@
 2. `AppState` - 63 edges
 3. `Database` - 38 edges
 4. `useTheme()` - 36 edges
-5. `SynapseBuilderInner()` - 32 edges
-6. `useNotification()` - 31 edges
-7. `detect_dataset_type()` - 28 edges
-8. `split_dataset_in_half()` - 25 edges
-9. `usePageContext()` - 25 edges
-10. `MessageProtocol` - 24 edges
+5. `useEscapeKey()` - 34 edges
+6. `SynapseBuilderInner()` - 32 edges
+7. `useNotification()` - 31 edges
+8. `detect_dataset_type()` - 28 edges
+9. `split_dataset_in_half()` - 25 edges
+10. `usePageContext()` - 25 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Auto-Fix Pipeline (App-Fehler → Manager → Triage-Agent → Review → Merge)` --semantically_similar_to--> `SynapseAICoach`  [INFERRED] [semantically similar]
@@ -179,8 +165,8 @@
   src/components/synapse/ai/INTEGRATION_GUIDE.md → src/components/synapse/SynapseBuilder.tsx
 - `SynapseBuilder()` --shares_data_with--> `currentModelConfig state`  [EXTRACTED]
   src/components/synapse/SynapseBuilder.tsx → src/components/synapse/ai/INTEGRATION_GUIDE.md
-- `Synapse AI Coach System README` --references--> `SynapseAICoach`  [EXTRACTED]
-  src/components/synapse/ai/README_AI_COACH.md → src/components/synapse/ai/SynapseAICoach.ts
+- `Auto-Triage FrameTrain Errors GitHub Workflow` --references--> `ANTHROPIC_API_KEY (GitHub Actions secret)`  [EXTRACTED]
+  .github/workflows/auto-triage.yml → .claude/AUTOMATION_SETUP.md
 
 ## Import Cycles
 - None detected.
@@ -190,7 +176,7 @@
 - **Synapse AI Coach system components (core logic, sub-modules, and UI panel)** — src_components_synapse_ai_synapseaicoach_synapseaicoach, src_components_synapse_ai_synapseaicoach_errorparser, src_components_synapse_ai_synapseaicoach_graphanalyzer, src_components_synapse_ai_synapseaicoach_graphautofixer, src_components_synapse_ai_synapseaicoachpanel_synapseaicoachpanel [EXTRACTED 1.00]
 - **Auto-Fix Pipeline: error capture, triage agent, and Manager review loop** — claude_automation_setup_auto_fix_pipeline, claude_automation_setup_manager, claude_commands_triage_errors_triage_agent, github_workflows_auto_triage_job [INFERRED 0.85]
 
-## Communities (170 total, 15 thin omitted)
+## Communities (156 total, 15 thin omitted)
 
 ### Community 0 - "dataset_manager.rs"
 Cohesion: 0.07
@@ -201,28 +187,28 @@ Cohesion: 0.06
 Nodes (74): CanvasInferenceResult, CanvasModelInfo, CanvasNetworkResult, check_training_requirements(), copy_dir(), create_canvas_network_model(), create_version(), default_lora_mods() (+66 more)
 
 ### Community 2 - "TrainingPanel.tsx"
-Cohesion: 0.07
-Nodes (35): applyCoachConfig(), CoachCommand, CoachConfigPatch, consumePendingCoachConfig(), getRecommendedParams(), onApplyCoachConfig(), runCoachCommand(), setRecommendedParams() (+27 more)
+Cohesion: 0.08
+Nodes (33): applyCoachConfig(), CoachCommand, CoachConfigPatch, consumePendingCoachConfig(), getRecommendedParams(), onApplyCoachConfig(), clampNumber(), isIncompleteNumber() (+25 more)
 
 ### Community 3 - "Database"
 Cohesion: 0.08
 Nodes (37): Connection, Database, Dataset, get_data_directory(), get_database_path(), Model, ModelVersion, Option (+29 more)
 
-### Community 4 - "DevTrainPanel.tsx"
-Cohesion: 0.12
-Nodes (28): analyzeError(), AppliedEditInfo, calculateAffectedLines(), ChatSession, deleteScript(), devProgressPercent(), DevTrainErrorModal(), DevTrainErrorModalProps (+20 more)
+### Community 4 - "registry.ts"
+Cohesion: 0.17
+Nodes (12): canvasPlugin, KNOWN_UNSUPPORTED, ModelDetectionInfo, PLUGINS, TEXT_DOMAIN_KEYS, seq2seqPlugin, ModelPlugin, detectYOLO() (+4 more)
 
-### Community 5 - "DevTestPanel.tsx"
-Cohesion: 0.13
-Nodes (27): AppliedEditInfo, calculateAffectedLines(), ChatSession, deleteScript(), DevTestErrorModal(), DevTestPanel(), DevTestPanelProps, escapeHtml() (+19 more)
+### Community 5 - "LoadedCanvasModel"
+Cohesion: 0.29
+Nodes (7): LoadedCanvasModel, Any, Bildgröße/Kanäle/Normalisierung aus dem IR ableiten (image_loader-Node).…, Lädt eine Bilddatei, bereitet sie nach IR-Spezifikation auf und sagt vorher., Wiederverwendbares Canvas-Modell – geladen aus Dateisystem., Einzelne Vorhersage. x: torch.Tensor (bereits auf richtigem Device) ODER…, Mehrere Vorhersagen auf einmal.
 
-### Community 6 - "autoFixHelper.ts"
-Cohesion: 0.10
-Nodes (18): adjustParamsFix(), applyAutoFix(), AutoFixResult, insertBridgeFix(), TODO: Implementiere topologisches Sorting der Nodes, TODO: Toast anzeigen, TODO: Error Toast anzeigen, removeNodeFix() (+10 more)
-
-### Community 7 - "useTheme"
+### Community 6 - "SynapseAICoachPanel.tsx"
 Cohesion: 0.06
-Nodes (38): DatasetFileManager(), DatasetFileManagerProps, FileInfo, formatBytes(), PAIRED_TYPES, SPLIT_COLORS, SPLIT_LABELS, Login() (+30 more)
+Nodes (38): adjustParamsFix(), applyAutoFix(), AutoFixResult, insertBridgeFix(), TODO: Implementiere topologisches Sorting der Nodes, TODO: Toast anzeigen, TODO: Error Toast anzeigen, removeNodeFix() (+30 more)
+
+### Community 7 - "CanvasInferenceServer"
+Cohesion: 0.42
+Nodes (4): CanvasInferenceServer, emit(), emit_error(), main()
 
 ### Community 8 - ".status"
 Cohesion: 0.21
@@ -234,7 +220,7 @@ Nodes (46): ANTHROPIC_API_KEY (GitHub Actions secret), app_errors D1 table (exte
 
 ### Community 10 - "AnalysisPanel.tsx"
 Cohesion: 0.08
-Nodes (38): AnalysisPanel(), buildFullContext(), AnalysisPanelProps, asFiniteNumber(), BigLossChart(), BOOLEAN_PARAM_KEYS, buildAnalysisSystemPrompt(), ChatMessage (+30 more)
+Nodes (39): setRecommendedParams(), AnalysisPanel(), buildFullContext(), AnalysisPanelProps, asFiniteNumber(), BigLossChart(), BOOLEAN_PARAM_KEYS, buildAnalysisSystemPrompt() (+31 more)
 
 ### Community 11 - "laboratory_manager.rs"
 Cohesion: 0.15
@@ -261,8 +247,8 @@ Cohesion: 0.06
 Nodes (35): albert, bert, camembert, deberta, deberta-v2, distilbert, electra, ernie (+27 more)
 
 ### Community 17 - "TrainingDashboard.tsx"
-Cohesion: 0.13
-Nodes (23): firstUsableLoss(), lossImprovementPct(), LossPointLike, cat(), t(), analyzeError(), BigLossChart(), ConfigSummary() (+15 more)
+Cohesion: 0.07
+Nodes (34): AppErrorBoundary, Props, State, firstUsableLoss(), lossImprovementPct(), LossPointLike, cat(), t() (+26 more)
 
 ### Community 18 - "train_engine.py"
 Cohesion: 0.08
@@ -273,60 +259,60 @@ Cohesion: 0.18
 Nodes (38): calc_speed_and_eta(), calculate_dir_size(), calculate_dir_size_inner(), cleanup_incomplete_download(), copy_dir_recursive(), delete_model(), detect_model_type(), download_huggingface_model() (+30 more)
 
 ### Community 20 - "LaboratoryPanel.tsx"
-Cohesion: 0.10
-Nodes (32): hasOpenQuote(), joinQuotedLines(), parseDelimitedRows(), splitDelimitedLine(), formatDate(), AnalysisView(), deleteSession(), extractLabelField() (+24 more)
+Cohesion: 0.09
+Nodes (37): hasOpenQuote(), joinQuotedLines(), parseDelimitedRows(), splitDelimitedLine(), AnalysisView(), deleteSession(), DevScriptEditor(), extractLabelField() (+29 more)
 
 ### Community 21 - "load_canvas_model"
-Cohesion: 0.11
-Nodes (21): CanvasInferenceServer, emit(), emit_error(), main(), _find_model_pt(), load_canvas_model(), _load_ir_from_checkpoint(), _load_ir_from_metadata() (+13 more)
+Cohesion: 0.31
+Nodes (10): _find_model_pt(), load_canvas_model(), _load_ir_from_checkpoint(), _load_ir_from_metadata(), Path, loader.py — Canvas Model Loader ================================ Zentrale API…, Lädt ein trainiertes Canvas-Modell vollständig aus dem Dateisystem.…, Liest graphIR aus graph_metadata.json. (+2 more)
 
 ### Community 22 - "useLanguage"
-Cohesion: 0.10
-Nodes (28): AIAssistantSettingsPanel(), AISetupScreen(), AISetupScreenProps, DependencyStatus, FirstLaunchSetup(), GpuInfo, InstallProgress, LanguageSelectScreen() (+20 more)
+Cohesion: 0.06
+Nodes (48): DatasetFileManager(), FileInfo, formatBytes(), PAIRED_TYPES, SPLIT_COLORS, SPLIT_LABELS, DevTestErrorModal(), RefRow() (+40 more)
 
 ### Community 23 - "Dashboard.tsx"
-Cohesion: 0.09
-Nodes (25): ApiKeyValidation, App(), CloseDialogProps, NOTE: synapse_sessions_${userId} NICHT löschen - Sessions sind User-Daten und…, UserData, Dashboard(), DashboardProps, UserData (+17 more)
+Cohesion: 0.06
+Nodes (45): ApiKeyValidation, App(), CloseDialogProps, NOTE: synapse_sessions_${userId} NICHT löschen - Sessions sind User-Daten und…, UserData, Dashboard(), DashboardProps, UserData (+37 more)
 
 ### Community 24 - "plugins/datasetCompat.ts"
-Cohesion: 0.17
-Nodes (24): DatasetCompatBadge(), DatasetCompatBadgeProps, AnalysisPreviewProps, checkDatasetCompat(), COMPAT_PLUGINS, analysisToCheckInput(), CompatLevel, DATASET_TYPE_LABELS (+16 more)
+Cohesion: 0.18
+Nodes (23): DatasetCompatBadge(), DatasetCompatBadgeProps, checkDatasetCompat(), COMPAT_PLUGINS, analysisToCheckInput(), CompatLevel, DATASET_TYPE_LABELS, DatasetAnalysis (+15 more)
 
 ### Community 25 - "TrainPlugin"
 Cohesion: 0.09
 Nodes (14): ABC, Any, core/config.py – TrainingConfig ================================ Gemeinsame…, Hilfsmethode: Plugin-spezifischen Wert aus plugin_config holen., TrainingConfig, Any, TrainingConfig, core/plugin_base.py – Abstrakte Basisklasse für Trainings-Plugins (+6 more)
 
 ### Community 26 - "SynapseBuilder.tsx"
-Cohesion: 0.13
-Nodes (31): buildPageContext(), kv(), Settings(), AffectedNodeInfo, applyShapeHighlightsToEdges(), applyShapeHighlightsToNodes(), buildShapeAgentPrompt(), buildShapeUserGuide() (+23 more)
+Cohesion: 0.16
+Nodes (25): kv(), AffectedNodeInfo, applyShapeHighlightsToEdges(), applyShapeHighlightsToNodes(), buildShapeAgentPrompt(), buildShapeUserGuide(), clearShapeHighlights(), collectAffectedNodeIds() (+17 more)
 
 ### Community 27 - "CanvasPlugin"
-Cohesion: 0.14
-Nodes (8): Optimizer, CanvasPlugin, Any, TrainingConfig, Lädt vorherige Gewichte + Optimizer-State für echten Resume., W1: Scheduler-Instanz basierend auf IR-Konfiguration. steps_per_epoch wird für…, Fix 1.3: Speichert vollständigen IR + optimizer_state_dict für Inference-Reload…, Abbruch aus der Oberflaeche. Diese Klasse erbt nicht von TrainPlugin, wo stop()…
+Cohesion: 0.11
+Nodes (9): Optimizer, CanvasPlugin, Any, Module, TrainingConfig, Lädt vorherige Gewichte + Optimizer-State für echten Resume., W1: Scheduler-Instanz basierend auf IR-Konfiguration. steps_per_epoch wird für…, Fix 1.3: Speichert vollständigen IR + optimizer_state_dict für Inference-Reload… (+1 more)
 
 ### Community 28 - "compilerOptions"
 Cohesion: 0.08
 Nodes (24): DOM, DOM.Iterable, ES2020, src, compilerOptions, allowImportingTsExtensions, allowSyntheticDefaultImports, esModuleInterop (+16 more)
 
 ### Community 29 - "FloatingAICoach.tsx"
-Cohesion: 0.06
-Nodes (54): AICoachOpenDetail, onOpenAICoach(), APP_OVERVIEW, Bilingual, buildCoachSystemPrompt(), CoachAction, coercePatchFromRecord(), coerceSettable() (+46 more)
+Cohesion: 0.05
+Nodes (71): AICoachOpenDetail, onOpenAICoach(), openAICoach(), APP_OVERVIEW, Bilingual, buildCoachSystemPrompt(), buildPageContext(), CoachAction (+63 more)
 
 ### Community 30 - "graph-shape-validation.ts"
-Cohesion: 0.24
-Nodes (16): detectCycles(), getSynapseNodeType(), isShapeCompatible(), LAYER_SHAPE_METADATA, nodeParams(), outputFeatureSize(), printValidationReport(), SHAPE_FLOW_CHECKED_TARGETS (+8 more)
+Cohesion: 0.19
+Nodes (17): detectCycles(), getSynapseNodeType(), isShapeCompatible(), LAYER_SHAPE_METADATA, nodeParams(), outputFeatureSize(), printValidationReport(), SHAPE_FLOW_CHECKED_TARGETS (+9 more)
 
 ### Community 31 - "yolo/manifest.json"
 Cohesion: 0.08
 Nodes (23): box_loss, cls_loss, mAP50, mAP50-95, pascal_voc, yolo, yolo11, yolo_bbox (+15 more)
 
-### Community 32 - "AISettingsContext.tsx"
-Cohesion: 0.23
-Nodes (10): PROVIDER_META, ProviderMeta, AIProvider, AISettings, AISettingsContext, AISettingsContextType, AISettingsProvider(), DEFAULT_SETTINGS (+2 more)
-
-### Community 33 - "LanguageContext.tsx"
+### Community 32 - "Settings.tsx"
 Cohesion: 0.10
-Nodes (21): CoachPromptOptions, PageContextInput, AIAnalysisReport, LanguageSelectScreenProps, CommunityNameErrorModal(), InstallProgress, SettingsProps, SettingsTab (+13 more)
+Nodes (31): callAI(), CallAIOptions, callAnthropic(), callOllama(), callOpenAICompat(), ChatRole, effectiveMaxTokens(), requireEnabled() (+23 more)
+
+### Community 33 - "ShellScopeEntryAllowedArgs"
+Cohesion: 0.67
+Nodes (3): ShellScopeEntryAllowedArgs, anyOf, description
 
 ### Community 34 - "canvas/manifest.json"
 Cohesion: 0.09
@@ -336,17 +322,13 @@ Nodes (22): csv_loader, image_loader, numpy>=1.24.0,<2.0.0, pandas>=2.0.0, parqu
 Cohesion: 0.09
 Nodes (22): efficientnet_b0, efficientnet_b4, mobilenet_v3_large, mobilenet_v3_small, resnet18, resnet50, top5_accuracy, vit_b_16 (+14 more)
 
-### Community 36 - "DiffViewer.tsx"
-Cohesion: 0.27
-Nodes (9): AutoAction, CodeEdit, AiMessage, AiMessage, countAddedRemoved(), countLines(), DiffViewer(), DiffViewerProps (+1 more)
-
 ### Community 37 - "OpenLibraryModal.tsx"
 Cohesion: 0.13
 Nodes (23): addToLocalLibrary(), AUTHOR_KEY(), DuplicateNameError(), FRAMEWORKS, getLocalKey(), getStoredAuthorName(), isRejected(), LibraryScript (+15 more)
 
 ### Community 38 - "nodeTypes.ts"
-Cohesion: 0.07
-Nodes (27): dragState, categoryColors, icons, NodeLibrary(), NodeLibraryProps, handleStyle(), SynapseNodeComponent, SynapseNodeData (+19 more)
+Cohesion: 0.06
+Nodes (28): dragState, categoryColors, icons, NodeLibrary(), NodeLibraryProps, handleStyle(), SynapseNodeComponent, SynapseNodeData (+20 more)
 
 ### Community 39 - "SynapseAIPanel.tsx"
 Cohesion: 0.24
@@ -376,9 +358,9 @@ Nodes (19): autoprefixer, jsdom, devDependencies, autoprefixer, jsdom, tailwindc
 Cohesion: 0.11
 Nodes (19): lucide-react, dependencies, lucide-react, react, react-dom, @tauri-apps/api, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs (+11 more)
 
-### Community 46 - "graphIR.ts"
-Cohesion: 0.10
-Nodes (17): buildCanvasGraphIR(), CANVAS_IR_VERSION, getCategory(), getParams(), IRDataSpec, IREdge, IRNode, IRTrainingSpec (+9 more)
+### Community 46 - "TrainingConsole.tsx"
+Cohesion: 0.12
+Nodes (14): CanvasInferenceResult, CanvasInferenceTab(), CanvasModelInfo, parseInputString(), pct(), Props, DatasetOption, ExportModal() (+6 more)
 
 ### Community 47 - ".status"
 Cohesion: 0.15
@@ -389,16 +371,12 @@ Cohesion: 0.09
 Nodes (19): hfEncoderPlugin, DatasetProgress, HFEncoderTestPlugin(), PredRow, TopPred, BASE_TEST_PROPS, ListenerMap, listeners (+11 more)
 
 ### Community 49 - "synapseAgent.ts"
-Cohesion: 0.20
-Nodes (17): AgentRunOptions, AgentRunResult, buildFixSystem(), buildPlanSystem(), executeBatch(), extractRetryDelayMs(), friendlyAIError(), getFixMaxTokens() (+9 more)
+Cohesion: 0.12
+Nodes (27): AgentRunOptions, AgentRunResult, buildFixSystem(), buildPlanSystem(), executeBatch(), extractRetryDelayMs(), friendlyAIError(), getFixMaxTokens() (+19 more)
 
 ### Community 50 - "codeGenerator.ts"
 Cohesion: 0.29
 Nodes (15): buildCompactGraphSummary(), genDatasetCode(), genDynamicForwardLines(), generateTrainingScript(), genForwardLine(), genForwardLineWithInputs(), genInitLine(), getCategory() (+7 more)
-
-### Community 51 - "PageContext.tsx"
-Cohesion: 0.11
-Nodes (15): PageId, AppErrorBoundary, Props, State, PageContext, PageContextProvider(), PageContextType, APP_ERROR_ENDPOINT (+7 more)
 
 ### Community 52 - "definitions"
 Cohesion: 0.12
@@ -406,30 +384,22 @@ Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, She
 
 ### Community 53 - "definitions"
 Cohesion: 0.12
-Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, ShellScopeEntryAllowedArgs, Value, anyOf, description (+8 more)
+Nodes (16): definitions, Number, PermissionEntry, ShellScopeEntryAllowedArg, Target, Value, anyOf, description (+8 more)
 
 ### Community 54 - "supported_architectures"
 Cohesion: 0.07
 Nodes (28): ast, audio-spectrogram-transformer, hubert, sew, sew-d, unispeech, unispeech-sat, wav2vec2 (+20 more)
 
-### Community 55 - "devScriptStorage.ts"
-Cohesion: 0.62
-Nodes (6): migrateLegacyDevScripts(), readKey(), readUserDevScripts(), StoredDevScript, testScriptsKey(), trainScriptsKey()
-
 ### Community 56 - "image-classification/index.ts"
 Cohesion: 0.28
 Nodes (7): containsToken(), detectImageClassification(), imageClassificationPlugin, NON_CLASSIFIER_IMAGE_TOKENS, TORCHVISION_TOKENS, ImageClassificationTestPlugin(), Prediction
-
-### Community 57 - "aiClient.ts"
-Cohesion: 0.31
-Nodes (10): callAI(), CallAIOptions, callAnthropic(), callOllama(), callOpenAICompat(), ChatRole, effectiveMaxTokens(), requireEnabled() (+2 more)
 
 ### Community 58 - "properties"
 Cohesion: 0.13
 Nodes (15): properties, default, description, type, type, array, null, description (+7 more)
 
 ### Community 59 - "YOLOPlugin"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (8): Any, Path, TrainingConfig, Summiert box/cls/dfl-Loss eines Praefixes ('train/' oder 'val/')., Laufender Trainings-Loss (box + cls + dfl) der aktuellen Epoche., Zaehlt die Bilder je Split anhand der dataset.yaml. Die Analyse-Seite zeigte…, Waehlt die Startgewichte. Ohne diesen Schritt wurde immer 'yolov8n.pt' geladen…, YOLOPlugin
 
 ### Community 60 - "PowerState"
@@ -453,8 +423,8 @@ Cohesion: 0.17
 Nodes (11): core:default, dialog:default, fs:default, main, os:default, shell:allow-open, description, identifier (+3 more)
 
 ### Community 65 - "DynamicGraphModule"
-Cohesion: 0.14
-Nodes (18): _apply_dense_initializer(), DynamicGraphModule, CanvasGraphIR, Module, Tensor, DynamicGraphModule — runtime DAG forward from Canvas IR., UI-Param 'initializer' des Dense-Nodes auf nn.Linear anwenden., Runtime nn.Module built from Canvas Graph IR. Exposes .layers ModuleDict for… (+10 more)
+Cohesion: 0.11
+Nodes (22): _apply_dense_initializer(), DynamicGraphModule, CanvasGraphIR, Module, Tensor, DynamicGraphModule — runtime DAG forward from Canvas IR., UI-Param 'initializer' des Dense-Nodes auf nn.Linear anwenden., Runtime nn.Module built from Canvas Graph IR. Exposes .layers ModuleDict for… (+14 more)
 
 ### Community 66 - "permissions"
 Cohesion: 0.29
@@ -491,10 +461,6 @@ Nodes (8): vite.config.ts, compilerOptions, allowSyntheticDefaultImports, compos
 ### Community 74 - "synapseAgentTools.ts"
 Cohesion: 0.28
 Nodes (8): AgentToolExecutor, createToolExecutor(), GraphMutationEvent, parsePosition(), PLAN_TOOLS, ToolExecutorContext, ToolExecutorHandle, waitForVisualMutation()
-
-### Community 75 - "SynapseAICoachPanel.tsx"
-Cohesion: 0.14
-Nodes (12): DiagnosticIssue, ErrorParser, FixSuggestion, GraphAnalyzer, GraphDiagnosis, TODO: Implement node reordering, SynapseAICoach, TrainingAnalyzer (+4 more)
 
 ### Community 76 - "ModelConfig"
 Cohesion: 0.22
@@ -552,9 +518,9 @@ Nodes (4): anyOf, description, $schema, title
 Cohesion: 0.40
 Nodes (4): anyOf, description, $schema, title
 
-### Community 91 - "ModelManager.tsx"
-Cohesion: 0.13
-Nodes (19): consumePendingCoachCommand(), onCoachCommand(), checkHfModelSupport(), DeleteConfirmDialog(), DeleteDialogProps, formatBytes(), formatDate(), formatDownloads() (+11 more)
+### Community 91 - "DatasetUpload.tsx"
+Cohesion: 0.05
+Nodes (59): PageId, consumePendingCoachCommand(), onCoachCommand(), DatasetTypeIcon(), ICON_MAP, AnalysisPreviewProps, DatasetCard(), DatasetCardProps (+51 more)
 
 ### Community 93 - "local"
 Cohesion: 0.50
@@ -568,25 +534,21 @@ Nodes (4): default, description, type, local
 Cohesion: 0.20
 Nodes (10): collect_class_files(), load_label_names(), Any, Path, Gemeinsame Bausteine für klassifizierende Test-Plugins (Bild, Audio). Beide…, Klassennamen aus label_mapping.json oder id2label des Modells., Sammelt Dateien samt erwarteter Klasse. Unterstützt das Trainingslayout (Ordner…, Durchläuft ein Dataset und schreibt Ergebnisse + Kennzahlen. (+2 more)
 
-### Community 97 - "registry.ts"
-Cohesion: 0.10
-Nodes (26): DatasetInfo, audioClassificationPlugin, AudioTestPlugin(), canvasPlugin, DatasetType, PairingStatus, GenericTestPanel(), GenericTestPanelProps (+18 more)
+### Community 97 - "types.ts"
+Cohesion: 0.18
+Nodes (14): DatasetFileManagerProps, DatasetInfo, audioClassificationPlugin, AudioTestPlugin(), DatasetType, PairingStatus, GenericTestPanel(), GenericTestPanelProps (+6 more)
 
-### Community 98 - "useAISettings"
-Cohesion: 0.11
-Nodes (30): AutoMode, buildAutoSystemPrompt(), parseAutoAction(), anchorReplace(), applyAllEdits(), applyEdit(), collapseSpaces(), extractFullPythonCode() (+22 more)
+### Community 98 - "DevTrainPanel.tsx"
+Cohesion: 0.05
+Nodes (83): AutoAction, AutoMode, buildAutoSystemPrompt(), parseAutoAction(), anchorReplace(), applyAllEdits(), applyEdit(), CodeEdit (+75 more)
 
 ### Community 131 - "Plugin"
 Cohesion: 0.22
 Nodes (6): Plugin, Any, Path, TestConfig, Wählt die richtige Datei aus einem Dataset-Verzeichnis. WICHTIG: Bei…, Lädt Samples aus JSON/JSONL/CSV/Parquet in eine einheitliche Struktur.
 
 ### Community 132 - "MessageProtocol"
-Cohesion: 0.11
-Nodes (20): build_training_arguments(), cap_eval_dataset(), classification_scores(), device_name(), _epoch_number(), final_metrics(), optimizer_name(), progress_callback() (+12 more)
-
-### Community 133 - "DatasetUpload.tsx"
-Cohesion: 0.13
-Nodes (17): DatasetTypeIcon(), ICON_MAP, DatasetCard(), DatasetCardProps, DatasetStructureGuide(), DatasetUpload(), DeleteDialog(), FilterOptions (+9 more)
+Cohesion: 0.10
+Nodes (21): build_training_arguments(), cap_eval_dataset(), classification_scores(), device_name(), _epoch_number(), final_metrics(), optimizer_name(), progress_callback() (+13 more)
 
 ### Community 134 - "TestConfig"
 Cohesion: 0.20
@@ -624,57 +586,33 @@ Nodes (8): class, description, entry, input_type, name, output_format, task_type
 Cohesion: 0.19
 Nodes (7): _detect_columns(), Plugin, Path, TrainingConfig, Sequenzklassifikations-Plugin für XLM-RoBERTa & ähnliche Encoder., Prüft Modell-Architektur und initialisiert Tokenizer., Erkennt automatisch Text- und Label-Spalte.
 
-### Community 143 - "AppContextMenu.tsx"
-Cohesion: 0.21
-Nodes (12): openAICoach(), AppContextMenu(), MenuState, NAV_ITEMS, Row, Section, collectContextMenuActions(), ContextMenuAction (+4 more)
-
 ### Community 150 - "ModelLibrary.tsx"
-Cohesion: 0.21
-Nodes (11): CanvasDesign, deleteBtn, deleteModelDesign(), formatDate(), iconBtn, loadBtn, loadModelDesign(), ModelLibrary() (+3 more)
+Cohesion: 0.09
+Nodes (25): CanvasModelMetadata, exportCanvasNetworkToModelLibrary(), buildCanvasGraphIR(), CANVAS_IR_VERSION, CanvasGraphIR, getCategory(), getParams(), IRDataSpec (+17 more)
 
 ### Community 151 - "train_engine/plugins/hf_image_classification/plugin.py"
 Cohesion: 0.20
 Nodes (6): _class_dirs(), _images_in(), Plugin, Path, TrainingConfig, Image Classification (HuggingFace) ================================== Trainiert…
 
 ### Community 152 - "make_plugin"
-Cohesion: 0.08
-Nodes (13): YOLO Object Detection Plugin — task_type: 'detect, Abbruch aus der Oberflaeche. Diese Klasse erbt nicht von TrainPlugin, wo stop()…, FakeTrainer, make_plugin(), MetricsTest, Prueft Startgewichte, Metriken und Split-Groessen des YOLO-Plugins.…, Regression: Analyse zeigte "n_train 0 / n_val 0" trotz 463/116 Bildern., Regression: "Stoppen" blieb wirkungslos, das Training lief zu Ende. Die Engine… (+5 more)
+Cohesion: 0.09
+Nodes (12): Abbruch aus der Oberflaeche. Diese Klasse erbt nicht von TrainPlugin, wo stop()…, FakeTrainer, make_plugin(), MetricsTest, Prueft Startgewichte, Metriken und Split-Groessen des YOLO-Plugins.…, Regression: Analyse zeigte "n_train 0 / n_val 0" trotz 463/116 Bildern., Regression: "Stoppen" blieb wirkungslos, das Training lief zu Ende. Die Engine…, Nachbau der Ultralytics-Trainer-Attribute, die der Callback liest. (+4 more)
 
 ### Community 153 - "python_env.rs"
 Cohesion: 0.38
 Nodes (10): Candidate, candidates(), fallback(), parse_version(), resolve_python(), resolve_python_with_version(), Option, String (+2 more)
 
 ### Community 154 - "ir.py"
-Cohesion: 0.25
-Nodes (10): IREdge, IRNode, IRTrainingSpec, Canvas Graph IR — parsed from config.canvas_graph JSON., build_model_from_graph(), CanvasGraphIR, build_model_from_graph — runtime nn.Module from IR., Canvas Model Training Plugin — Runtime Graph IR Trainiert Modelle aus… (+2 more)
-
-### Community 155 - "synapseDebugLogger.ts"
-Cohesion: 0.24
-Nodes (10): buildEntry(), DebugCallEntry, DebugHandle, debugLogRequest(), estimateTokens(), findDuplicates(), flush(), isEnabled() (+2 more)
-
-### Community 156 - "CanvasGraphIR"
-Cohesion: 0.23
-Nodes (7): get_dataloaders(), _infer_input_features(), CanvasGraphIR, DataLoader, DataLoaders for Canvas IR training., CanvasGraphIR, Module
+Cohesion: 0.16
+Nodes (16): get_dataloaders(), _infer_input_features(), CanvasGraphIR, DataLoader, DataLoaders for Canvas IR training., CanvasGraphIR, IREdge, IRNode (+8 more)
 
 ### Community 157 - "user_manager.rs"
 Cohesion: 0.57
 Nodes (7): is_user_logged_in(), login_user(), logout_user(), Result, State, String, UserSession
 
-### Community 158 - "synapseGraphContext.ts"
-Cohesion: 0.64
-Nodes (9): buildAttentionShapeContext(), buildConvDenseShapeContext(), buildConvShapeContext(), buildDenseShapeContext(), buildNormShapeContext(), buildSynapseGraphContext(), nodeParams(), nodeType() (+1 more)
-
-### Community 159 - "canvasModelBridge.ts"
-Cohesion: 0.31
-Nodes (4): CanvasModelMetadata, CanvasGraphIR, LayerConfig, ModelGraphConfig
-
 ### Community 160 - "parse_ir"
 Cohesion: 0.43
 Nodes (4): IRDataSpec, is_non_empty_ir(), parse_ir(), Any
-
-### Community 161 - "Target"
-Cohesion: 0.67
-Nodes (3): Target, description, oneOf
 
 ### Community 162 - "Identifier"
 Cohesion: 0.67
@@ -688,14 +626,6 @@ Nodes (3): Target, description, oneOf
 Cohesion: 0.32
 Nodes (6): _compatible(), CanvasGraphIR, Exception, Backend shape validation for Canvas IR., ShapeValidationError, validate_ir_shapes()
 
-### Community 167 - "GradientChatInput.tsx"
-Cohesion: 0.60
-Nodes (4): darkenHex(), GradientChatInput, GradientChatInputProps, hexLuminance()
-
-### Community 168 - "run_op"
-Cohesion: 0.40
-Nodes (4): Any, Tensor, Functional graph ops (no registered parameters)., run_op()
-
 ### Community 169 - "Identifier"
 Cohesion: 0.67
 Nodes (3): Identifier, description, oneOf
@@ -705,7 +635,7 @@ Nodes (3): Identifier, description, oneOf
   src/components/synapse/ai/INTEGRATION_GUIDE.md · relation: calls
 
 ## Knowledge Gaps
-- **684 isolated node(s):** `name`, `private`, `license`, `version`, `type` (+679 more)
+- **682 isolated node(s):** `name`, `private`, `license`, `version`, `type` (+677 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **15 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -714,14 +644,14 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **What is the exact relationship between `SynapseBuilder()` and `applyAutoFix()`?**
   _Edge tagged AMBIGUOUS (relation: calls) - confidence is low._
-- **Why does `useLanguage()` connect `useLanguage` to `TrainingPanel.tsx`, `DevTrainPanel.tsx`, `DatasetUpload.tsx`, `DevTestPanel.tsx`, `useTheme`, `AnalysisPanel.tsx`, `AppContextMenu.tsx`, `TrainingDashboard.tsx`, `LaboratoryPanel.tsx`, `ModelLibrary.tsx`, `Dashboard.tsx`, `plugins/datasetCompat.ts`, `SynapseBuilder.tsx`, `FloatingAICoach.tsx`, `AISettingsContext.tsx`, `LanguageContext.tsx`, `DiffViewer.tsx`, `OpenLibraryModal.tsx`, `nodeTypes.ts`, `SynapseAIPanel.tsx`, `graphIR.ts`, `detectPlugin`, `SynapseAICoachPanel.tsx`, `ModelManager.tsx`, `useAISettings`?**
-  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `useLanguage()` connect `useLanguage` to `Settings.tsx`, `DevTrainPanel.tsx`, `TrainingPanel.tsx`, `OpenLibraryModal.tsx`, `SynapseAICoachPanel.tsx`, `SynapseAIPanel.tsx`, `nodeTypes.ts`, `AnalysisPanel.tsx`, `TrainingConsole.tsx`, `TrainingDashboard.tsx`, `FloatingAICoach.tsx`, `LaboratoryPanel.tsx`, `ModelLibrary.tsx`, `Dashboard.tsx`, `plugins/datasetCompat.ts`, `SynapseBuilder.tsx`, `DatasetUpload.tsx`, `detectPlugin`?**
+  _High betweenness centrality (0.027) - this node is a cross-community bridge._
 - **Why does `AppState` connect `dataset_manager.rs` to `training_manager.rs`, `Database`, `analysis_manager.rs`, `String`, `model_manager.rs`, `user_manager.rs`, `main.rs`?**
-  _High betweenness centrality (0.026) - this node is a cross-community bridge._
-- **Why does `SynapseAICoach` connect `SynapseAICoachPanel.tsx` to `Manager (Cloudflare Worker + D1)`, `autoFixHelper.ts`?**
-  _High betweenness centrality (0.016) - this node is a cross-community bridge._
+  _High betweenness centrality (0.024) - this node is a cross-community bridge._
+- **Why does `SynapseAICoach` connect `SynapseAICoachPanel.tsx` to `Manager (Cloudflare Worker + D1)`?**
+  _High betweenness centrality (0.017) - this node is a cross-community bridge._
 - **What connects `name`, `private`, `license` to the rest of the system?**
-  _684 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _682 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `dataset_manager.rs` be split into smaller, more focused modules?**
   _Cohesion score 0.07304964539007092 - nodes in this community are weakly interconnected._
 - **Should `training_manager.rs` be split into smaller, more focused modules?**

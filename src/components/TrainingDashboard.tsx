@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { TrainingConfig } from './TrainingPanel';
 import { hiddenTrainingFieldsForTaskType } from '../plugins/registry';
+import { classifyError, type ErrorCategory } from '../utils/errorClassify';
 import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -65,72 +66,16 @@ export function getSession(id: string): TrainingSession | undefined {
 
 // ── Error Analysis ────────────────────────────────────────────────────────
 
-type ErrorCategory = 'memory' | 'dataset' | 'labels' | 'architecture' | 'packages' | 'network' | 'cuda' | 'config' | 'code' | 'unknown';
-
+// Kategorie kommt aus der gemeinsamen classifyError-Quelle (src/utils/
+// errorClassify), damit Dashboard und Dev-Train denselben Fehler gleich
+// einordnen. Nur Titel/Hinweis bleiben hier (eigener Locale-Namespace).
 export function analyzeError(errorMsg: string, t: (key: string) => string): { category: ErrorCategory; title: string; hint: string } {
-  const e = (errorMsg ?? '').toLowerCase();
-  if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
-    return { category: 'memory', title: t('trainingDashboard.errorRecovery.memoryCategoryTitle'), hint: t('trainingDashboard.errorRecovery.memoryCategoryHint') };
-
-  // Label-/Klassenprobleme VOR der Geräte-Prüfung: PyTorch meldet den
-  // Regressions-Fallback bei num_labels=1 als "mse_loss_out_mps: only defined
-  // for floating types". Wer nur auf "mps" prüft, verkauft dem Nutzer einen
-  // Datenfehler als Hardwareproblem und schickt ihn zu FP16/CPU-Einstellungen.
-  if (e.includes('mse_loss') || e.includes('only defined for floating types')
-      || e.includes('label-spalte') || e.includes('label column')
-      || e.includes('num_labels') || e.includes('nur einen einzigen wert'))
-    return { category: 'labels', title: t('trainingDashboard.errorRecovery.labelsCategoryTitle'), hint: t('trainingDashboard.errorRecovery.labelsCategoryHint') };
-
-  if (e.includes('wird noch nicht unterstützt') || e.includes('not yet supported')
-      || e.includes('modell-architektur') || e.includes('model architecture')
-      || e.includes('unsupported architecture'))
-    return { category: 'architecture', title: t('trainingDashboard.errorRecovery.architectureCategoryTitle'), hint: t('trainingDashboard.errorRecovery.architectureCategoryHint') };
-
-  // Geräte-Fehler nur bei echten Geräte-Meldungen, nicht bei jedem Vorkommen
-  // von "mps"/"device" irgendwo in einem Traceback.
-  if (e.includes('cuda error') || e.includes('cuda unavailable') || e.includes('no cuda')
-      || e.includes('cuda is not available') || e.includes('mps not available')
-      || e.includes('mps backend') || e.includes('device-side assert')
-      || e.includes('no gpu') || e.includes('device not found')
-      || /device .*(unavailable|not available|mismatch)/.test(e))
-    return { category: 'cuda', title: t('trainingDashboard.errorRecovery.cudaCategoryTitle'), hint: t('trainingDashboard.errorRecovery.cudaCategoryHint') };
-  // Netzwerk- und Zertifikatsfehler VOR der Paket-Pruefung: torchvision laedt
-  // vortrainierte Gewichte nach, und ein SSL-Fehler dabei enthaelt das Wort
-  // "torchvision" — die App riet daraufhin zu "pip install", was nichts half.
-  if (e.includes('certificate_verify_failed') || e.includes('certificate verify failed')
-      || e.includes('unable to get local issuer certificate') || e.includes('ssl:')
-      || e.includes('sslcertverificationerror') || e.includes('urlopen error')
-      || e.includes('max retries exceeded') || e.includes('connection refused')
-      || e.includes('connectionerror') || e.includes('name or service not known')
-      || e.includes('temporary failure in name resolution') || e.includes('proxyerror'))
-    return { category: 'network', title: t('trainingDashboard.errorRecovery.networkCategoryTitle'), hint: t('trainingDashboard.errorRecovery.networkCategoryHint') };
-
-  if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module')
-      || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
-    return { category: 'packages', title: t('trainingDashboard.errorRecovery.packagesCategoryTitle'), hint: t('trainingDashboard.errorRecovery.packagesCategoryHint') };
-
-  // Python-Fehlertypen VOR der Dataset-Pruefung. Ein Traceback aus einem
-  // Dev-Train-Script nennt fast immer DATASET_PATH — vorher wurde deshalb
-  // jeder NameError als "Dataset / Pfad Fehler" ausgegeben und der Nutzer
-  // suchte den Fehler im Dataset statt in seinem Code.
-  if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('nameerror')
-      || e.includes('typeerror') || e.includes('attributeerror') || e.includes('keyerror')
-      || e.includes('indexerror') || e.includes('unboundlocalerror')
-      || e.includes('zerodivisionerror') || e.includes('recursionerror'))
-    return { category: 'code', title: t('trainingDashboard.errorRecovery.codeCategoryTitle'), hint: t('trainingDashboard.errorRecovery.codeCategoryHint') };
-
-  // Nur echte Datei-/Dataset-Meldungen. Ein blosses "path" irgendwo im
-  // Traceback reicht nicht — das steht in jedem Python-Stacktrace.
-  if (e.includes('filenotfounderror') || e.includes('file not found')
-      || e.includes('no such file') || e.includes('dataset')
-      || e.includes('existiert nicht') || e.includes('keine daten-dateien')
-      || e.includes('permission denied') || e.includes('isadirectoryerror'))
-    return { category: 'dataset', title: t('trainingDashboard.errorRecovery.datasetCategoryTitle'), hint: t('trainingDashboard.errorRecovery.datasetCategoryHint') };
-
-  // \b-Grenzen: sonst matchen deutsche Wörter wie "E**inf**ach" oder "Fi**nan**zen"
-  if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
-    return { category: 'config', title: t('trainingDashboard.errorRecovery.configCategoryTitle'), hint: t('trainingDashboard.errorRecovery.configCategoryHint') };
-  return { category: 'unknown', title: t('trainingDashboard.errorRecovery.unknownCategoryTitle'), hint: t('trainingDashboard.errorRecovery.unknownCategoryHint') };
+  const category = classifyError(errorMsg);
+  return {
+    category,
+    title: t(`trainingDashboard.errorRecovery.${category}CategoryTitle`),
+    hint:  t(`trainingDashboard.errorRecovery.${category}CategoryHint`),
+  };
 }
 
 // ── Big Loss Chart ────────────────────────────────────────────────────────

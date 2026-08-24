@@ -46,6 +46,7 @@ interface DependencyStatus {
 interface GpuInfo {
   has_nvidia_gpu: boolean;
   cuda_available: boolean;
+  mps_available?: boolean;
   cuda_version?: string;
   gpu_name?: string;
   recommended_torch_index: string;
@@ -493,11 +494,15 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
                       cuda:  result.gpu_info.cuda_version ?? '?',
                       index: result.gpu_info.recommended_torch_index,
                     })
-                  : t('firstLaunch.preflight.gpuNone')}
+                  : result.gpu_info.mps_available
+                    ? t('firstLaunch.preflight.gpuMps')
+                    : t('firstLaunch.preflight.gpuNone')}
                 ok={true}
-                detail={!result.gpu_info.has_nvidia_gpu
-                  ? t('firstLaunch.preflight.gpuNoneHint')
-                  : undefined}
+                detail={result.gpu_info.has_nvidia_gpu
+                  ? undefined
+                  : result.gpu_info.mps_available
+                    ? t('firstLaunch.preflight.gpuMpsHint')
+                    : t('firstLaunch.preflight.gpuNoneHint')}
               />
 
               {/* Errors */}

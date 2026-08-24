@@ -35,6 +35,9 @@ pub struct GpuInfo {
     pub cuda_version: Option<String>,
     pub gpu_name: Option<String>,
     pub recommended_torch_index: String,  // z.B. "cu121" oder "cpu"
+    // Apple Silicon (MPS) — der Erststart-Check meldete sonst "CPU-Modus",
+    // obwohl das Training auf dem Mac ueber MPS die GPU nutzt.
+    #[serde(default)] pub mps_available: bool,
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -344,6 +347,7 @@ fn detect_gpu() -> GpuInfo {
         cuda_version: cuda_ver,
         gpu_name,
         recommended_torch_index,
+        mps_available: is_apple_silicon,
     }
 }
 

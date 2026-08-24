@@ -373,6 +373,8 @@
       "gpuFound": "GPU: {name} — CUDA {cuda} → torch+{index}",
       "gpuNone": "No NVIDIA GPU — CPU mode",
       "gpuNoneHint": "Training runs on the CPU, just slower. Apple Silicon (MPS) is supported.",
+      "gpuMps": "Apple Silicon GPU (MPS) — acceleration active",
+      "gpuMpsHint": "Training uses the Apple Silicon GPU via Metal (MPS) — much faster than CPU.",
       "errorsTitle": "Fix these before continuing:",
       "recheck": "Re-check",
       "continue": "Continue"
@@ -709,6 +711,18 @@
         "unknown": {
           "title": "Unknown Error",
           "hint": "Send the error to the FrameTrain team or use the AI assistant for analysis."
+        },
+        "labels": {
+          "title": "Label/class problem",
+          "hint": "The label column does not fit (e.g. only one value or wrong type). Check the classes in the dataset."
+        },
+        "architecture": {
+          "title": "Architecture not supported",
+          "hint": "This model architecture is not supported yet. Pick a compatible model."
+        },
+        "network": {
+          "title": "Network/certificate error",
+          "hint": "Download failed (network or SSL). Check your connection and try again."
         }
       }
     },

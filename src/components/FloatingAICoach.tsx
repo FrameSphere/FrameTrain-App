@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
@@ -732,6 +733,7 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const [isOpen, setIsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [view, setView] = useState<'chat' | 'chatList'>('chat');
+  useEscapeKey(() => setIsOpen(false), isOpen);
   // Automation-Modus: schaltet Training-Start/Stop-Tools frei (persistiert)
   const [automation, setAutomation] = useState<boolean>(() => {
     try { return localStorage.getItem('ft_coach_automation') === '1'; } catch { return false; }

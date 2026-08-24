@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import type { CodeEdit } from '../ai/codeEdits';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface DiffViewerProps {
   edits: CodeEdit[];
@@ -159,6 +160,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
   const totalAdded = edits.reduce((acc, e) => acc + countLines(e.replace), 0);
   const allApplied = edits.every(e => e.applied);
   const { t } = useLanguage();
+  useEscapeKey(onClose);
 
   useEffect(() => {
     setEdits(initialEdits);

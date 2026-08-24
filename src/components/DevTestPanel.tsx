@@ -17,6 +17,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI } from './TrainingPanel';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
@@ -135,6 +136,7 @@ function highlightPythonToHtml(code: string) {
 
 function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: boolean; defaultName: string; onSave: (name: string) => void; onClose: () => void; }) {
   const { t } = useLanguage();
+  useEscapeKey(onClose, isOpen);
   const [name, setName] = useState(defaultName);
   useEffect(() => { setName(defaultName); }, [defaultName]);
   if (!isOpen) return null;
@@ -166,6 +168,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
 
 function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { currentScript: string; onLoad: (s: SavedScript) => void; onClose: () => void; userId?: string; }) {
   const { t, language } = useLanguage();
+  useEscapeKey(onClose);
   const [scripts, setScripts] = useState<SavedScript[]>([]);
   const [saveName, setSaveName] = useState('');
   const [showSaveForm, setShowForm] = useState(false);
@@ -286,6 +289,7 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   // ── Session State ──────────────────────────────────────────────
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [showHistory, setShowHistory]           = useState(false);
+  useEscapeKey(() => setShowHistory(false), showHistory);
   const [isReadonly, setIsReadonly]             = useState(false);
   const [sessionTitle, setSessionTitle]         = useState('');
   const currentSessionIdRef = useRef<string | null>(null);
@@ -842,6 +846,7 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
   script: string; output: string; onClose: () => void; onSendToAI: (ctx: string) => void; isSending?: boolean;
 }) {
   const { t } = useLanguage();
+  useEscapeKey(onClose, isOpen);
   const [copied, setCopied] = useState(false);
   if (!isOpen) return null;
   const ctx = `[Dev Test Fehler]\n\nTitel: ${errorTitle}\n\nFehler: ${errorMessage}\n\nDetails: ${errorDetails}\n\nSkript:\n${script}\n\nAusgabe:\n${output}`;

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 interface UpdateInfo {
   latestVersion: string;
@@ -12,6 +13,7 @@ export function UpdateChecker() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const { t } = useLanguage();
+  useEscapeKey(() => setShowDialog(false), showDialog);
 
   useEffect(() => {
     checkForUpdates();

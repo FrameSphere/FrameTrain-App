@@ -32,6 +32,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { dateLocale } from '../utils/dateLocale';
 
 // ============ Types ============
@@ -241,6 +242,8 @@ function VersionsModal({
   const [loading, setLoading] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportingVersion, setExportingVersion] = useState<ModelVersion | null>(null);
+  // Export-Overlay zuerst, sonst der ganze Versions-Dialog.
+  useEscapeKey(() => (showExportModal ? setShowExportModal(false) : onClose()));
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const { t, language } = useLanguage();
 

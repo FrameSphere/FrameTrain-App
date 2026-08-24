@@ -21,6 +21,7 @@ import { useLanguage, type Language } from '../contexts/LanguageContext';
 import DatasetFileManager from './DatasetFileManager';
 import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
 import DatasetTypeIcon from './DatasetTypeIcon';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
 import { detectPlugin } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
@@ -462,6 +463,9 @@ export default function DatasetUpload() {
   const [showHalveModal, setShowHalveModal] = useState(false);
   const [datasetToHalve, setDatasetToHalve] = useState<DatasetInfo | null>(null);
   const [halving, setHalving] = useState(false);
+  useEscapeKey(() => setShowImportModal(false), showImportModal);
+  useEscapeKey(() => setShowSplitModal(false), showSplitModal);
+  useEscapeKey(() => setShowHalveModal(false), showHalveModal);
   // Halbieren: train/val/test-Struktur an beide Hälften vererben (Standard: an)
   const [inheritSplits, setInheritSplits] = useState(true);
 

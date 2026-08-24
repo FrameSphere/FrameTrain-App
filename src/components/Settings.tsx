@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { buildPageContext, kv } from '../ai/coachContext';
@@ -92,6 +93,7 @@ function useStoredTickets(userId: string) {
 
 function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () => void }) {
   const { t } = useLanguage();
+  useEscapeKey(onClose);
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-red-500/20 max-w-sm w-full p-6 space-y-4">
