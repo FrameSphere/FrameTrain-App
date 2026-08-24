@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   FileText, Trash2, Upload, Search, X, Eye,
   File, Loader2, RefreshCw, Tag, ArrowRight,
-  FolderOpen, Edit3, Plus, Check, Save,
+  FolderOpen, Edit3, Plus, Check, Save, AlertTriangle,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -271,7 +271,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
             <h2 className="text-xl font-bold text-white">{datasetName}</h2>
             {datasetType && PAIRED_TYPES.includes(datasetType) && (
               <div className="mt-2 flex items-start gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
-                <span className="flex-shrink-0 mt-0.5">⚠️</span>
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                 <span>{t(`datasetFileManager.pairedHints.${datasetType}`)}</span>
               </div>
             )}

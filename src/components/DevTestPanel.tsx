@@ -7,7 +7,7 @@ import { listen } from '@tauri-apps/api/event';
 import {
   Play, Square, Loader2, Terminal, FolderOpen, FileCode,
   FolderClosed, Bot, Send, Maximize2, Minimize2, X, Minus, Plus,
-  AlertCircle, CheckCircle,
+  AlertCircle, CheckCircle, XCircle,
   Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy,
   FlaskConical, ClipboardList,
   History, MessageSquarePlus, Globe,
@@ -849,7 +849,7 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-red-500/10 flex-shrink-0">
-          <div className="flex items-center gap-3"><span className="text-3xl">❌</span><div><h2 className="text-lg font-bold text-white">{t('devTestPanel.errorModal.title')}</h2><p className="text-sm text-red-300">{errorTitle}</p></div></div>
+          <div className="flex items-center gap-3"><XCircle className="w-7 h-7 text-red-400 flex-shrink-0" /><div><h2 className="text-lg font-bold text-white">{t('devTestPanel.errorModal.title')}</h2><p className="text-sm text-red-300">{errorTitle}</p></div></div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all"><X className="w-5 h-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-4">

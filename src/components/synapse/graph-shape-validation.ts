@@ -708,8 +708,9 @@ function validateNodeParameters(nodeType: string, params: Record<string, any>): 
  * Human-readable error message
  */
 export function formatValidationError(error: ValidationError): string {
+  // Kein Emoji in der Log-Ausgabe — schlichter Text-Glyph statt 💡.
   return `[${error.severity.toUpperCase()}] ${error.message}${
-    error.suggestion ? `\n💡 Suggestion: ${error.suggestion}` : ""
+    error.suggestion ? `\n→ Suggestion: ${error.suggestion}` : ""
   }`;
 }
 

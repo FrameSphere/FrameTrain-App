@@ -83,6 +83,22 @@ export function detectPlugin(
 
 
 /**
+ * Liefert die für einen Task-Typ ausgeblendeten Trainingsfelder.
+ * Das Eingabeformular (TrainingPanel) verbirgt anhand von
+ * `plugin.hiddenTrainingFields` bereits die irrelevanten Parameter; der
+ * Konfig-Block im Trainings-Dashboard bekam diese Information nie und zeigte
+ * darum z. B. "Max. Sequenzlänge" auch bei YOLO/Bildmodellen. Über den
+ * `task_type` aus der Trainingskonfiguration findet der Block hier dieselbe
+ * Liste und blendet konsistent aus.
+ */
+export function hiddenTrainingFieldsForTaskType(taskType?: string): string[] {
+  if (!taskType) return [];
+  const plugin = PLUGINS.find((p) => p.taskType === taskType);
+  return plugin?.hiddenTrainingFields ?? [];
+}
+
+
+/**
  * Sucht eine bekannte Architektur im Modellnamen, wenn keine config.json
  * vorliegt. Nur an Wortgrenzen, damit "bert" nicht in "albert" trifft.
  */

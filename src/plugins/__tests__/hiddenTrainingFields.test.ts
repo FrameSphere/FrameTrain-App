@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import yoloPlugin from '../yolo';
 import seq2seqPlugin from '../seq2seq';
-import { PLUGINS } from '../registry';
+import { PLUGINS, hiddenTrainingFieldsForTaskType } from '../registry';
 
 describe('hiddenTrainingFields', () => {
   it('YOLO blendet die Felder aus, die Ultralytics nicht kennt', () => {
@@ -34,5 +34,25 @@ describe('hiddenTrainingFields', () => {
       expect(hidden).not.toContain('batch_size');
       expect(hidden).not.toContain('learning_rate');
     }
+  });
+
+  // Der Konfig-Block im Trainings-Dashboard blendet ueber den task_type dieselben
+  // Felder aus wie das Eingabeformular — sonst stand "Max. Sequenzlaenge" auch
+  // bei YOLO/Bildmodellen im Block.
+  describe('hiddenTrainingFieldsForTaskType', () => {
+    it('liefert fuer YOLO (task_type "detect") die YOLO-Ausblendliste', () => {
+      const hidden = hiddenTrainingFieldsForTaskType('detect');
+      expect(hidden).toEqual(yoloPlugin.hiddenTrainingFields ?? []);
+      expect(hidden).toContain('max_seq_length');
+    });
+
+    it('liefert fuer Seq2Seq eine leere Liste', () => {
+      expect(hiddenTrainingFieldsForTaskType(seq2seqPlugin.taskType)).toHaveLength(0);
+    });
+
+    it('liefert fuer unbekannten oder fehlenden task_type eine leere Liste', () => {
+      expect(hiddenTrainingFieldsForTaskType(undefined)).toHaveLength(0);
+      expect(hiddenTrainingFieldsForTaskType('gibt-es-nicht')).toHaveLength(0);
+    });
   });
 });

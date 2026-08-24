@@ -640,9 +640,9 @@
       "lossHistory": "Loss-Verlauf",
       "outputLabel": "Ausgabe",
       "waitingForOutput": "Warte auf Python-Output…",
-      "trainingStarted": "🚀 Training gestartet (Job: {id})...\n",
-      "trainingComplete": "✅ Training abgeschlossen!",
-      "trainingStopped": "⏹️  Training gestoppt."
+      "trainingStarted": "Training gestartet (Job: {id})...\n",
+      "trainingComplete": "Training abgeschlossen!",
+      "trainingStopped": "Training gestoppt."
     },
     "saveDialog": {
       "title": "Skript speichern",
@@ -695,7 +695,7 @@
     },
     "errorModal": {
       "title": "Training fehlgeschlagen",
-      "hintLabel": "💡 Hinweis:",
+      "hintLabel": "Hinweis:",
       "errorLabel": "Fehler-Meldung:",
       "detailsLabel": "Details:",
       "copyButton": "Fehler kopieren",
@@ -707,31 +707,31 @@
       "closeButton": "Schließen",
       "errorCategories": {
         "memory": {
-          "title": "🧠 RAM/GPU Überlauf",
+          "title": "RAM/GPU Überlauf",
           "hint": "Batch-Größe reduzieren, FP16 oder LoRA aktivieren, Gradient Checkpointing einschalten."
         },
         "cuda": {
-          "title": "⚙️ Hardware/Device Fehler",
+          "title": "Hardware/Device Fehler",
           "hint": "Gerät nicht verfügbar oder inkompatibel. Versuche mit CPU oder anderen Geräte-Einstellungen."
         },
         "dataset": {
-          "title": "📁 Dataset/Pfad Fehler",
+          "title": "Dataset/Pfad Fehler",
           "hint": "Dataset-Pfad prüfen, Dateirechte überprüfen, Dataset existiert noch?"
         },
         "packages": {
-          "title": "📦 Fehlende Python-Pakete",
+          "title": "Fehlende Python-Pakete",
           "hint": "Fehlende Dependencies. Prüfe im Skript welche Module importiert werden."
         },
         "config": {
-          "title": "📊 Numerischer Fehler (NaN/Inf)",
+          "title": "Numerischer Fehler (NaN/Inf)",
           "hint": "Learning Rate zu hoch? Gradient Clipping (max_grad_norm) aktivieren, LR reduzieren."
         },
         "code": {
-          "title": "🐛 Code-Fehler",
+          "title": "Code-Fehler",
           "hint": "Syntax-, Typ- oder Namensfehler. Der KI-Assistent kann dir helfen."
         },
         "unknown": {
-          "title": "❓ Unbekannter Fehler",
+          "title": "Unbekannter Fehler",
           "hint": "Den Fehler an das FrameTrain-Team senden oder den KI-Assistenten zur Analyse nutzen."
         }
       }
@@ -936,9 +936,9 @@
       "outputLabel": "Ausgabe",
       "clearButton": "Löschen",
       "waitingForOutput": "Warte auf Python-Output…",
-      "testStarted": "🚀 Test gestartet…",
-      "testComplete": "✅ Test abgeschlossen!",
-      "testStopped": "⏹️  Test gestoppt.",
+      "testStarted": "Test gestartet…",
+      "testComplete": "Test abgeschlossen!",
+      "testStopped": "Test gestoppt.",
       "exitCodeError": "Prozess beendet mit Exit-Code {code}",
       "complete": "✓ Test abgeschlossen.",
       "errorPrefix": "[Fehler]",
@@ -1439,7 +1439,7 @@
       "inputPlaceholder": "Frag mich alles zum Fehler… (Enter senden)",
       "aiUnavailableNote": "⚠ AI gerade nicht erreichbar — das war die regelbasierte Schnell-Antwort. Mit ↻ erneut versuchen.",
       "suggestedActionsLabel": "VORGESCHLAGENE AKTIONEN:",
-      "inspectOnlyNote": "ℹ️ Nur zur Information - keine automatische Änderung",
+      "inspectOnlyNote": "Nur zur Information - keine automatische Änderung",
       "applyButton": "Anwenden",
       "footerHint": "Stell mir jede Frage zum Fehler — ich antworte mit vollem Kontext zu Training und Graph."
     }
@@ -1844,14 +1844,14 @@
       "modelMissing": "❌ Modell: (nicht gewählt) → Wähle aus Dropdown",
       "modelSelected": "✓ Modell: {name} ({type})",
       "versionSelected": "✓ Version: {name} (v{version})",
-      "versionMissing": "⚠️ Version: (nicht gewählt)",
+      "versionMissing": "⚠ Version: (nicht gewählt)",
       "pluginSelected": "✓ Plugin: {name} ({task})",
-      "pluginUnsupported": "⚠️ Plugin: Nicht unterstützt",
+      "pluginUnsupported": "⚠ Plugin: Nicht unterstützt",
       "datasetMissing": "❌ Dataset: (nicht gewählt) → Wähle aus Dropdown",
       "datasetSelected": "✓ Dataset: {name}",
       "datasetStatus": "  Status: {status}",
       "datasetSplit": "✓ Split (Train/Val/Test)",
-      "datasetUnsplit": "⚠️ Nicht aufgeteilt",
+      "datasetUnsplit": "⚠ Nicht aufgeteilt",
       "trainingModeTitle": "--- TRAINING MODE ---",
       "trainingMode": "Mode: {mode}",
       "trainingStatusTitle": "--- TRAINING STATUS ---",
@@ -1861,7 +1861,7 @@
       "trainLoss": "Train Loss: {value}",
       "valLoss": "Val Loss: {value}",
       "progress": "Progress: {value}",
-      "error": "⚠️ Error: {error}",
+      "error": "⚠ Error: {error}",
       "readyTitle": "--- BEREIT ZUM TRAINING ---",
       "readyBody": "(Kein aktives Training)",
       "layoutTitle": "--- UI LAYOUT ---",
@@ -1876,9 +1876,9 @@
       "layoutMiddleLora": "  • ▼ LoRA (wenn enabled): Target Modules, Rank, Alpha",
       "layoutMiddleInfo": "  • Info Box: Speicheranforderung, GPU-Kompatibilität",
       "layoutBottom": "**UNTEN (Actions):**",
-      "layoutBottomStart": "  • 🚀 \"Training starten\" (rechts, Hauptbutton - grün wenn bereit)",
-      "layoutBottomDashboard": "  • 📊 \"Dashboard\" Toggle/Button",
-      "layoutBottomHistory": "  • 📋 Training History Link",
+      "layoutBottomStart": "  • \"Training starten\" (rechts, Hauptbutton - grün wenn bereit)",
+      "layoutBottomDashboard": "  • \"Dashboard\" Toggle/Button",
+      "layoutBottomHistory": "  • Training History Link",
       "availableActions": "--- VERFÜGBARE AKTIONEN ---",
       "actionPickModel": "1. Öffne [Modell Dropdown] oben links → wähle Modell",
       "actionPickDataset": "2. Öffne [Dataset Dropdown] oben Mitte → wähle Dataset",
@@ -1888,9 +1888,9 @@
       "actionOpenDataset": "2. Öffne Dataset \"{name}\"",
       "actionSplitDataset": "3. Klick \"Dataset aufteilen\" → konfiguriere Train/Val/Test",
       "actionAdjustConfig": "1. Passe Config an (optional): Öffne ▼ Sections in der Mitte",
-      "actionStartTraining": "2. Klick 🚀 \"Training starten\" unten rechts",
+      "actionStartTraining": "2. Klick \"Training starten\" unten rechts",
       "actionDashboardOpens": "3. Dashboard öffnet sich automatisch",
-      "actionMonitor": "1. Überwache: Schaue auf 📊 Dashboard für Live-Logs & Loss-Charts",
+      "actionMonitor": "1. Überwache: Schaue auf Dashboard für Live-Logs & Loss-Charts",
       "actionPauseStop": "2. Kann während Training pausiert/gestoppt werden (Buttons im Dashboard)"
     }
   },
@@ -2665,10 +2665,10 @@
       "title": "Modell exportiert!",
       "description": "ist jetzt in der FrameTrain-Bibliothek.",
       "nextStepsTitle": "Was passiert als nächstes:",
-      "step1": "1️⃣ Training-Seite öffnen",
-      "step2": "2️⃣ Modell wählen → {name}",
-      "step3": "3️⃣ Dataset hinzufügen & Training starten",
-      "step4": "4️⃣ Nach Training: model.pt erscheint in Versionen",
+      "step1": "1. Training-Seite öffnen",
+      "step2": "2. Modell wählen → {name}",
+      "step3": "3. Dataset hinzufügen & Training starten",
+      "step4": "4. Nach Training: model.pt erscheint in Versionen",
       "confirmButton": "Verstanden"
     }
   },

@@ -10,6 +10,7 @@ import {
   AlertCircle, CheckCircle, TrendingDown, BarChart3, Zap,
   Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy,
   History, MessageSquarePlus, Globe,
+  MemoryStick, Database, Package, Bug, HelpCircle,
 } from 'lucide-react';
 import OpenLibraryModal from './OpenLibraryModal';
 import { useTheme } from '../contexts/ThemeContext';
@@ -76,26 +77,34 @@ function calculateAffectedLines(script: string, edit: CodeEdit): HighlightedLine
 
 type ErrorCategory = 'memory' | 'dataset' | 'packages' | 'cuda' | 'code' | 'config' | 'unknown';
 
-function analyzeError(errorMsg: string): {
-  category: ErrorCategory;
-  icon: string;
-} {
+function analyzeError(errorMsg: string): { category: ErrorCategory } {
   const e = (errorMsg ?? '').toLowerCase();
   if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
-    return { category: 'memory', icon: '🧠' };
+    return { category: 'memory' };
   if (e.includes('cuda') || e.includes('mps') || e.includes('device'))
-    return { category: 'cuda', icon: '⚙️' };
+    return { category: 'cuda' };
   if (e.includes('dataset') || e.includes('file not found') || e.includes('no such file') || e.includes('path'))
-    return { category: 'dataset', icon: '📁' };
+    return { category: 'dataset' };
   if (e.includes('modulenotfounderror') || e.includes('importerror') || e.includes('no module named')
       || e.includes('torchvision') || e.includes('versionskonflikt') || e.includes('version conflict'))
-    return { category: 'packages', icon: '📦' };
+    return { category: 'packages' };
   if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
-    return { category: 'config', icon: '📊' };
+    return { category: 'config' };
   if (e.includes('syntaxerror') || e.includes('indentationerror') || e.includes('typeerror') || e.includes('attributeerror') || e.includes('nameerror'))
-    return { category: 'code', icon: '🐛' };
-  return { category: 'unknown', icon: '❓' };
+    return { category: 'code' };
+  return { category: 'unknown' };
 }
+
+// Kein Emoji im Fehler-Modal — lucide-Icon je Fehlerkategorie.
+const ERROR_CATEGORY_ICON: Record<ErrorCategory, React.ReactNode> = {
+  memory:   <MemoryStick className="w-7 h-7 text-red-400" />,
+  cuda:     <Zap className="w-7 h-7 text-amber-400" />,
+  dataset:  <Database className="w-7 h-7 text-blue-400" />,
+  packages: <Package className="w-7 h-7 text-purple-400" />,
+  config:   <BarChart3 className="w-7 h-7 text-orange-400" />,
+  code:     <Bug className="w-7 h-7 text-pink-400" />,
+  unknown:  <HelpCircle className="w-7 h-7 text-gray-400" />,
+};
 
 // ── Error Modal (Dev Train) ───────────────────────────────────────────────
 
@@ -143,7 +152,7 @@ function DevTrainErrorModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-red-500/10 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="text-3xl">{analysis.icon}</div>
+            <div className="flex-shrink-0">{ERROR_CATEGORY_ICON[analysis.category]}</div>
             <div>
               <h2 className="text-lg font-bold text-white">{t('devTrainPanel.errorModal.title')}</h2>
               <p className="text-sm text-red-300">{analysisTitle}</p>
@@ -1661,7 +1670,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       }
       setRunning(false);
       setJob(j => j ? { ...j, status: 'failed', error: d?.error ?? 'Fehler' } : null);
-      setOutput(o => o + '\n❌ ' + (d?.error ?? 'Fehler') + (d?.details ? '\n' + d.details : ''));
+      setOutput(o => o + '\n[Fehler] ' + (d?.error ?? 'Fehler') + (d?.details ? '\n' + d.details : ''));
       invoke('disable_prevent_sleep').catch(() => {});
       
       // Error-Modal öffnen

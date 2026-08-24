@@ -733,6 +733,13 @@ function ScriptCard({
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 text-emerald-300 text-[9px] font-bold flex-shrink-0">
                 <ShieldCheck className="w-2.5 h-2.5" /> Verified
               </span>
+            ) : isRejected(script) ? (
+              // Abgelehnte Skripte muessen auch in der Liste als "Abgelehnt"
+              // erkennbar sein, nicht bloss als "Ungeprueft" — die Detailansicht
+              // zeigte es schon rot, die Karte hinkte hinterher.
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[9px] font-bold flex-shrink-0">
+                <ShieldAlert className="w-2.5 h-2.5" /> {t('openLibrary.rejected')}
+              </span>
             ) : (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400/70 text-[9px] flex-shrink-0">
                 <ShieldAlert className="w-2.5 h-2.5" /> {t('openLibrary.unverified')}

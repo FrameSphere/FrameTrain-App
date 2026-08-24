@@ -10,7 +10,7 @@ import {
   HardDrive, Cloud, CheckCircle, Loader2, Database,
   Calendar, ExternalLink, X, RefreshCw, ChevronDown,
   Scissors, Layers, FileText, Filter, AlertTriangle, AlertCircle,
-  Zap, Heart, Info,
+  Zap, Heart, Info, Target, Folder, Mic, FolderTree,
 } from 'lucide-react';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { useTheme } from '../contexts/ThemeContext';
@@ -20,6 +20,7 @@ import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '.
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import DatasetFileManager from './DatasetFileManager';
 import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
+import DatasetTypeIcon from './DatasetTypeIcon';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
 import { detectPlugin } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
@@ -137,7 +138,7 @@ function AnalysisPreview({ analysis, modelId }: AnalysisPreviewProps) {
     <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <span className="text-2xl leading-none flex-shrink-0">{typeMeta.icon}</span>
+          <DatasetTypeIcon icon={typeMeta.icon} className={`w-6 h-6 flex-shrink-0 ${typeMeta.color}`} />
           <div>
             <p className={`text-sm font-semibold ${typeMeta.color}`}>{typeMeta.label}</p>
             <p className="text-gray-500 text-xs">{t('datasetUpload.analysisPreview.confidenceLabel').replace('{confidence}', String(analysis.confidence)).replace('{count}', String(analysis.file_count))}</p>
@@ -211,13 +212,13 @@ function AnalysisPreview({ analysis, modelId }: AnalysisPreviewProps) {
 const STRUCTURE_TYPES = [
   {
     id: 'yolo',
-    icon: '🎯',
+    icon: <Target className="w-4 h-4" />,
     labelKey: 'yolo',
     color: 'text-orange-400',
     hintKey: 'yolo',
     hintColor: 'text-amber-400',
     tree: [
-      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '▸' },
       { text: 'images/',         indent: 1, bold: false, marker: '├─' },
       { text: 'foto1.jpg',       indent: 2, bold: false, marker: '│  ├─' },
       { text: 'foto2.jpg',       indent: 2, bold: false, marker: '│  └─' },
@@ -228,26 +229,26 @@ const STRUCTURE_TYPES = [
   },
   {
     id: 'flatfile',
-    icon: '📄',
+    icon: <FileText className="w-4 h-4" />,
     labelKey: 'flatfile',
     color: 'text-violet-400',
     hintKey: 'flatfile',
     hintColor: 'text-gray-400',
     tree: [
-      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '▸' },
       { text: 'train.jsonl',     indent: 1, bold: false, marker: '├─' },
       { text: 'val.jsonl',       indent: 1, bold: false, marker: '└─' },
     ],
   },
   {
     id: 'folderclass',
-    icon: '📁',
+    icon: <Folder className="w-4 h-4" />,
     labelKey: 'folderclass',
     color: 'text-blue-400',
     hintKey: 'folderclass',
     hintColor: 'text-gray-400',
     tree: [
-      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '▸' },
       { text: 'katze/',          indent: 1, bold: false, marker: '├─' },
       { text: 'bild1.jpg',       indent: 2, bold: false, marker: '│  └─' },
       { text: 'hund/',           indent: 1, bold: false, marker: '└─' },
@@ -256,13 +257,13 @@ const STRUCTURE_TYPES = [
   },
   {
     id: 'audio',
-    icon: '🎙️',
+    icon: <Mic className="w-4 h-4" />,
     labelKey: 'audio',
     color: 'text-cyan-400',
     hintKey: 'audio',
     hintColor: 'text-gray-400',
     tree: [
-      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '▸' },
       { text: 'aufnahme1.wav',   indent: 1, bold: false, marker: '├─' },
       { text: 'aufnahme1.txt',   indent: 1, bold: false, marker: '├─' },
       { text: 'aufnahme2.mp3',   indent: 1, bold: false, marker: '├─' },
@@ -271,13 +272,13 @@ const STRUCTURE_TYPES = [
   },
   {
     id: 'pascal',
-    icon: '🗂️',
+    icon: <FolderTree className="w-4 h-4" />,
     labelKey: 'pascal',
     color: 'text-yellow-400',
     hintKey: 'pascal',
     hintColor: 'text-gray-400',
     tree: [
-      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '📁' },
+      { text: 'mein-dataset/',   indent: 0, bold: true,  marker: '▸' },
       { text: 'images/',         indent: 1, bold: false, marker: '├─' },
       { text: 'bild1.jpg',       indent: 2, bold: false, marker: '│  └─' },
       { text: 'annotations/',    indent: 1, bold: false, marker: '└─' },
@@ -299,7 +300,7 @@ function DatasetStructureGuide() {
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-all"
       >
         <span className="flex items-center gap-2 text-sm text-gray-400">
-          <span className="text-base">📂</span>
+          <FolderOpen className="w-4 h-4" />
           {t('datasetUpload.structureGuide.toggleLabel')}
         </span>
         <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -1180,7 +1181,7 @@ export default function DatasetUpload() {
                     <div className="text-xs text-blue-300 space-y-0.5">
                       <p className="font-medium">{plugin.name}</p>
                       {preferredMeta && (
-                      <p>{t('datasetUpload.importModal.local.pluginPreferredType')} <span className={preferredMeta.color}>{preferredMeta.icon} {preferredMeta.label}</span></p>
+                      <p className="flex items-center gap-1">{t('datasetUpload.importModal.local.pluginPreferredType')} <span className={`inline-flex items-center gap-1 ${preferredMeta.color}`}><DatasetTypeIcon icon={preferredMeta.icon} className="w-3.5 h-3.5" /> {preferredMeta.label}</span></p>
                       )}
                       {supported && supported.length > 1 && (
                         <p className="text-blue-400/60">{t('datasetUpload.importModal.local.pluginAlsoCompatible')} {supported
@@ -1482,7 +1483,7 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       {/* Dataset-Typ Badge */}
       {typeMeta && dataset.dataset_type !== 'unknown' && (
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10">
-          <span className="text-base leading-none flex-shrink-0">{typeMeta.icon}</span>
+          <DatasetTypeIcon icon={typeMeta.icon} className={`w-4 h-4 flex-shrink-0 ${typeMeta.color}`} />
           <span className={`text-xs font-medium ${typeMeta.color}`}>{typeMeta.label}</span>
           {dataset.pairing_status && (
             <span className={`ml-auto text-xs ${dataset.pairing_status.is_paired ? 'text-emerald-400/70' : 'text-amber-400/70'}`}>

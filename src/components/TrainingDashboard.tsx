@@ -9,6 +9,7 @@ import {
   Database, MemoryStick, Bug, Rocket, Save, Info, XCircle,
 } from 'lucide-react';
 import type { TrainingConfig } from './TrainingPanel';
+import { hiddenTrainingFieldsForTaskType } from '../plugins/registry';
 import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -232,28 +233,34 @@ function ConfigSummary({ config, mode }: { config?: Partial<TrainingConfig>; mod
   if (!config) {
     return <p className="text-gray-600 text-xs italic">{t('trainingDashboard.config.notAvailable')}</p>;
   }
-  const rows: { label: string; value: string | number | boolean | undefined; color: string }[] = [
-    { label: t('trainingDashboard.config.epochs'),       value: config.epochs,                            color: 'text-emerald-400' },
-    { label: t('trainingDashboard.config.batchSize'),    value: config.batch_size,                        color: 'text-blue-400' },
-    { label: t('trainingDashboard.config.learningRate'), value: config.learning_rate?.toExponential(2),   color: 'text-purple-400' },
-    { label: t('trainingDashboard.config.maxSeqLen'),   value: config.max_seq_length,                    color: 'text-amber-400' },
-    { label: t('trainingDashboard.config.warmupRatio'),  value: config.warmup_ratio,                      color: 'text-cyan-400' },
-    { label: t('trainingDashboard.config.gradAccum'),    value: config.gradient_accumulation_steps,       color: 'text-pink-400' },
-    { label: t('trainingDashboard.config.optimizer'),     value: config.optimizer,                         color: 'text-emerald-400' },
-    { label: t('trainingDashboard.config.scheduler'),     value: config.scheduler,                         color: 'text-blue-400' },
-    { label: t('trainingDashboard.config.weightDecay'),  value: config.weight_decay,                      color: 'text-purple-400' },
-    { label: t('trainingDashboard.config.maxGradNorm'), value: config.max_grad_norm,                     color: 'text-amber-400' },
-    { label: t('trainingDashboard.config.dropout'),       value: config.dropout,                           color: 'text-cyan-400' },
-    { label: t('trainingDashboard.config.seed'),          value: config.seed,                              color: 'text-gray-300' },
-    { label: t('trainingDashboard.config.fp16'),          value: config.fp16 ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),             color: config.fp16 ? 'text-emerald-400' : 'text-gray-600' },
-    { label: t('trainingDashboard.config.bf16'),          value: config.bf16 ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),             color: config.bf16 ? 'text-emerald-400' : 'text-gray-600' },
-    { label: t('trainingDashboard.config.lora'),          value: config.use_lora ? `r=${config.lora_r}` : t('trainingDashboard.config.no'), color: config.use_lora ? 'text-violet-400' : 'text-gray-600' },
-    { label: t('trainingDashboard.config.qlora'),  value: config.load_in_4bit ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),     color: config.load_in_4bit ? 'text-fuchsia-400' : 'text-gray-600' },
-    { label: t('trainingDashboard.config.gradCheckpoint'), value: config.gradient_checkpointing ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'), color: config.gradient_checkpointing ? 'text-emerald-400' : 'text-gray-600' },
+  // Dieselben Felder verbergen, die das Eingabeformular fuer diesen Task-Typ
+  // ausblendet — sonst stand "Max. Sequenzlaenge", Warmup oder LoRA auch bei
+  // YOLO/Bildmodellen im Block, wo sie nichts steuern.
+  const hidden = hiddenTrainingFieldsForTaskType(config.task_type);
+  // QLoRA gehoert zum LoRA-Feature: wer LoRA ausblendet, meint auch QLoRA.
+  const isHidden = (key: string) => hidden.includes(key) || (key === 'qlora' && hidden.includes('lora'));
+  const rows: { key: string; label: string; value: string | number | boolean | undefined; color: string }[] = [
+    { key: 'epochs',                       label: t('trainingDashboard.config.epochs'),       value: config.epochs,                            color: 'text-emerald-400' },
+    { key: 'batch_size',                   label: t('trainingDashboard.config.batchSize'),    value: config.batch_size,                        color: 'text-blue-400' },
+    { key: 'learning_rate',                label: t('trainingDashboard.config.learningRate'), value: config.learning_rate?.toExponential(2),   color: 'text-purple-400' },
+    { key: 'max_seq_length',               label: t('trainingDashboard.config.maxSeqLen'),   value: config.max_seq_length,                    color: 'text-amber-400' },
+    { key: 'warmup_ratio',                 label: t('trainingDashboard.config.warmupRatio'),  value: config.warmup_ratio,                      color: 'text-cyan-400' },
+    { key: 'gradient_accumulation_steps',  label: t('trainingDashboard.config.gradAccum'),    value: config.gradient_accumulation_steps,       color: 'text-pink-400' },
+    { key: 'optimizer',                    label: t('trainingDashboard.config.optimizer'),     value: config.optimizer,                         color: 'text-emerald-400' },
+    { key: 'scheduler',                    label: t('trainingDashboard.config.scheduler'),     value: config.scheduler,                         color: 'text-blue-400' },
+    { key: 'weight_decay',                 label: t('trainingDashboard.config.weightDecay'),  value: config.weight_decay,                      color: 'text-purple-400' },
+    { key: 'max_grad_norm',                label: t('trainingDashboard.config.maxGradNorm'), value: config.max_grad_norm,                     color: 'text-amber-400' },
+    { key: 'dropout',                      label: t('trainingDashboard.config.dropout'),       value: config.dropout,                           color: 'text-cyan-400' },
+    { key: 'seed',                         label: t('trainingDashboard.config.seed'),          value: config.seed,                              color: 'text-gray-300' },
+    { key: 'fp16',                         label: t('trainingDashboard.config.fp16'),          value: config.fp16 ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),             color: config.fp16 ? 'text-emerald-400' : 'text-gray-600' },
+    { key: 'bf16',                         label: t('trainingDashboard.config.bf16'),          value: config.bf16 ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),             color: config.bf16 ? 'text-emerald-400' : 'text-gray-600' },
+    { key: 'lora',                         label: t('trainingDashboard.config.lora'),          value: config.use_lora ? `r=${config.lora_r}` : t('trainingDashboard.config.no'), color: config.use_lora ? 'text-violet-400' : 'text-gray-600' },
+    { key: 'qlora',                        label: t('trainingDashboard.config.qlora'),  value: config.load_in_4bit ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'),     color: config.load_in_4bit ? 'text-fuchsia-400' : 'text-gray-600' },
+    { key: 'gradient_checkpointing',       label: t('trainingDashboard.config.gradCheckpoint'), value: config.gradient_checkpointing ? t('trainingDashboard.config.yes') : t('trainingDashboard.config.no'), color: config.gradient_checkpointing ? 'text-emerald-400' : 'text-gray-600' },
   ];
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-      {rows.filter(r => r.value !== undefined).map(r => (
+      {rows.filter(r => r.value !== undefined && !isHidden(r.key)).map(r => (
         <div key={r.label} className="flex items-center justify-between gap-1">
           <span className="text-gray-500 text-[11px] truncate">{r.label}</span>
           <span className={`${r.color} text-[11px] font-mono font-medium flex-shrink-0`}>{String(r.value)}</span>
