@@ -2628,7 +2628,9 @@
       "uploadedBody": "Your script will be reviewed by the FrameTrain team for safety and functionality. After verification, it will appear in the library with the Verified badge.",
       "submitAnotherButton": "Submit Another Script",
       "successTitle": "Uploaded!",
-      "successDetail": "Your script was submitted and will be reviewed soon."
+      "successDetail": "Your script was submitted and will be reviewed soon.",
+      "uploadFailed": "Upload failed",
+      "uploadFailedDetail": "The script could not be submitted. Check your internet connection and try again."
     }
   },
   "canvasInferenceTab": {

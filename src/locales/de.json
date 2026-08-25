@@ -2628,7 +2628,9 @@
       "uploadedBody": "Dein Skript wird vom FrameTrain-Team auf Sicherheit und Funktionalität geprüft. Nach der Verifikation erscheint es in der Bibliothek mit dem Verified-Badge.",
       "submitAnotherButton": "Weiteres Skript einreichen",
       "successTitle": "Hochgeladen!",
-      "successDetail": "Dein Skript wurde eingereicht und wird bald geprüft."
+      "successDetail": "Dein Skript wurde eingereicht und wird bald geprüft.",
+      "uploadFailed": "Upload fehlgeschlagen",
+      "uploadFailedDetail": "Das Skript konnte nicht eingereicht werden. Prüfe deine Internetverbindung und versuche es erneut."
     }
   },
   "canvasInferenceTab": {

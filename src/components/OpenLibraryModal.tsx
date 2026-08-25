@@ -518,9 +518,10 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       setSubmitted(true);
       success(t('openLibrary.upload.successTitle'), t('openLibrary.upload.successDetail'));
     } catch (err) {
+      // Fehler NICHT als Erfolg ausgeben — sonst denkt der Nutzer, das Skript
+      // sei eingereicht, obwohl der POST fehlschlug (kein Beleg fuer Ankunft).
       console.error('Upload error:', err);
-      setSubmitted(true);
-      success(t('openLibrary.upload.successTitle'), t('openLibrary.upload.successDetail'));
+      error(t('openLibrary.upload.uploadFailed'), t('openLibrary.upload.uploadFailedDetail'));
     } finally {
       setSubmitting(false);
     }
