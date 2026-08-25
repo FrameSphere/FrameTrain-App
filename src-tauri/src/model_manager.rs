@@ -497,7 +497,11 @@ pub async fn download_huggingface_model(
 
     let files = get_huggingface_model_files(repo_id.clone()).await?;
     let client = reqwest::Client::builder()
+        // Gesamtdeckel pro Anfrage. Der eigentliche Netz-aus-Schutz ist das
+        // Idle-Timeout pro Chunk weiter unten (30 s ohne Daten -> Abbruch),
+        // damit der Download bei Verbindungsverlust nicht minutenlang einfriert.
         .timeout(std::time::Duration::from_secs(600))
+        .connect_timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| format!("HTTP Client: {}", e))?;
 
@@ -644,7 +648,43 @@ pub async fn download_huggingface_model(
             let mut file_bytes: u64 = 0;
             let mut last_emit = Instant::now();
 
-            while let Some(chunk_result) = stream.next().await {
+            // Idle-Timeout: kommt 30 s lang kein Chunk (z. B. WLAN aus), brechen
+            // wir ab, raeumen die Teildatei weg und melden "Verbindung unterbrochen"
+            // — statt bis zum 600-s-Gesamttimeout stumm einzufrieren.
+            const IDLE_TIMEOUT_SECS: u64 = 30;
+            loop {
+                let next = match tokio::time::timeout(
+                    std::time::Duration::from_secs(IDLE_TIMEOUT_SECS),
+                    stream.next(),
+                ).await {
+                    Ok(n) => n,
+                    Err(_) => {
+                        let _ = fs::remove_dir_all(&target);
+                        let _ = app_handle.emit("model-download-progress", ModelDownloadProgress {
+                            status: "error".to_string(),
+                            current_file: file.filename.clone(),
+                            current_file_index: idx + 1,
+                            total_files,
+                            downloaded_bytes: downloaded_so_far,
+                            total_bytes: total_size,
+                            progress_percent: if total_size > 0 {
+                                ((downloaded_so_far as f64 / total_size as f64) * 100.0) as i32
+                            } else { 0 },
+                            speed_mbs: 0.0,
+                            elapsed_secs: download_start.elapsed().as_secs(),
+                            eta_secs: 0,
+                            message: format!("Verbindung unterbrochen beim Laden von {} — Download abgebrochen.", file.filename),
+                        });
+                        return Err(format!(
+                            "Zeitueberschreitung: seit {} s keine Daten fuer {} (Verbindung unterbrochen?)",
+                            IDLE_TIMEOUT_SECS, file.filename
+                        ));
+                    }
+                };
+                let chunk_result = match next {
+                    Some(cr) => cr,
+                    None => break,
+                };
                 let chunk = chunk_result.map_err(|e| {
                     let _ = fs::remove_dir_all(&target);
                     format!("Stream {}: {}", file.filename, e)

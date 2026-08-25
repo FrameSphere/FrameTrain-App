@@ -7,6 +7,7 @@ import GlobalTrainingProgress from './components/GlobalTrainingProgress';
 import LoadingScreen from './components/LoadingScreen';
 import FirstLaunchSetup from './components/FirstLaunchSetup';
 import { UpdateChecker } from './components/UpdateChecker';
+import { TauriAutoUpdater } from './components/TauriAutoUpdater';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { AISettingsProvider } from './contexts/AISettingsContext';
@@ -314,6 +315,7 @@ function App() {
                     onLogout={handleLogout} 
                   />
                   <UpdateChecker />
+                  <TauriAutoUpdater />
                 </>
               ) : (
                 <Login onLogin={handleLogin} />
