@@ -453,7 +453,10 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
     try {
       const response = await fetch(`https://frame-train.com/api/user/community-name`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(userData?.apiKey ? { Authorization: `Bearer ${userData.apiKey}` } : {}),
+        },
         body: JSON.stringify({ userId: userData?.userId, communityName: newName }),
       });
       if (!response.ok) {
@@ -511,7 +514,11 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
       };
       const res = await fetch(`${API_BASE}/scripts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Desktop authentifiziert sich per API-Key (kein Cookie cross-origin).
+          ...(userData?.apiKey ? { Authorization: `Bearer ${userData.apiKey}` } : {}),
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
