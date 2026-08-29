@@ -3,6 +3,7 @@
 // Enthält außerdem den Dev-Test-Modus (start_dev_test / stop_dev_test).
 
 use std::fs;
+use crate::command_ext::NoWindow;
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 use std::thread;
@@ -35,14 +36,14 @@ static DEV_TEST_PROC:  StdMutex<DevProcEntry> = StdMutex::new(DevProcEntry { pid
 fn kill_process_tree(pid: u32) {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+        let _ = Command::new("kill").no_window().args(["-TERM", &pid.to_string()]).output();
         thread::sleep(std::time::Duration::from_millis(300));
-        let _ = Command::new("pkill").args(["-KILL", "-P", &pid.to_string()]).output();
-        let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
+        let _ = Command::new("pkill").no_window().args(["-KILL", "-P", &pid.to_string()]).output();
+        let _ = Command::new("kill").no_window().args(["-KILL", &pid.to_string()]).output();
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill").args(["/F", "/PID", &pid.to_string(), "/T"]).output();
+        let _ = Command::new("taskkill").no_window().args(["/F", "/PID", &pid.to_string(), "/T"]).output();
     }
 }
 
@@ -155,6 +156,7 @@ pub async fn start_dev_training(
 
     thread::spawn(move || {
         let mut cmd = Command::new(&python);
+        cmd.no_window();
         cmd.arg(script_p.to_string_lossy().to_string())
            .stdout(Stdio::piped())
            .stderr(Stdio::piped());
@@ -374,6 +376,7 @@ pub async fn start_dev_test(
 
     thread::spawn(move || {
         let mut cmd = Command::new(&python);
+        cmd.no_window();
         cmd.arg(script_path.to_string_lossy().to_string())
            .stdout(Stdio::piped())
            .stderr(Stdio::piped());

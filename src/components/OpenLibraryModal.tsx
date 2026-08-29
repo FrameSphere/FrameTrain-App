@@ -799,6 +799,10 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
   const [tab, setTab] = useState<'browse' | 'upload'>('browse');
   const [scripts, setScripts] = useState<LibraryScript[]>([]);
   const [loading, setLoading] = useState(true);
+  // Unterscheidet "Bibliothek nicht erreichbar" von "wirklich leer". Ohne das
+  // sah ein Netzwerkfehler exakt wie eine leere Bibliothek aus ("Sei der Erste,
+  // lade ein Skript hoch") — das ist irrefuehrend.
+  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterModelType, setFilterModelType] = useState('Alle');
   const [filterTaskType, setFilterTaskType] = useState('Alle');
@@ -813,6 +817,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
   // Skripte laden
   const loadScripts = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const res = await fetch(`${API_BASE}/scripts?script_type=${mode}`, {
         // API-Key mitschicken, damit der Server auch die EIGENEN abgelehnten
@@ -826,8 +831,9 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
       const list = Array.isArray(data) ? data : (data.scripts ?? null);
       setScripts(list ?? []);
     } catch {
-      // Bei Fehler leeres Array
+      // Netzwerk-/Serverfehler: NICHT als leere Bibliothek darstellen.
       setScripts([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -1065,6 +1071,18 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                 {loading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
+                  </div>
+                ) : loadError ? (
+                  <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                    <AlertTriangle className="w-12 h-12 text-amber-500/70" />
+                    <p className="text-amber-300 text-sm">{t('openLibrary.loadErrorTitle')}</p>
+                    <p className="text-gray-500 text-xs text-center max-w-xs">{t('openLibrary.loadErrorHint')}</p>
+                    <button
+                      onClick={loadScripts}
+                      className="mt-1 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 text-xs transition-all"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> {t('openLibrary.retry')}
+                    </button>
                   </div>
                 ) : filtered.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 space-y-3">

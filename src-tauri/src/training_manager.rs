@@ -1,4 +1,5 @@
 use std::fs;
+use crate::command_ext::NoWindow;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -932,7 +933,7 @@ fn run_training(
 
     let _ = app_handle.emit("training-started", serde_json::json!({"job_id":job_id}));
 
-    let mut child = match Command::new(&python)
+    let mut child = match Command::new(&python).no_window()
         .arg(engine_path.to_string_lossy().to_string())
         .arg("--config").arg(&config_path)
         .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
@@ -1138,14 +1139,14 @@ pub fn stop_training(
     if let Some(ref mut p) = sl.process { let _ = p.kill(); }
     if let Some(pid) = sl.process_pid {
         #[cfg(unix)] {
-            let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+            let _ = Command::new("kill").no_window().args(["-TERM", &pid.to_string()]).output();
             thread::sleep(std::time::Duration::from_millis(300));
             // Kinder VOR dem Parent killen — nach dem Parent-Kill werden sie
             // an launchd/init umgehängt und pkill -P findet sie nicht mehr.
-            let _ = Command::new("pkill").args(["-KILL","-P",&pid.to_string()]).output();
-            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
+            let _ = Command::new("pkill").no_window().args(["-KILL","-P",&pid.to_string()]).output();
+            let _ = Command::new("kill").no_window().args(["-KILL", &pid.to_string()]).output();
         }
-        #[cfg(windows)] { let _ = Command::new("taskkill").args(["/F","/PID",&pid.to_string(),"/T"]).output(); }
+        #[cfg(windows)] { let _ = Command::new("taskkill").no_window().args(["/F","/PID",&pid.to_string(),"/T"]).output(); }
     }
     if let Some(ref mut job) = sl.current_job {
         job.status = TrainingStatus::Stopped;
@@ -1345,7 +1346,7 @@ pub fn delete_training_job(
 #[tauri::command]
 pub fn get_system_ram_gb() -> f64 {
     #[cfg(target_os = "macos")] {
-        if let Ok(out) = Command::new("sysctl").args(["-n","hw.memsize"]).output() {
+        if let Ok(out) = Command::new("sysctl").no_window().args(["-n","hw.memsize"]).output() {
             if let Ok(s) = String::from_utf8(out.stdout) {
                 if let Ok(b) = s.trim().parse::<u64>() { return b as f64 / (1024.0_f64).powi(3); }
             }
@@ -1410,25 +1411,25 @@ pub struct RequirementsCheck {
 pub async fn check_training_requirements() -> Result<RequirementsCheck, String> {
     let python = get_python_path();
 
-    let py_out = Command::new(&python).arg("--version").output();
+    let py_out = Command::new(&python).no_window().arg("--version").output();
     let py_ok  = py_out.is_ok() && py_out.as_ref().unwrap().status.success();
     let py_ver = if py_ok { String::from_utf8_lossy(&py_out.unwrap().stdout).trim().to_string() } else { "Nicht gefunden".to_string() };
 
-    let torch_out = Command::new(&python).args(["-c","import torch; print(torch.__version__)"]).output();
+    let torch_out = Command::new(&python).no_window().args(["-c","import torch; print(torch.__version__)"]).output();
     let torch_ok  = torch_out.is_ok() && torch_out.as_ref().unwrap().status.success();
     let torch_ver = if torch_ok { String::from_utf8_lossy(&torch_out.unwrap().stdout).trim().to_string() } else { "Nicht installiert".to_string() };
 
-    let cuda = Command::new(&python).args(["-c","import torch; print(torch.cuda.is_available())"]).output();
+    let cuda = Command::new(&python).no_window().args(["-c","import torch; print(torch.cuda.is_available())"]).output();
     let cuda_ok = cuda.is_ok() && String::from_utf8_lossy(&cuda.unwrap().stdout).trim() == "True";
 
-    let mps = Command::new(&python).args(["-c","import torch; print(hasattr(torch.backends,'mps') and torch.backends.mps.is_available())"]).output();
+    let mps = Command::new(&python).no_window().args(["-c","import torch; print(hasattr(torch.backends,'mps') and torch.backends.mps.is_available())"]).output();
     let mps_ok = mps.is_ok() && String::from_utf8_lossy(&mps.unwrap().stdout).trim() == "True";
 
-    let tf_out = Command::new(&python).args(["-c","import transformers; print(transformers.__version__)"]).output();
+    let tf_out = Command::new(&python).no_window().args(["-c","import transformers; print(transformers.__version__)"]).output();
     let tf_ok  = tf_out.is_ok() && tf_out.as_ref().unwrap().status.success();
     let tf_ver = if tf_ok { String::from_utf8_lossy(&tf_out.unwrap().stdout).trim().to_string() } else { "Nicht installiert".to_string() };
 
-    let peft_out = Command::new(&python).args(["-c","import peft; print(peft.__version__)"]).output();
+    let peft_out = Command::new(&python).no_window().args(["-c","import peft; print(peft.__version__)"]).output();
     let peft_ok  = peft_out.is_ok() && peft_out.as_ref().unwrap().status.success();
     let peft_ver = if peft_ok { String::from_utf8_lossy(&peft_out.unwrap().stdout).trim().to_string() } else { "Nicht installiert".to_string() };
 
@@ -1810,7 +1811,7 @@ pub async fn run_canvas_inference(
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let mut child = Command::new(&python_path)
+    let mut child = Command::new(&python_path).no_window()
         .arg(&server_script)
         .arg("--model-dir")
         .arg(model_dir.to_string_lossy().as_ref())

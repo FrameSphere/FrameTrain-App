@@ -1,6 +1,7 @@
 // test_manager.rs – Sequenzklassifikations-Test-Engine
 
 use serde::{Deserialize, Serialize};
+use crate::command_ext::NoWindow;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -336,7 +337,7 @@ fn run_test(
         }
     };
 
-    let mut child = match Command::new(&python)
+    let mut child = match Command::new(&python).no_window()
         .arg(engine_path.to_string_lossy().to_string())
         .arg("--config").arg(&config_path)
         .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()

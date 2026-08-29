@@ -2,6 +2,7 @@
 // Verwaltet First-Launch-Check, Python-Dependency-Installation und YOLO-Inferenz.
 
 use serde::{Deserialize, Serialize};
+use crate::command_ext::NoWindow;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
@@ -101,7 +102,7 @@ fn verify_python_available() -> Result<(), String> {
         vec!["python3", "python"]
     };
     for cmd in &candidates {
-        if let Ok(out) = Command::new(cmd).arg("--version").output() {
+        if let Ok(out) = Command::new(cmd).no_window().arg("--version").output() {
             if out.status.success() {
                 let version = String::from_utf8_lossy(&out.stdout);
                 println!("[Deps] Python gefunden: {} ({})", cmd, version.trim());
@@ -145,7 +146,7 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
     // Nicht nur Metadaten lesen, sondern auch echten Import versuchen.
     // Faengt binaere Inkompatibilitaeten ab (z.B. numpy/pandas ABI-Mismatch),
     // die importlib.metadata nicht erkennt weil das Paket "installiert" aber kaputt ist.
-    let check = Command::new(python)
+    let check = Command::new(python).no_window()
         .args(["-c", &format!(
             "import importlib.metadata, {}; print(importlib.metadata.version('{}'))",
             import_name, package
@@ -217,7 +218,7 @@ fn parse_python_version(version_str: &str) -> Option<(u32, u32)> {
 
 /// Prüft Python-Version aus stdout+stderr (manche Pythons schreiben auf stderr)
 fn get_python_version_string(cmd: &str) -> Option<String> {
-    if let Ok(out) = Command::new(cmd).arg("--version").output() {
+    if let Ok(out) = Command::new(cmd).no_window().arg("--version").output() {
         let from_stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let from_stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         let version_str = if !from_stdout.is_empty() { from_stdout } else { from_stderr };
@@ -240,7 +241,7 @@ fn find_valid_python() -> (Option<String>, Option<String>, bool) {
 
 /// Prüft ob pip verfügbar ist für das gegebene Python
 fn check_pip(python: &str) -> bool {
-    Command::new(python)
+    Command::new(python).no_window()
         .args(["-m", "pip", "--version"])
         .output()
         .map(|o| o.status.success())
@@ -256,7 +257,7 @@ fn get_free_disk_gb() -> f64 {
     } else {
         "import shutil,os; s=shutil.disk_usage(os.path.expanduser('~')); print(s.free/1e9)".to_string()
     };
-    if let Ok(out) = Command::new(&python).args(["-c", &script]).output() {
+    if let Ok(out) = Command::new(&python).no_window().args(["-c", &script]).output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             return s.parse::<f64>().unwrap_or(0.0);
@@ -265,7 +266,7 @@ fn get_free_disk_gb() -> f64 {
     // Fallback: kein Python — versuche os-native Methode
     #[cfg(unix)]
     {
-        if let Ok(out) = Command::new("df").args(["-BG", "/"]).output() {
+        if let Ok(out) = Command::new("df").no_window().args(["-BG", "/"]).output() {
             let s = String::from_utf8_lossy(&out.stdout);
             if let Some(line) = s.lines().nth(1) {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -283,14 +284,14 @@ fn get_free_disk_gb() -> f64 {
 /// GPU-Detection: NVIDIA/CUDA via nvidia-smi + Python torch-check
 fn detect_gpu() -> GpuInfo {
     // 1. nvidia-smi prüfen
-    let (has_nvidia, cuda_ver, gpu_name) = if let Ok(out) = Command::new("nvidia-smi")
+    let (has_nvidia, cuda_ver, gpu_name) = if let Ok(out) = Command::new("nvidia-smi").no_window()
         .args(["--query-gpu=name", "--format=csv,noheader"])
         .output()
     {
         if out.status.success() {
             let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
             // CUDA-Version aus nvidia-smi
-            let cuda = Command::new("nvidia-smi")
+            let cuda = Command::new("nvidia-smi").no_window()
                 .output()
                 .ok()
                 .and_then(|o| {
@@ -307,7 +308,7 @@ fn detect_gpu() -> GpuInfo {
 
     // 2. macOS Apple Silicon — MPS
     let is_apple_silicon = cfg!(target_os = "macos") && {
-        Command::new("sysctl")
+        Command::new("sysctl").no_window()
             .args(["-n", "machdep.cpu.brand_string"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).contains("Apple"))
@@ -378,7 +379,7 @@ fn torch_install_args(gpu: &GpuInfo) -> Vec<String> {
 /// "operator torchvision::nms does not exist".
 fn torch_ecosystem_broken(python: &str) -> bool {
     let check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
-    Command::new(python)
+    Command::new(python).no_window()
         .args(["-c", check])
         .output()
         .map(|o| !o.status.success())
@@ -389,7 +390,7 @@ fn torch_ecosystem_broken(python: &str) -> bool {
 fn torch_needs_reinstall(python: &str, gpu: &GpuInfo) -> bool {
     if !gpu.has_nvidia_gpu { return false; }
     // Prüfe ob torch.cuda.is_available()
-    let check = Command::new(python)
+    let check = Command::new(python).no_window()
         .args(["-c", "import torch; print('1' if torch.cuda.is_available() else '0')"])
         .output();
     match check {
@@ -628,7 +629,7 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
 
         // --- Schritt 2: pip selbst upgraden ---
         emit_progress(&window, "pip wird aktualisiert...", "installing_package", pct(step));
-        let _ = Command::new(&python)
+        let _ = Command::new(&python).no_window()
             .args(["-m", "pip", "install", "--quiet", "--upgrade", "pip"])
             .output();
         step += 1;
@@ -658,8 +659,12 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
             );
         } else {
             // Torch installieren (oder neu installieren für CUDA / Versionskonflikt)
+            // Kein --quiet: pip soll "Downloading torch (2.5 GB)..."-Zeilen liefern,
+            // damit die Live-Ausgabe waehrend des langen Downloads etwas anzeigt.
+            // --progress-bar off unterdrueckt nur den \r-Balken (der ohnehin nicht
+            // zeilenweise streamt), nicht die aussagekraeftigen Statuszeilen.
             let mut torch_cmd_args = vec!["-m".to_string(), "pip".to_string(),
-                "install".to_string(), "--quiet".to_string()];
+                "install".to_string(), "--progress-bar".to_string(), "off".to_string()];
             if needs_reinstall {
                 torch_cmd_args.push("--force-reinstall".to_string());
                 emit_progress(
@@ -693,7 +698,7 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                         pct(step),
                     );
                     let fallback_args = vec!["-m".to_string(), "pip".to_string(),
-                        "install".to_string(), "--quiet".to_string(),
+                        "install".to_string(), "--progress-bar".to_string(), "off".to_string(),
                         "torch".to_string(), "torchvision".to_string(), "torchaudio".to_string()];
                     let fallback_ok = run_pip_with_retry(&python, &fallback_args, &window, 1);
                     if !fallback_ok {
@@ -754,7 +759,7 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
             };
 
             let pip_args = vec!["-m".to_string(), "pip".to_string(),
-                "install".to_string(), "--quiet".to_string(),
+                "install".to_string(), "--progress-bar".to_string(), "off".to_string(),
                 install_spec.to_string()];
 
             let ok = run_pip_with_retry(&python, &pip_args, &window, 2);
@@ -805,7 +810,7 @@ fn run_pip_with_retry(python: &str, args: &[String], window: &Window, retries: u
             std::thread::sleep(Duration::from_secs(3));
         }
 
-        let mut child = match Command::new(python)
+        let mut child = match Command::new(python).no_window()
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1053,7 +1058,7 @@ except Exception as e:
     let tmp_path = std::env::temp_dir().join(format!("ft_yolo_infer_{}.py", uuid::Uuid::new_v4()));
     std::fs::write(&tmp_path, &script).map_err(|e| format!("Script schreiben: {}", e))?;
 
-    let out = Command::new(&python)
+    let out = Command::new(&python).no_window()
         .arg(tmp_path.to_string_lossy().to_string())
         .arg(&model_path)
         .arg(&image_path)

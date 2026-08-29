@@ -7,6 +7,7 @@
 //  - Jeder Command mit Datenzugriff bekommt State<'_, AppState> → user_id
 
 use std::fs;
+use crate::command_ext::NoWindow;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
@@ -1063,7 +1064,7 @@ fn is_row_splittable(ext: &str) -> bool {
 /// beide Namen und bevorzugt ausserdem ein torch-faehiges Python.
 fn find_python_cmd() -> Result<String, String> {
     let py = crate::python_env::resolve_python();
-    if std::process::Command::new(&py).arg("--version").output().is_ok() {
+    if std::process::Command::new(&py).no_window().arg("--version").output().is_ok() {
         return Ok(py);
     }
     Err("Python nicht gefunden -- wird für das Splitten strukturierter Dateien (Parquet/CSV/JSON) benötigt.".to_string())
@@ -1242,7 +1243,7 @@ if len(test_idx) > 0:
 
 print(json.dumps({{"train": len(train_idx), "val": val_count, "test": test_count, "too_small": False}}))
 "#);
-    let output = Command::new(python)
+    let output = Command::new(python).no_window()
         .arg("-c").arg(&script)
         .arg(src.to_string_lossy().to_string())
         .arg(train_out.to_string_lossy().to_string())
@@ -2094,7 +2095,7 @@ except Exception as e:
     let python_cmd = find_python_cmd()
         .map_err(|_| "Python nicht gefunden — Parquet-Preview benötigt Python mit pandas/pyarrow.".to_string())?;
 
-    let output = Command::new(python_cmd)
+    let output = Command::new(python_cmd).no_window()
         .arg("-c").arg(&python_script).arg(&file_path)
         .stdout(Stdio::piped()).stderr(Stdio::piped())
         .output()
@@ -2559,7 +2560,7 @@ except Exception as e:
     let script_file = std::env::temp_dir().join("hf_dataset_download.py");
     fs::write(&script_file, python_script).map_err(|e| format!("Script: {}", e))?;
     let python_cmd = find_python_cmd()?;
-    let mut child = Command::new(python_cmd)
+    let mut child = Command::new(python_cmd).no_window()
         .arg(&script_file).arg(&repo_id).arg(target.to_string_lossy().to_string())
         .stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| format!("Python spawn: {}", e))?;

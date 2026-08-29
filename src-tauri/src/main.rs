@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ml_backend;
+mod command_ext;
 mod database;
 mod db_commands;
 mod auth;

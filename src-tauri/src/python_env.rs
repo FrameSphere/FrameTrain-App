@@ -9,6 +9,7 @@
 // torch schlaegt eine hoehere Version ohne torch.
 
 use std::process::Command;
+use crate::command_ext::NoWindow;
 
 /// Version aus der Ausgabe von `python --version` ("Python 3.11.1").
 pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
@@ -30,7 +31,7 @@ struct Candidate {
 }
 
 fn version_of(cmd: &str) -> Option<(u32, u32, u32)> {
-    let out = Command::new(cmd).arg("--version").output().ok()?;
+    let out = Command::new(cmd).no_window().arg("--version").output().ok()?;
     if !out.status.success() { return None; }
     // Aeltere Versionen schreiben nach stderr statt stdout
     let combined = format!(
@@ -85,13 +86,13 @@ pub fn resolve_python() -> String {
     // torch + torchvision/torchaudio (falls installiert) muessen zusammenpassen
     let torch_check = "import torch\nfor _m in ('torchvision', 'torchaudio'):\n    try:\n        __import__(_m)\n    except ImportError:\n        pass";
     for c in &list {
-        let ok = Command::new(&c.path).args(["-c", torch_check]).output()
+        let ok = Command::new(&c.path).no_window().args(["-c", torch_check]).output()
             .map(|o| o.status.success()).unwrap_or(false);
         if ok { return c.path.clone(); }
     }
     // Fallback: torch vorhanden, torchvision/torchaudio defekt
     for c in &list {
-        let ok = Command::new(&c.path).args(["-c", "import torch"]).output()
+        let ok = Command::new(&c.path).no_window().args(["-c", "import torch"]).output()
             .map(|o| o.status.success()).unwrap_or(false);
         if ok {
             println!("[Python] torchvision/torchaudio defekt oder inkompatibel bei {} — Fix: pip install --upgrade torch torchvision torchaudio", c.path);

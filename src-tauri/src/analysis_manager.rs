@@ -2,6 +2,7 @@
 // Liest Trainings-Metriken aus DB, Step-Logs + Full-Data + AI-Reports aus Dateien
 
 use std::fs;
+use crate::command_ext::NoWindow;
 use std::path::PathBuf;
 use tauri::Manager;
 use serde_json::{json, Value};
@@ -411,7 +412,7 @@ pub fn save_full_analysis_data(
 
     let system_ram: f64 = {
         #[cfg(target_os = "macos")] {
-            std::process::Command::new("sysctl")
+            std::process::Command::new("sysctl").no_window()
                 .args(["-n", "hw.memsize"])
                 .output()
                 .ok()

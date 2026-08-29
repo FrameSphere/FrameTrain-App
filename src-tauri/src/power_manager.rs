@@ -5,6 +5,7 @@
 /// Windows → ruft SetThreadExecutionState via FFI direkt auf (kein extra Crate)
 
 use std::process::{Child, Command};
+use crate::command_ext::NoWindow;
 use std::sync::Mutex;
 
 // ============ Windows FFI ============
@@ -71,7 +72,7 @@ pub fn enable_prevent_sleep(
         //   -m  Disk-Sleep verhindern
         //   -s  System-Sleep verhindern (AC-Power vorausgesetzt)
         // Damit läuft das Training auch über Nacht ohne Unterbrechung.
-        match Command::new("caffeinate").args(["-dims"]).spawn() {
+        match Command::new("caffeinate").no_window().args(["-dims"]).spawn() {
             Ok(child) => {
                 s.inhibitor_process = Some(child);
                 s.sleep_prevented = true;
@@ -86,7 +87,7 @@ pub fn enable_prevent_sleep(
     #[cfg(target_os = "linux")]
     {
         // Primär: systemd-inhibit (moderne Distros mit systemd)
-        let result = Command::new("systemd-inhibit")
+        let result = Command::new("systemd-inhibit").no_window()
             .args([
                 "--what=sleep:idle",
                 "--who=FrameTrain",
@@ -105,7 +106,7 @@ pub fn enable_prevent_sleep(
             }
             Err(_) => {
                 // Fallback: xdg-screensaver reset (X11-Umgebungen)
-                match Command::new("xdg-screensaver").arg("reset").spawn() {
+                match Command::new("xdg-screensaver").no_window().arg("reset").spawn() {
                     Ok(_) => {
                         s.sleep_prevented = true;
                         println!("[PowerManager] ⚠️  Linux: nur xdg-screensaver verfügbar");

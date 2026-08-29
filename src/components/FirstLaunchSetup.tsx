@@ -37,6 +37,26 @@ interface InstallProgress {
   progress?: number;
 }
 
+/**
+ * Fuehrt ein neues Fortschritts-Event mit dem letzten Stand zusammen.
+ * Das Backend streamt pip-Ausgaben mit `progress: null` (nur Text). Ohne
+ * dieses Merge wuerde jede Live-Zeile den zuletzt bekannten Prozentwert
+ * loeschen und der Balken auf 0 zurueckspringen. Der Prozentwert bleibt also
+ * erhalten, bis das Backend einen neuen echten Wert liefert.
+ */
+function mergeProgress(
+  prev: Map<string, InstallProgress>,
+  incoming: InstallProgress,
+): Map<string, InstallProgress> {
+  const next = new Map(prev);
+  const old = next.get(incoming.plugin_id);
+  next.set(incoming.plugin_id, {
+    ...incoming,
+    progress: incoming.progress ?? old?.progress,
+  });
+  return next;
+}
+
 interface DependencyStatus {
   package: string;
   installed: boolean;
@@ -189,10 +209,16 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
     
     const setupListenersForPython = async () => {
       const unlistenProgress = await listen<InstallProgress>('plugin-install-progress', (event) => {
-        const progress = event.payload;
-        setInstallProgress(prev => new Map(prev).set(progress.plugin_id, progress));
+        setInstallProgress(prev => mergeProgress(prev, event.payload));
+        // Ein "failed"-Event vom Backend kommt NICHT als abgelehntes invoke an
+        // (install_plugins liefert sofort Ok und installiert asynchron). Ohne
+        // diese Weiche haenge der Nutzer fuer immer auf dem Installations-Screen.
+        if (event.payload.plugin_id === 'system' && event.payload.status === 'failed') {
+          setPythonError(event.payload.message || 'Installation fehlgeschlagen.');
+          setPythonSetupPhase('error');
+        }
       });
-      
+
       const unlistenComplete = await listen('plugin-install-complete', async () => {
         console.log('[Setup] Python dependencies installed successfully');
         setPythonSetupPhase('complete');
@@ -234,8 +260,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   
   const setupListeners = async (): Promise<() => void> => {
     const unlistenProgress = await listen<InstallProgress>('plugin-install-progress', (event) => {
-      const progress = event.payload;
-      setInstallProgress(prev => new Map(prev).set(progress.plugin_id, progress));
+      setInstallProgress(prev => mergeProgress(prev, event.payload));
     });
 
     const unlistenComplete = await listen('plugin-install-complete', () => {
@@ -813,9 +838,16 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
   currentTheme,
   installProgress
 }) => {
-  const progress = installProgress.get('seq_classification');
+  // Das Backend meldet den Gesamtfortschritt der Dependency-Installation unter
+  // der Plugin-ID "system" (echter, schrittbasierter Prozentwert + Live-Text aus
+  // pip). Frueher las dieser Screen "seq_classification" (wird hier nie gesendet)
+  // und zeigte stattdessen fixe 100%-Balken — sah eingefroren aus.
+  const sys = installProgress.get('system');
+  const pct = Math.max(0, Math.min(100, sys?.progress ?? 0));
+  const isFailed = sys?.status === 'failed';
+  const liveMessage = sys?.message;
   const { t } = useLanguage();
-  
+
   return (
     <>
       {/* Header */}
@@ -851,39 +883,38 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
                 <h2 className="text-2xl font-bold text-white mb-2">{t('firstLaunch.python.installingTitle')}</h2>
                 <p className="text-gray-400">{t('firstLaunch.python.installingDesc')}</p>
               </div>
-              
-              <div className="space-y-4">
-                {dependencyStatus.map(dep => (
-                  <div key={dep.package} className="bg-white/5 rounded-xl p-4 border border-white/10">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold text-white">{dep.package}</span>
-                      {dep.installed ? (
-                        <span className="text-green-400 flex items-center gap-1">
-                          <Check className="w-4 h-4" /> {dep.version || 'installed'}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">{t('firstLaunch.python.installingPackage')}</span>
-                      )}
-                    </div>
-                    
-                    {!dep.installed && (
-                      <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 animate-pulse"
-                          style={{ width: '100%' }}
-                        />
-                      </div>
+
+              {/* Echter Gesamt-Fortschritt (Backend-Event "system"). Der Wert ist
+                  schrittbasiert; ein langer Schritt (z.B. PyTorch-Download) bleibt
+                  bewusst stehen — die Live-Zeile darunter zeigt, dass es laeuft. */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-300">
+                    {isFailed ? t('firstLaunch.plugins.progressFailed') : t('firstLaunch.plugins.progressInstalling')}
+                  </span>
+                  <span className={`text-sm font-bold tabular-nums ${isFailed ? 'text-red-400' : 'text-blue-300'}`}>{pct}%</span>
+                </div>
+                <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden shadow-inner">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden bg-gradient-to-r ${
+                      isFailed ? 'from-red-500 to-red-400' : 'from-blue-600 to-purple-500'
+                    }`}
+                    style={{ width: `${Math.max(pct, 4)}%` }}
+                  >
+                    {!isFailed && (
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-pulse" />
                     )}
                   </div>
-                ))}
+                </div>
               </div>
-              
-              {progress && progress.message && (
-                <div className="mt-6 p-4 bg-white/5 rounded-xl border border-white/10">
-                  <p className="text-sm text-gray-300">{progress.message}</p>
+
+              {/* Live-Ausgabe aus pip — belegt sichtbar, dass etwas passiert. */}
+              {liveMessage && (
+                <div className="p-4 bg-black/30 rounded-xl border border-white/10">
+                  <p className={`text-sm font-mono break-words ${isFailed ? 'text-red-300' : 'text-gray-300'}`}>{liveMessage}</p>
                 </div>
               )}
-              
+
               <p className="text-sm text-gray-500 text-center mt-8">
                 {t('firstLaunch.python.installDontClose')}
               </p>
