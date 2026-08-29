@@ -814,7 +814,12 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
   const loadScripts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/scripts?script_type=${mode}`, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(`${API_BASE}/scripts?script_type=${mode}`, {
+        // API-Key mitschicken, damit der Server auch die EIGENEN abgelehnten
+        // Skripte des Nutzers mitliefert (mit Warnung angezeigt).
+        headers: userData?.apiKey ? { Authorization: `Bearer ${userData.apiKey}` } : {},
+        signal: AbortSignal.timeout(5000),
+      });
       if (!res.ok) throw new Error('API unavailable');
       const data = await res.json();
       // API gibt { scripts, total } zurück
@@ -826,7 +831,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mode, userData?.apiKey]);
 
   useEffect(() => { loadScripts(); }, [loadScripts]);
   useEffect(() => {
