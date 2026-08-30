@@ -822,6 +822,33 @@ const AISetupScreen: React.FC<AISetupScreenProps> = ({ currentTheme, onContinue,
   );
 };
 
+// ============ Sub-Component: Transparency Note ============
+// Erklaert waehrend der Installation in Klartext, WAS geladen wird, WOHER, und
+// dass alles lokal bleibt. Ohne diese Info wirkt ein mehrere GB grosser
+// Download (frueher zusaetzlich mit aufpoppenden Terminals) schnell unserioes.
+const TransparencyNote: React.FC<{ className?: string }> = ({ className = '' }) => {
+  const { t } = useLanguage();
+  const rows: { icon: React.ReactNode; text: string }[] = [
+    { icon: <Download className="w-4 h-4 text-blue-300" />,   text: t('firstLaunch.python.trustWhat') },
+    { icon: <Globe className="w-4 h-4 text-blue-300" />,      text: t('firstLaunch.python.trustWhere') },
+    { icon: <ShieldCheck className="w-4 h-4 text-green-300" />, text: t('firstLaunch.python.trustLocal') },
+    { icon: <Check className="w-4 h-4 text-green-300" />,     text: t('firstLaunch.python.trustNoAdmin') },
+  ];
+  return (
+    <div className={`p-4 bg-blue-500/[0.07] border border-blue-500/20 rounded-xl ${className}`}>
+      <p className="text-sm font-semibold text-blue-200 mb-3">{t('firstLaunch.python.trustTitle')}</p>
+      <ul className="space-y-2">
+        {rows.map((r, i) => (
+          <li key={i} className="flex items-start gap-2.5">
+            <span className="flex-shrink-0 mt-0.5">{r.icon}</span>
+            <span className="text-xs text-gray-300 leading-relaxed">{r.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
 // ============ Sub-Component: Python Setup Screen ============
 interface PythonSetupScreenProps {
   phase: 'checking' | 'installing' | 'error';
@@ -915,7 +942,11 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
                 </div>
               )}
 
-              <p className="text-sm text-gray-500 text-center mt-8">
+              {/* Transparenz: WAS wird geladen, WOHER, und dass alles lokal bleibt.
+                  Nimmt dem GB-grossen Download den "sketchy"-Eindruck. */}
+              <TransparencyNote className="mt-6" />
+
+              <p className="text-sm text-gray-500 text-center mt-6">
                 {t('firstLaunch.python.installDontClose')}
               </p>
             </>
@@ -1265,6 +1296,8 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
               })}
             </div>
             
+            <TransparencyNote className="mb-4" />
+
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
               <p className="text-sm text-blue-300 text-center">{t('firstLaunch.plugins.doNotClose')}</p>
               <p className="text-xs text-blue-400 text-center mt-2">{t('firstLaunch.plugins.waitNote')}</p>
