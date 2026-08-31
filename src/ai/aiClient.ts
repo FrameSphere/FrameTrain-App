@@ -99,6 +99,19 @@ function withResponseLanguage(system: string, responseLanguage?: string) {
   return `${system}\n\nANTWORTSPRACHE:\n- Antworte ausschließlich auf ${lang}.`;
 }
 
+/**
+ * Prueft mit einem minimalen Request, ob Provider + Key + Modell zusammen
+ * funktionieren. Wirft mit einer sprechenden Fehlermeldung, wenn nicht.
+ * `enabled` wird intern erzwungen, damit auch vor dem Aktivieren getestet
+ * werden kann.
+ */
+export async function testAIConnection(settings: AISettings): Promise<void> {
+  await callAI(
+    { ...settings, enabled: true },
+    { system: 'ping', messages: [{ role: 'user', content: 'ping' }], maxTokens: 5, temperature: 0 },
+  );
+}
+
 export async function callAI(settings: AISettings, options: CallAIOptions): Promise<string> {
   requireEnabled(settings);
   const provider: AIProvider = settings.provider;

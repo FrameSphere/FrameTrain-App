@@ -20,7 +20,8 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
     keyPlaceholder: 'sk-ant-api03-...',
     keyHint: 'Kostenlos testen: console.anthropic.com',
     keyLink: 'https://console.anthropic.com',
-    models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+    // Aktuelle Modell-IDs (Stand 2026): opus-4-5/sonnet-4-5 sind ausgelaufen.
+    models: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
     defaultModel: 'claude-haiku-4-5',
   },
   openai: {
@@ -38,11 +39,12 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
     keyPlaceholder: 'gsk_...',
     keyHint: 'console.groq.com',
     keyLink: 'https://console.groq.com',
-    // Groq mustert Modelle regelmäßig aus. Die zuvor eingetragenen
-    // llama-3.3-70b-versatile / llama-3.1-8b-instant / mixtral-8x7b-32768
-    // existierten allesamt nicht mehr — damit war jede KI-Funktion tot, ohne
-    // dass man ohne eigenes Modellfeld etwas dagegen tun konnte.
-    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b', 'groq/compound-mini'],
+    // Groq mustert Modelle regelmäßig aus. Deshalb hier ausschliesslich
+    // PRODUKTIONS-Modelle (nicht die Preview-Modelle wie qwen3.6-27b, die
+    // laut Groq nur "for evaluation purposes" laufen und jederzeit verschwinden
+    // — genau das legte frueher die gesamte KI lahm). Falls Groq doch eines
+    // ausmustert, kann der Nutzer im Freitextfeld ein aktuelles Modell setzen.
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'groq/compound-mini'],
     defaultModel: 'openai/gpt-oss-20b',
   },
   ollama: {

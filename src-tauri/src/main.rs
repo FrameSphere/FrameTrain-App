@@ -20,6 +20,7 @@ mod plugin_commands;
 mod power_manager;
 mod laboratory_manager;
 mod python_env;
+mod secret_store;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -278,6 +279,9 @@ fn main() {
             db_commands::save_canvas_model_design,
             db_commands::load_canvas_model_design,
             db_commands::delete_canvas_model_design,
+            secret_store::secret_set,
+            secret_store::secret_get,
+            secret_store::secret_delete,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

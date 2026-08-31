@@ -34,5 +34,9 @@ tokio = { version = "1", features = ["full"] }
 
 urlencoding = "2.1"
 
+# Sichere Ablage von API-Keys im OS-Schluesselbund (macOS Keychain / Windows Credential Manager).
+# Native Backends fuer die tatsaechlich ausgelieferten Plattformen.
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
 [features]
 default = []

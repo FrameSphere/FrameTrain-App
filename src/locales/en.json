@@ -176,7 +176,19 @@
       "show": "Show",
       "hide": "Hide",
       "customModelLabel": "Custom model ID",
-      "customModelHint": "Overrides the selection above. Needed when the provider retires a model."
+      "customModelHint": "Overrides the selection above. Needed when the provider retires a model.",
+      "save": "Save",
+      "discard": "Discard",
+      "unsaved": "Unsaved changes",
+      "saved": "Saved",
+      "saving": "Saving…",
+      "keyLoading": "Loading key…",
+      "keySecure": "The API key is stored securely in the operating system keychain (macOS Keychain / Windows Credential Manager) – not in plain text.",
+      "keychainUnavailable": "Keychain unavailable – the key applies to this session only and is not stored permanently.",
+      "testConnection": "Test connection",
+      "testing": "Testing…",
+      "testOk": "Connection successful – key and model work.",
+      "testFailed": "Test failed: {error}"
     },
     "system": {
       "packagesTitle": "Python Packages (Training)",

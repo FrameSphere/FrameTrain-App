@@ -176,7 +176,19 @@
       "show": "Anzeigen",
       "hide": "Verbergen",
       "customModelLabel": "Eigene Modell-ID",
-      "customModelHint": "Überschreibt die Auswahl oben. Nötig, wenn der Anbieter ein Modell abgekündigt hat."
+      "customModelHint": "Überschreibt die Auswahl oben. Nötig, wenn der Anbieter ein Modell abgekündigt hat.",
+      "save": "Speichern",
+      "discard": "Verwerfen",
+      "unsaved": "Nicht gespeicherte Änderungen",
+      "saved": "Gespeichert",
+      "saving": "Speichern…",
+      "keyLoading": "Key wird geladen…",
+      "keySecure": "Der API-Key wird sicher im Schlüsselbund des Betriebssystems gespeichert (macOS Keychain / Windows Credential Manager) – nicht im Klartext.",
+      "keychainUnavailable": "Schlüsselbund nicht erreichbar – der Key gilt nur für diese Sitzung und wird nicht dauerhaft gespeichert.",
+      "testConnection": "Verbindung testen",
+      "testing": "Teste…",
+      "testOk": "Verbindung erfolgreich – Key und Modell funktionieren.",
+      "testFailed": "Test fehlgeschlagen: {error}"
     },
     "system": {
       "packagesTitle": "Python-Pakete (Training)",

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -12,6 +12,7 @@ import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { PROVIDER_META } from '../ai/providerMeta';
+import { testAIConnection } from '../ai/aiClient';
 import { getStoredAuthorName, saveAuthorName } from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
 
@@ -146,7 +147,42 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     resolved: t('settings.support.statusResolved'),
     closed: t('settings.support.statusClosed'),
   };
-  const { settings: aiSettings, updateSettings: updateAISettings } = useAISettings();
+  const {
+    draft: aiSettings,
+    updateDraft: updateAISettings,
+    isDirty: aiDirty,
+    saveSettings: saveAISettings,
+    discardDraft: discardAIDraft,
+    keyLoading: aiKeyLoading,
+    keychainAvailable: aiKeychainAvailable,
+  } = useAISettings();
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestMsg, setAiTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleAISave = async () => {
+    setAiSaving(true);
+    try {
+      await saveAISettings();
+      setNotification({ type: 'success', message: t('settings.ai.saved') });
+      setTimeout(() => setNotification(null), 2500);
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleAITest = async () => {
+    setAiTesting(true);
+    setAiTestMsg(null);
+    try {
+      await testAIConnection(aiSettings);
+      setAiTestMsg({ ok: true, text: t('settings.ai.testOk') });
+    } catch (e) {
+      setAiTestMsg({ ok: false, text: t('settings.ai.testFailed', { error: e instanceof Error ? e.message : String(e) }) });
+    } finally {
+      setAiTesting(false);
+    }
+  };
   const { setCurrentPageContent } = usePageContext();
   const [appVersion, setAppVersion] = useState<string>('Loading...');
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
@@ -924,10 +960,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   <div className="flex items-center gap-2">
                     <input
                       type={showApiKeyField ? 'text' : 'password'}
-                      value={aiSettings.apiKey}
+                      value={aiKeyLoading ? '' : aiSettings.apiKey}
+                      disabled={aiKeyLoading}
                       onChange={(e) => updateAISettings({ apiKey: e.target.value })}
-                      placeholder={meta.keyPlaceholder}
-                      className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                      placeholder={aiKeyLoading ? t('settings.ai.keyLoading') : meta.keyPlaceholder}
+                      className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
                     />
                     <button
                       onClick={() => setShowApiKeyField(!showApiKeyField)}
@@ -938,7 +975,16 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   </div>
                 </div>
 
-                <p className="text-xs text-gray-500">{t('settings.ai.keyLocalOnly')}</p>
+                <div className="flex items-start gap-2 p-3 bg-emerald-500/8 border border-emerald-500/20 rounded-lg">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-emerald-200">{t('settings.ai.keySecure')}</p>
+                </div>
+                {!aiKeychainAvailable && (
+                  <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-300">{t('settings.ai.keychainUnavailable')}</p>
+                  </div>
+                )}
 
                 {/* Model Selection */}
                 <div>
@@ -957,6 +1003,21 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                         {m}
                       </button>
                     ))}
+                  </div>
+                  {/* Freitextfeld: Anbieter mustern Modelle aus. Ohne dieses Feld
+                      wäre jede KI-Funktion blockiert, sobald alle Vorschläge
+                      veraltet sind. */}
+                  <div className="mt-3">
+                    <label className="block text-xs text-gray-400 mb-1.5">{t('settings.ai.customModelLabel')}</label>
+                    <input
+                      type="text"
+                      value={aiSettings.selectedModel ?? ''}
+                      onChange={(e) => updateAISettings({ selectedModel: e.target.value })}
+                      placeholder={meta.defaultModel}
+                      spellCheck={false}
+                      className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-xs font-mono placeholder:text-gray-600 focus:outline-none focus:border-purple-500/50 transition-all"
+                    />
+                    <p className="text-xs text-gray-500 mt-1.5">{t('settings.ai.customModelHint')}</p>
                   </div>
                 </div>
               </div>
@@ -1061,13 +1122,17 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 // Kosten-Schätzung pro Nachricht (Input + Output)
                 // Grobe Durchschnittswerte ($ per 1M tokens)
                 const pricing: Record<string, { input: number; output: number }> = {
-                  'claude-opus-4-5':         { input: 15,   output: 75 },
-                  'claude-sonnet-4-5':       { input: 3,    output: 15 },
-                  'claude-haiku-4-5':        { input: 0.8,  output: 4  },
+                  'claude-opus-5':           { input: 5,    output: 25 },
+                  'claude-sonnet-5':         { input: 2,    output: 10 },
+                  'claude-haiku-4-5':        { input: 1,    output: 5  },
                   'gpt-4o':                  { input: 2.5,  output: 10 },
                   'gpt-4o-mini':             { input: 0.15, output: 0.6 },
+                  'gpt-3.5-turbo':           { input: 0.5,  output: 1.5 },
                   'llama-3.3-70b-versatile': { input: 0,    output: 0  }, // Groq Free
                   'llama-3.1-8b-instant':    { input: 0,    output: 0  }, // Groq Free
+                  'openai/gpt-oss-120b':     { input: 0,    output: 0  }, // Groq Free
+                  'openai/gpt-oss-20b':      { input: 0,    output: 0  }, // Groq Free
+                  'groq/compound-mini':      { input: 0,    output: 0  }, // Groq Free
                   'ollama':                  { input: 0,    output: 0  },
                 };
                 const model = aiSettings.provider === 'ollama'
@@ -1177,6 +1242,54 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             </div>
           </>
         )}
+
+        {/* Speichern-Leiste: Änderungen werden erst nach dem Speichern wirksam */}
+        <div className="sticky bottom-0 pt-2">
+          {aiTestMsg && (
+            <div className={`mb-2 flex items-start gap-2 p-3 rounded-lg border text-xs ${aiTestMsg.ok ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+              {aiTestMsg.ok ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+              <span>{aiTestMsg.text}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-white/10 bg-black/40 backdrop-blur">
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              {aiDirty ? (
+                <><AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" /><span className="text-amber-300 truncate">{t('settings.ai.unsaved')}</span></>
+              ) : (
+                <><CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" /><span className="text-gray-400 truncate">{t('settings.ai.saved')}</span></>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {aiSettings.enabled && (
+                <button
+                  onClick={handleAITest}
+                  disabled={aiTesting || aiSaving || aiKeyLoading}
+                  className="px-3 py-2 rounded-lg text-sm border border-white/10 bg-white/5 hover:bg-white/10 text-gray-200 disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  {aiTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                  {aiTesting ? t('settings.ai.testing') : t('settings.ai.testConnection')}
+                </button>
+              )}
+              {aiDirty && (
+                <button
+                  onClick={discardAIDraft}
+                  disabled={aiSaving}
+                  className="px-3 py-2 rounded-lg text-sm border border-white/10 bg-white/5 hover:bg-white/10 text-gray-300 disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-4 h-4" /> {t('settings.ai.discard')}
+                </button>
+              )}
+              <button
+                onClick={handleAISave}
+                disabled={!aiDirty || aiSaving}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {aiSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {aiSaving ? t('settings.ai.saving') : t('settings.ai.save')}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
