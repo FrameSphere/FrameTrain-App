@@ -18,22 +18,65 @@ function requireEnabled(settings: AISettings) {
   if (meta.needsKey && !settings.apiKey) throw new Error(`API-Key für ${meta.label} fehlt.`);
 }
 
+/**
+ * Anthropic kennt zwei Key-Typen mit UNTERSCHIEDLICHER Authentifizierung:
+ *
+ *  - `sk-ant-api…` (Console-Key, Dollar-Guthaben): Header `x-api-key`.
+ *  - `sk-ant-oat…` (OAuth-Abo-Token aus `claude setup-token`, zählt gegen die
+ *    Abo-Grenzen): Header `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20`.
+ *    Zusätzlich akzeptiert Anthropic OAuth-Token nur für „Claude Code"-förmige
+ *    Anfragen — deshalb wird der Claude-Code-Identitätssatz als erster
+ *    System-Block vorangestellt (genau das macht die CLI intern). Ohne ihn
+ *    lehnt die API den Abo-Token ab.
+ */
+function isOAuthToken(key: string): boolean {
+  return key.trim().startsWith('sk-ant-oat');
+}
+
+const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
+  const key = apiKey.trim();
+  const oauth = isOAuthToken(key);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  };
+  if (oauth) {
+    headers['Authorization'] = `Bearer ${key}`;
+    headers['anthropic-beta'] = 'oauth-2025-04-20';
+  } else {
+    headers['x-api-key'] = key;
+  }
+
+  // Bei OAuth muss der Claude-Code-Identitätssatz zuerst kommen, sonst 401/403.
+  const systemField = oauth
+    ? [
+        { type: 'text', text: CLAUDE_CODE_IDENTITY },
+        { type: 'text', text: system },
+      ]
+    : system;
+
+  // Die Claude-5-Familie (opus-5, sonnet-5, fable-5) sowie opus-4.6/4.7/4.8 und
+  // sonnet-4.6 lehnen Sampling-Parameter (temperature/top_p) mit HTTP 400 ab.
+  // Nur ältere Modelle wie haiku-4-5 akzeptieren `temperature`. Deshalb wird der
+  // Parameter für die neueren Modelle weggelassen (Default greift).
+  const rejectsSampling = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/.test(model);
+
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: maxTokens,
+    system: systemField,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+  };
+  if (!rejectsSampling) body.temperature = temperature;
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      system,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-    }),
+    headers,
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));

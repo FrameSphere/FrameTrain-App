@@ -17,8 +17,8 @@ export const PROVIDER_META: Record<AIProvider, ProviderMeta> = {
   anthropic: {
     label: 'Claude (Anthropic)',
     needsKey: true,
-    keyPlaceholder: 'sk-ant-api03-...',
-    keyHint: 'Kostenlos testen: console.anthropic.com',
+    keyPlaceholder: 'sk-ant-api03-… oder sk-ant-oat01-…',
+    keyHint: 'Console-Key (sk-ant-api…, Guthaben) oder Abo-Token (sk-ant-oat…, claude setup-token)',
     keyLink: 'https://console.anthropic.com',
     // Aktuelle Modell-IDs (Stand 2026): opus-4-5/sonnet-4-5 sind ausgelaufen.
     models: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
