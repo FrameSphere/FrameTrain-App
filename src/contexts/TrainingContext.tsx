@@ -98,8 +98,18 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
     const isDevJob = (jobId?: string) => jobId?.startsWith('dev_') ?? false;
     const unlisteners: Array<() => void> = [];
     let disposed = false;
+    // Tauri's unlisten() throws ("listeners[eventId].handlerId" is undefined) if the
+    // underlying listener was already torn down (e.g. Vite HMR reloading this module
+    // mid-flight while a listen() promise from the previous instance is still pending).
+    // That throw happens inside a .then() with no .catch(), which surfaces as an
+    // unhandled promise rejection. Swallow it — the listener is gone either way.
+    const safeUnlisten = (fn: () => void) => {
+      try { fn(); } catch { /* already unregistered — nothing to do */ }
+    };
     const add = (p: Promise<() => void>) =>
-      p.then((fn) => { if (disposed) fn(); else unlisteners.push(fn); });
+      p
+        .then((fn) => { if (disposed) safeUnlisten(fn); else unlisteners.push(fn); })
+        .catch(() => { /* listen() itself failed — nothing to unlisten */ });
 
     add(listen<{ job_id?: string; data?: TrainingProgress }>('training-progress', (e) => {
       if (isDevJob(e.payload.job_id)) return;
@@ -163,7 +173,7 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
 
     return () => {
       disposed = true;
-      unlisteners.forEach((u) => u());
+      unlisteners.forEach(safeUnlisten);
     };
   }, []);
 
