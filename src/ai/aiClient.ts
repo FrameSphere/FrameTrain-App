@@ -1,5 +1,31 @@
+import { invoke } from '@tauri-apps/api/core';
 import type { AISettings, AIProvider } from '../contexts/AISettingsContext';
 import { PROVIDER_META, resolveModel } from './providerMeta';
+
+/**
+ * Alle KI-HTTP-Aufrufe laufen ueber das Rust-Backend (Tauri-Command
+ * `ai_http_post`), NICHT direkt aus dem WebView. Grund: Anthropic-Abo-/OAuth-
+ * Orgs blockieren CORS-Anfragen aus dem Browser ("CORS requests are not allowed
+ * for this Organization"). Serverseitig gibt es keinen Origin/Preflight — genau
+ * wie bei der Claude-Code-CLI. Zusaetzlich liegt der Key so nie in einer
+ * Browser-Netzwerkschicht.
+ */
+type ProxyResponse = { status: number; body: string };
+
+async function backendPost(
+  url: string,
+  headers: Record<string, string>,
+  bodyObj: unknown,
+): Promise<{ status: number; data: any }> {
+  const res = await invoke<ProxyResponse>('ai_http_post', {
+    url,
+    headers,
+    body: JSON.stringify(bodyObj),
+  });
+  let data: any = {};
+  try { data = res.body ? JSON.parse(res.body) : {}; } catch { data = { raw: res.body }; }
+  return { status: res.status, data };
+}
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 export type ChatMessage = { role: Exclude<ChatRole, 'system'>; content: string };
@@ -42,7 +68,6 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
   };
   if (oauth) {
     headers['Authorization'] = `Bearer ${key}`;
@@ -73,16 +98,10 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   };
   if (!rejectsSampling) body.temperature = temperature;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e?.error?.message || `HTTP ${res.status}`);
+  const { status, data } = await backendPost('https://api.anthropic.com/v1/messages', headers, body);
+  if (status < 200 || status >= 300) {
+    throw new Error(data?.error?.message || `HTTP ${status}`);
   }
-  const data = await res.json();
   return data?.content?.[0]?.text || '';
 }
 
@@ -102,37 +121,42 @@ export function effectiveMaxTokens(model: string, maxTokens: number): number {
 }
 
 async function callOpenAICompat(url: string, apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
+  const { status, data } = await backendPost(
+    url,
+    { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` },
+    {
       model,
       max_tokens: effectiveMaxTokens(model, maxTokens),
       temperature,
       messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
-    }),
-  });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e?.error?.message || `HTTP ${res.status}`);
+    },
+  );
+  if (status < 200 || status >= 300) {
+    throw new Error(data?.error?.message || `HTTP ${status}`);
   }
-  const data = await res.json();
   return data?.choices?.[0]?.message?.content || '';
 }
 
 async function callOllama(model: string, system: string, messages: ChatMessage[], temperature: number) {
-  const res = await fetch('http://localhost:11434/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      options: { temperature, num_ctx: 4096 },
-      messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
-    }),
-  });
-  if (!res.ok) throw new Error('Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
-  const data = await res.json();
+  let status: number, data: any;
+  try {
+    ({ status, data } = await backendPost(
+      'http://localhost:11434/api/chat',
+      { 'Content-Type': 'application/json' },
+      {
+        model,
+        stream: false,
+        options: { temperature, num_ctx: 4096 },
+        messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
+      },
+    ));
+  } catch {
+    // Verbindungsfehler (Backend erreicht Ollama nicht)
+    throw new Error('Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
+  }
+  if (status < 200 || status >= 300) {
+    throw new Error(data?.error || 'Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
+  }
   return data?.message?.content || '';
 }
 
