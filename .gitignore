@@ -7,8 +7,14 @@ target/
 .env
 .env.local
 
-# Claude Code lokale Settings (enthält Secrets für die Auto-Fix-Routine) – nie committen
-.claude/settings.local.json
+# Claude Code lokale Konfiguration (Settings enthalten Secrets) – gehört nicht ins Repo
+.claude/
+
+# Knowledge-Graph-Output von graphify (lokales Analyse-Artefakt, wird generiert)
+graphify-out/
+
+# Vite schreibt beim Start transiente Config-Timestamps – reine Build-Artefakte
+vite.config.ts.timestamp-*.mjs
 
 # Build
 src-tauri/target/
