@@ -8,8 +8,8 @@
   "dataset_formats": ["image_loader", "csv_loader", "parquet_loader"],
   "requirements": [
     "torch>=2.0.0",
-    "numpy>=1.24.0,<2.0.0",
-    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
     "pyarrow>=14.0.0"
   ],
   "supports_features": {

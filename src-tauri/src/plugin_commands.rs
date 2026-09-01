@@ -132,9 +132,14 @@ fn version_exceeds_max(version: &str, max_major: u32, max_minor: u32) -> bool {
 
 /// Pakete mit harten Obergrenzen die trotz erfolgreichem Import erzwungen werden muessen.
 /// (package, max_major, max_minor) -- "< max_major.max_minor"
-const VERSION_CEILINGS: &[(&str, u32, u32)] = &[
-    ("numpy", 2, 0),
-];
+///
+/// Frueher stand hier numpy<2.0 (ABI-Kompat zu alten Paketen). Das war auf
+/// modernem Python (3.12/3.13) fatal: torch zieht als Wheel numpy 2.x; die
+/// Obergrenze zwang danach einen Downgrade auf numpy 1.x, fuer das es KEIN
+/// Wheel gibt -> pip baute aus dem Quellcode -> Fehlschlag ("Fehler beim
+/// Installieren von numpy"). torch/pandas/scikit-learn unterstuetzen heute
+/// numpy 2.x, daher keine Obergrenze mehr.
+const VERSION_CEILINGS: &[(&str, u32, u32)] = &[];
 
 fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
     let import_name = match package {
@@ -746,8 +751,11 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                 "datasets"        => "datasets>=2.14.0",
                 "huggingface_hub" => "huggingface_hub>=0.19.0",
                 "scikit-learn"    => "scikit-learn>=1.3.0",
-                "numpy"           => "numpy>=1.24.0,<2.0.0",
-                "pandas"          => "pandas>=2.0.0,<2.2.0",  // kompatibel zu numpy<2.0
+                // Keine Obergrenze: pip nimmt das neueste numpy-Wheel (2.x auf
+                // aktuellem Python). Ein Cap <2.0 erzwaenge sonst einen Downgrade
+                // ohne Wheel -> Quellcode-Build -> Fehlschlag auf Windows.
+                "numpy"           => "numpy>=1.26.0",
+                "pandas"          => "pandas>=2.2.0",  // 2.2+ ist numpy-2-kompatibel und hat Wheels bis Py3.13
                 "pyarrow"         => "pyarrow>=14.0.0",
                 "accelerate"      => "accelerate>=0.24.0",
                 "ultralytics"     => "ultralytics>=8.0.0",
