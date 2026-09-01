@@ -1,5 +1,5 @@
 use std::fs;
-use crate::command_ext::NoWindow;
+use crate::command_ext::{NoWindow, PythonUtf8};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -933,7 +933,7 @@ fn run_training(
 
     let _ = app_handle.emit("training-started", serde_json::json!({"job_id":job_id}));
 
-    let mut child = match Command::new(&python).no_window()
+    let mut child = match Command::new(&python).no_window().python_utf8()
         .arg(engine_path.to_string_lossy().to_string())
         .arg("--config").arg(&config_path)
         .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
@@ -1811,7 +1811,7 @@ pub async fn run_canvas_inference(
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let mut child = Command::new(&python_path).no_window()
+    let mut child = Command::new(&python_path).no_window().python_utf8()
         .arg(&server_script)
         .arg("--model-dir")
         .arg(model_dir.to_string_lossy().as_ref())

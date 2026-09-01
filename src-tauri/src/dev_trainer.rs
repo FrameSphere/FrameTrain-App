@@ -3,7 +3,7 @@
 // Enthält außerdem den Dev-Test-Modus (start_dev_test / stop_dev_test).
 
 use std::fs;
-use crate::command_ext::NoWindow;
+use crate::command_ext::{NoWindow, PythonUtf8};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 use std::thread;
@@ -157,6 +157,7 @@ pub async fn start_dev_training(
     thread::spawn(move || {
         let mut cmd = Command::new(&python);
         cmd.no_window();
+        cmd.python_utf8();
         cmd.arg(script_p.to_string_lossy().to_string())
            .stdout(Stdio::piped())
            .stderr(Stdio::piped());
@@ -377,6 +378,7 @@ pub async fn start_dev_test(
     thread::spawn(move || {
         let mut cmd = Command::new(&python);
         cmd.no_window();
+        cmd.python_utf8();
         cmd.arg(script_path.to_string_lossy().to_string())
            .stdout(Stdio::piped())
            .stderr(Stdio::piped());

@@ -22,6 +22,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# stdout/stderr auf UTF-8 zwingen — MUSS vor jedem print laufen.
+#
+# Auf Windows ist die Standard-Kodierung von stdout/stderr cp1252 (charmap).
+# Sobald eine Status-Meldung ein Zeichen ausserhalb von cp1252 enthaelt
+# (z.B. ein Emoji wie U+2705, das Haekchen U+2713, oder die Unicode-Balken von
+# tqdm/HuggingFace), stirbt der print mit UnicodeEncodeError — das Training
+# endet, bevor es beginnt.
+# reconfigure() aendert den bestehenden Stream in-place; errors="replace" ist
+# zusaetzliche Absicherung, falls doch mal etwas Unkodierbares durchkommt.
+def _force_utf8_stdio() -> None:
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+_force_utf8_stdio()
+
 # CA-Zertifikate sicherstellen.
 #
 # Python-Framework-Installationen auf macOS bringen keinen CA-Store mit, solange

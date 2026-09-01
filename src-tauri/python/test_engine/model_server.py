@@ -22,9 +22,13 @@ import sys
 import time
 from pathlib import Path
 
-# Unbuffered line-by-line stdout (kritisch fuer IPC)
+# Unbuffered line-by-line stdout (kritisch fuer IPC) + UTF-8 erzwingen.
+# Auf Windows ist stdout/stderr per Default cp1252 (charmap); ein Emoji oder
+# tqdm-Unicode-Balken laesst den print sonst mit UnicodeEncodeError sterben.
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def emit(obj: dict):

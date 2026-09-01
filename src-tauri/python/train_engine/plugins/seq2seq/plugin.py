@@ -49,7 +49,7 @@ class Plugin(TrainPlugin):
                 self.model_type = json.loads(cfg_path.read_text(encoding="utf-8")).get("model_type", "")
             except Exception:
                 self.model_type = ""
-        MessageProtocol.status("init", f"✅ Architektur erkannt: {self.model_type or 'unbekannt'} | Lade Tokenizer...")
+        MessageProtocol.status("init", f"✓ Architektur erkannt: {self.model_type or 'unbekannt'} | Lade Tokenizer...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
         MessageProtocol.status("init", "Tokenizer geladen ✓")
 
@@ -132,7 +132,7 @@ class Plugin(TrainPlugin):
         self.eval_dataset = eval_raw.map(tokenize, batched=True, remove_columns=eval_raw.column_names)
         MessageProtocol.status(
             "loading_data",
-            f"✅ Dataset tokenisiert | Train: {len(self.train_dataset)} | Eval: {len(self.eval_dataset)}",
+            f"✓ Dataset tokenisiert | Train: {len(self.train_dataset)} | Eval: {len(self.eval_dataset)}",
         )
 
     # ── 3. Modell ───────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ class Plugin(TrainPlugin):
         MessageProtocol.status("building_model", "Lade Seq2Seq-Modell...")
         self.model = AutoModelForSeq2SeqLM.from_pretrained(self.config.model_path)
         params = sum(p.numel() for p in self.model.parameters())
-        MessageProtocol.status("building_model", f"✅ Modell geladen | Parameter: {params/1e6:.1f}M")
+        MessageProtocol.status("building_model", f"✓ Modell geladen | Parameter: {params/1e6:.1f}M")
 
     # ── 4. Training ─────────────────────────────────────────────────────────
     def train(self) -> None:

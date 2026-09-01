@@ -60,7 +60,7 @@ class Plugin(TrainPlugin):
                 self.model_type = json.loads(cfg_path.read_text(encoding="utf-8")).get("model_type", "")
             except Exception:
                 self.model_type = ""
-        MessageProtocol.status("init", f"✅ Architektur erkannt: {self.model_type or 'unbekannt'} | Lade Bild-Prozessor...")
+        MessageProtocol.status("init", f"✓ Architektur erkannt: {self.model_type or 'unbekannt'} | Lade Bild-Prozessor...")
         self.processor = AutoImageProcessor.from_pretrained(self.config.model_path)
         MessageProtocol.status("init", "Bild-Prozessor geladen ✓")
 
@@ -119,7 +119,7 @@ class Plugin(TrainPlugin):
 
         self.train_dataset = train_ds
         self.eval_dataset = eval_ds
-        MessageProtocol.status("loading_data", f"✅ Train: {len(train_ds)} | Eval: {len(eval_ds)}")
+        MessageProtocol.status("loading_data", f"✓ Train: {len(train_ds)} | Eval: {len(eval_ds)}")
 
     # ── 3. Modell ───────────────────────────────────────────────────────────
     def build_model(self) -> None:
@@ -136,7 +136,7 @@ class Plugin(TrainPlugin):
         params = sum(p.numel() for p in self.model.parameters())
         MessageProtocol.status(
             "building_model",
-            f"✅ Modell geladen | Parameter: {params/1e6:.1f}M | Klassen: {len(self.classes)}",
+            f"✓ Modell geladen | Parameter: {params/1e6:.1f}M | Klassen: {len(self.classes)}",
         )
 
     # ── 4. Training ─────────────────────────────────────────────────────────

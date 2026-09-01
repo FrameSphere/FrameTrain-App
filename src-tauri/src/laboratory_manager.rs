@@ -5,7 +5,7 @@
 // Jeder Sample-Test braucht nur noch ~50ms statt 3-5s.
 
 use serde::{Deserialize, Serialize};
-use crate::command_ext::NoWindow;
+use crate::command_ext::{NoWindow, PythonUtf8};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -258,7 +258,7 @@ pub async fn lab_start_model_server(
     std::thread::spawn(move || {
         println!("[LabServer] Starte Python: {} {} {} (canvas={})", python, path_arg, mp, canvas);
 
-        let mut child = match Command::new(&python).no_window()
+        let mut child = match Command::new(&python).no_window().python_utf8()
             .arg(server_script.to_string_lossy().to_string())
             .arg(path_arg).arg(&mp)
             .stdin(Stdio::piped())
@@ -539,6 +539,7 @@ pub async fn run_lab_script_sample(
     std::thread::spawn(move || {
         let mut cmd = Command::new(&python);
         cmd.no_window();
+        cmd.python_utf8();
         cmd.arg(tp.to_string_lossy().to_string())
            .env("LAB_SAMPLE_INPUT", &sample_input)
            .stdout(Stdio::piped())

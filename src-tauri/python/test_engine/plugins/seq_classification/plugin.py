@@ -71,7 +71,7 @@ class Plugin:
         if model_type not in SUPPORTED_ARCHITECTURES:
             supported = ", ".join(sorted(SUPPORTED_ARCHITECTURES))
             raise ValueError(
-                f"❌ Modell-Architektur '{model_type}' wird noch nicht unterstützt.\n"
+                f"✗ Modell-Architektur '{model_type}' wird noch nicht unterstützt.\n"
                 f"Unterstützte Architekturen: {supported}"
             )
 
@@ -107,7 +107,7 @@ class Plugin:
         self.model.to(self.device)
         self.model.eval()
 
-        TestProtocol.status("init", "✅ Modell geladen")
+        TestProtocol.status("init", "✓ Modell geladen")
 
     # ─── Single-Input Inferenz ────────────────────────────────────────────
 

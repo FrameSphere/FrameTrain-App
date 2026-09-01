@@ -61,7 +61,7 @@ class Plugin(TrainPlugin):
                 self.model_type = json.loads(cfg_path.read_text(encoding="utf-8")).get("model_type", "")
             except Exception:
                 self.model_type = ""
-        MessageProtocol.status("init", f"✅ Architektur erkannt: {self.model_type or 'unbekannt'} | Lade Feature-Extractor...")
+        MessageProtocol.status("init", f"✓ Architektur erkannt: {self.model_type or 'unbekannt'} | Lade Feature-Extractor...")
         self.extractor = AutoFeatureExtractor.from_pretrained(self.config.model_path)
         self.sampling_rate = int(getattr(self.extractor, "sampling_rate", 16000) or 16000)
         MessageProtocol.status("init", f"Feature-Extractor geladen ✓ | Abtastrate: {self.sampling_rate} Hz")
@@ -123,7 +123,7 @@ class Plugin(TrainPlugin):
         eval_ds = hft.cap_eval_dataset(eval_ds, getattr(self.config, "max_eval_samples", 0), self.config.seed)
         self.train_dataset = train_ds
         self.eval_dataset = eval_ds
-        MessageProtocol.status("loading_data", f"✅ Train: {len(train_ds)} | Eval: {len(eval_ds)}")
+        MessageProtocol.status("loading_data", f"✓ Train: {len(train_ds)} | Eval: {len(eval_ds)}")
 
     # ── 3. Modell ───────────────────────────────────────────────────────────
     def build_model(self) -> None:
@@ -140,7 +140,7 @@ class Plugin(TrainPlugin):
         params = sum(p.numel() for p in self.model.parameters())
         MessageProtocol.status(
             "building_model",
-            f"✅ Modell geladen | Parameter: {params/1e6:.1f}M | Klassen: {len(self.classes)}",
+            f"✓ Modell geladen | Parameter: {params/1e6:.1f}M | Klassen: {len(self.classes)}",
         )
 
     # ── 4. Training ─────────────────────────────────────────────────────────

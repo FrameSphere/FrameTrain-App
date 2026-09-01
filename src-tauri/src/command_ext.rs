@@ -31,3 +31,22 @@ impl NoWindow for Command {
         self
     }
 }
+
+/// Erzwingt UTF-8 fuer stdin/stdout/stderr des Python-Subprozesses.
+///
+/// Auf Windows ist die Standard-Kodierung cp1252 (charmap). Sobald die Engine
+/// (oder tqdm/HuggingFace, oder ein User-Dev-Skript) ein Zeichen ausserhalb von
+/// cp1252 ausgibt — z.B. ✅ (U+2705) — stirbt der print mit UnicodeEncodeError
+/// und das Training endet, bevor es beginnt. PYTHONUTF8=1 aktiviert den UTF-8-
+/// Modus des Interpreters von Anfang an; PYTHONIOENCODING ist die Absicherung
+/// fuer aeltere Interpreter. Auf Mac/Linux schadet es nicht (dort ist es Default).
+pub trait PythonUtf8 {
+    fn python_utf8(&mut self) -> &mut Self;
+}
+
+impl PythonUtf8 for Command {
+    fn python_utf8(&mut self) -> &mut Self {
+        self.env("PYTHONUTF8", "1")
+            .env("PYTHONIOENCODING", "utf-8")
+    }
+}

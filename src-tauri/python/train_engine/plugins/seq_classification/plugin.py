@@ -144,14 +144,14 @@ class Plugin(TrainPlugin):
         if model_type not in SUPPORTED_ARCHITECTURES:
             supported_list = ", ".join(sorted(SUPPORTED_ARCHITECTURES))
             raise ValueError(
-                f"❌ Modell-Architektur '{model_type}' wird noch nicht unterstützt.\n\n"
+                f"✗ Modell-Architektur '{model_type}' wird noch nicht unterstützt.\n\n"
                 f"Unterstützte Architekturen:\n  {supported_list}\n\n"
                 f"Bitte verwende ein XLM-RoBERTa, BERT oder ähnliches Encoder-Modell."
             )
 
         MessageProtocol.status(
             "init",
-            f"✅ Architektur erkannt: {model_type} | Lade Tokenizer..."
+            f"✓ Architektur erkannt: {model_type} | Lade Tokenizer..."
         )
 
         # Tokenizer laden
@@ -320,7 +320,7 @@ class Plugin(TrainPlugin):
         self.train_dataset.set_format("torch")
         self.eval_dataset.set_format("torch")
 
-        MessageProtocol.status("loading_data", "✅ Dataset tokenisiert")
+        MessageProtocol.status("loading_data", "✓ Dataset tokenisiert")
 
     def _load_from_file(self, path: Path) -> dict:
         ext = path.suffix.lower()
@@ -438,7 +438,7 @@ class Plugin(TrainPlugin):
         param_count = sum(p.numel() for p in self.model.parameters()) / 1e6
         MessageProtocol.status(
             "building_model",
-            f"✅ Modell geladen | Parameter: {param_count:.1f}M | Labels: {self.num_labels}"
+            f"✓ Modell geladen | Parameter: {param_count:.1f}M | Labels: {self.num_labels}"
         )
 
     # ─── 4. Training ───────────────────────────────────────────────────────
@@ -749,5 +749,5 @@ class Plugin(TrainPlugin):
         with open(output_path / "label_mapping.json", "w", encoding="utf-8") as f:
             json.dump(label_map, f, ensure_ascii=False, indent=2)
 
-        MessageProtocol.status("saving", f"✅ Modell gespeichert: {output_path}")
+        MessageProtocol.status("saving", f"✓ Modell gespeichert: {output_path}")
         return str(output_path)

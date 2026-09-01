@@ -19,6 +19,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# stdout/stderr auf UTF-8 zwingen — MUSS vor jedem print laufen.
+# Auf Windows ist stdout/stderr per Default cp1252; ein Unicode-Zeichen
+# (Emoji, tqdm-Balken) laesst den print sonst mit UnicodeEncodeError sterben.
+def _force_utf8_stdio() -> None:
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+_force_utf8_stdio()
+
 from core.config import TestConfig
 from core.protocol import TestProtocol
 
