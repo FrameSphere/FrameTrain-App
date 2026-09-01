@@ -61,7 +61,7 @@ function isOAuthToken(key: string): boolean {
 
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
-async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
+async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number, unlimited = false) {
   const key = apiKey.trim();
   const oauth = isOAuthToken(key);
 
@@ -98,11 +98,29 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   };
   if (!rejectsSampling) body.temperature = temperature;
 
+  // "Unlimited"-Modus: Modelle mit Effort-Steuerung (Claude-5-Familie,
+  // opus-4.6/4.7/4.8, sonnet-4.6) laufen auf höchster Stufe — maximale Tiefe
+  // fürs interne Nachdenken. Modelle ohne Effort-Support (z.B. haiku-4-5)
+  // ignorieren das bewusst, um kein HTTP 400 zu provozieren.
+  const supportsEffort = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[5678]|sonnet-4-6)/.test(model);
+  if (unlimited && supportsEffort) {
+    body.output_config = { effort: 'max' };
+  }
+
   const { status, data } = await backendPost('https://api.anthropic.com/v1/messages', headers, body);
   if (status < 200 || status >= 300) {
     throw new Error(data?.error?.message || `HTTP ${status}`);
   }
-  return data?.content?.[0]?.text || '';
+  // WICHTIG: Bei Thinking-Modellen (Claude-5-Familie: opus-5/sonnet-5 — Thinking
+  // ist dort per Default an) ist content[0] ein `thinking`-Block; der eigentliche
+  // Text steht in einem SPÄTEREN `text`-Block. Deshalb ALLE text-Blöcke einsammeln,
+  // nicht nur den ersten — sonst kommt fälschlich ein leerer String zurück.
+  const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
+  return blocks
+    .filter(b => b?.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text)
+    .join('')
+    .trim();
 }
 
 /**
@@ -173,10 +191,23 @@ function withResponseLanguage(system: string, responseLanguage?: string) {
  * werden kann.
  */
 export async function testAIConnection(settings: AISettings): Promise<void> {
-  await callAI(
+  // maxTokens großzügig genug, dass auch Thinking-Modelle (die einen Teil des
+  // Budgets fürs interne Nachdenken verbrauchen) noch echten Text ausgeben.
+  const reply = await callAI(
     { ...settings, enabled: true },
-    { system: 'ping', messages: [{ role: 'user', content: 'ping' }], maxTokens: 5, temperature: 0 },
+    {
+      system: 'Reply with exactly the word: OK',
+      messages: [{ role: 'user', content: 'ping' }],
+      maxTokens: 256,
+      temperature: 0,
+    },
   );
+  // Ohne diese Prüfung galt der Test schon als bestanden, wenn der Aufruf nur
+  // nicht warf — eine leere Antwort (z.B. weil nur ein Thinking-Block kam) wäre
+  // faelschlich als Erfolg durchgegangen.
+  if (!reply || !reply.trim()) {
+    throw new Error('Verbindung steht, aber das Modell lieferte keinen Text zurück. Bitte anderes Modell/Budget probieren.');
+  }
 }
 
 export async function callAI(settings: AISettings, options: CallAIOptions): Promise<string> {
@@ -187,8 +218,9 @@ export async function callAI(settings: AISettings, options: CallAIOptions): Prom
   const temperature = options.temperature ?? 0.7;
   const system = withResponseLanguage(options.system, options.responseLanguage);
   const messages = options.messages;
+  const unlimited = settings.tokenBudget === 'unlimited';
 
-  if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature);
+  if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, unlimited);
   if (provider === 'openai') return callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
   if (provider === 'groq') return callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
   return callOllama(model, system, messages, temperature);

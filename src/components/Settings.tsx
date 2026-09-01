@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Infinity as InfinityIcon } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -1086,12 +1086,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     balanced: 'border-blue-500/50 bg-blue-500/10 text-blue-300',
                     quality:  'border-purple-500/50 bg-purple-500/10 text-purple-300',
                     max:      'border-amber-500/50 bg-amber-500/10 text-amber-300',
+                    unlimited:'border-fuchsia-500/50 bg-fuchsia-500/10 text-fuchsia-300',
                   };
                   const iconComponents: Record<TokenBudget, React.ReactNode> = {
-                    minimal:  <Leaf      className="w-4 h-4 text-emerald-400" />,
-                    balanced: <Scale     className="w-4 h-4 text-blue-400" />,
-                    quality:  <Star      className="w-4 h-4 text-purple-400" />,
-                    max:      <Flame     className="w-4 h-4 text-amber-400" />,
+                    minimal:  <Leaf        className="w-4 h-4 text-emerald-400" />,
+                    balanced: <Scale       className="w-4 h-4 text-blue-400" />,
+                    quality:  <Star        className="w-4 h-4 text-purple-400" />,
+                    max:      <Flame       className="w-4 h-4 text-amber-400" />,
+                    unlimited:<InfinityIcon className="w-4 h-4 text-fuchsia-400" />,
                   };
                   return (
                     <button
@@ -1151,11 +1153,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 const groqMsgsPerMinute = Math.floor(6000 / groqTpm);
 
                 const budgetBarWidth: Record<TokenBudget, string> = {
-                  minimal: 'w-1/4', balanced: 'w-2/4', quality: 'w-3/4', max: 'w-full'
+                  minimal: 'w-1/4', balanced: 'w-2/4', quality: 'w-3/4', max: 'w-full', unlimited: 'w-full'
                 };
                 const budgetBarColor: Record<TokenBudget, string> = {
                   minimal: 'bg-emerald-400', balanced: 'bg-blue-400',
-                  quality: 'bg-purple-400',  max: 'bg-amber-400',
+                  quality: 'bg-purple-400',  max: 'bg-amber-400', unlimited: 'bg-fuchsia-400',
                 };
 
                 return (
@@ -1221,7 +1223,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     </div>
 
                     {/* Groq-Warning */}
-                    {isGroq && (aiSettings.tokenBudget === 'quality' || aiSettings.tokenBudget === 'max') && (
+                    {isGroq && (aiSettings.tokenBudget === 'quality' || aiSettings.tokenBudget === 'max' || aiSettings.tokenBudget === 'unlimited') && (
                       <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                         <p className="text-xs text-amber-300">{t('settings.ai.tokenBudget.groqWarning')}</p>

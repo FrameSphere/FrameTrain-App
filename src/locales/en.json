@@ -156,6 +156,7 @@
         "balancedDesc": "Good balance of quality and token usage. Recommended for most users.",
         "qualityDesc": "Detailed responses with more context. Recommended for Claude / GPT-4.",
         "maxDesc": "Maximum quality and depth. Only for paid APIs with high rate limits.",
+        "unlimitedDesc": "No restrictions — maximum length, depth and reasoning effort. Paid APIs / subscription tokens only; highest usage.",
         "previewTitle": "Preview",
         "previewCoach": "AI Coach response",
         "previewSynapse": "Synapse Magic",
@@ -2666,6 +2667,8 @@
     "saveButton": "Save",
     "saveTooltipUpdate": "Save changes to \"{name}\"",
     "sessionsModelsButton": "Library",
+    "autoLayout": "Arrange",
+    "autoLayoutHint": "Automatically arrange nodes for a clear overview",
     "autosaveRestored": "[Synapse] Last working state restored automatically ({count} nodes) — discard via Clear",
     "saveDialog": {
       "title": "Save model",

@@ -18,6 +18,7 @@ import {
   RotateCcw,
   ShieldCheck,
   XCircle,
+  Infinity as InfinityIcon,
 } from 'lucide-react';
 import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -307,12 +308,14 @@ export default function AIAssistantSettingsPanel() {
                   balanced: 'border-blue-500/50 bg-blue-500/10 text-blue-300',
                   quality:  'border-purple-500/50 bg-purple-500/10 text-purple-300',
                   max:      'border-amber-500/50 bg-amber-500/10 text-amber-300',
+                  unlimited:'border-fuchsia-500/50 bg-fuchsia-500/10 text-fuchsia-300',
                 };
                 const iconComponents: Record<TokenBudget, React.ReactNode> = {
-                  minimal:  <Leaf      className="w-4 h-4 text-emerald-400" />,
-                  balanced: <Scale     className="w-4 h-4 text-blue-400" />,
-                  quality:  <Star      className="w-4 h-4 text-purple-400" />,
-                  max:      <Flame     className="w-4 h-4 text-amber-400" />,
+                  minimal:  <Leaf        className="w-4 h-4 text-emerald-400" />,
+                  balanced: <Scale       className="w-4 h-4 text-blue-400" />,
+                  quality:  <Star        className="w-4 h-4 text-purple-400" />,
+                  max:      <Flame       className="w-4 h-4 text-amber-400" />,
+                  unlimited:<InfinityIcon className="w-4 h-4 text-fuchsia-400" />,
                 };
                 return (
                   <button
@@ -439,7 +442,7 @@ export default function AIAssistantSettingsPanel() {
                   </div>
 
                   {/* Groq-Warning */}
-                  {isGroq && (aiSettings.tokenBudget === 'quality' || aiSettings.tokenBudget === 'max') && (
+                  {isGroq && (aiSettings.tokenBudget === 'quality' || aiSettings.tokenBudget === 'max' || aiSettings.tokenBudget === 'unlimited') && (
                     <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                       <p className="text-xs text-amber-300">{t('settings.ai.tokenBudget.groqWarning')}</p>

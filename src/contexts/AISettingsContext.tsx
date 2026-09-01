@@ -19,7 +19,7 @@ import { invoke } from '@tauri-apps/api/core';
  */
 
 export type AIProvider = 'anthropic' | 'openai' | 'groq' | 'ollama';
-export type TokenBudget = 'minimal' | 'balanced' | 'quality' | 'max';
+export type TokenBudget = 'minimal' | 'balanced' | 'quality' | 'max' | 'unlimited';
 
 export const TOKEN_BUDGET_CONFIG: Record<TokenBudget, {
   label: string;
@@ -55,6 +55,16 @@ export const TOKEN_BUDGET_CONFIG: Record<TokenBudget, {
     historyTokenBudget: 4000,
     synapseMaxTokens: 8000,
     description: 'Maximale Qualität und Tiefe. Nur für bezahlte APIs mit hohem Rate-Limit.',
+  },
+  unlimited: {
+    label: 'Unlimited',
+    // Bewusst sehr hoch: lässt die KI ohne künstliche Kürzung arbeiten. Bei
+    // Anthropic wird zusätzlich effort:'max' gesetzt (siehe aiClient). Nur für
+    // bezahlte APIs / Abo-Token mit hohem Limit sinnvoll — höchste Kosten/Zeit.
+    maxTokens: 16000,
+    historyTokenBudget: 8000,
+    synapseMaxTokens: 16000,
+    description: 'Keine Restriktionen — maximale Länge, Tiefe und Reasoning-Effort. Nur für bezahlte APIs / Abo-Token; höchster Verbrauch.',
   },
 };
 
@@ -171,7 +181,21 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
     }
 
     (async () => {
-      // 2) Key aus dem Schlüsselbund holen
+      // 2) Nur Key-Provider brauchen den Schlüsselbund. Ollama (der Default!)
+      //    nie — dadurch sehen Standard-Nutzer den macOS-Schlüsselbund-Dialog
+      //    gar nicht erst. Der Zugriff wird erst ausgelöst, wenn wirklich ein
+      //    Key-Provider (Claude/OpenAI/Groq) gespeichert ist.
+      if (base.provider === 'ollama') {
+        const loaded: AISettings = { ...base, apiKey: '' };
+        persistNonSecret(loaded);
+        if (cancelled) return;
+        setSettings(loaded);
+        setDraft(loaded);
+        setKeyLoading(false);
+        return;
+      }
+
+      // Key aus dem Schlüsselbund holen
       const got = await keychainGet(account);
       if (cancelled) return;
 

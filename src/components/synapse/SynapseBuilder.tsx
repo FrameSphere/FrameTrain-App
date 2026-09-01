@@ -57,6 +57,7 @@ import { runSynapseAgent, stripToolCallTags } from "./ai/synapseAgent";
 import type { AgentStep, AgentResumeState } from "./ai/synapseAgent";
 import { createToolExecutor, type GraphMutationEvent } from "./ai/synapseAgentTools";
 import { buildSynapseGraphContext } from "./ai/synapseGraphContext";
+import { autoLayoutNodes } from "./synapseLayout";
 import { SynapseAIPanel } from "./ai/SynapseAIPanel";
 import "./ai/synapseAIPanel.css";
 import { useAISettings } from "../../contexts/AISettingsContext";
@@ -829,6 +830,16 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     else performClear();
   }, [nodes.length, edges.length, hasUnsavedChanges, performClear]);
 
+  // ── Auto-Layout: Knoten übersichtlich in Ebenen anordnen ──────────────────
+  // Ordnet den Canvas per Layering-Algorithmus (links→rechts, gestapelte
+  // Knoten werden entzerrt), sodass Kanten sichtbar werden — kein manuelles
+  // Auseinanderziehen mehr nötig.
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return;
+    setNodes((nds) => autoLayoutNodes(nds, edges));
+    setTimeout(() => rfRef.current?.fitView({ duration: 400, padding: 0.18, maxZoom: 1.1 }), 60);
+  }, [nodes.length, edges, setNodes]);
+
   // ── Rechtsklick-Menü: Synapse-Aktionen ────────────────────────────────────
   useContextMenuActions(() => [
     {
@@ -1264,6 +1275,16 @@ Keine Floskeln, nur Fakten.`;
               <line x1="6" y1="2" x2="6" y2="1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
             </svg>
             AI
+          </button>
+
+          {/* Auto-Layout — Knoten automatisch anordnen */}
+          <button onClick={handleAutoLayout} disabled={nodes.length === 0} style={btnStyle} title={t('synapseBuilder.autoLayoutHint')}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <rect x="1"   y="1"   width="3" height="10" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+              <rect x="5"   y="3"   width="3" height="6"  rx="1" stroke="currentColor" strokeWidth="1.3"/>
+              <rect x="9"   y="1.5" width="2" height="9"  rx="1" stroke="currentColor" strokeWidth="1.3"/>
+            </svg>
+            {t('synapseBuilder.autoLayout')}
           </button>
 
           {/* Clear — mit Bestätigung bei ungespeicherten Änderungen */}

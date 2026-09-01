@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "frametrain-desktop"
-version = "1.2.40"
+version = "1.2.41"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
