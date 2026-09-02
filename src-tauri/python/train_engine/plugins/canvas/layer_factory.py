@@ -4,7 +4,52 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+
+class AnyRankBatchNorm(nn.Module):
+    """BatchNorm, das jede Eingabe-Dimensionalität akzeptiert (2D…5D).
+
+    Im Canvas kann derselbe ``batchnorm``-Knoten je nach Vorgänger einen
+    2D-Tensor (nach Dense: ``[N, C]``) oder einen 4D-Tensor (nach Conv2D:
+    ``[N, C, H, W]``) sehen. ``nn.BatchNorm1d/2d/3d`` unterscheiden sich NUR im
+    Dimensions-Check (``_check_input_dim``) — die eigentliche Rechnung
+    (``F.batch_norm`` über Dimension 1) ist identisch. Deshalb normalisiert
+    dieser Baustein rangunabhängig über die Kanal-/Feature-Dimension und
+    behebt den Absturz „expected 2D or 3D input (got 4D input)".
+
+    Wichtig: gleiche Parameter/Buffer-Namen wie ``nn.BatchNorm*`` (weight, bias,
+    running_mean, running_var, num_batches_tracked) → bestehende Checkpoints
+    bleiben ladbar (Resume funktioniert weiter).
+    """
+
+    def __init__(self, num_features: int, eps: float = 1e-5, momentum: float = 0.1, affine: bool = True):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.momentum = momentum
+        self.affine = affine
+        if affine:
+            self.weight = nn.Parameter(torch.ones(num_features))
+            self.bias = nn.Parameter(torch.zeros(num_features))
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
+        self.register_buffer("running_mean", torch.zeros(num_features))
+        self.register_buffer("running_var", torch.ones(num_features))
+        self.register_buffer("num_batches_tracked", torch.tensor(0, dtype=torch.long))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() < 2:
+            raise ValueError(f"BatchNorm erwartet mindestens 2D (N, C, …), bekam {x.dim()}D")
+        if self.training:
+            self.num_batches_tracked += 1
+        return F.batch_norm(
+            x, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training, self.momentum, self.eps,
+        )
 
 
 def _int(v: Any, default: int) -> int:
@@ -113,7 +158,8 @@ def create_layer(node_type: str, params: Dict[str, Any]) -> Optional[nn.Module]:
             elementwise_affine=_bool(p.get("affine"), True),
         )
     if node_type == "batchnorm":
-        return nn.BatchNorm1d(
+        # Rangunabhängig: funktioniert nach Dense (2D) UND nach Conv2D (4D).
+        return AnyRankBatchNorm(
             _int(p.get("numFeatures"), 64),
             eps=_float(p.get("eps"), 1e-5),
             momentum=_float(p.get("momentum"), 0.1),

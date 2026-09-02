@@ -23,3 +23,26 @@ export function lossImprovementPct(points: LossPointLike[]): number | null {
   if (first == null || last == null || first <= 0 || first === last) return null;
   return ((first - last) / first) * 100;
 }
+
+/**
+ * Haengt einen Loss-Punkt an — oder fuehrt ihn mit dem letzten zusammen, wenn
+ * beide denselben `step` haben.
+ *
+ * Eval-Events (die finale Evaluation bei max_steps, oder step-basierte Eval, die
+ * mit einem Log-Step zusammenfaellt) tragen denselben `step` wie der letzte
+ * Trainingspunkt. Als eigener Punkt wuerden sie den Loss-Graphen ueber die echte
+ * Schrittzahl hinaus verlaengern ("Step 60/60, aber 9 Punkte" und scheinbares
+ * Weiterlaufen ueber 100%). Ein vorhandenes val_loss bleibt erhalten, wenn das
+ * neue Event keins mitbringt.
+ */
+export function appendLossPoint<T extends { step: number; val_loss?: number | null }>(
+  points: T[],
+  point: T,
+): T[] {
+  const last = points[points.length - 1];
+  if (last && last.step === point.step) {
+    const merged = { ...last, ...point, val_loss: point.val_loss ?? last.val_loss };
+    return [...points.slice(0, -1), merged];
+  }
+  return [...points, point];
+}

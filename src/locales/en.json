@@ -1684,6 +1684,7 @@
       "evalStrategyNone": "None",
       "evalSteps": "Eval Steps",
       "evalStepsTooltip": "Only when eval_strategy='steps'",
+      "evalStepsDisabledHint": "Set the evaluation strategy to 'Steps' for this interval to take effect.",
       "saveSteps": "Save Steps",
       "saveTotalLimit": "Save Total Limit",
       "saveTotalLimitTooltip": "Max. checkpoints.",

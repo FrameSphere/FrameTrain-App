@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { appendLossPoint } from '../components/lossStats';
 
 export interface LossPoint {
   step: number;
@@ -199,7 +200,10 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addLossPoint = useCallback((point: LossPoint) => {
-    setState(s => ({ ...s, lossPoints: [...s.lossPoints, point] }));
+    // appendLossPoint fuehrt Eval-Events mit demselben `step` wie der letzte
+    // Trainingspunkt zusammen, statt den Loss-Graphen ueber die echte
+    // Schrittzahl hinaus zu verlaengern.
+    setState(s => ({ ...s, lossPoints: appendLossPoint(s.lossPoints, point) }));
   }, []);
 
   const setLossPoints = useCallback((points: LossPoint[]) => {

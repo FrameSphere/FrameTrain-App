@@ -18,6 +18,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord } from '../ai/coachContext';
 import { clampNumber, parseNumberInput } from './numberInput';
+import { appendLossPoint } from './lossStats';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
@@ -207,7 +208,7 @@ function Field({ label, tooltip, children }: { label: string; tooltip?: string; 
   );
 }
 
-function NumInput({ value, onChange, min, max, step = 'any' }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number | 'any' }) {
+function NumInput({ value, onChange, min, max, step = 'any', disabled = false }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number | 'any'; disabled?: boolean }) {
   // Waehrend des Tippens gilt der Rohtext, sonst loescht das Rendern das
   // gerade getippte Dezimaltrennzeichen wieder (siehe numberInput.ts).
   const [draft, setDraft] = useState<string | null>(null);
@@ -219,6 +220,7 @@ function NumInput({ value, onChange, min, max, step = 'any' }: { value: number; 
       min={min}
       max={max}
       step={step}
+      disabled={disabled}
       onChange={e => {
         const raw = e.target.value;
         setDraft(raw);
@@ -226,7 +228,7 @@ function NumInput({ value, onChange, min, max, step = 'any' }: { value: number; 
         if (parsed !== null) onChange(clampNumber(parsed, min, max));
       }}
       onBlur={() => setDraft(null)}
-      className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-all"
+      className={`w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-all ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
     />
   );
 }
@@ -1001,7 +1003,9 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       const d = e.payload.data;
       setCurrentJob(j => (j ? { ...j, status: 'running', progress: d } : null));
       if (hasJobRef.current && d.train_loss != null) {
-        setLossPoints(pts => [...pts, { step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined }]);
+        // Eval-Events tragen denselben `step` wie der letzte Trainingspunkt —
+        // appendLossPoint fuehrt sie zusammen statt den Graphen zu verlaengern.
+        setLossPoints(pts => appendLossPoint(pts, { step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined }));
       }
     }).then(fn => { u1 = fn; });
     listen<{ job_id?: string; new_version_id?: string }>('training-complete', e => {
@@ -1713,7 +1717,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 <Field label={t('trainingPanel.fields.maxSteps')} tooltip={t('trainingPanel.fields.maxStepsTooltip')}><NumInput value={config.max_steps} onChange={v => updateConfig({ max_steps: v })} min={-1} step={100} /></Field>
                 <Field label={t('trainingPanel.fields.maxEvalSamples')} tooltip={t('trainingPanel.fields.maxEvalSamplesTooltip')}><NumInput value={config.max_eval_samples} onChange={v => updateConfig({ max_eval_samples: v })} min={0} step={100} /></Field>
                 <Field label={t('trainingPanel.fields.evalStrategy')}><SelectInput value={config.eval_strategy} onChange={v => updateConfig({ eval_strategy: v })} options={[{value:'epoch',label:t('trainingPanel.fields.evalStrategyEpoch')},{value:'steps',label:t('trainingPanel.fields.evalStrategySteps')},{value:'no',label:t('trainingPanel.fields.evalStrategyNone')}]} /></Field>
-                <Field label={t('trainingPanel.fields.evalSteps')} tooltip={t('trainingPanel.fields.evalStepsTooltip')}><NumInput value={config.eval_steps} onChange={v => updateConfig({ eval_steps: v })} min={1} step={100} /></Field>
+                <Field label={t('trainingPanel.fields.evalSteps')} tooltip={config.eval_strategy === 'steps' ? t('trainingPanel.fields.evalStepsTooltip') : t('trainingPanel.fields.evalStepsDisabledHint')}><NumInput value={config.eval_steps} onChange={v => updateConfig({ eval_steps: v })} min={1} step={100} disabled={config.eval_strategy !== 'steps'} /></Field>
                 <Field label={t('trainingPanel.fields.saveSteps')}><NumInput value={config.save_steps} onChange={v => updateConfig({ save_steps: v })} min={1} step={100} /></Field>
                 <Field label={t('trainingPanel.fields.saveTotalLimit')} tooltip={t('trainingPanel.fields.saveTotalLimitTooltip')}><NumInput value={config.save_total_limit} onChange={v => updateConfig({ save_total_limit: v })} min={1} step={1} /></Field>
                 <Field label={t('trainingPanel.fields.loggingSteps')}><NumInput value={config.logging_steps} onChange={v => updateConfig({ logging_steps: v })} min={1} step={5} /></Field>
