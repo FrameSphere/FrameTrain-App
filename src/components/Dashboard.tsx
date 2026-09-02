@@ -156,6 +156,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
           config={trainingState.config as any}
           job={trainingState.currentJob}
           lossPoints={trainingState.lossPoints}
+          statusMessage={trainingState.statusMessage}
           sessionId={trainingState.sessionId}
           startedAt={trainingState.dashStartedAt}
           onStop={handleStopFromGlobal}

@@ -33,6 +33,10 @@ export interface TrainingState {
   showDashboard: boolean;
   currentJob: TrainingJob | null;
   lossPoints: LossPoint[];
+  // Letzte Status-/Phasen-Meldung der Engine (z.B. "Finale Evaluation...").
+  // Ohne diese blieb der Balken stumm auf 100%, waehrend die Abschluss-
+  // Evaluierung noch lief — es sah aus, als haenge die App.
+  statusMessage: string | null;
   sessionId: string;
   dashStartedAt: number;
   completedVersionId: string | null;
@@ -77,6 +81,7 @@ const defaultState: TrainingState = {
   showDashboard: false,
   currentJob: null,
   lossPoints: [],
+  statusMessage: null,
   sessionId: '',
   dashStartedAt: 0,
   completedVersionId: null,
@@ -123,13 +128,25 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
           currentJob: { ...s.currentJob, status: 'running', progress: d },
         };
         if (d.train_loss != null) {
-          next.lossPoints = [
-            ...s.lossPoints,
-            { step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined },
-          ];
+          // appendLossPoint fuehrt Eval-Events mit demselben step zusammen,
+          // sonst laeuft der Graph ueber die echte Schrittzahl hinaus.
+          next.lossPoints = appendLossPoint(s.lossPoints, {
+            step: d.step, epoch: d.epoch, train_loss: d.train_loss, val_loss: d.val_loss ?? undefined,
+          });
         }
         return next;
       });
+    }));
+
+    // Phasen-Meldung der Engine (z.B. "Evaluierung laeuft...", "Finale
+    // Evaluation..."). Damit weiss der Nutzer, dass nach 100% der Trainings-
+    // schritte noch die Abschluss-Auswertung laeuft — statt eines stummen 100%.
+    add(listen<{ job_id?: string; data?: { status?: string; message?: string } }>('training-status', (e) => {
+      if (isDevJob(e.payload.job_id)) return;
+      const msg = e.payload.data?.message;
+      if (typeof msg === 'string' && msg.length > 0) {
+        setState((s) => (s.currentJob ? { ...s, statusMessage: msg } : s));
+      }
     }));
 
     add(listen<{ job_id?: string; new_version_id?: string }>('training-complete', (e) => {
@@ -138,6 +155,7 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
         ...s,
         currentJob: s.currentJob ? { ...s.currentJob, status: 'completed' } : s.currentJob,
         completedVersionId: e.payload.new_version_id ?? s.completedVersionId,
+        statusMessage: null,
       }));
     }));
 
@@ -150,6 +168,7 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
         currentJob: s.currentJob
           ? { ...s.currentJob, status: 'failed', error: det ? `${err}\n${det}` : err }
           : s.currentJob,
+        statusMessage: null,
       }));
     }));
 
@@ -159,6 +178,7 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
         ...s,
         currentJob: s.currentJob ? { ...s.currentJob, status: 'stopped' } : s.currentJob,
         completedVersionId: e.payload.version_id ?? s.completedVersionId,
+        statusMessage: null,
       }));
     }));
 
@@ -169,6 +189,7 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
       setState((s) => ({
         ...s,
         currentJob: s.currentJob ? { ...s.currentJob, status: 'stopped' } : s.currentJob,
+        statusMessage: null,
       }));
     }));
 

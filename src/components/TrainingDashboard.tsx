@@ -494,6 +494,7 @@ interface TrainingDashboardProps {
   config?: TrainingConfig;
   job: TrainingJob | null;
   lossPoints: LossPoint[];
+  statusMessage?: string | null;                 // Phasen-Meldung der Engine (z.B. "Finale Evaluation...")
   sessionId: string;
   startedAt: number;
   onStop: () => void;
@@ -508,7 +509,7 @@ interface TrainingDashboardProps {
 export default function TrainingDashboard({
   isOpen, isMinimized, onMinimize, onMaximize, onClose,
   mode, modelName, datasetName, config,
-  job, lossPoints, sessionId, startedAt, onStop,
+  job, lossPoints, statusMessage, sessionId, startedAt, onStop,
   completedVersionId, onNavigateToAnalysis,
   onOpenKIAssistant, devScript, onSendCodeToKI,
 }: TrainingDashboardProps) {
@@ -767,6 +768,15 @@ export default function TrainingDashboard({
               <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
                 <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
               </div>
+              {/* Nach 100% der Trainingsschritte laeuft noch die Abschluss-
+                  Evaluierung/Speicherung. Ohne diesen Hinweis sah ein stummer
+                  100%-Balken aus, als haenge die App ("erreicht 100%, geht weiter"). */}
+              {isRunning && (statusMessage || percent >= 100) && (
+                <div className="flex items-center gap-2 text-xs text-emerald-300/90 pt-0.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                  <span className="truncate">{statusMessage || t('trainingDashboard.progress.finalizing')}</span>
+                </div>
+              )}
             </div>
           )}
 

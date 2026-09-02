@@ -1144,7 +1144,8 @@
       "stopped": "Gestoppt"
     },
     "progress": {
-      "epochStep": "Epoch {epoch} / {totalEpochs} · Step {step} / {totalSteps}"
+      "epochStep": "Epoch {epoch} / {totalEpochs} · Step {step} / {totalSteps}",
+      "finalizing": "Trainingsschritte fertig — finale Auswertung & Speichern laufen…"
     },
     "stopped": {
       "message": "Training wurde manuell gestoppt. Du kannst es jederzeit neu starten."
