@@ -4,7 +4,7 @@
 
 [![Website](https://img.shields.io/badge/website-frame--train.com-6d28d9)](https://frame-train.com)
 [![Download](https://img.shields.io/badge/download-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1d4ed8)](https://frame-train.com/en/download)
-[![Version](https://img.shields.io/badge/version-1.2.39-16a34a)](https://frame-train.com/en/changelog)
+[![Version](https://img.shields.io/badge/version-1.2.45-16a34a)](https://frame-train.com/en/changelog)
 ![Built with Tauri + React](https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20React-333)
 
 FrameTrain is a desktop application for training and fine-tuning AI models **locally on your own hardware** — no cloud required. It brings LoRA/QLoRA fine-tuning of Hugging Face models, PyTorch-based training with GPU acceleration (NVIDIA CUDA **and** Apple Silicon / Metal MPS), a visual neural-network builder, dataset management, live training monitoring and automatic model versioning together in one GUI.
