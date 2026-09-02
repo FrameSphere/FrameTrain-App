@@ -609,7 +609,6 @@ class Plugin(TrainPlugin):
             adam_beta1=self.config.adam_beta1,
             adam_beta2=self.config.adam_beta2,
             adam_epsilon=self.config.adam_epsilon,
-            group_by_length=self.config.group_by_length,
             lr_scheduler_type=self.config.scheduler,
             max_grad_norm=self.config.max_grad_norm,
             label_smoothing_factor=self.config.label_smoothing,
@@ -618,6 +617,12 @@ class Plugin(TrainPlugin):
             gradient_checkpointing=self.config.gradient_checkpointing,
             eval_strategy=self.config.eval_strategy,
             **({"eval_steps": eval_steps} if eval_steps is not None else {}),
+            # group_by_length nur senden, wenn aktiv. transformers 5.x kennt das
+            # Feld nicht mehr; der Default (False) wuerde sonst bei jedem Lauf die
+            # "...werden ignoriert: group_by_length"-Warnung ausloesen, obwohl der
+            # Nutzer nichts eingestellt hat. Nur wenn bewusst aktiviert, ist die
+            # Warnung (auf 5.x) berechtigt.
+            **({"group_by_length": True} if self.config.group_by_length else {}),
             # Checkpointing: immer steps-basiert damit stop_training() einen
             # Checkpoint findet, auch wenn keine Epoche abgeschlossen wurde.
             # save_total_limit=2: aktuellsten + einen Backup halten,
