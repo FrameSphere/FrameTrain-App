@@ -12,7 +12,89 @@
       "versions": "Versions"
     },
     "settings": "Settings",
-    "logout": "Log Out"
+    "logout": "Log Out",
+    "home": "Home"
+  },
+  "home": {
+    "greeting": {
+      "morning": "Good morning",
+      "day": "Good afternoon",
+      "evening": "Good evening"
+    },
+    "lastVisit": "last here {when}",
+    "relative": {
+      "now": "just now",
+      "minutes": "{n} min ago",
+      "hours": "{n} h ago",
+      "days": "{n} days ago"
+    },
+    "running": {
+      "title": "Currently running",
+      "step": "Step {step}/{total}",
+      "epoch": "Epoch {epoch}/{total}",
+      "loss": "Loss {loss}"
+    },
+    "since": {
+      "title": "Since your last visit",
+      "trainingDone": "Training finished: {model}",
+      "trainingFailed": "Training failed: {model}",
+      "trainingStopped": "Training stopped: {model}",
+      "finalLoss": "final loss {loss}",
+      "testDone": "Test finished: {model} ({version})",
+      "accuracy": "accuracy {value}%"
+    },
+    "firstRun": {
+      "title": "Welcome to FrameTrain",
+      "text": "This is where you'll land after signing in: running trainings, last night's results and recent tests at a glance. Start with a model, add a dataset — then the first training can begin.",
+      "cta": "Add your first model"
+    },
+    "insights": {
+      "title": "Needs attention",
+      "sleepRisk": "A training is running but sleep is not being prevented — the machine could fall asleep mid-run",
+      "trainingFailed": "The last run of {model} failed — no new attempt since",
+      "overfitting": "{model}: val_loss {val} is well above train_loss {train} — possible overfitting",
+      "weakAccuracy": "{model} only reached {value}% accuracy in the last test",
+      "untestedModels": "{count} models have never been tested (e.g. {first})",
+      "untestedModels_one": "{first} has never been tested",
+      "unusedDatasets": "{count} datasets have never been used for training (e.g. {first})",
+      "unusedDatasets_one": "Dataset {first} has never been used for training"
+    },
+    "stats": {
+      "models": "Models",
+      "versions": "Versions",
+      "datasets": "Datasets",
+      "trainings": "Trainings"
+    },
+    "recentTrainings": {
+      "title": "Recent trainings",
+      "empty": "No training run yet"
+    },
+    "recentTests": {
+      "title": "Recent tests",
+      "empty": "No test run yet"
+    },
+    "trend": {
+      "title": "Loss trend",
+      "subtitle": "Final loss of the last {count} completed trainings"
+    },
+    "ranking": {
+      "title": "Best results"
+    },
+    "viewAll": "View all",
+    "briefing": {
+      "title": "AI briefing",
+      "create": "Create briefing",
+      "refresh": "Refresh briefing",
+      "regenerate": "Regenerate",
+      "loading": "{provider} is writing the briefing...",
+      "meta": "{model} · {when}",
+      "stale": "out of date",
+      "costHint": "Created on click only and stored afterwards — so it costs tokens just once.",
+      "disabled": "The AI assistant is not set up. With a provider configured it summarises here what happened since your last look and suggests the next step.",
+      "toSettings": "Set up in settings",
+      "userPrompt": "Here is the current state of my project:",
+      "emptyAnswer": "The AI returned no text."
+    }
   },
   "login": {
     "tagline": "Local ML training on your desktop",

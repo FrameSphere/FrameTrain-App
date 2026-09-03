@@ -1,5 +1,6 @@
 import { 
   LayoutDashboard, 
+  Home,
   Play, 
   Upload, 
   BarChart3, 
@@ -57,8 +58,30 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
         className="p-6 transition-colors duration-500 ease-in-out"
         style={{ borderBottom: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}` }}
       >
-        <h1 className="text-2xl font-bold text-white">FrameTrain</h1>
-        <p className="text-gray-400 text-sm mt-1">{t('sidebar.tagline')}</p>
+        <div className="flex items-center gap-3">
+          {/* Home-Button — Rücksprung zur Startseite von jeder Ansicht aus.
+              Zeigt den Aktiv-Zustand, damit "ich bin auf Start" sichtbar bleibt. */}
+          <button
+            onClick={() => onViewChange('home')}
+            title={t('sidebar.home')}
+            aria-label={t('sidebar.home')}
+            aria-current={currentView === 'home' ? 'page' : undefined}
+            className={`p-2 rounded-xl flex-shrink-0 transition-all duration-500 ease-in-out ${
+              currentView === 'home'
+                ? isSynapse
+                  ? 'text-white shadow-lg'
+                  : `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
+                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10'
+            }`}
+            style={currentView === 'home' && isSynapse ? { backgroundImage: synapseActiveGradient } : undefined}
+          >
+            <Home className="w-5 h-5" />
+          </button>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-white leading-tight">FrameTrain</h1>
+            <p className="text-gray-400 text-sm">{t('sidebar.tagline')}</p>
+          </div>
+        </div>
       </div>
 
       {/* Navigation */}

@@ -12,7 +12,89 @@
       "versions": "Versionen"
     },
     "settings": "Einstellungen",
-    "logout": "Abmelden"
+    "logout": "Abmelden",
+    "home": "Start"
+  },
+  "home": {
+    "greeting": {
+      "morning": "Guten Morgen",
+      "day": "Guten Tag",
+      "evening": "Guten Abend"
+    },
+    "lastVisit": "zuletzt hier {when}",
+    "relative": {
+      "now": "gerade eben",
+      "minutes": "vor {n} Min.",
+      "hours": "vor {n} Std.",
+      "days": "vor {n} Tagen"
+    },
+    "running": {
+      "title": "Läuft gerade",
+      "step": "Schritt {step}/{total}",
+      "epoch": "Epoche {epoch}/{total}",
+      "loss": "Loss {loss}"
+    },
+    "since": {
+      "title": "Seit deinem letzten Besuch",
+      "trainingDone": "Training abgeschlossen: {model}",
+      "trainingFailed": "Training fehlgeschlagen: {model}",
+      "trainingStopped": "Training gestoppt: {model}",
+      "finalLoss": "Final-Loss {loss}",
+      "testDone": "Test abgeschlossen: {model} ({version})",
+      "accuracy": "Accuracy {value}%"
+    },
+    "firstRun": {
+      "title": "Willkommen bei FrameTrain",
+      "text": "Hier landest du künftig nach dem Login: laufende Trainings, Ergebnisse der letzten Nacht und die letzten Tests auf einen Blick. Fang mit einem Modell an, lade ein Dataset dazu — dann kann das erste Training starten.",
+      "cta": "Erstes Modell hinzufügen"
+    },
+    "insights": {
+      "title": "Braucht Aufmerksamkeit",
+      "sleepRisk": "Ein Training läuft, aber der Ruhezustand ist nicht unterdrückt — der Rechner könnte mitten im Lauf einschlafen",
+      "trainingFailed": "Letzter Lauf von {model} ist fehlgeschlagen — seitdem kein neuer Versuch",
+      "overfitting": "{model}: val_loss {val} liegt deutlich über train_loss {train} — Verdacht auf Overfitting",
+      "weakAccuracy": "{model} kommt im letzten Test nur auf {value}% Accuracy",
+      "untestedModels": "{count} Modelle wurden noch nie getestet (z. B. {first})",
+      "untestedModels_one": "{first} wurde noch nie getestet",
+      "unusedDatasets": "{count} Datasets wurden noch nie für ein Training benutzt (z. B. {first})",
+      "unusedDatasets_one": "Dataset {first} wurde noch nie für ein Training benutzt"
+    },
+    "stats": {
+      "models": "Modelle",
+      "versions": "Versionen",
+      "datasets": "Datasets",
+      "trainings": "Trainings"
+    },
+    "recentTrainings": {
+      "title": "Letzte Trainings",
+      "empty": "Noch kein Training gelaufen"
+    },
+    "recentTests": {
+      "title": "Letzte Tests",
+      "empty": "Noch kein Test gelaufen"
+    },
+    "trend": {
+      "title": "Loss-Trend",
+      "subtitle": "Final-Loss der letzten {count} abgeschlossenen Trainings"
+    },
+    "ranking": {
+      "title": "Beste Ergebnisse"
+    },
+    "viewAll": "Alle ansehen",
+    "briefing": {
+      "title": "KI-Briefing",
+      "create": "Briefing erstellen",
+      "refresh": "Briefing aktualisieren",
+      "regenerate": "Neu erstellen",
+      "loading": "{provider} schreibt das Briefing...",
+      "meta": "{model} · {when}",
+      "stale": "Stand veraltet",
+      "costHint": "Wird nur auf Klick erstellt und danach gespeichert — kostet also nur einmal Tokens.",
+      "disabled": "Der KI-Assistent ist nicht eingerichtet. Mit einem hinterlegten Anbieter fasst er hier zusammen, was seit dem letzten Blick passiert ist, und schlägt den nächsten Schritt vor.",
+      "toSettings": "In den Einstellungen einrichten",
+      "userPrompt": "Hier ist der aktuelle Stand meines Projekts:",
+      "emptyAnswer": "Die KI hat keinen Text zurückgegeben."
+    }
   },
   "login": {
     "tagline": "Lokales ML-Training auf deinem Desktop",

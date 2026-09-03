@@ -2,6 +2,7 @@
 // Hauptansicht zu wechseln, ohne Props durch den Baum zu reichen.
 
 export type AppView =
+  | 'home'
   | 'models' | 'training' | 'dataset' | 'analysis'
   | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse';
 

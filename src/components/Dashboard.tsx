@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Sidebar from './Sidebar';
+import HomePanel from './HomePanel';
 import ModelManager from './ModelManager';
 import TrainingPanel from './TrainingPanel';
 import DatasetUpload from './DatasetUpload';
@@ -30,10 +31,10 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type View = 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse';
+type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse';
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
-  const [currentView, setCurrentView] = useState<View>('models');
+  const [currentView, setCurrentView] = useState<View>('home');
   const [initialAnalysisVersionId, setInitialAnalysisVersionId] = useState<string | null>(null);
   const { currentTheme } = useTheme();
 
@@ -49,6 +50,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
 
   const renderView = () => {
     switch (currentView) {
+      case 'home':
+        return <HomePanel userEmail={userData.email} userId={userData.userId} />;
       case 'models':
         return <ModelManager />;
       case 'training':
@@ -76,7 +79,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
       case 'synapse':
         return <SynapseBuilder userId={userData.userId} />;
       default:
-        return <ModelManager />;
+        return <HomePanel userEmail={userData.email} userId={userData.userId} />;
     }
   };
 

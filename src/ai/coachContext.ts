@@ -19,6 +19,7 @@ import type { CoachConfigPatch, CoachCommand } from './coachToolEvents';
 
 // ── Stabile Seiten-IDs (matchen die Sidebar-Navigation + Dev-Modi) ──────────
 export type PageId =
+  | 'home'
   | 'dashboard'
   | 'models'
   | 'training'
@@ -310,6 +311,7 @@ const SKILLS: Bilingual = {
 
 /** Navigierbare Ziele (matchen AppView aus navigationEvents). */
 export const NAV_TARGETS: Record<AppView, Bilingual> = {
+  home: { de: 'Start', en: 'Home' },
   models: { de: 'Models', en: 'Models' },
   training: { de: 'Training', en: 'Training' },
   dataset: { de: 'Dataset', en: 'Dataset' },
