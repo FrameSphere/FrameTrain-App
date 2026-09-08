@@ -13,7 +13,10 @@ vi.mock('../../contexts/ThemeContext', () => ({
 }));
 
 const settingsRef = { current: { enabled: true, provider: 'anthropic', apiKey: 'sk-ant-api-x', selectedModel: 'claude-haiku-4-5', ollamaModel: '', tokenBudget: 'balanced' } };
-vi.mock('../../contexts/AISettingsContext', () => ({
+// Nur useAISettings wird ersetzt — TOKEN_BUDGET_CONFIG bleibt echt, damit die
+// Komponente dieselbe Budget-Tabelle sieht wie in der App.
+vi.mock('../../contexts/AISettingsContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../contexts/AISettingsContext')>()),
   useAISettings: () => ({ settings: settingsRef.current }),
 }));
 
@@ -34,6 +37,7 @@ vi.mock('../../contexts/LanguageContext', async () => {
 });
 
 import de from '../../locales/de.json';
+import { TOKEN_BUDGET_CONFIG } from '../../contexts/AISettingsContext';
 import HomeBriefing from '../HomeBriefing';
 
 const CACHE_KEY = 'ft_home_briefing_u1';
@@ -137,5 +141,18 @@ describe('HomeBriefing', () => {
 
     await waitFor(() => expect(screen.getByText(de.home.briefing.emptyAnswer)).toBeTruthy());
     expect(localStorage.getItem(CACHE_KEY)).toBeNull();
+  });
+
+  // Das Budget aus den Einstellungen galt hier frueher nicht: 700 Tokens
+  // standen fest im Code, egal was der Nutzer eingestellt hatte.
+  it('nutzt das eingestellte Token-Budget', async () => {
+    settingsRef.current = { ...enabled, tokenBudget: 'max' };
+    callAIMock.mockResolvedValue('Kurzfassung.');
+    render(<HomeBriefing facts="stand" factsKey="h1" userId="u1" />);
+    await userEvent.click(screen.getByText(de.home.briefing.create));
+
+    await waitFor(() => expect(callAIMock).toHaveBeenCalled());
+    const opts = callAIMock.mock.calls[0][1] as { maxTokens: number };
+    expect(opts.maxTokens).toBe(TOKEN_BUDGET_CONFIG.max.maxTokens);
   });
 });

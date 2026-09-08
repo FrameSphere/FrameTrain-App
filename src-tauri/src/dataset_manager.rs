@@ -375,6 +375,19 @@ impl SplitLayout {
     pub fn count_of(&self, canonical: &str) -> usize {
         self.splits.iter().find(|(c, _, _)| c == canonical).map(|(_, _, n)| *n).unwrap_or(0)
     }
+    /// Verschiebt das Layout um einen Wrapper-Ordner nach unten. Alle Pfade
+    /// bleiben relativ zum ausgewaehlten Ordner, damit sowohl die Paarung als
+    /// auch die generierte dataset.yaml weiter stimmen.
+    fn prefix_with(&mut self, wrapper: &str) {
+        if self.style == "nested" {
+            self.images_dir = format!("{}/{}", wrapper, self.images_dir);
+            self.labels_dir = format!("{}/{}", wrapper, self.labels_dir);
+        } else {
+            for (_, dir, _) in self.splits.iter_mut() {
+                *dir = format!("{}/{}", wrapper, dir);
+            }
+        }
+    }
 }
 
 /// Ordnernamen wie "training"/"validation" auf train/val/test normalisieren.
@@ -404,6 +417,26 @@ fn dir_has_xml(dir: &Path) -> bool {
 /// "Unbekannt, 0 % Konfidenz": `list_files_in_dir("images")` findet keine
 /// Dateien, weil dort nur die Split-Unterordner liegen.
 pub fn detect_split_layout(path: &Path) -> Option<SplitLayout> {
+    if let Some(layout) = detect_split_layout_at(path) { return Some(layout); }
+
+    // Wrapper-Ordner: Entpacker und Downloads legen das Dataset haeufig eine
+    // Ebene tiefer ab (ausgewaehlt/mein-dataset/images/train). Vorher fiel das
+    // durch alle Zweige und endete bei "Unbekannt, 0 %".
+    let mut found: Option<SplitLayout> = None;
+    for sub in list_subdir_names(path) {
+        if sub.starts_with('.') || sub.eq_ignore_ascii_case("__MACOSX") { continue; }
+        if let Some(mut layout) = detect_split_layout_at(&path.join(&sub)) {
+            // Mehrere Kandidaten -> nicht raten, sonst landet der Import im
+            // falschen Unterordner.
+            if found.is_some() { return None; }
+            layout.prefix_with(&sub);
+            found = Some(layout);
+        }
+    }
+    found
+}
+
+fn detect_split_layout_at(path: &Path) -> Option<SplitLayout> {
     let dir_names = list_subdir_names(path);
     let find_dir = |cands: &[&str]| -> Option<String> {
         dir_names.iter().find(|d| cands.contains(&d.to_lowercase().as_str())).cloned()
@@ -422,8 +455,12 @@ pub fn detect_split_layout(path: &Path) -> Option<SplitLayout> {
             let n = count_images_in(&img_base.join(&sub));
             if n == 0 { continue; }
             // Der passende Label-Ordner muss existieren, sonst ist es kein Paar.
-            let lbl_sub = list_subdir_names(&lbl_base).into_iter()
-                .find(|d| canonical_split_name(d) == Some(canon))?;
+            // Fehlt der passende Label-Ordner, wird nur dieser Split
+            // uebersprungen. Ein `?` an dieser Stelle liess frueher die
+            // gesamte Erkennung scheitern, sobald z. B. images/test ohne
+            // labels/test existierte -> "Unbekannt, 0 %".
+            let Some(lbl_sub) = list_subdir_names(&lbl_base).into_iter()
+                .find(|d| canonical_split_name(d) == Some(canon)) else { continue };
             has_xml |= dir_has_xml(&lbl_base.join(&lbl_sub));
             splits.push((canon.to_string(), sub, n));
         }
@@ -691,6 +728,15 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
     }
 
     // 9. Unknown
+    // Haeufigster Praxisfall: images/ und labels/ liegen da, aber die
+    // Split-Ordner passen nicht zueinander (z. B. Labels flach statt
+    // labels/train). Ohne Hinweis stand im Dialog nur "Typ konnte nicht
+    // erkannt werden" und niemand wusste, woran es liegt.
+    let has_img_dir_like = dir_names_lc.iter().any(|d| matches!(d.as_str(), "images"|"imgs"|"image"));
+    let has_lbl_dir_like = dir_names_lc.iter().any(|d| matches!(d.as_str(), "labels"|"label"|"annotations"|"annotation"));
+    if has_img_dir_like && has_lbl_dir_like {
+        warnings.push("images/ und labels/ gefunden, aber die Struktur passt nicht: erwartet werden Bilder direkt in images/ oder gleich benannte Split-Ordner in beiden (images/train + labels/train).".to_string());
+    }
     warnings.push("Dataset-Typ konnte nicht erkannt werden.".to_string());
     DatasetAnalysis { detected_type: DatasetType::Unknown, confidence: 0,
         pairing_status: None, warnings, file_count: total_file_count,
@@ -3082,6 +3128,95 @@ mod split_layout_tests {
         assert_eq!(hint["is_split"], serde_json::json!(true));
         assert_eq!(hint["splits"]["train"]["count"], serde_json::json!(3));
         assert!(a.pairing_status.unwrap().is_paired);
+    }
+
+    #[test]
+    fn split_ohne_passenden_label_ordner_kippt_erkennung_nicht() {
+        // images/test hat Bilder, labels/test fehlt. Vorher liess das `?` in
+        // detect_split_layout die komplette Erkennung scheitern -> "Unbekannt".
+        let dir = TempDir::new("halber_split");
+        for (split, n) in [("train", 3), ("val", 2)] {
+            for i in 0..n {
+                make_pair(&dir.path().join("images").join(split),
+                          &dir.path().join("labels").join(split),
+                          &format!("{}_{}", split, i));
+            }
+        }
+        fs::create_dir_all(dir.path().join("images/test")).unwrap();
+        fs::write(dir.path().join("images/test/t0.jpg"), b"x").unwrap();
+
+        let layout = detect_split_layout(dir.path()).expect("train/val muessen trotzdem erkannt werden");
+        assert_eq!(layout.count_of("train"), 3);
+        assert_eq!(layout.count_of("val"), 2);
+        // Der Split ohne Labels wird uebersprungen, nicht uebernommen.
+        assert_eq!(layout.count_of("test"), 0);
+        assert!(matches!(detect_dataset_type(dir.path()).detected_type, DatasetType::YoloBbox));
+    }
+
+    #[test]
+    fn dataset_im_wrapper_ordner_wird_erkannt() {
+        // Entpackte Archive haben oft eine zusaetzliche Ebene.
+        let dir = TempDir::new("wrapper");
+        let inner = dir.path().join("mein-dataset");
+        for (split, n) in [("train", 2), ("val", 1)] {
+            for i in 0..n {
+                make_pair(&inner.join("images").join(split), &inner.join("labels").join(split), &format!("{}_{}", split, i));
+            }
+        }
+
+        let layout = detect_split_layout(dir.path()).expect("Wrapper-Ebene muss durchsucht werden");
+        assert_eq!(layout.images_dir, "mein-dataset/images");
+        assert_eq!(layout.labels_dir, "mein-dataset/labels");
+        assert_eq!(layout.count_of("train"), 2);
+
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::YoloBbox), "erkannt als {:?}", a.detected_type);
+        // Paarung muss durch den Prefix hindurch weiter funktionieren.
+        assert!(a.pairing_status.unwrap().is_paired);
+
+        // Die generierte yaml zeigt auf den echten Unterordner.
+        generate_split_dataset_yaml(dir.path(), &layout).unwrap();
+        let yaml = fs::read_to_string(dir.path().join("dataset.yaml")).unwrap();
+        assert!(yaml.contains("train: mein-dataset/images/train"), "yaml war:\n{}", yaml);
+    }
+
+    #[test]
+    fn wrapper_bleibt_uneindeutig_wenn_mehrere_kandidaten() {
+        let dir = TempDir::new("zwei_wrapper");
+        for name in ["ds-a", "ds-b"] {
+            let inner = dir.path().join(name);
+            make_pair(&inner.join("images/train"), &inner.join("labels/train"), "a");
+        }
+        assert!(detect_split_layout(dir.path()).is_none(), "bei zwei Kandidaten darf nicht geraten werden");
+    }
+
+    #[test]
+    fn flache_labels_erklaeren_warum_nichts_erkannt_wurde() {
+        // images/train + images/val, aber labels flach: fuer YOLO unbrauchbar.
+        // Wichtig ist, dass die Analyse sagt, woran es liegt.
+        let dir = TempDir::new("flache_labels");
+        for split in ["train", "val"] {
+            fs::create_dir_all(dir.path().join("images").join(split)).unwrap();
+            fs::write(dir.path().join("images").join(split).join("a.jpg"), b"x").unwrap();
+        }
+        fs::create_dir_all(dir.path().join("labels")).unwrap();
+        fs::write(dir.path().join("labels/a.txt"), b"0 0.5 0.5 0.1 0.1").unwrap();
+
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::Unknown));
+        assert!(a.warnings.iter().any(|w| w.contains("images/") && w.contains("labels/")),
+                "kein erklaerender Hinweis: {:?}", a.warnings);
+    }
+
+    #[test]
+    fn nested_split_ohne_data_yaml_wird_erkannt() {
+        let dir = TempDir::new("ohne_yaml");
+        for split in ["train", "val"] {
+            make_pair(&dir.path().join("images").join(split), &dir.path().join("labels").join(split), &format!("{}_0", split));
+        }
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::YoloBbox), "erkannt als {:?}", a.detected_type);
+        assert!(a.confidence >= 90);
     }
 
     #[test]

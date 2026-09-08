@@ -457,3 +457,48 @@ describe('HFEncoderTestPlugin – Dataset-Test Reset', () => {
     });
   });
 });
+
+describe('HFEncoderTestPlugin – Max Samples', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    setupListenMock();
+  });
+
+  it('leeres Feld → maxSamples: null', async () => {
+    mockInvoke.mockResolvedValue({ id: 'job-3' });
+    render(<HFEncoderTestPlugin {...BASE_TEST_PROPS} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Start$/i }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('start_test', expect.objectContaining({
+        maxSamples: null,
+      }));
+    });
+  });
+
+  it('Eingabe "1000" → maxSamples als Zahl (nicht String)', async () => {
+    mockInvoke.mockResolvedValue({ id: 'job-4' });
+    render(<HFEncoderTestPlugin {...BASE_TEST_PROPS} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/leer = alle/i), { target: { value: '1000' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Start$/i }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('start_test', expect.objectContaining({
+        maxSamples: 1000,
+      }));
+    });
+    const args = mockInvoke.mock.calls.find(c => c[0] === 'start_test')![1] as { maxSamples: unknown };
+    expect(typeof args.maxSamples).toBe('number');
+  });
+
+  it('nicht-numerische Zeichen werden im Feld verworfen', async () => {
+    mockInvoke.mockResolvedValue({ id: 'job-5' });
+    render(<HFEncoderTestPlugin {...BASE_TEST_PROPS} />);
+
+    const field = screen.getByPlaceholderText(/leer = alle/i) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: '12abc' } });
+    expect(field.value).toBe('12');
+  });
+});

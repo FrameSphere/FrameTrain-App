@@ -10,7 +10,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useLanguage } from "../../../contexts/LanguageContext";
-import { useAISettings } from "../../../contexts/AISettingsContext";
+import { useAISettings, TOKEN_BUDGET_CONFIG } from "../../../contexts/AISettingsContext";
 import { callAI } from "../../../ai/aiClient";
 import type { ChatMessage } from "../../../ai/aiClient";
 import GradientChatInput from "../../ui/GradientChatInput";
@@ -134,7 +134,7 @@ ${graphCtx}
       const answer = await callAI(aiSettings, {
         system: buildCoachSystem(),
         messages: withUser.slice(-8),
-        maxTokens: 700,
+        maxTokens: TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'].maxTokens,
         temperature: 0.4,
         responseLanguage: language,
       });

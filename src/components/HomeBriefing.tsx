@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Loader2, AlertTriangle, RefreshCw, ArrowRight, Settings as SettingsIcon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useAISettings } from '../contexts/AISettingsContext';
+import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { callAI } from '../ai/aiClient';
 import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
 import { navigateTo } from '../ui/navigationEvents';
@@ -106,7 +106,7 @@ export default function HomeBriefing({ facts, factsKey, userId }: HomeBriefingPr
       const text = await callAI(settings, {
         system: SYSTEM_PROMPT[language === 'en' ? 'en' : 'de'],
         messages: [{ role: 'user', content: `${t('home.briefing.userPrompt')}\n\n${facts}` }],
-        maxTokens: 700,
+        maxTokens: TOKEN_BUDGET_CONFIG[settings.tokenBudget ?? 'balanced'].maxTokens,
         temperature: 0.4,
         responseLanguage: language,
       });

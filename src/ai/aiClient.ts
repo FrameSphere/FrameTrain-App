@@ -36,7 +36,34 @@ export type CallAIOptions = {
   maxTokens?: number;
   temperature?: number;
   responseLanguage?: string;
+  /**
+   * Wird aufgerufen, wenn das Modell mitten im Satz aufgehoert hat, weil
+   * max_tokens erreicht war. Ohne diesen Hinweis wirkt eine abgeschnittene
+   * Antwort wie eine vollstaendige — inklusive halbem JSON-Block, aus dem
+   * dann keine Parameter mehr gelesen werden koennen.
+   */
+  onTruncated?: () => void;
 };
+
+/**
+ * Bereinigt den Verlauf, bevor er an einen Provider geht.
+ *
+ * - Leere / nur aus Leerzeichen bestehende Nachrichten fliegen raus: Anthropic
+ *   lehnt leere Text-Bloecke mit HTTP 400 ab. Eine leer zurueckgekommene
+ *   Antwort landete so als leere assistant-Nachricht im Verlauf und legte
+ *   jeden weiteren Aufruf lahm.
+ * - Aufeinanderfolgende Nachrichten derselben Rolle werden zusammengefasst.
+ */
+function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (typeof m.content !== 'string' || !m.content.trim()) continue;
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) last.content = `${last.content}\n\n${m.content}`;
+    else out.push({ role: m.role, content: m.content });
+  }
+  return out;
+}
 
 function requireEnabled(settings: AISettings) {
   if (!settings.enabled) throw new Error('KI-Assistent deaktiviert. Bitte in Einstellungen aktivieren.');
@@ -61,7 +88,30 @@ function isOAuthToken(key: string): boolean {
 
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
-async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number, unlimited = false) {
+/**
+ * Anthropic verlangt, dass die ERSTE Nachricht die Rolle `user` hat.
+ * Der Metrik-Assistent stellt den fertigen Bericht als erste
+ * assistant-Nachricht in den Verlauf, und der Coach kann nach dem
+ * History-Trimmen ebenfalls mit einer assistant-Nachricht beginnen — beides
+ * quittierte die API mit HTTP 400, der Chat blieb komplett tot.
+ * Der Inhalt geht nicht verloren: er steckt bei beiden bereits im
+ * System-Prompt.
+ */
+function stripLeadingAssistant(messages: ChatMessage[]): ChatMessage[] {
+  let i = 0;
+  while (i < messages.length && messages[i].role === 'assistant') i++;
+  return messages.slice(i);
+}
+
+/**
+ * Claude-Modelle mit standardmaessig aktivem Thinking verbrauchen einen Teil
+ * von max_tokens fuers interne Nachdenken. Ohne Aufschlag bleibt fuer den
+ * sichtbaren Text zu wenig uebrig — die Antwort bricht mitten im Satz ab
+ * (und ein JSON-Block bleibt unvollstaendig).
+ */
+const ANTHROPIC_THINKING_PATTERN = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/;
+
+async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number, unlimited = false, onTruncated?: () => void) {
   const key = apiKey.trim();
   const oauth = isOAuthToken(key);
 
@@ -90,11 +140,16 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   // Parameter für die neueren Modelle weggelassen (Default greift).
   const rejectsSampling = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/.test(model);
 
+  const sendable = stripLeadingAssistant(messages);
+  if (sendable.length === 0) throw new Error('Keine Nachricht zum Senden (Verlauf enthaelt nur Antworten).');
+
+  const budget = ANTHROPIC_THINKING_PATTERN.test(model) ? maxTokens + REASONING_RESERVE : maxTokens;
+
   const body: Record<string, unknown> = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: budget,
     system: systemField,
-    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    messages: sendable.map(m => ({ role: m.role, content: m.content })),
   };
   if (!rejectsSampling) body.temperature = temperature;
 
@@ -115,6 +170,7 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   // ist dort per Default an) ist content[0] ein `thinking`-Block; der eigentliche
   // Text steht in einem SPÄTEREN `text`-Block. Deshalb ALLE text-Blöcke einsammeln,
   // nicht nur den ersten — sonst kommt fälschlich ein leerer String zurück.
+  if (data?.stop_reason === 'max_tokens') onTruncated?.();
   const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
   return blocks
     .filter(b => b?.type === 'text' && typeof b.text === 'string')
@@ -138,7 +194,7 @@ export function effectiveMaxTokens(model: string, maxTokens: number): number {
   return REASONING_MODEL_PATTERN.test(model) ? maxTokens + REASONING_RESERVE : maxTokens;
 }
 
-async function callOpenAICompat(url: string, apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number) {
+async function callOpenAICompat(url: string, apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number, onTruncated?: () => void) {
   const { status, data } = await backendPost(
     url,
     { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` },
@@ -152,6 +208,7 @@ async function callOpenAICompat(url: string, apiKey: string, model: string, syst
   if (status < 200 || status >= 300) {
     throw new Error(data?.error?.message || `HTTP ${status}`);
   }
+  if (data?.choices?.[0]?.finish_reason === 'length') onTruncated?.();
   return data?.choices?.[0]?.message?.content || '';
 }
 
@@ -217,11 +274,12 @@ export async function callAI(settings: AISettings, options: CallAIOptions): Prom
   const maxTokens = options.maxTokens ?? 2000;
   const temperature = options.temperature ?? 0.7;
   const system = withResponseLanguage(options.system, options.responseLanguage);
-  const messages = options.messages;
+  const messages = normalizeMessages(options.messages);
   const unlimited = settings.tokenBudget === 'unlimited';
+  const onTruncated = options.onTruncated;
 
-  if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, unlimited);
-  if (provider === 'openai') return callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
-  if (provider === 'groq') return callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature);
+  if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, unlimited, onTruncated);
+  if (provider === 'openai') return callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, onTruncated);
+  if (provider === 'groq') return callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, onTruncated);
   return callOllama(model, system, messages, temperature);
 }

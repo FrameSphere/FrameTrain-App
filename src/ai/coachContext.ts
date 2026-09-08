@@ -344,8 +344,8 @@ export const OPEN_TARGETS: Record<string, { page: AppView; label: Bilingual }> =
 const OPEN_KEYS = Object.keys(OPEN_TARGETS);
 
 // ── Setzbare Trainings-Config-Felder (Whitelist fürs [[set:…]]-Tool) ─────────
-type SettableType = 'int' | 'float' | 'bool';
-export const SETTABLE_CONFIG: Record<string, { type: SettableType; label: string }> = {
+type SettableType = 'int' | 'float' | 'bool' | 'enum' | 'text';
+export const SETTABLE_CONFIG: Record<string, { type: SettableType; label: string; values?: readonly string[] }> = {
   epochs: { type: 'int', label: 'Epochs' },
   batch_size: { type: 'int', label: 'Batch Size' },
   learning_rate: { type: 'float', label: 'Learning Rate' },
@@ -367,6 +367,31 @@ export const SETTABLE_CONFIG: Record<string, { type: SettableType; label: string
   lora_dropout: { type: 'float', label: 'LoRA Dropout' },
   load_in_4bit: { type: 'bool', label: '4-bit Loading' },
   load_in_8bit: { type: 'bool', label: '8-bit Loading' },
+  // Optimizer und Scheduler sind die haeufigste Empfehlung ueberhaupt
+  // ("nimm SGD statt AdamW"), waren aber nicht uebernehmbar: die
+  // Analyse-Seite hat sie erkannt, hier fielen sie mangels String-Typ raus.
+  optimizer: { type: 'enum', label: 'Optimizer',
+    values: ['adamw', 'adamw_torch', 'adamw_hf', 'adamw_8bit', 'adam', 'adafactor', 'sgd', 'lion', 'rmsprop'] },
+  scheduler: { type: 'enum', label: 'Scheduler',
+    values: ['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup', 'inverse_sqrt'] },
+  eval_strategy: { type: 'enum', label: 'Eval-Strategie', values: ['no', 'steps', 'epoch'] },
+  eval_steps: { type: 'int', label: 'Eval Steps' },
+  max_steps: { type: 'int', label: 'Max Steps' },
+  save_steps: { type: 'int', label: 'Save Steps' },
+  seed: { type: 'int', label: 'Seed' },
+  // Der Rest der Trainings-Config. Anspruch: was der Nutzer im Training
+  // einstellen kann, kann die KI auch vorschlagen — sonst verschwinden
+  // Empfehlungen kommentarlos. Der Test settableConfig.test.ts haelt diese
+  // Liste deckungsgleich mit DEFAULT_CONFIG.
+  adam_beta1: { type: 'float', label: 'Adam Beta1' },
+  adam_beta2: { type: 'float', label: 'Adam Beta2' },
+  adam_epsilon: { type: 'float', label: 'Adam Epsilon' },
+  max_eval_samples: { type: 'int', label: 'Max Eval Samples' },
+  save_total_limit: { type: 'int', label: 'Save Total Limit' },
+  num_workers: { type: 'int', label: 'Dataloader Workers' },
+  pin_memory: { type: 'bool', label: 'Pin Memory' },
+  group_by_length: { type: 'bool', label: 'Group by Length' },
+  lora_target_modules: { type: 'text', label: 'LoRA Target Modules' },
 };
 const SETTABLE_KEYS = Object.keys(SETTABLE_CONFIG);
 
@@ -374,7 +399,7 @@ const TRUE_WORDS = new Set(['true', '1', 'on', 'yes', 'an', 'ja', 'aktiv']);
 const FALSE_WORDS = new Set(['false', '0', 'off', 'no', 'aus', 'nein', 'inaktiv']);
 
 /** Wandelt einen Roh-Wert gemäß Feldtyp; gibt undefined bei ungültigem Wert. */
-function coerceSettable(key: string, raw: string): number | boolean | undefined {
+function coerceSettable(key: string, raw: string): number | boolean | string | undefined {
   const meta = SETTABLE_CONFIG[key];
   if (!meta) return undefined;
   const v = raw.trim();
@@ -383,6 +408,14 @@ function coerceSettable(key: string, raw: string): number | boolean | undefined 
     if (TRUE_WORDS.has(lo)) return true;
     if (FALSE_WORDS.has(lo)) return false;
     return undefined;
+  }
+  if (meta.type === 'enum') {
+    const lo = v.toLowerCase().replace(/^["'`]|["'`]$/g, '');
+    return meta.values?.includes(lo) ? lo : undefined;
+  }
+  if (meta.type === 'text') {
+    const clean = v.replace(/^["'`]|["'`]$/g, '').trim();
+    return clean.length > 0 && clean.length <= 200 ? clean : undefined;
   }
   const num = meta.type === 'int' ? parseInt(v, 10) : parseFloat(v);
   return Number.isFinite(num) ? num : undefined;

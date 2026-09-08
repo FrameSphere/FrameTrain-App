@@ -85,4 +85,38 @@ describe('extractAIRecommendedParams', () => {
     ].join('\n');
     expect(extractAIRecommendedParams(text)).toEqual({ epochs: 2 });
   });
+
+  // Der reale Fall: die Antwort wurde von max_tokens mitten im JSON gekappt.
+  // Frueher rettete nur der Inline-Fallback die Zahlen — "optimizer": "sgd",
+  // also die wichtigste Empfehlung ueberhaupt, fiel hinten runter.
+  it('liest einen mitten im JSON abgeschnittenen Block', () => {
+    const text = [
+      '## Empfohlene Parameter',
+      '```json',
+      '{"epochs":100,"batch_size":16,"learning_rate":0.001,"weight_decay":0.0005,'
+        + '"warmup_ratio":0.03,"optimizer":"sgd","scheduler":"cosine","fp16":true,'
+        + '"dropout":0.0,"label_smoothing":0.0,"eval_strategy":"epoch","save_steps":200,"logging_steps":20,',
+    ].join('\n');
+    const params = extractAIRecommendedParams(text);
+    expect(params).toMatchObject({
+      epochs: 100,
+      batch_size: 16,
+      learning_rate: 0.001,
+      optimizer: 'sgd',
+      scheduler: 'cosine',
+      fp16: true,
+      eval_strategy: 'epoch',
+      save_steps: 200,
+    });
+  });
+
+  // Diese Felder existieren in der Trainings-Config, waren aber nicht
+  // uebernehmbar, weil Extraktion und Anwendung zwei getrennte Listen hatten.
+  it('erkennt Regularisierungs- und Ablauf-Parameter', () => {
+    const text = '```json\n{"dropout":0.1,"label_smoothing":0.05,"max_steps":500,"eval_steps":50,"bf16":true,"gradient_checkpointing":true,"seed":42}\n```';
+    expect(extractAIRecommendedParams(text)).toEqual({
+      dropout: 0.1, label_smoothing: 0.05, max_steps: 500,
+      eval_steps: 50, bf16: true, gradient_checkpointing: true, seed: 42,
+    });
+  });
 });

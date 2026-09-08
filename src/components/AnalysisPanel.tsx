@@ -12,9 +12,11 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
-import { useAISettings, type AIProvider } from '../contexts/AISettingsContext';
+import { useAISettings, type AIProvider, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { setRecommendedParams } from '../ai/coachToolEvents';
+import { SETTABLE_CONFIG } from '../ai/coachContext';
+import { findLastJsonObject } from '../ai/jsonBlock';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
@@ -100,22 +102,34 @@ function formatBytes(b: number) {
  * Namens-Whitelist ließ „Bei fp16: die Hardware …“ als { fp16: 'die' }
  * durch, und das landete dann in der Trainings-Config.
  */
-const NUMERIC_PARAM_KEYS = new Set([
-  'epochs', 'batch_size', 'learning_rate', 'warmup_ratio', 'warmup_steps',
-  'weight_decay', 'gradient_accumulation_steps', 'max_seq_length',
-  'max_grad_norm', 'lora_r', 'lora_alpha', 'lora_dropout',
-]);
-const BOOLEAN_PARAM_KEYS = new Set(['fp16', 'use_lora', 'load_in_8bit', 'load_in_4bit']);
+/**
+ * Abgeleitet aus SETTABLE_CONFIG — bewusst dieselbe Quelle, die das Training
+ * beim Uebernehmen benutzt (coercePatchFromRecord). Vorher waren es zwei
+ * getrennte Listen, und nur ihre Schnittmenge kam wirklich an: Empfehlungen
+ * wie "optimizer: sgd" oder "dropout: 0" wurden hier erkannt, beim Anwenden
+ * aber stillschweigend verworfen — bzw. umgekehrt.
+ */
+const NUMERIC_PARAM_KEYS = new Set(
+  Object.entries(SETTABLE_CONFIG).filter(([, m]) => m.type === 'int' || m.type === 'float').map(([k]) => k),
+);
+const BOOLEAN_PARAM_KEYS = new Set(
+  Object.entries(SETTABLE_CONFIG).filter(([, m]) => m.type === 'bool').map(([k]) => k),
+);
 /** Bei String-Parametern reicht „sieht aus wie ein Wort“ nicht — nur bekannte Bezeichner. */
-const ENUM_PARAM_VALUES: Record<string, Set<string>> = {
-  optimizer: new Set(['adamw', 'adamw_torch', 'adamw_hf', 'adamw_8bit', 'adam', 'adafactor', 'sgd', 'lion', 'rmsprop']),
-  scheduler: new Set(['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup', 'inverse_sqrt']),
-};
-const RECOMMENDABLE_PARAM_KEYS = new Set<string>([
-  ...Array.from(NUMERIC_PARAM_KEYS),
-  ...Array.from(BOOLEAN_PARAM_KEYS),
-  ...Object.keys(ENUM_PARAM_VALUES),
-]);
+const ENUM_PARAM_VALUES: Record<string, Set<string>> = Object.fromEntries(
+  Object.entries(SETTABLE_CONFIG)
+    .filter(([, m]) => m.type === 'enum')
+    .map(([k, m]) => [k, new Set(m.values ?? [])]),
+);
+/**
+ * Freitext-Felder (z.B. lora_target_modules) werden nur aus echtem JSON
+ * uebernommen. Die Inline-Heuristik wuerde sonst jedes Wort hinter einem
+ * Doppelpunkt als Wert durchwinken.
+ */
+const TEXT_PARAM_KEYS = new Set(
+  Object.entries(SETTABLE_CONFIG).filter(([, m]) => m.type === 'text').map(([k]) => k),
+);
+const RECOMMENDABLE_PARAM_KEYS = new Set<string>(Object.keys(SETTABLE_CONFIG));
 
 function coerceParamValue(raw: string): unknown {
   const v = raw.trim().replace(/^["'`]|["'`]$/g, '').replace(/[.,;]$/, '');
@@ -127,6 +141,7 @@ function coerceParamValue(raw: string): unknown {
 function isValidParamValue(key: string, value: unknown): boolean {
   if (NUMERIC_PARAM_KEYS.has(key)) return typeof value === 'number' && Number.isFinite(value);
   if (BOOLEAN_PARAM_KEYS.has(key)) return typeof value === 'boolean';
+  if (TEXT_PARAM_KEYS.has(key)) return typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
   const allowed = ENUM_PARAM_VALUES[key];
   return allowed !== undefined && typeof value === 'string' && allowed.has(value.toLowerCase());
 }
@@ -151,50 +166,24 @@ const RECOMMENDATION_HEADING = /^[ \t]{0,3}(?:#{1,6}[ \t]+|\*\*)[^\n]*(?:empfohl
 
 /** Wendet alle Such-Strategien auf einen Textausschnitt an. */
 function extractParamsFrom(text: string): Record<string, unknown> | null {
-  const tryParse = (candidate: string): Record<string, unknown> | null => {
-    try {
-      const parsed = JSON.parse(candidate.trim());
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return pickKnownParams(parsed as Record<string, unknown>);
-      }
-    } catch { /* nächste Strategie */ }
-    return null;
-  };
-
-  // Bei mehreren Treffern gewinnt der letzte — Berichte nennen erst den
-  // Ist-Zustand und danach die Empfehlung.
-  const lastMatch = (re: RegExp, group: number): Record<string, unknown> | null => {
-    let hit: Record<string, unknown> | null = null;
-    for (const m of text.matchAll(re)) hit = tryParse(m[group]) ?? hit;
-    return hit;
-  };
-
-  // 1. Geschlossener Code-Block (```json … ``` oder ``` … ```).
-  const fenced = lastMatch(/```json\s*([\s\S]*?)```/gi, 1) ?? lastMatch(/```\s*(\{[\s\S]*?\})\s*```/g, 1);
-  if (fenced) return fenced;
-
-  // 2. Nicht geschlossener Code-Block am Ende der Antwort.
-  const unclosed = text.match(/```json\s*([\s\S]*)$/i);
-  if (unclosed) {
-    const brace = unclosed[1].match(/\{[\s\S]*\}/);
-    if (brace) {
-      const hit = tryParse(brace[0]);
-      if (hit) return hit;
-    }
+  // 1.-3. Echtes JSON (Code-Block, freistehend oder am Token-Limit
+  // abgeschnitten) — dieselbe Logik nutzt der Trainings-Assistent.
+  const raw = findLastJsonObject(text);
+  if (raw) {
+    const picked = pickKnownParams(raw);
+    if (picked) return picked;
   }
-
-  // 3. Freistehendes JSON-Objekt irgendwo im Text.
-  const loose = lastMatch(/\{[^{}]*\}/g, 0);
-  if (loose) return loose;
 
   // 4. Inline-Paare: `epochs=5`, epochs = 5, **epochs**: 5 …
   // Markdown-Auszeichnung vorher entfernen, damit "**epochs**: 5" greift.
   const plain = text.replace(/[*`]/g, '');
   const inline: Record<string, unknown> = {};
-  const pairRe = /([a-z_][a-z0-9_]*)\s*[=:]\s*([^\s,;)"'`*]+)/gi;
+  // Anfuehrungszeichen im Wert zulassen ("optimizer": "sgd") — coerceParamValue
+  // streift sie ab. Unsinnige Treffer faengt isValidParamValue ohnehin weg.
+  const pairRe = /([a-z_][a-z0-9_]*)\s*[=:]\s*("[^"]*"|'[^']*'|[^\s,;)}"'`*]+)/gi;
   for (const m of plain.matchAll(pairRe)) {
     const key = m[1].toLowerCase();
-    if (!RECOMMENDABLE_PARAM_KEYS.has(key)) continue;
+    if (!RECOMMENDABLE_PARAM_KEYS.has(key) || TEXT_PARAM_KEYS.has(key)) continue;
     const value = coerceParamValue(m[2]);
     if (isValidParamValue(key, value)) inline[key] = value; // letzter Treffer gewinnt
   }
@@ -991,7 +980,23 @@ function isImageArchitecture(arch?: string): boolean {
 // AI System Prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-function buildAnalysisSystemPrompt(language: string) {
+/**
+ * Die uebernehmbaren Felder als Prompt-Zeilen. Aus SETTABLE_CONFIG abgeleitet,
+ * damit Vorschlag und Uebernahme nicht auseinanderlaufen: die feste Vorlage
+ * nannte frueher neun Felder, obwohl die Trainings-Config deutlich mehr kennt.
+ */
+function settableFieldList(): string {
+  return Object.entries(SETTABLE_CONFIG)
+    .map(([key, meta]) => {
+      if (meta.type === 'enum') return `- ${key}: ${(meta.values ?? []).map(v => `"${v}"`).join(' | ')}`;
+      if (meta.type === 'bool') return `- ${key}: true | false`;
+      if (meta.type === 'text') return `- ${key}: string`;
+      return `- ${key}: number`;
+    })
+    .join('\n');
+}
+
+function buildAnalysisSystemPrompt(language: string, taskHint = '') {
   const responseInstruction = language === 'de'
     ? 'Antworte ausschließlich auf Deutsch.'
     : 'Answer exclusively in English.';
@@ -1023,8 +1028,16 @@ function buildAnalysisSystemPrompt(language: string) {
         forecastText: 'What do you expect from the next training run?',
       };
 
+  // Ohne diesen Absatz bewertete die KI jeden Lauf als NLP-Feintuning und
+  // empfahl Felder, die es beim jeweiligen Task gar nicht gibt.
+  const taskBlock = taskHint
+    ? `\n\nThis run is: ${taskHint}.
+Judge it by the metrics that matter for THAT task (e.g. mAP50/mAP50-95 for object detection, accuracy/F1 for classification).
+Only recommend parameters that are meaningful for this task — leave out fields that do not apply (e.g. max_seq_length or LoRA for a CNN detector).`
+    : '';
+
   return `You are an experienced machine learning engineer and model training expert.
-${responseInstruction}
+${responseInstruction}${taskBlock}
 Write the entire answer in that one language — never mix in words from another language.
 
 Formatting rules:
@@ -1050,19 +1063,10 @@ ${sectionTitles.suggestions}
 ${sectionTitles.suggestionsText}
 
 ${sectionTitles.params}
-\`\`\`json
-{
-  "epochs": ...,
-  "batch_size": ...,
-  "learning_rate": ...,
-  "optimizer": "...",
-  "scheduler": "...",
-  "warmup_ratio": ...,
-  "weight_decay": ...,
-  "gradient_accumulation_steps": ...,
-  "max_seq_length": ...
-}
-\`\`\`
+Use a \`\`\`json block with only the fields you want to change.
+Every field the user can set is allowed — these and no others:
+${settableFieldList()}
+Example: {"epochs": 4, "learning_rate": 0.00002, "optimizer": "sgd", "fp16": true}
 
 ${sectionTitles.forecast}
 ${sectionTitles.forecastText}`;
@@ -1103,6 +1107,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   const [generatingReport, setGeneratingReport] = useState(false);
   /** Persistente Fehlermeldung der KI-Analyse — Toasts blenden zu schnell aus. */
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+  /** true, wenn die letzte Analyse am Token-Limit abgeschnitten wurde. */
+  const [aiTruncated, setAiTruncated] = useState(false);
   const [aiRecommendedParams, setAiRecommendedParams] = useState<Record<string, any> | null>(null);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -1340,15 +1346,35 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       lines.push(`LoRA: ${cfg.use_lora} | fp16: ${cfg.fp16} | seq_len: ${cfg.max_seq_length}`);
       lines.push(`Hardware: ${hw.device?.toUpperCase()} ${hw.system_ram_gb}GB RAM | Val-Set: ${ds.has_validation ? 'Ja' : 'NEIN'}`);
       // Ohne Architektur und Datenmenge bewertete die KI ins Blaue hinein.
-      lines.push(`Modell: architecture=${mi?.architecture ?? 'unbekannt'} num_labels=${mi?.num_labels ?? 'N/A'} lora_active=${mi?.lora_active ?? false}`);
+      // Ohne den Task-Typ bewertete die KI jeden Lauf als NLP-Feintuning und
+      // empfahl max_seq_length/LoRA — bei einem YOLO-Detektor Unsinn.
+      lines.push(`Modell: architecture=${mi?.architecture ?? 'unbekannt'} task=${cfg.task_type ?? 'unbekannt'} num_labels=${mi?.num_labels ?? 'N/A'} lora_active=${mi?.lora_active ?? false}`);
       lines.push(`Daten: n_train=${ds.n_train ?? 'N/A'} n_val=${ds.n_val ?? 'N/A'}`);
       // Die Qualitaetsmetriken lagen vor, wurden aber nie mitgeschickt — die
       // KI konnte deshalb gar nicht beurteilen, wie gut das Modell wirklich ist.
+      // Die Detektions-Metriken fehlten selbst danach noch: bei einem YOLO-Lauf
+      // sah die KI nur den Loss und redete deshalb ueber die Config statt
+      // ueber mAP — genau die Zahl, an der ein Detektor gemessen wird.
+      const pct = (v?: number | null) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : null);
+      const metricLine = (label: string, pairs: Array<[string, number | null | undefined]>) => {
+        const parts = pairs.map(([k, v]) => [k, pct(v)] as const).filter(([, v]) => v !== null);
+        if (parts.length === 0) return null;
+        return `${label}: ${parts.map(([k, v]) => `${k}=${v}`).join(' ')}`;
+      };
+      const dm = fullData.detection_metrics;
       const cm = fullData.classification_metrics;
-      if (cm) {
-        const pct = (v?: number) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : 'N/A');
-        lines.push(`Qualitaet: accuracy=${pct(cm.accuracy)} f1=${pct(cm.f1)} precision=${pct(cm.precision)} recall=${pct(cm.recall)}`);
-      }
+      const detLine = dm ? metricLine('Detektion (mAP)', [
+        ['mAP50', dm.map50], ['mAP50-95', dm.map50_95],
+        ['precision', dm.precision], ['recall', dm.recall],
+      ]) : null;
+      const clsLine = cm ? metricLine('Qualitaet', [
+        ['accuracy', cm.accuracy], ['f1', cm.f1],
+        ['precision', cm.precision], ['recall', cm.recall],
+      ]) : null;
+      // Bei Objekterkennung ersetzt mAP die Accuracy — wie in der Oberflaeche.
+      if (detLine) lines.push(detLine);
+      else if (clsLine) lines.push(clsLine);
+      else lines.push('Qualitaetsmetriken: keine vorhanden (nur Loss verfuegbar).');
       if (fullData.epoch_summaries?.length > 0) {
         lines.push('\nEpochen:');
         for (const e of fullData.epoch_summaries) lines.push(`E${e.epoch}: Ø=${e.avg_train_loss?.toFixed(4)} Min=${e.min_train_loss?.toFixed(4)} Val=${e.val_loss?.toFixed(4) ?? 'N/A'}`);
@@ -1362,6 +1388,17 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
 
   // ── KI-Analyse ─────────────────────────────────────────────────────────────
 
+  /**
+   * Kurzbeschreibung des Task-Typs fuer den System-Prompt. Ohne sie schlug die
+   * KI bei einem YOLO-Lauf NLP-Parameter (max_seq_length, LoRA) vor.
+   */
+  function taskHint(): string {
+    const task = String(fullData?.config?.task_type ?? '').trim();
+    const arch = String(fullData?.model_info?.architecture ?? '').trim();
+    const parts = [task && `task_type=${task}`, arch && `architecture=${arch}`].filter(Boolean);
+    return parts.join(', ');
+  }
+
   const runAIAnalysis = async () => {
     if (!selectedVersionId) return;
     if (!aiEnabled) { notifyError(t('analysisPanel.aiAnalysis.notEnabledTitle'), t('analysisPanel.aiAnalysis.notEnabledDescription')); return; }
@@ -1369,14 +1406,20 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     if (meta.needsKey && !aiApiKey.trim()) { notifyError(t('common.error'), `${meta.label}-Key konfigurieren.`); return; }
     setGeneratingReport(true);
     setAiAnalysisError(null);
+    setAiTruncated(false);
     try {
       const resolvedModel = resolveModel(aiProvider, aiSettings.selectedModel, aiSettings.ollamaModel);
+      // Das eingestellte Token-Budget galt hier nicht: 6000 waren fest
+      // verdrahtet. Bei "Minimal" war das viel zu teuer, bei "Unlimited" zu
+      // knapp — der Bericht brach mitten im Satz ab, samt halbem JSON-Block.
+      const budget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
       const text = await callAIClient(aiSettings, {
-        system: buildAnalysisSystemPrompt(language),
+        system: buildAnalysisSystemPrompt(language, taskHint()),
         messages: [{ role: 'user', content: `Analysiere folgendes Training:\n\n${buildFullContext()}` }],
-        maxTokens: 6000,
+        maxTokens: budget.maxTokens,
         temperature: 0.4,
         responseLanguage: language,
+        onTruncated: () => setAiTruncated(true),
       });
       await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: resolvedModel, language });
       const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: resolvedModel, language, generated_at: new Date().toISOString() };
@@ -1409,8 +1452,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     setChatRetryText(null);
     setChatLoading(true);
     try {
-      const sys = `${buildAnalysisSystemPrompt(language)}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
-      const reply = await callAIClient(aiSettings, { system: sys, messages: updated, maxTokens: 3000, temperature: 0.6, responseLanguage: language });
+      const sys = `${buildAnalysisSystemPrompt(language, taskHint())}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
+      const chatBudget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
+      const reply = await callAIClient(aiSettings, {
+        system: sys, messages: updated,
+        maxTokens: chatBudget.maxTokens,
+        temperature: 0.6, responseLanguage: language,
+      });
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (e: any) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: `${t('common.error')}: ${String(e)}` }]);
@@ -1881,6 +1929,17 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                   <p className="text-red-300 text-xs font-medium">{t('analysisPanel.aiAnalysis.failedTitle')}</p>
                   <p className="text-red-200/80 text-xs break-words">{aiAnalysisError}</p>
                 </div>
+              </div>
+            )}
+
+            {aiTruncated && !generatingReport && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 mb-3">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <p className="text-amber-200/90 text-xs break-words">
+                  {language === 'de'
+                    ? 'Die Antwort wurde am Token-Limit abgeschnitten. In den Einstellungen ein groesseres Token-Budget waehlen und neu erzeugen.'
+                    : 'The answer was cut off at the token limit. Pick a larger token budget in settings and regenerate.'}
+                </p>
               </div>
             )}
 

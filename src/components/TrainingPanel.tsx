@@ -19,7 +19,7 @@ import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumeP
 import { coercePatchFromRecord } from '../ai/coachContext';
 import { clampNumber, parseNumberInput } from './numberInput';
 import { appendLossPoint } from './lossStats';
-import { useAISettings } from '../contexts/AISettingsContext';
+import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -124,11 +124,28 @@ interface TrainingPanelProps {
 
 import type { AISettings } from '../contexts/AISettingsContext';
 import { callAI as callAIClient } from '../ai/aiClient';
+import { findLastJsonObject } from '../ai/jsonBlock';
+import { MarkdownText } from './ui/MarkdownText';
 import { dateLocale } from '../utils/dateLocale';
 
-export async function callAI(settings: AISettings, systemPrompt: string, userPrompt: string, history?: { role: 'user' | 'assistant'; content: string }[], responseLanguage?: Language): Promise<string> {
+/**
+ * Gemeinsamer Einstieg fuer Training, Labor und die Dev-Panels.
+ *
+ * Die Antwortlaenge folgt dem eingestellten Token-Budget. Vorher standen hier
+ * feste 2000 Tokens: bei "Minimal" wurde teurer geantwortet als gewollt, bei
+ * "Maximum"/"Unlimited" brach die Antwort mitten im Satz ab.
+ */
+export function budgetMaxTokens(settings: AISettings): number {
+  return TOKEN_BUDGET_CONFIG[settings.tokenBudget ?? 'balanced'].maxTokens;
+}
+
+export async function callAI(settings: AISettings, systemPrompt: string, userPrompt: string, history?: { role: 'user' | 'assistant'; content: string }[], responseLanguage?: Language, onTruncated?: () => void): Promise<string> {
   const messages = [...(history ?? []), { role: 'user' as const, content: userPrompt }];
-  return callAIClient(settings, { system: systemPrompt, messages, maxTokens: 2000, temperature: 0.7, responseLanguage });
+  return callAIClient(settings, {
+    system: systemPrompt, messages,
+    maxTokens: budgetMaxTokens(settings),
+    temperature: 0.7, responseLanguage, onTruncated,
+  });
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────
@@ -589,7 +606,7 @@ ALLE VERFÜGBAREN METRIKEN (du kannst ALLE davon in deinem JSON verwenden):
 
 HINWEIS: Wenn das Modell viel RAM braucht → use_lora=true, lora_r=8, load_in_4bit=true empfehlen.`;
 
-function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onApply, onClose, onSaveAsTemplate, initialGoal }: {
+export function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onApply, onClose, onSaveAsTemplate, initialGoal }: {
   config: TrainingConfig; datasetName: string; datasetSize: number; modelName: string;
   onApply: (patch: Partial<TrainingConfig>) => void;
   onClose: () => void;
@@ -607,6 +624,8 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
   const [applied, setApplied] = useState(false);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
   const [askFailed, setAskFailed] = useState(false);
+  /** true, wenn die Antwort am Token-Limit abgeschnitten wurde. */
+  const [truncated, setTruncated] = useState(false);
   const [phase, setPhase] = useState<'input' | 'result'>(initialGoal ? 'input' : 'input');
 
   // Auto-trigger analysis if initialGoal provided (e.g. from error recovery)
@@ -621,6 +640,15 @@ function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onAppl
     // Antwortsprache folgt der App-Einstellung — vorher war "Antworte auf
     // Deutsch" hart im Prompt und hat die Spracheinstellung überschrieben.
     const en = (language ?? '').toLowerCase().startsWith('en');
+    // Die Laenge folgte frueher einer festen "3-4 Saetze"-Vorgabe, unabhaengig
+    // vom eingestellten Token-Budget — deshalb kam auch bei "Maximum" nur ein
+    // Absatz, der dann am Limit auch noch mitten im Satz endete.
+    const maxTokens = budgetMaxTokens(aiSettings);
+    const lengthHint = maxTokens <= 600
+      ? { de: '2-3 Sätze', en: '2-3 sentences' }
+      : maxTokens <= 1600
+      ? { de: 'kompakt, etwa 5-8 Sätze', en: 'compact, about 5-8 sentences' }
+      : { de: 'ausführlich, mit Begründung je Empfehlung', en: 'in depth, with a rationale per recommendation' };
     const prompt = `${en ? 'You are an ML expert for HuggingFace fine-tuning.' : 'Du bist ein ML-Experte für HuggingFace Fine-Tuning.'}
 
 ${en ? 'CURRENT CONFIGURATION' : 'AKTUELLE KONFIGURATION'}:
@@ -634,39 +662,51 @@ ${goalText ? `\n${en ? "USER'S GOAL / PROBLEM" : 'ZIEL / PROBLEM DES USERS'}:\n$
 ${KI_CONFIG_FIELDS}
 
 ${en ? `TASK:
-1. Briefly analyze the current configuration (3-4 sentences in English)
+1. Analyze the current configuration (${lengthHint.en})
 2. Take the user's goal / problem into account if provided
 3. Produce optimized hyperparameters
 
-IMPORTANT: End with ONE valid JSON object containing ALL metrics you want to change.
-Only fields that should change. Example: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}
-No markdown code block — only the raw JSON object at the end.` : `AUFGABE:
-1. Analysiere die aktuelle Konfiguration kurz (3-4 Sätze auf Deutsch)
+Use Markdown for the text part: short headings and flat bullet lists, no emojis.
+
+IMPORTANT: End with ONE valid JSON object containing ALL metrics you want to change,
+inside a \`\`\`json code block. Only fields that should change.
+Example: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}` : `AUFGABE:
+1. Analysiere die aktuelle Konfiguration (${lengthHint.de})
 2. Berücksichtige das Ziel / Problem des Users falls angegeben
 3. Erstelle optimierte Hyperparameter
 
-WICHTIG: Gib am Ende EIN valides JSON-Objekt mit ALLEN Metriken die du ändern möchtest.
-Nur Felder die sich ändern sollen. Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}
-Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`}`;
+Nutze Markdown für den Textteil: kurze Überschriften und flache Listen, keine Emojis.
+
+WICHTIG: Gib am Ende EIN valides JSON-Objekt mit ALLEN Metriken die du ändern möchtest,
+in einem \`\`\`json-Codeblock. Nur Felder die sich ändern sollen.
+Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}`}`;
 
     const system = en
       ? 'You are a precise ML expert. Answer in English. Output exactly one valid JSON object at the end.'
       : 'Du bist ein präziser ML-Experte. Antworte auf Deutsch. Gib am Ende exakt ein valides JSON-Objekt aus.';
 
+    setTruncated(false);
     try {
-      const text = await callAI(aiSettings, system, prompt, undefined, language);
+      const text = await callAI(aiSettings, system, prompt, undefined, language, () => setTruncated(true));
       setSuggestion(text);
-      const matches = [...text.matchAll(/\{[^{}]*\}/g)];
-      if (matches.length > 0) {
-        try {
-          const sanitized = sanitizeAIConfig(JSON.parse(matches[matches.length - 1][0]));
-          setParsed(Object.keys(sanitized).length > 0 ? sanitized : null);
-        } catch { /* ignore */ }
+      // Versteht Code-Block, rohes JSON und am Token-Limit abgeschnittene
+      // Objekte — vorher fiel jede Antwort ohne schliessende Klammer durch,
+      // und damit gingen alle Empfehlungen verloren.
+      const raw = findLastJsonObject(text);
+      if (raw) {
+        const sanitized = sanitizeAIConfig(raw);
+        setParsed(Object.keys(sanitized).length > 0 ? sanitized : null);
       }
     } catch (err) { setSuggestion(`${t('common.error')}: ${String(err)}`); setParsed(null); setAskFailed(true); } finally { setLoading(false); }
   };
 
-  const textOnly = suggestion?.replace(/\{[^{}]*\}/g, '').trim() ?? '';
+  // Der JSON-Teil wird als Parameter-Liste angezeigt, nicht noch einmal als
+  // Text — inklusive des Code-Blocks, in dem er jetzt steckt.
+  const textOnly = (suggestion ?? '')
+    .replace(/```json[\s\S]*?(?:```|$)/gi, '')
+    .replace(/```\s*\{[\s\S]*?(?:```|$)/g, '')
+    .replace(/\{[^{}]*\}/g, '')
+    .trim();
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -732,11 +772,22 @@ Kein Markdown-Code-Block, nur das reine JSON-Objekt am Ende.`}`;
               ) : (
                 <>
                   {textOnly && (
-                    <div className={`p-4 rounded-xl border text-sm leading-relaxed whitespace-pre-wrap ${
+                    <div className={`p-4 rounded-xl border text-sm leading-relaxed ${
                       askFailed
-                        ? 'bg-red-500/10 border-red-500/25 text-red-200'
+                        ? 'bg-red-500/10 border-red-500/25 text-red-200 whitespace-pre-wrap'
                         : 'bg-violet-500/10 border-violet-500/20 text-gray-300'
-                    }`}>{textOnly}</div>
+                    }`}>
+                      {/* Die Antwort ist Markdown. Als Rohtext standen die
+                          Rauten der Ueberschriften woertlich im Dialog. */}
+                      {askFailed ? textOnly : <MarkdownText text={textOnly} />}
+                    </div>
+                  )}
+                  {truncated && !askFailed && (
+                    <p className="text-amber-300/90 text-xs">
+                      {language === 'en'
+                        ? 'The answer was cut off at the token limit. Pick a larger token budget in settings.'
+                        : 'Die Antwort wurde am Token-Limit abgeschnitten. In den Einstellungen ein groesseres Token-Budget waehlen.'}
+                    </p>
                   )}
                   {askFailed && (
                     <button

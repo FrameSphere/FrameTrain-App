@@ -119,6 +119,14 @@ export default function HFEncoderTestPlugin({
     const ds = datasets.find(d => d.id === selectedDatasetId);
     if (!ds) return;
 
+    // Backend erwartet usize | null - leeres Feld = alle Samples
+    const trimmedMax = maxSamples.trim();
+    const parsedMax = trimmedMax === '' ? null : Math.floor(Number(trimmedMax));
+    if (parsedMax !== null && (!Number.isFinite(parsedMax) || parsedMax < 1)) {
+      setDatasetError('Max Samples muss eine ganze Zahl >= 1 sein (oder leer fuer alle).');
+      return;
+    }
+
     setDatasetError(null);
     setDatasetResults(null);
     setDatasetProgress(null);
@@ -137,7 +145,7 @@ export default function HFEncoderTestPlugin({
         datasetId: selectedDatasetId,
         datasetName: ds.name,
         batchSize,
-        maxSamples: maxSamples === '' ? null : maxSamples,
+        maxSamples: parsedMax,
         taskType: 'seq_classification',
         pluginConfig: {},
       });
@@ -299,7 +307,7 @@ export default function HFEncoderTestPlugin({
               type="number"
               min={1}
               value={batchSize}
-              onChange={(e) => setBatchSize(Number(e.target.value))}
+              onChange={(e) => setBatchSize(Math.max(1, parseInt(e.target.value, 10) || 1))}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500/40"
             />
           </div>
@@ -308,7 +316,7 @@ export default function HFEncoderTestPlugin({
             <input
               type="text"
               value={maxSamples}
-              onChange={(e) => setMaxSamples(e.target.value)}
+              onChange={(e) => setMaxSamples(e.target.value.replace(/[^0-9]/g, ''))}
               placeholder="leer = alle"
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40"
             />
