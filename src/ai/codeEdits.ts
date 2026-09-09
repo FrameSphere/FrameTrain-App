@@ -8,32 +8,63 @@ export type CodeEdit = {
   confidence?: number; // 0..1
 };
 
+/**
+ * Entfernt umschliessende Code-Fences — mit und ohne Sprachangabe.
+ *
+ * Vorher wurde nur exakt "```python" am Anfang und "```" am Ende getroffen.
+ * Ein Block, den das Modell als "```" (ohne Sprache) oder mit Leerzeile davor
+ * eingerahmt hat, behielt seinen Fence — und der landete beim Uebernehmen als
+ * Code-Zeile im Skript.
+ */
 function stripPythonFences(s: string) {
-  return s.replace(/^```python\n?/, '').replace(/\n?```$/, '');
+  return s
+    .trim()
+    .replace(/^```[a-zA-Z0-9_+-]*[ \t]*\r?\n?/, '')
+    .replace(/\r?\n?[ \t]*```[ \t]*$/, '')
+    .trim();
+}
+
+/**
+ * Reste des Edit-Protokolls bzw. von Markdown, die niemals in den Code gehoeren.
+ * Ein Vorschlag, der so etwas enthaelt, ist nicht uebernehmbar.
+ */
+const PROTOCOL_LEFTOVER = /(?:^|\n)[ \t]*(?:##EDIT_(?:START|END)##|FIND:|REPLACE:|```)/;
+
+/**
+ * Ein Edit ist nur brauchbar, wenn beide Seiten reiner Code sind.
+ *
+ * Der Praxisfall: das Modell liess "##EDIT_END##" weg und schrieb danach
+ * weiter. Der Fallback nahm daraufhin ALLES bis zum Textende als neuen Code —
+ * inklusive "```", "FIND:" und dem naechsten Block. Nach dem Uebernehmen stand
+ * genau das im Skript und machte es unbrauchbar. Lieber kein Vorschlag als ein
+ * zerstoerender.
+ */
+export function isUsableEdit(find: string, replace: string): boolean {
+  if (!find.trim()) return false;
+  return !PROTOCOL_LEFTOVER.test(find) && !PROTOCOL_LEFTOVER.test(replace);
 }
 
 export function parseEdits(text: string): CodeEdit[] {
   const edits: CodeEdit[] = [];
+  const push = (rawFind: string, rawReplace: string) => {
+    const find = stripPythonFences(rawFind.trim());
+    const replace = stripPythonFences(rawReplace.trim());
+    if (!isUsableEdit(find, replace)) return;
+    edits.push({ id: `edit_${Date.now()}_${edits.length}`, find, replace });
+  };
 
   // Erst vollständige Blöcke (mit ##EDIT_END##)
   const regexComplete = /##EDIT_START##\s*FIND:\s*([\s\S]*?)\s*REPLACE:\s*([\s\S]*?)\s*##EDIT_END##/g;
   let match: RegExpExecArray | null;
-  while ((match = regexComplete.exec(text)) !== null) {
-    let find = stripPythonFences(match[1].trim());
-    let replace = stripPythonFences(match[2].trim());
-    edits.push({ id: `edit_${Date.now()}_${edits.length}`, find, replace });
-  }
+  while ((match = regexComplete.exec(text)) !== null) push(match[1], match[2]);
 
-  // Fallback: unvollständige Blöcke (KI hat ##EDIT_END## vergessen), greedy bis Ende
+  // Fallback: unvollständige Blöcke (KI hat ##EDIT_END## vergessen).
+  // Der Ersetzungsteil endet am naechsten Marker, NICHT am Textende — sonst
+  // wandert der Rest der Antwort als "neuer Code" ins Skript.
   if (edits.length === 0) {
-    const regexIncomplete = /##EDIT_START##\s*FIND:\s*([\s\S]*?)\s*REPLACE:\s*([\s\S]*)/g;
-    while ((match = regexIncomplete.exec(text)) !== null) {
-      let find = stripPythonFences(match[1].trim());
-      let replace = stripPythonFences(match[2].trim());
-      if (find && replace) {
-        edits.push({ id: `edit_${Date.now()}_${edits.length}`, find, replace });
-      }
-    }
+    const regexIncomplete =
+      /##EDIT_START##\s*FIND:\s*([\s\S]*?)\s*REPLACE:\s*([\s\S]*?)(?=\n[ \t]*(?:##EDIT_|FIND:)|$)/g;
+    while ((match = regexIncomplete.exec(text)) !== null) push(match[1], match[2]);
   }
 
   return edits;

@@ -766,14 +766,24 @@ ANFORDERUNGEN:
       // das rationale-Feld des Steuerblocks und lassen den Fliesstext leer.
       // Ohne diesen Rueckgriff blieb die Antwortblase komplett leer.
       const explanation = cleaned.trim() || (action?.rationale ?? '').trim();
+      // Ein Vorschlag, aus dem kein sauberer Edit zu lesen war (Protokoll-Reste,
+      // fehlendes ##EDIT_END##), wird verworfen — sonst landet Markdown als
+      // Code im Skript. Ohne Hinweis saehe es aus, als haette die KI nichts
+      // geliefert.
+      const editsDropped = inferredEdit && edits.length === 0 && !code;
       const baseContent = code ? [explanation, '```python', code, '```'].join('\n') : explanation;
       // Am Limit abgeschnittene Antworten enthalten halbe Edit-Bloecke. Ohne
       // Hinweis haette der User unvollstaendigen Code uebernommen.
+      const droppedNote = editsDropped
+        ? `\n\n_${language === 'en'
+            ? 'The suggested change was incomplete and was discarded — ask again, ideally with a smaller step.'
+            : 'Der vorgeschlagene Code-Eingriff war unvollstaendig und wurde verworfen — frag noch einmal, am besten in einem kleineren Schritt.'}_`
+        : '';
       const finalContent = cutOff
         ? `${baseContent}\n\n_${language === 'en'
             ? 'Answer was cut off at the token limit — the change may be incomplete. Choose a larger token budget in settings.'
             : 'Antwort wurde am Token-Limit abgeschnitten — die Aenderung kann unvollstaendig sein. In den Einstellungen ein groesseres Token-Budget waehlen.'}_`
-        : baseContent;
+        : baseContent + droppedNote;
       setMessages(m => [...m, { role: 'assistant', content: finalContent, edits: cutOff ? [] : edits, action }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', content: `Fehler: ${String(err)}` }]);
