@@ -24,7 +24,7 @@ import { MarkdownText } from './ui/MarkdownText';
 import TrainingDashboard from './TrainingDashboard';
 import { classifyError, type ErrorCategory } from '../utils/errorClassify';
 import { useEscapeKey } from '../hooks/useEscapeKey';
-import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, type CodeEdit } from '../ai/codeEdits';
+import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, calculateAffectedLines, type CodeEdit, type HighlightedLine } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { sendAppErrorReport } from '../utils/errorReport';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
@@ -47,34 +47,8 @@ const updateScript = (id: string, script: string, userId?: string) => { const ke
 
 // ── Line Highlighting Utilities ────────────────────────────────────────────
 
-interface HighlightedLine { lineNum: number; type: 'added' | 'removed' | 'modified'; }
-
-function calculateAffectedLines(script: string, edit: CodeEdit): HighlightedLine[] {
-  const findLines = edit.find.split('\n');
-  const replaceLines = edit.replace.split('\n');
-  const affected: HighlightedLine[] = [];
-
-  // Find where the edit text appears in the script (case-sensitive exact match)
-  const findStart = script.indexOf(edit.find);
-  if (findStart === -1) return affected; // Not found
-
-  // Calculate the starting line number (1-indexed)
-  // Count all newlines before the findStart position
-  const linesBeforeFindCount = (script.slice(0, findStart).match(/\n/g) || []).length;
-  const startLineNum = linesBeforeFindCount + 1;
-  
-  // Lines being REMOVED (show in RED) - the find block
-  for (let i = 0; i < findLines.length; i++) {
-    affected.push({ lineNum: startLineNum + i, type: 'removed' });
-  }
-
-  // Lines being ADDED (show in GREEN) - the replace block, appears right after removed lines
-  for (let i = 0; i < replaceLines.length; i++) {
-    affected.push({ lineNum: startLineNum + findLines.length + i, type: 'added' });
-  }
-
-  return affected;
-}
+// HighlightedLine + calculateAffectedLines liegen in src/ai/codeEdits.ts —
+// beide Dev-Panels markieren identisch.
 
 // ── Error Categorization ──────────────────────────────────────────────────
 
@@ -2200,35 +2174,43 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
                   <div className="relative flex-1 min-w-0">
                     {/* Line highlights for edits */}
-                    {highlightedLines.map((hl) => (
-                      <div
-                        key={`hl-${hl.lineNum}`}
-                        aria-hidden
-                        className="absolute left-0 right-0 pointer-events-none"
-                        style={{
-                          top: Math.round(editorPadTopPx + (hl.lineNum - 1) * editorLineHeightPx - editorScrollTop),
-                          height: Math.ceil(editorLineHeightPx),
-                          background:
-                            hl.type === 'added'
-                              ? 'rgba(34,197,94,0.25)'
-                              : hl.type === 'removed'
-                                ? 'rgba(239,68,68,0.25)'
-                                : 'rgba(234,179,8,0.20)',
-                          borderLeft:
-                            hl.type === 'added'
-                              ? '3px solid rgba(34,197,94,0.8)'
-                              : hl.type === 'removed'
-                                ? '3px solid rgba(239,68,68,0.8)'
-                                : '3px solid rgba(234,179,8,0.8)',
-                          borderRight:
-                            hl.type === 'added'
-                              ? '1px solid rgba(34,197,94,0.3)'
-                              : hl.type === 'removed'
-                                ? '1px solid rgba(239,68,68,0.3)'
-                                : '1px solid rgba(234,179,8,0.3)',
-                        }}
-                      />
-                    ))}
+                    {highlightedLines.map((hl) => {
+                      const top = Math.round(editorPadTopPx + (hl.lineNum - 1) * editorLineHeightPx - editorScrollTop);
+                      // Einfuegestelle: nur eine Linie mit "+N". Eine gruene
+                      // Flaeche ueber noch leeren Zeilen sah aus, als fehlte
+                      // dort die Code-Vorschau — den neuen Code zeigt der
+                      // Diff-Dialog.
+                      if (hl.type === 'insertion') {
+                        return (
+                          <div
+                            key={`hl-${hl.lineNum}`}
+                            aria-hidden
+                            className="absolute left-0 right-0 pointer-events-none flex items-center gap-1"
+                            style={{ top: top - 1 }}
+                          >
+                            <div className="h-[2px] flex-1 bg-emerald-500/70" />
+                            <span className="mr-2 rounded bg-emerald-500/20 px-1.5 py-[1px] text-[9px] font-medium text-emerald-300">
+                              +{hl.count}
+                            </span>
+                          </div>
+                        );
+                      }
+                      const removed = hl.type === 'removed';
+                      return (
+                        <div
+                          key={`hl-${hl.lineNum}`}
+                          aria-hidden
+                          className="absolute left-0 right-0 pointer-events-none"
+                          style={{
+                            top,
+                            height: Math.ceil(editorLineHeightPx),
+                            background: removed ? 'rgba(239,68,68,0.25)' : 'rgba(234,179,8,0.20)',
+                            borderLeft: removed ? '3px solid rgba(239,68,68,0.8)' : '3px solid rgba(234,179,8,0.8)',
+                            borderRight: removed ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(234,179,8,0.3)',
+                          }}
+                        />
+                      );
+                    })}
 
                     {/* Active line highlight */}
                     <div

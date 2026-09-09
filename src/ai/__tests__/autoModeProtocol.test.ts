@@ -33,6 +33,27 @@ describe('parseAutoAction', () => {
     expect(cleaned).toBe('Text.');
   });
 
+  // Der Praxisfall aus 1.2.52: groq/compound-mini setzt gar keine Backticks,
+  // sondern schreibt die Zeile "ft_action" und darunter das JSON.
+  it('erkennt den Block auch ganz ohne Fence', () => {
+    const { action, cleaned } = parseAutoAction('ft_action\n' + ACTION + '\n\nKurz: Tippfehler behoben.');
+    expect(action?.mode).toBe('edit');
+    expect(cleaned).toBe('Kurz: Tippfehler behoben.');
+    expect(cleaned).not.toMatch(/ft_action|rationale/);
+  });
+
+  it('erkennt ein nacktes Steuer-JSON am Anfang', () => {
+    const { action, cleaned } = parseAutoAction(ACTION + '\nDie Erklaerung.');
+    expect(action?.mode).toBe('edit');
+    expect(cleaned).toBe('Die Erklaerung.');
+  });
+
+  // Ein JSON MITTEN in der Antwort ist kein Steuerblock, sondern Inhalt.
+  it('greift nur am Anfang der Antwort', () => {
+    const text = 'Nutze diese Werte:\n' + ACTION;
+    expect(parseAutoAction(text)).toEqual({ action: null, cleaned: text });
+  });
+
   it('laesst Text ohne Steuerblock unveraendert', () => {
     const text = 'Nur eine normale Antwort ohne Steuerblock.';
     expect(parseAutoAction(text)).toEqual({ action: null, cleaned: text });

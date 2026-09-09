@@ -76,11 +76,23 @@ function firstJsonObject(input: string, from: number): { json: string; end: numb
  * Fence bis zur schliessenden Klammer (samt optionalem End-Fence) entfernt.
  */
 export function parseAutoAction(text: string): { action: AutoAction | null; cleaned: string } {
+  // 1. Regulaer: der Block steckt in einem ```ft_action- oder ```json-Fence.
   const fence = new RegExp('```[ \\t]*(?:' + ACTION_FENCE + '|json)\\b', 'i');
-  const hit = fence.exec(text);
+  let hit: { index: number; length: number } | null = null;
+  const fenced = fence.exec(text);
+  if (fenced) {
+    hit = { index: fenced.index, length: fenced[0].length };
+  } else {
+    // 2. Ohne Fence: groq/compound-mini schreibt schlicht die Zeile
+    //    "ft_action" und darunter das JSON. Ohne diesen Fall stand der
+    //    Steuerblock als Text ueber jeder Antwort im Chat.
+    //    Bewusst eng: nur am ANFANG der Antwort und nur mit gueltigem mode.
+    const bare = new RegExp('^\\s*(?:' + ACTION_FENCE + '\\s*)?(?=\\{)', 'i').exec(text);
+    if (bare) hit = { index: bare.index, length: bare[0].length };
+  }
   if (!hit) return { action: null, cleaned: text };
 
-  const found = firstJsonObject(text, hit.index + hit[0].length);
+  const found = firstJsonObject(text, hit.index + hit.length);
   if (!found) return { action: null, cleaned: text };
 
   let action: AutoAction;

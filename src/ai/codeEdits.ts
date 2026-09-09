@@ -170,3 +170,49 @@ export function extractFullPythonCode(text: string) {
   return text.match(/```python\n([\s\S]*?)```/)?.[1] ?? null;
 }
 
+
+// ── Zeilen-Markierung im Editor ────────────────────────────────────────────
+
+export interface HighlightedLine {
+  lineNum: number;
+  /**
+   * 'removed'   — Zeile wird ersetzt (rot; der alte Code scheint durch).
+   * 'insertion' — an dieser Stelle kommt neuer Code dazu (`count` Zeilen).
+   * 'modified'  — geaendert, ohne Zeilenverschiebung.
+   */
+  type: 'removed' | 'insertion' | 'modified';
+  /** Nur bei 'insertion': Anzahl der neuen Zeilen. */
+  count?: number;
+}
+
+/**
+ * Welche Zeilen ein Edit betrifft — fuer die Markierung im Editor.
+ *
+ * Die neuen Zeilen bekommen bewusst KEINE eigene Flaeche mehr: sie stehen ja
+ * noch gar nicht im Skript. Vorher malte die Vorschau deshalb einen grossen
+ * gruenen Block ueber leere Editor-Zeilen, der neuen Code suggerierte, wo
+ * keiner zu sehen war. Stattdessen markiert eine schmale Linie mit "+N" die
+ * Einfuegestelle; den neuen Code zeigt der Diff-Dialog.
+ */
+export function calculateAffectedLines(script: string, edit: CodeEdit): HighlightedLine[] {
+  const findLines = edit.find.split('\n');
+  const replaceLines = edit.replace.split('\n');
+  const affected: HighlightedLine[] = [];
+
+  const findStart = script.indexOf(edit.find);
+  if (findStart === -1) return affected;
+
+  const startLineNum = (script.slice(0, findStart).match(/\n/g) || []).length + 1;
+
+  for (let i = 0; i < findLines.length; i++) {
+    affected.push({ lineNum: startLineNum + i, type: 'removed' });
+  }
+  if (replaceLines.length > 0 && edit.replace.trim() !== '') {
+    affected.push({
+      lineNum: startLineNum + findLines.length,
+      type: 'insertion',
+      count: replaceLines.length,
+    });
+  }
+  return affected;
+}
