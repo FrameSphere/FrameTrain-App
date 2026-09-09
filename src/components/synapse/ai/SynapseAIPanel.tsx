@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLanguage } from "../../../contexts/LanguageContext";
+import { MarkdownText } from "../../ui/MarkdownText";
 import type { ChatMessage } from "../../../ai/aiClient";
 import type { AgentResumeState } from "./synapseAgent";
 import type { AgentStep } from "./synapseAgentTools";
@@ -352,7 +353,9 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
 
             {messages.map((m, i) => (
               <div key={`msg-${i}`} className={`synapse-ai-msg ${m.role}`} style={{ animationDelay: `${i * 0.05}s` }}>
-                {m.content}
+                {/* Auch die Zusammenfassungen kommen als Markdown zurueck —
+                    ohne Renderer standen Sternchen woertlich in der Blase. */}
+                {m.role === 'user' ? m.content : <MarkdownText text={m.content} className="text-xs" />}
               </div>
             ))}
 

@@ -20,6 +20,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePageContext } from '../contexts/PageContext';
 import { callAI, trimHistory } from './TrainingPanel';
+import { MarkdownText } from './ui/MarkdownText';
 import OpenLibraryModal from './OpenLibraryModal';
 import { readUserDevScripts } from '../utils/devScriptStorage';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
@@ -541,8 +542,14 @@ Code in \`\`\`python Blöcken.`;
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {aiMessages.length === 0 && <p className="text-gray-600 text-[10px] text-center py-4">{t('laboratoryPanel.devScript.aiSidebar.emptyHint')}</p>}
               {aiMessages.map((m, i) => (
-                <div key={i} className={`px-2.5 py-2 rounded-lg text-[10px] leading-relaxed ${m.role === 'user' ? 'bg-violet-500/10 text-gray-200 border border-violet-500/15 ml-4' : 'bg-white/5 text-gray-300 border border-white/10 mr-4'}`}>
-                  {m.content.replace(/```python[\s\S]*?```/g, '[Code wurde übernommen]').trim()}
+                <div key={i} className={`px-2.5 py-2 rounded-lg text-[10px] leading-relaxed min-w-0 max-w-full ${m.role === 'user' ? 'bg-violet-500/10 text-gray-200 border border-violet-500/15 ml-4' : 'bg-white/5 text-gray-300 border border-white/10 mr-4'}`}>
+                  {/* Markdown statt Rohtext (Backticks standen woertlich im
+                      Chat) und der Platzhalter kommt aus den Uebersetzungen
+                      statt fest auf Deutsch. */}
+                  <MarkdownText
+                    className="text-[10px]"
+                    text={m.content.replace(/```python[\s\S]*?```/g, t('laboratoryPanel.devScript.aiSidebar.codeTakenLabel')).trim()}
+                  />
                 </div>
               ))}
               {aiLoading && <div className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 mr-4"><Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" /></div>}

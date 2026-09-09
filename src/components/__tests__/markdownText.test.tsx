@@ -51,4 +51,17 @@ describe('MarkdownText', () => {
     render(<MarkdownText text="Ganz normaler Satz." />);
     expect(screen.getByText('Ganz normaler Satz.')).toBeTruthy();
   });
+
+  // Eine einzelne Raute fehlte im Renderer: "# Analyse der Konfiguration"
+  // stand woertlich samt Raute im Dialog des Metrik-Assistenten.
+  it('rendert auch eine einzelne Raute als Ueberschrift', () => {
+    render(<MarkdownText text={'# Analyse der Konfiguration\nText darunter.'} />);
+    expect(screen.getByText('Analyse der Konfiguration')).toBeTruthy();
+    expect(screen.queryByText(/^#/)).toBeNull();
+  });
+
+  it('haelt eine Raute ohne Leerzeichen fuer normalen Text', () => {
+    render(<MarkdownText text="#1 im Ranking" />);
+    expect(screen.getByText('#1 im Ranking')).toBeTruthy();
+  });
 });

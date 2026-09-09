@@ -20,6 +20,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { TrainingJob, TrainingProgress, LossPoint, ModelInfo, DatasetInfo } from './TrainingPanel';
 import { callAI, trimHistory, LossChart } from './TrainingPanel';
+import { MarkdownText } from './ui/MarkdownText';
 import TrainingDashboard from './TrainingDashboard';
 import { classifyError, type ErrorCategory } from '../utils/errorClassify';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -1031,7 +1032,11 @@ ANFORDERUNGEN:
                       : <Bot className="w-3 h-3" />
                 }
               </div>
-              <div className={`flex-1 max-w-[90%] flex flex-col gap-1.5 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+              {/* min-w-0: ohne das kann ein Flex-Item nicht unter seine
+                  Inhaltsbreite schrumpfen — eine Antwort mit langem
+                  Inline-Code (`project=OUTPUT_PATH, name="trainX"`) lief
+                  deshalb rechts aus der Sidebar heraus und war abgeschnitten. */}
+              <div className={`flex-1 min-w-0 max-w-[90%] flex flex-col gap-1.5 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                 {/* Render message parts */}
                 {removeEditBlocks(m.content).split(/(```python[\s\S]*?```)/g).map((part, pi) => {
                   if (part.startsWith('```python')) {
@@ -1051,7 +1056,7 @@ ANFORDERUNGEN:
                   return part.trim() ? (
                     <div
                       key={pi}
-                      className={`px-3 py-2 rounded-xl text-[11px] leading-relaxed whitespace-pre-wrap break-words ${
+                      className={`px-3 py-2 rounded-xl text-[11px] leading-relaxed break-words min-w-0 max-w-full ${
                         m.role === 'user'
                           ? 'bg-emerald-500/10 text-gray-200 border border-emerald-500/20'
                           : (m.action?.mode === 'edit')
@@ -1061,7 +1066,10 @@ ANFORDERUNGEN:
                               : 'bg-white/[0.05] text-gray-300 border border-white/10'
                       }`}
                     >
-                      {part.trim()}
+                      {/* Die Antwort ist Markdown. Als Rohtext standen die
+                          Backticks und Sternchen woertlich im Chat — anders
+                          als beim Coach und beim Metrik-Assistenten. */}
+                      <MarkdownText text={part.trim()} className="text-[11px]" />
                     </div>
                   ) : null;
                 })}

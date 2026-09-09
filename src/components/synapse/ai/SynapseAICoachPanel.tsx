@@ -10,6 +10,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useLanguage } from "../../../contexts/LanguageContext";
+import { MarkdownText } from "../../ui/MarkdownText";
 import { useAISettings, TOKEN_BUDGET_CONFIG } from "../../../contexts/AISettingsContext";
 import { callAI } from "../../../ai/aiClient";
 import type { ChatMessage } from "../../../ai/aiClient";
@@ -244,13 +245,16 @@ ${graphCtx}
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`p-2.5 rounded-lg text-xs whitespace-pre-wrap leading-relaxed ${
+            className={`p-2.5 rounded-lg text-xs leading-relaxed min-w-0 max-w-full ${
               m.role === "user"
                 ? "bg-purple-900/40 border border-purple-500/30 text-purple-100 ml-6"
                 : "bg-gray-800 border border-gray-700 text-gray-100 mr-2"
             }`}
           >
-            {m.content}
+            {/* Antworten des Coaches sind Markdown — als Rohtext standen
+                Sternchen und Backticks woertlich in der Blase. Die Frage des
+                Users bleibt unveraendert. */}
+            {m.role === "user" ? <span className="whitespace-pre-wrap">{m.content}</span> : <MarkdownText text={m.content} className="text-xs" />}
           </div>
         ))}
 
