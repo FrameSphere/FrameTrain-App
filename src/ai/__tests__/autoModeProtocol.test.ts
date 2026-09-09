@@ -7,7 +7,7 @@
 // Ausfuehren: npx vitest run src/ai/__tests__/autoModeProtocol.test.ts --config vitest.config.ts
 
 import { describe, it, expect } from 'vitest';
-import { parseAutoAction } from '../autoModeProtocol';
+import { parseAutoAction, buildAutoSystemPrompt } from '../autoModeProtocol';
 
 const ACTION = '{"mode":"edit","rationale":"Tippfehler behoben","title":"Fix"}';
 
@@ -70,5 +70,17 @@ describe('parseAutoAction', () => {
     const { action, cleaned } = parseAutoAction('```ft_action\n' + withBrace + '\n```\nFertig.');
     expect(action?.mode).toBe('chat');
     expect(cleaned).toBe('Fertig.');
+  });
+});
+
+// Bei knappem Budget schrieb groq/compound-mini die komplette Erklaerung in
+// die rationale und liess den Fliesstext leer — die Antwortblase im Chat
+// blieb dadurch komplett leer.
+describe('buildAutoSystemPrompt', () => {
+  it('stellt klar, dass die Erklaerung nicht in die rationale gehoert', () => {
+    const prompt = buildAutoSystemPrompt('BASIS');
+    expect(prompt).toContain('BASIS');
+    expect(prompt).toMatch(/rationale/i);
+    expect(prompt).toMatch(/NICHT angezeigt|niemals ausschliesslich/i);
   });
 });

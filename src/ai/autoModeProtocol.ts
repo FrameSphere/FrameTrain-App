@@ -20,7 +20,10 @@ Du musst IMMER mit folgendem Format starten — NICHT mit \`\`\`json\`\`\`:
 {"mode":"chat|edit|rewrite","rationale":"Deine kurze Begründung","title":"Optional: Kurztitel"}
 \`\`\`
 
-WICHTIG: Verwende IMMER \`\`\`ft_action\`\`\` nicht \`\`\`json\`\`\`! 
+WICHTIG: Verwende IMMER \`\`\`ft_action\`\`\` nicht \`\`\`json\`\`\`!
+Die "rationale" ist nur eine interne Kurznotiz (max. 10 Woerter) und wird dem
+User NICHT angezeigt. Die eigentliche Erklaerung steht IMMER im Text darunter —
+niemals ausschliesslich in der rationale.
 
 Dann antworte normal:
 - Bei mode="chat": Beantwortung + optional 1-2 Rückfragen

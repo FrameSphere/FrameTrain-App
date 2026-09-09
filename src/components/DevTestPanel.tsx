@@ -429,7 +429,11 @@ ANFORDERUNGEN:
       const inferredEdit = (action?.mode === 'edit') || cleaned.includes('##EDIT_START##');
       const edits = inferredEdit ? parseEdits(response) : [];
       const code = action?.mode === 'rewrite' ? (extractFullPythonCode(response) ?? null) : null;
-      const baseContent = code ? [cleaned, '```python', code, '```'].join('\n') : cleaned;
+      // Bei knappem Budget schreiben manche Modelle ihre ganze Erklaerung in
+      // das rationale-Feld des Steuerblocks und lassen den Fliesstext leer.
+      // Ohne diesen Rueckgriff blieb die Antwortblase komplett leer.
+      const explanation = cleaned.trim() || (action?.rationale ?? '').trim();
+      const baseContent = code ? [explanation, '```python', code, '```'].join('\n') : explanation;
       // Am Limit abgeschnittene Antworten enthalten halbe Edit-Bloecke. Ohne
       // Hinweis haette der User unvollstaendigen Code uebernommen.
       const finalContent = cutOff
