@@ -53,6 +53,8 @@ class YOLOPlugin:
         yaml_path = self._find_or_build_yaml(Path(dsp))
         if yaml_path is None:
             return False
+        if not self._verify_labels(yaml_path):
+            return False
         self._yaml_path = str(yaml_path)
         self.yolo_model = self._resolve_weights()
         self._output_dir = Path(self.config.output_path)
@@ -111,6 +113,91 @@ class YOLOPlugin:
         chosen = sorted(pool, key=rank)[0]
         MessageProtocol.status("setup", f"Startgewichte: {chosen.name} (aus dem importierten Modell)")
         return str(chosen)
+
+    _IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+
+    @staticmethod
+    def _label_candidates(img: Path) -> list:
+        """Pfade, an denen ein Label zu diesem Bild liegen kann.
+
+        Ultralytics ersetzt im Bildpfad das Segment 'images' durch 'labels'.
+        Zusaetzlich werden die in der Praxis ueblichen Varianten geprueft:
+        Geschwisterordner 'labels' und die .txt-Datei direkt neben dem Bild.
+        """
+        parts = list(img.parts)
+        cands = []
+        for i in range(len(parts) - 1, -1, -1):
+            if parts[i] == "images":
+                cands.append(Path(*parts[:i], "labels", *parts[i + 1:]).with_suffix(".txt"))
+                break
+        cands.append(img.parent.parent / "labels" / (img.stem + ".txt"))
+        cands.append(img.parent / "labels" / (img.stem + ".txt"))
+        cands.append(img.with_suffix(".txt"))
+        return cands
+
+    def _sample_labels(self, images_dir: Path, sample: int = 60) -> tuple:
+        """(gefundene Labels, geprüfte Bilder) einer Stichprobe."""
+        imgs = [f for f in sorted(images_dir.rglob("*"))
+                if f.is_file() and f.suffix.lower() in self._IMG_EXTS]
+        probe = imgs[:sample]
+        found = sum(1 for im in probe if any(c.exists() for c in self._label_candidates(im)))
+        return found, len(probe)
+
+    def _yaml_image_dirs(self, yaml_path: Path) -> list:
+        """Die in der dataset.yaml genannten Bildordner (train/val)."""
+        root = yaml_path.parent
+        dirs = []
+        try:
+            lines = yaml_path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            return []
+        base = None
+        for line in lines:
+            line = line.split("#")[0].strip()
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key, value = key.strip(), value.strip()
+            if key == "path" and value:
+                base = Path(value)
+            elif key in ("train", "val") and value:
+                p = Path(value)
+                if not p.is_absolute():
+                    p = (base or root) / value
+                dirs.append(p)
+        return [d for d in dirs if d.is_dir()]
+
+    def _verify_labels(self, yaml_path: Path) -> bool:
+        """Bricht ab, wenn zu den Bildern keine Labels existieren.
+
+        Ohne diese Pruefung lief ein Training ueber alle Epochen durch, obwohl
+        Ultralytics jedes Bild als Hintergrund behandelte: box- und dfl-Loss
+        sind dann konstant 0, mAP ebenfalls — die Oberflaeche zeigte
+        'loss=0.0000 mAP50=0.0000' und niemand konnte sehen, woran es lag.
+        """
+        dirs = self._yaml_image_dirs(yaml_path)
+        found = probed = 0
+        for d in dirs:
+            f, n = self._sample_labels(d)
+            found += f
+            probed += n
+        if probed == 0:
+            return True  # Keine Bilder gefunden — daran scheitert Ultralytics selbst.
+        if found == 0:
+            MessageProtocol.error(
+                "Keine Labels zum Dataset gefunden",
+                "Zu den Bildern existiert keine einzige .txt-Annotation. Ein "
+                "Objekterkennungs-Training waere wirkungslos: Loss und mAP "
+                "blieben ueber alle Epochen 0.\n"
+                "Erwartet wird neben dem Bildordner ein gleich aufgebauter "
+                "Label-Ordner, z.B. images/train/foto.jpg + labels/train/foto.txt.\n"
+                f"Geprueft: {', '.join(str(d) for d in dirs) or yaml_path.parent}")
+            return False
+        if found < probed / 2:
+            MessageProtocol.status("setup",
+                f"Warnung: nur {found} von {probed} geprueften Bildern haben ein Label. "
+                "Bilder ohne Label zaehlen als Hintergrund.")
+        return True
 
     def _find_or_build_yaml(self, root: Path) -> Optional[Path]:
         for c in [root/"dataset.yaml", root/"data.yaml"]:

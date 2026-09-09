@@ -137,6 +137,7 @@ ${graphCtx}
         maxTokens: TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'].maxTokens,
         temperature: 0.4,
         responseLanguage: language,
+        style: 'chat',
       });
       setMessages([...withUser, { role: "assistant", content: answer.trim() || ruleBased.answer }]);
     } catch {

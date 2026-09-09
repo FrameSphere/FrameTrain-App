@@ -1,7 +1,7 @@
 // TrainingPanel.tsx – Vollständiges Training-Interface (v5 – LoRA/QLoRA + Error Recovery)
 
 import { useState, useEffect, useRef, useCallback, useContext, useMemo } from 'react';
-import { usePluginParams } from './usePluginParams';
+import { usePluginParams, type PluginParamValue } from './usePluginParams';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -144,8 +144,35 @@ export async function callAI(settings: AISettings, systemPrompt: string, userPro
   return callAIClient(settings, {
     system: systemPrompt, messages,
     maxTokens: budgetMaxTokens(settings),
+    // 'chat': die Laengen-Vorgabe kommt zentral aus dem Token-Budget. Sie
+    // begrenzt nur den Fliesstext — Code-Bloecke und Edit-Bloecke bleiben
+    // vollstaendig.
+    style: 'chat',
     temperature: 0.7, responseLanguage, onTruncated,
   });
+}
+
+/**
+ * Begrenzt den mitgeschickten Verlauf auf das History-Budget der Einstellung.
+ *
+ * Die Dev-Panels schickten bisher JEDE bisherige Nachricht mit — inklusive
+ * kompletter Skript-Rewrites. Nach ein paar Runden bestand die Anfrage fast
+ * nur noch aus altem Code, was bei Groq regelmaessig ins Minutenlimit lief.
+ */
+export function trimHistory(
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  settings: AISettings,
+): { role: 'user' | 'assistant'; content: string }[] {
+  const max = TOKEN_BUDGET_CONFIG[settings.tokenBudget ?? 'balanced'].historyTokenBudget;
+  const kept: { role: 'user' | 'assistant'; content: string }[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const estimated = Math.ceil(messages[i].content.length / 4);
+    if (used + estimated > max && kept.length >= 2) break;
+    kept.unshift(messages[i]);
+    used += estimated;
+  }
+  return kept;
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────
@@ -550,6 +577,70 @@ function sanitizeAIConfig(raw: Record<string, unknown>): Partial<TrainingConfig>
   return out as Partial<TrainingConfig>;
 }
 
+/**
+ * Felder, die es nur bei Text-Modellen gibt. Bei einem CNN-Detektor wie YOLO
+ * existieren weder Attention-Projektionen (q_proj/v_proj) noch Token-Sequenzen
+ * - stehen sie trotzdem im Prompt, verbraucht die KI die halbe Antwort damit,
+ * zu erklaeren, warum sie nicht passen.
+ */
+const SEQUENCE_ONLY_FIELDS = [
+  'max_seq_length', 'group_by_length', 'use_lora', 'lora_r', 'lora_alpha',
+  'lora_dropout', 'lora_target_modules', 'load_in_4bit', 'load_in_8bit',
+];
+
+/** Tasks ohne Token-Sequenzen: Bild, Audio, Objekterkennung. */
+const NON_SEQUENCE_TASKS = new Set([
+  'detect', 'image_classification', 'hf_image_classification', 'audio_classification',
+]);
+
+export function isSequenceTask(taskType?: string, modelName?: string): boolean {
+  const t = (taskType ?? '').trim().toLowerCase();
+  if (t) return !NON_SEQUENCE_TASKS.has(t);
+  // Ohne task_type entscheidet der Modellname.
+  return !/yolo|detr|rcnn|\bssd\b|vit|resnet|efficientnet|convnext|whisper|wav2vec/i.test(modelName ?? '');
+}
+
+/**
+ * Die aktuelle Konfiguration als Prompt-Zeilen.
+ *
+ * Ohne den Task-Filter stand hier bei einem YOLO-Lauf die komplette
+ * NLP-Parameterliste - und genau die zitierte die KI dann zurueck ("die
+ * vorliegende Parameterliste stammt aus dem HuggingFace-Oekosystem"), statt
+ * Empfehlungen zu geben. plugin_config faellt raus: als Objekt landete es
+ * ohnehin nur als "[object Object]" im Prompt.
+ */
+export function currentConfigLines(config: Record<string, unknown>, sequenceTask: boolean): string {
+  return Object.entries(config)
+    .filter(([k, v]) => k !== 'plugin_config' && typeof v !== 'object')
+    .filter(([k]) => sequenceTask || !SEQUENCE_ONLY_FIELDS.includes(k))
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join('\n');
+}
+
+/** Die Feldliste fuer den Prompt, ohne die fuer diesen Task sinnlosen Felder. */
+export function configFieldsFor(sequenceTask: boolean, fields = KI_CONFIG_FIELDS): string {
+  if (sequenceTask) return fields;
+  const kept: string[] = [];
+  let block: string[] = [];
+  let first = true;
+  const flush = () => {
+    // Der Vorspann vor dem ersten Abschnitt bleibt; Abschnitte, aus denen kein
+    // Feld uebrig blieb, fallen ganz weg (sonst stuende dort eine leere
+    // Ueberschrift wie "--- LORA / QLORA ---").
+    if (first || block.some(l => /^- [a-z_]+:/.test(l.trim()))) kept.push(...block);
+    first = false;
+    block = [];
+  };
+  for (const line of fields.split('\n')) {
+    if (line.trim().startsWith('---')) { flush(); block = [line]; continue; }
+    const m = line.trim().match(/^- ([a-z_]+):/);
+    if (m && SEQUENCE_ONLY_FIELDS.includes(m[1])) continue;
+    block.push(line);
+  }
+  flush();
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
 const KI_CONFIG_FIELDS = `
 ALLE VERFÜGBAREN METRIKEN (du kannst ALLE davon in deinem JSON verwenden):
 
@@ -606,12 +697,47 @@ ALLE VERFÜGBAREN METRIKEN (du kannst ALLE davon in deinem JSON verwenden):
 
 HINWEIS: Wenn das Modell viel RAM braucht → use_lora=true, lora_r=8, load_in_4bit=true empfehlen.`;
 
-export function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onApply, onClose, onSaveAsTemplate, initialGoal }: {
+/**
+ * Plugin-Parameter (YOLO: imgsz/lr0/lrf …) liegen NICHT in der Trainings-Config,
+ * sondern in einem eigenen State. Sie fehlten deshalb komplett im Prompt: die KI
+ * sah bei einem YOLO-Lauf nur die generischen HuggingFace-Defaults und redete
+ * ueber learning_rate 2e-5 und Warmup — Werte, die dieser Lauf gar nicht nutzt.
+ */
+export function sanitizePluginPatch(
+  raw: Record<string, unknown>,
+  current: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const configKeys = DEFAULT_CONFIG as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(raw)) {
+    if (!(k in current)) continue;
+    // Kollisionen (gleicher Name in Config UND Plugin) gehen an die Config,
+    // damit ein Wert nicht zweimal in der Vorschlagsliste steht.
+    if (k in configKeys) continue;
+    const d = current[k];
+    if (typeof d === 'number') {
+      const n = typeof v === 'number' ? v : parseFloat(String(v));
+      if (Number.isFinite(n)) out[k] = n;
+    } else if (typeof d === 'boolean') {
+      out[k] = v === true || String(v).toLowerCase() === 'true';
+    } else {
+      out[k] = Array.isArray(v) ? v.join(',') : String(v);
+    }
+  }
+  return out;
+}
+
+export function AIMetricAssistant({ config, datasetName, datasetSize, modelName, onApply, onClose, onSaveAsTemplate, initialGoal, pluginName, pluginParams, onApplyPlugin }: {
   config: TrainingConfig; datasetName: string; datasetSize: number; modelName: string;
   onApply: (patch: Partial<TrainingConfig>) => void;
   onClose: () => void;
   onSaveAsTemplate: (cfg: Partial<TrainingConfig>) => Promise<boolean>;
   initialGoal?: string;
+  /** Name des aktiven Trainings-Plugins (z.B. "YOLO Object Detection"). */
+  pluginName?: string;
+  /** Aktuelle Plugin-Parameter — gehen mit in den Prompt und sind uebernehmbar. */
+  pluginParams?: Record<string, unknown>;
+  onApplyPlugin?: (patch: Record<string, unknown>) => void;
 }) {
   const { t } = useLanguage();
   const { settings: aiSettings } = useAISettings();
@@ -621,11 +747,16 @@ export function AIMetricAssistant({ config, datasetName, datasetSize, modelName,
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [parsed, setParsed] = useState<Partial<TrainingConfig> | null>(null);
+  const [parsedPlugin, setParsedPlugin] = useState<Record<string, unknown> | null>(null);
   const [applied, setApplied] = useState(false);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
   const [askFailed, setAskFailed] = useState(false);
   /** true, wenn die Antwort am Token-Limit abgeschnitten wurde. */
   const [truncated, setTruncated] = useState(false);
+  /** Config-Stand zum Zeitpunkt des Vorschlags. Ohne den Schnappschuss zeigte
+   *  die Diff-Liste nach dem Uebernehmen "50 -> 50", weil links der bereits
+   *  aktualisierte Wert stand. */
+  const [baseline, setBaseline] = useState<TrainingConfig | null>(null);
   const [phase, setPhase] = useState<'input' | 'result'>(initialGoal ? 'input' : 'input');
 
   // Auto-trigger analysis if initialGoal provided (e.g. from error recovery)
@@ -633,49 +764,57 @@ export function AIMetricAssistant({ config, datasetName, datasetSize, modelName,
     if (initialGoal && initialGoal.trim()) setGoalText(initialGoal);
   }, [initialGoal]);
 
+  const pluginEntries = Object.entries(pluginParams ?? {});
+
   const ask = async () => {
-    setLoading(true); setSuggestion(null); setParsed(null); setApplied(false); setSavedAsTemplate(false);
+    setLoading(true); setSuggestion(null); setParsed(null); setParsedPlugin(null); setApplied(false); setSavedAsTemplate(false);
     setAskFailed(false);
     setPhase('result');
     // Antwortsprache folgt der App-Einstellung — vorher war "Antworte auf
     // Deutsch" hart im Prompt und hat die Spracheinstellung überschrieben.
     const en = (language ?? '').toLowerCase().startsWith('en');
-    // Die Laenge folgte frueher einer festen "3-4 Saetze"-Vorgabe, unabhaengig
-    // vom eingestellten Token-Budget — deshalb kam auch bei "Maximum" nur ein
-    // Absatz, der dann am Limit auch noch mitten im Satz endete.
-    const maxTokens = budgetMaxTokens(aiSettings);
-    const lengthHint = maxTokens <= 600
-      ? { de: '2-3 Sätze', en: '2-3 sentences' }
-      : maxTokens <= 1600
-      ? { de: 'kompakt, etwa 5-8 Sätze', en: 'compact, about 5-8 sentences' }
-      : { de: 'ausführlich, mit Begründung je Empfehlung', en: 'in depth, with a rationale per recommendation' };
+    // Die Antwortlaenge kommt jetzt zentral aus dem Token-Budget (aiClient,
+    // style: 'chat') — vorher stand sie hier doppelt und widersprach der
+    // Einstellung.
+    const sequenceTask = isSequenceTask(config.task_type, modelName);
+    // Der Plugin-Block macht den Unterschied zwischen "die KI raet an der
+    // Architektur vorbei" und "sie kennt imgsz, lr0 & Co.".
+    const pluginBlock = pluginEntries.length > 0
+      ? `\n${en ? 'PLUGIN PARAMETERS' : 'PLUGIN-PARAMETER'} (${pluginName ?? 'Plugin'}) — ${en ? 'these are the knobs this architecture actually uses; you may include them in the JSON' : 'das sind die Stellschrauben, die diese Architektur wirklich nutzt; du darfst sie im JSON verwenden'}:\n${pluginEntries.map(([k, v]) => `- ${k}: ${String(v)}`).join('\n')}\n`
+      : '';
     const prompt = `${en ? 'You are an ML expert for HuggingFace fine-tuning.' : 'Du bist ein ML-Experte für HuggingFace Fine-Tuning.'}
 
 ${en ? 'CURRENT CONFIGURATION' : 'AKTUELLE KONFIGURATION'}:
-${Object.entries(config).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
+${currentConfigLines(config as unknown as Record<string, unknown>, sequenceTask)}
 
 ${en ? 'CONTEXT' : 'KONTEXT'}:
 - ${en ? 'Model' : 'Modell'}: ${modelName}
+- Task: ${config.task_type || (sequenceTask ? 'seq_classification' : 'vision')}
 - Dataset: ${datasetName} (${datasetSize} ${en ? 'files' : 'Dateien'})
+${pluginBlock}
 ${goalText ? `\n${en ? "USER'S GOAL / PROBLEM" : 'ZIEL / PROBLEM DES USERS'}:\n${goalText}` : ''}
 
-${KI_CONFIG_FIELDS}
+${configFieldsFor(sequenceTask)}
 
 ${en ? `TASK:
-1. Analyze the current configuration (${lengthHint.en})
+1. Analyze the current configuration
 2. Take the user's goal / problem into account if provided
 3. Produce optimized hyperparameters
 
-Use Markdown for the text part: short headings and flat bullet lists, no emojis.
+Use Markdown for the text part: short bullet lists, no emojis, no headings above the first line.
+Stay on the point: name what to change and why. Do NOT explain which fields are unsuitable for this
+architecture or why you left them out, and do not restate the field list.
 
 IMPORTANT: End with ONE valid JSON object containing ALL metrics you want to change,
 inside a \`\`\`json code block. Only fields that should change.
 Example: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_r":8}` : `AUFGABE:
-1. Analysiere die aktuelle Konfiguration (${lengthHint.de})
+1. Analysiere die aktuelle Konfiguration
 2. Berücksichtige das Ziel / Problem des Users falls angegeben
 3. Erstelle optimierte Hyperparameter
 
-Nutze Markdown für den Textteil: kurze Überschriften und flache Listen, keine Emojis.
+Nutze Markdown für den Textteil: kurze Listen, keine Emojis, keine Überschrift vor der ersten Zeile.
+Bleib beim Punkt: was zu ändern ist und warum. Erkläre NICHT, welche Felder für diese Architektur
+ungeeignet sind oder warum du sie weglässt, und wiederhole die Feldliste nicht.
 
 WICHTIG: Gib am Ende EIN valides JSON-Objekt mit ALLEN Metriken die du ändern möchtest,
 in einem \`\`\`json-Codeblock. Nur Felder die sich ändern sollen.
@@ -686,6 +825,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
       : 'Du bist ein präziser ML-Experte. Antworte auf Deutsch. Gib am Ende exakt ein valides JSON-Objekt aus.';
 
     setTruncated(false);
+    setBaseline(config);
     try {
       const text = await callAI(aiSettings, system, prompt, undefined, language, () => setTruncated(true));
       setSuggestion(text);
@@ -696,8 +836,28 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
       if (raw) {
         const sanitized = sanitizeAIConfig(raw);
         setParsed(Object.keys(sanitized).length > 0 ? sanitized : null);
+        const pluginPatch = sanitizePluginPatch(raw, pluginParams ?? {});
+        setParsedPlugin(Object.keys(pluginPatch).length > 0 ? pluginPatch : null);
       }
     } catch (err) { setSuggestion(`${t('common.error')}: ${String(err)}`); setParsed(null); setAskFailed(true); } finally { setLoading(false); }
+  };
+
+  /**
+   * Vorschlags-Zeilen: Trainings-Config UND Plugin-Parameter in einer Liste,
+   * jeweils mit dem Wert von vorher. Ohne die Plugin-Zeilen fielen bei einem
+   * YOLO-Lauf genau die Empfehlungen weg, die etwas bewirken.
+   */
+  const suggestionRows: Array<[key: string, next: unknown, prev: unknown]> = [
+    ...Object.entries(parsed ?? {}).map(([k, v]) =>
+      [k, v, ((baseline ?? config) as unknown as Record<string, unknown>)[k]] as [string, unknown, unknown]),
+    ...Object.entries(parsedPlugin ?? {}).map(([k, v]) =>
+      [k, v, (pluginParams ?? {})[k]] as [string, unknown, unknown]),
+  ];
+
+  const applySuggestions = () => {
+    if (parsed && Object.keys(parsed).length > 0) onApply(parsed);
+    if (parsedPlugin && Object.keys(parsedPlugin).length > 0) onApplyPlugin?.(parsedPlugin);
+    setApplied(true);
   };
 
   // Der JSON-Teil wird als Parameter-Liste angezeigt, nicht noch einmal als
@@ -724,9 +884,15 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
                   {[
                     ['Epochs', config.epochs], ['Batch', config.batch_size], ['LR', config.learning_rate],
-                    ['Seq Len', config.max_seq_length], ['Optimizer', config.optimizer], ['Scheduler', config.scheduler],
+                    // Seq Len und LoRA gibt es nur bei Text-Modellen. Bei einem
+                    // YOLO-Lauf standen hier vorher Werte, die dieser Lauf gar
+                    // nicht nutzt — dafuer fehlten die echten Plugin-Werte.
+                    ...(isSequenceTask(config.task_type, modelName)
+                      ? [['Seq Len', config.max_seq_length], ['LoRA', config.use_lora ? `r=${config.lora_r}` : '—']] as Array<[string, unknown]>
+                      : []),
+                    ['Optimizer', config.optimizer], ['Scheduler', config.scheduler],
                     ['FP16', config.fp16 ? '✓' : '—'], ['GradAcc', config.gradient_accumulation_steps],
-                    ['LoRA', config.use_lora ? `r=${config.lora_r}` : '—'],
+                    ...pluginEntries.slice(0, 6).map(([k, v]) => [k, v] as [string, unknown]),
                   ].map(([k, v]) => (
                     <div key={k as string} className="flex items-center gap-2 text-xs">
                       <span className="text-gray-500">{k}:</span>
@@ -797,18 +963,18 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                       {t('aiCoach.retryButton')}
                     </button>
                   )}
-                  {parsed && Object.keys(parsed).length > 0 && (
+                  {suggestionRows.length > 0 && (
                     <div className="space-y-3">
                       <p className="text-white text-sm font-medium flex items-center gap-2">
                         <ClipboardList className="w-4 h-4 text-violet-400" />
-                        {t('trainingPanel.aiAssistant.suggestionsTitle').replace('{count}', String(Object.keys(parsed).length))}
+                        {t('trainingPanel.aiAssistant.suggestionsTitle').replace('{count}', String(suggestionRows.length))}
                       </p>
                       <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                        {Object.entries(parsed).map(([k, v]) => (
+                        {suggestionRows.map(([k, v, prev]) => (
                           <div key={k} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/5 border border-white/10">
                             <span className="text-gray-400 font-mono text-xs">{k}</span>
                             <div className="flex items-center gap-2">
-                              <span className="text-gray-600 text-xs line-through">{String((config as unknown as Record<string, unknown>)[k] ?? '—')}</span>
+                              <span className="text-gray-600 text-xs line-through">{String(prev ?? '—')}</span>
                               <span className="text-emerald-400 font-semibold text-xs">→ {String(v)}</span>
                             </div>
                           </div>
@@ -821,7 +987,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                           </div>
                         ) : (
                           <div className="flex gap-2">
-                            <button onClick={() => { onApply(parsed); setApplied(true); }} className="flex-1 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 text-sm font-medium transition-all">
+                            <button onClick={applySuggestions} className="flex-1 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 text-sm font-medium transition-all">
                               <span className="inline-flex items-center gap-2">
                                 <Check className="w-4 h-4" />
                                 {t('trainingPanel.aiAssistant.applyButton').replace('{count}', String(Object.keys(parsed).length))}
@@ -1122,7 +1288,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     if (!selectedDataset) {
       lines.push(t('trainingPanel.pageContext.datasetMissing'));
     } else {
-      lines.push(t('trainingPanel.pageContext.datasetSelected').replace('{name}', selectedDataset.name));
+      // Die Dateianzahl fehlte: der Coach fragte den User nach der
+      // Datensatzgroesse, obwohl sie zwei Zeilen weiter oben auf dem
+      // Bildschirm stand.
+      lines.push(t('trainingPanel.pageContext.datasetSelected')
+        .replace('{name}', selectedDataset.name)
+        .replace('{files}', String(selectedDataset.file_count ?? '?')));
       lines.push(t('trainingPanel.pageContext.datasetStatus').replace('{status}', selectedDataset.status === 'split' ? t('trainingPanel.pageContext.datasetSplit') : t('trainingPanel.pageContext.datasetUnsplit')));
     }
 
@@ -1909,6 +2080,9 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
           datasetName={selectedDataset?.name ?? ''}
           datasetSize={selectedDataset?.file_count ?? 0}
           modelName={selectedModel?.name ?? ''}
+          pluginName={detection?.supported ? detection.plugin.name : undefined}
+          pluginParams={detection?.supported ? pluginParams : undefined}
+          onApplyPlugin={patch => setPluginParams(prev => ({ ...prev, ...patch as Record<string, PluginParamValue> }))}
           onApply={updateConfig}
           onClose={() => setShowAIAssistant(false)}
           onSaveAsTemplate={handleSaveAIAsTemplate}

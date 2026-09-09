@@ -730,7 +730,14 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
     fixSummary
     ?? (doneStep?.args?.summary
       ? String(doneStep.args.summary)
-      : `${totalActualChanges} von ${actionSteps.length} Schritten effektiv`);
+      // Fallback, wenn das Modell keine eigene Zusammenfassung geliefert hat
+      // (kommt bei knappem Budget vor). "34 von 34 Schritten effektiv" sagte
+      // dem User nichts ueber sein Netz — jetzt steht da, was passiert ist.
+      : textFor(
+          responseLanguage,
+          `Fertig — ${totalActualChanges} Änderungen am Canvas ausgeführt.`,
+          `Done — applied ${totalActualChanges} changes to the canvas.`,
+        ));
   if (reviewSummary) summary = `${summary}\n${reviewSummary}`;
 
   return { steps: currentSteps, summary };

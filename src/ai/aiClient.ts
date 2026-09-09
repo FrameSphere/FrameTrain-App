@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { AISettings, AIProvider } from '../contexts/AISettingsContext';
+import type { AISettings, AIProvider, TokenBudget } from '../contexts/AISettingsContext';
 import { PROVIDER_META, resolveModel } from './providerMeta';
 
 /**
@@ -30,12 +30,27 @@ async function backendPost(
 export type ChatRole = 'system' | 'user' | 'assistant';
 export type ChatMessage = { role: Exclude<ChatRole, 'system'>; content: string };
 
+/**
+ * 'chat'  — Fliesstext fuer Menschen. Bekommt eine Laengen-Vorgabe passend zum
+ *           Token-Budget (kurz bei Minimal, ausfuehrlich bei Maximum).
+ * 'raw'   — Strukturierte Ausgabe (JSON-Plan, Code-Edits, Chat-Titel).
+ *           Keine Laengen-Vorgabe, sonst kuerzt das Modell die Struktur weg.
+ */
+export type ResponseStyle = 'chat' | 'raw';
+
 export type CallAIOptions = {
   system: string;
   messages: ChatMessage[];
+  /**
+   * Ziel-Laenge der SICHTBAREN Antwort. Ist bewusst KEIN hartes Limit mehr:
+   * das tatsaechlich gesendete max_tokens liegt darueber (siehe
+   * `thinkingReserve`), damit nichts mitten im Satz abbricht. Die Laenge
+   * steuert bei `style: 'chat'` die Vorgabe im System-Prompt.
+   */
   maxTokens?: number;
   temperature?: number;
   responseLanguage?: string;
+  style?: ResponseStyle;
   /**
    * Wird aufgerufen, wenn das Modell mitten im Satz aufgehoert hat, weil
    * max_tokens erreicht war. Ohne diesen Hinweis wirkt eine abgeschnittene
@@ -44,6 +59,79 @@ export type CallAIOptions = {
    */
   onTruncated?: () => void;
 };
+
+type Bilingual = { de: string; en: string };
+
+/**
+ * Was ein Token-Budget in der Praxis bedeutet.
+ *
+ * Vorher war `maxTokens` gleichzeitig Laengen-Steuerung UND hartes Limit. Das
+ * ging bei Modellen mit unsichtbarem Nachdenken (Claude-5-Familie, gpt-oss,
+ * qwen3 …) schief: die Denk-Tokens zaehlen gegen max_tokens, verbrauchten bei
+ * "Minimal" das komplette Budget und die Antwort kam LEER zurueck — Analyse,
+ * Metrik-Assistent und Analyse-Chat lieferten sichtbar nichts.
+ *
+ * Jetzt sind beide Rollen getrennt:
+ *   - `thinkingReserve` wird auf max_tokens DRAUFGESCHLAGEN. Der sichtbare
+ *     Text hat damit immer Platz, egal wie viel das Modell nachdenkt.
+ *   - `effort` begrenzt bei Anthropic, wie tief nachgedacht wird — das ist der
+ *     Hebel, der die Kosten bei kleinem Budget wirklich klein haelt.
+ *   - `brevity` steuert die Laenge dort, wo sie hingehoert: im Prompt.
+ * Ergebnis: jedes Budget funktioniert, hoeheres Budget = mehr Tiefe.
+ */
+type BudgetProfile = {
+  effort: 'low' | 'medium' | 'high' | 'max';
+  thinkingReserve: number;
+  brevity: Bilingual | null;
+};
+
+export const BUDGET_PROFILE: Record<TokenBudget, BudgetProfile> = {
+  minimal: {
+    effort: 'low',
+    thinkingReserve: 2000,
+    brevity: {
+      de: 'Fasse dich sehr kurz: hoechstens 3 Saetze Fliesstext, keine Wiederholungen, keine Einleitung.',
+      en: 'Be very brief: at most 3 sentences of prose, no repetition, no preamble.',
+    },
+  },
+  balanced: {
+    effort: 'low',
+    thinkingReserve: 3000,
+    brevity: {
+      de: 'Fasse dich knapp: hoechstens 6 Saetze Fliesstext, keine Einleitung.',
+      en: 'Be concise: at most 6 sentences of prose, no preamble.',
+    },
+  },
+  quality: {
+    effort: 'medium',
+    thinkingReserve: 5000,
+    brevity: {
+      de: 'Antworte ausfuehrlich, aber ohne Fuellwoerter: hoechstens 12 Saetze Fliesstext, je Empfehlung eine kurze Begruendung.',
+      en: 'Answer thoroughly but without filler: at most 12 sentences of prose, one short rationale per recommendation.',
+    },
+  },
+  max: {
+    effort: 'high',
+    thinkingReserve: 8000,
+    brevity: {
+      de: 'Antworte gruendlich und begruendet. Struktur mit Zwischenueberschriften und Listen ist erwuenscht, Fuellwoerter nicht.',
+      en: 'Answer thoroughly with reasoning. Use headings and lists where they help; no filler.',
+    },
+  },
+  unlimited: {
+    effort: 'max',
+    thinkingReserve: 16000,
+    brevity: {
+      de: 'Nimm dir Raum: gehe in die Tiefe, nenne Alternativen und Trade-offs, belege deine Empfehlungen. Keine kuenstliche Kuerzung.',
+      en: 'Take your space: go deep, name alternatives and trade-offs, justify recommendations. Do not artificially shorten.',
+    },
+  },
+};
+
+/** Laengen- und Denk-Profil der aktuellen Einstellung. */
+export function budgetProfile(settings: AISettings): BudgetProfile {
+  return BUDGET_PROFILE[settings.tokenBudget ?? 'balanced'] ?? BUDGET_PROFILE.balanced;
+}
 
 /**
  * Bereinigt den Verlauf, bevor er an einen Provider geht.
@@ -104,14 +192,27 @@ function stripLeadingAssistant(messages: ChatMessage[]): ChatMessage[] {
 }
 
 /**
- * Claude-Modelle mit standardmaessig aktivem Thinking verbrauchen einen Teil
- * von max_tokens fuers interne Nachdenken. Ohne Aufschlag bleibt fuer den
- * sichtbaren Text zu wenig uebrig — die Antwort bricht mitten im Satz ab
- * (und ein JSON-Block bleibt unvollstaendig).
+ * Claude-Modelle, die vor der Antwort unsichtbar nachdenken (Thinking ist dort
+ * per Default aktiv). Ihre Denk-Tokens zaehlen gegen max_tokens.
  */
 const ANTHROPIC_THINKING_PATTERN = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/;
 
-async function callAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number, unlimited = false, onTruncated?: () => void) {
+/** Modelle, die `output_config.effort` kennen. */
+const ANTHROPIC_EFFORT_PATTERN = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[5678]|sonnet-4-6)/;
+
+/** Nur die neueren Familien kennen die Stufe `max`; opus-4.5 kann nur bis `high`. */
+const ANTHROPIC_MAX_EFFORT_PATTERN = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/;
+
+function anthropicEffort(model: string, profile: BudgetProfile): string | null {
+  if (!ANTHROPIC_EFFORT_PATTERN.test(model)) return null;
+  if (profile.effort === 'max' && !ANTHROPIC_MAX_EFFORT_PATTERN.test(model)) return 'high';
+  return profile.effort;
+}
+
+async function callAnthropic(
+  apiKey: string, model: string, system: string, messages: ChatMessage[],
+  maxTokens: number, temperature: number, profile: BudgetProfile, onTruncated?: () => void,
+) {
   const key = apiKey.trim();
   const oauth = isOAuthToken(key);
 
@@ -138,12 +239,14 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   // sonnet-4.6 lehnen Sampling-Parameter (temperature/top_p) mit HTTP 400 ab.
   // Nur ältere Modelle wie haiku-4-5 akzeptieren `temperature`. Deshalb wird der
   // Parameter für die neueren Modelle weggelassen (Default greift).
-  const rejectsSampling = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/.test(model);
+  const rejectsSampling = ANTHROPIC_THINKING_PATTERN.test(model);
 
   const sendable = stripLeadingAssistant(messages);
   if (sendable.length === 0) throw new Error('Keine Nachricht zum Senden (Verlauf enthaelt nur Antworten).');
 
-  const budget = ANTHROPIC_THINKING_PATTERN.test(model) ? maxTokens + REASONING_RESERVE : maxTokens;
+  const budget = ANTHROPIC_THINKING_PATTERN.test(model)
+    ? maxTokens + profile.thinkingReserve
+    : maxTokens;
 
   const body: Record<string, unknown> = {
     model,
@@ -153,14 +256,11 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
   };
   if (!rejectsSampling) body.temperature = temperature;
 
-  // "Unlimited"-Modus: Modelle mit Effort-Steuerung (Claude-5-Familie,
-  // opus-4.6/4.7/4.8, sonnet-4.6) laufen auf höchster Stufe — maximale Tiefe
-  // fürs interne Nachdenken. Modelle ohne Effort-Support (z.B. haiku-4-5)
-  // ignorieren das bewusst, um kein HTTP 400 zu provozieren.
-  const supportsEffort = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[5678]|sonnet-4-6)/.test(model);
-  if (unlimited && supportsEffort) {
-    body.output_config = { effort: 'max' };
-  }
+  // Der Denk-Aufwand folgt jetzt dem Token-Budget (frueher nur "unlimited" =
+  // effort:max, sonst gar nichts). Genau das macht "Minimal" bezahlbar: das
+  // Modell denkt kurz statt lange, statt dass wir ihm den Text abschneiden.
+  const effort = anthropicEffort(model, profile);
+  if (effort) body.output_config = { effort };
 
   const { status, data } = await backendPost('https://api.anthropic.com/v1/messages', headers, body);
   if (status < 200 || status >= 300) {
@@ -187,32 +287,86 @@ async function callAnthropic(apiKey: string, model: string, system: string, mess
  * wird komplett vom Reasoning aufgebraucht — die Antwort kommt dann leer
  * zurueck, ohne Fehler. Deshalb bekommen diese Modelle einen Aufschlag.
  */
-const REASONING_MODEL_PATTERN = /gpt-oss|^o[1-9]([-.]|$)|qwen3|deepseek-r1|compound/i;
-const REASONING_RESERVE = 1024;
+const REASONING_MODEL_PATTERN = /gpt-oss|^o[1-9]([-.]|$)|qwen3|deepseek-r1|magistral|compound|thinking|reasoning/i;
 
-export function effectiveMaxTokens(model: string, maxTokens: number): number {
-  return REASONING_MODEL_PATTERN.test(model) ? maxTokens + REASONING_RESERVE : maxTokens;
+/** OpenAI-Reasoning-Modelle nehmen `max_completion_tokens` statt `max_tokens`. */
+const OPENAI_REASONING_PATTERN = /^(o[1-9]|gpt-5)/i;
+
+export function effectiveMaxTokens(model: string, maxTokens: number, reserve = 1024): number {
+  return REASONING_MODEL_PATTERN.test(model) ? maxTokens + reserve : maxTokens;
 }
 
-async function callOpenAICompat(url: string, apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number, temperature: number, onTruncated?: () => void) {
+/**
+ * Entfernt sichtbare Denk-Bloecke aus der Antwort.
+ *
+ * Lokale Reasoning-Modelle (qwen3, deepseek-r1, gpt-oss über Ollama) schreiben
+ * ihr Nachdenken als `<think>…</think>` mitten in den Text. Ungefiltert stand
+ * das komplette Selbstgespraech im Chat.
+ */
+export function stripThinkTags(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    // Unabgeschlossener Block (am Limit abgeschnitten): Rest verwerfen.
+    .replace(/<think(?:ing)?>[\s\S]*$/i, '')
+    .trim();
+}
+
+async function callOpenAICompat(
+  url: string, apiKey: string, model: string, system: string, messages: ChatMessage[],
+  maxTokens: number, temperature: number, profile: BudgetProfile, onTruncated?: () => void,
+) {
+  const ceiling = effectiveMaxTokens(model, maxTokens, profile.thinkingReserve);
+  const isOpenAIReasoning = OPENAI_REASONING_PATTERN.test(model);
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
+  };
+  // o-Serie und GPT-5 lehnen `max_tokens` sowie abweichende Temperaturen mit
+  // HTTP 400 ab — dort gilt `max_completion_tokens` und der Default-Sampler.
+  if (isOpenAIReasoning) {
+    body.max_completion_tokens = ceiling;
+  } else {
+    body.max_tokens = ceiling;
+    body.temperature = temperature;
+  }
+
   const { status, data } = await backendPost(
     url,
     { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` },
-    {
-      model,
-      max_tokens: effectiveMaxTokens(model, maxTokens),
-      temperature,
-      messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
-    },
+    body,
   );
   if (status < 200 || status >= 300) {
     throw new Error(data?.error?.message || `HTTP ${status}`);
   }
   if (data?.choices?.[0]?.finish_reason === 'length') onTruncated?.();
-  return data?.choices?.[0]?.message?.content || '';
+  const msg = data?.choices?.[0]?.message;
+  const raw = typeof msg?.content === 'string' ? msg.content : '';
+  return stripThinkTags(raw);
 }
 
-async function callOllama(model: string, system: string, messages: ChatMessage[], temperature: number) {
+/** Ollama-Kontextfenster in sinnvollen Stufen (Speicherverbrauch waechst mit). */
+const OLLAMA_CTX_STEPS = [4096, 8192, 16384, 32768];
+
+/**
+ * Waehlt `num_ctx` so, dass Prompt UND Antwort hineinpassen.
+ *
+ * Vorher standen hier fest 4096 Tokens. Ollama schneidet alles darueber
+ * STILL ab — und zwar vorne, also genau den System-Prompt. Bei Seitenkontext,
+ * Trainingsanalyse oder einem laengeren Dev-Skript antwortete das lokale
+ * Modell deshalb an der Frage vorbei, ohne dass ein Fehler sichtbar wurde.
+ */
+export function ollamaContextSize(promptChars: number, numPredict: number): number {
+  const needed = Math.ceil(promptChars / 3.5) + numPredict + 512;
+  return OLLAMA_CTX_STEPS.find(step => step >= needed) ?? OLLAMA_CTX_STEPS[OLLAMA_CTX_STEPS.length - 1];
+}
+
+async function callOllama(
+  model: string, system: string, messages: ChatMessage[],
+  maxTokens: number, temperature: number, profile: BudgetProfile, onTruncated?: () => void,
+) {
+  const numPredict = effectiveMaxTokens(model, maxTokens, profile.thinkingReserve);
+  const promptChars = system.length + messages.reduce((n, m) => n + m.content.length, 0);
   let status: number, data: any;
   try {
     ({ status, data } = await backendPost(
@@ -221,7 +375,13 @@ async function callOllama(model: string, system: string, messages: ChatMessage[]
       {
         model,
         stream: false,
-        options: { temperature, num_ctx: 4096 },
+        options: {
+          temperature,
+          num_ctx: ollamaContextSize(promptChars, numPredict),
+          // Ohne num_predict lieferte Ollama bis zum Modell-Default (oft sehr
+          // lang) — das eingestellte Token-Budget galt hier ueberhaupt nicht.
+          num_predict: numPredict,
+        },
         messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
       },
     ));
@@ -229,16 +389,40 @@ async function callOllama(model: string, system: string, messages: ChatMessage[]
     // Verbindungsfehler (Backend erreicht Ollama nicht)
     throw new Error('Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
   }
+  if (status === 404) {
+    throw new Error(
+      data?.error
+        ? `Ollama: ${data.error} — Modell zuerst laden: "ollama pull ${model}".`
+        : `Ollama kennt das Modell "${model}" nicht. Zuerst "ollama pull ${model}" ausführen.`,
+    );
+  }
   if (status < 200 || status >= 300) {
     throw new Error(data?.error || 'Ollama nicht erreichbar (http://localhost:11434). Läuft Ollama?');
   }
-  return data?.message?.content || '';
+  if (data?.done_reason === 'length') onTruncated?.();
+  const raw = typeof data?.message?.content === 'string' ? data.message.content : '';
+  return stripThinkTags(raw);
 }
 
-function withResponseLanguage(system: string, responseLanguage?: string) {
-  const lang = responseLanguage?.trim();
-  if (!lang) return system;
-  return `${system}\n\nANTWORTSPRACHE:\n- Antworte ausschließlich auf ${lang}.`;
+function decorateSystem(system: string, opts: { responseLanguage?: string; style: ResponseStyle; profile: BudgetProfile }): string {
+  const parts = [system];
+  const lang = opts.responseLanguage?.trim();
+  if (lang) parts.push(`\n\nANTWORTSPRACHE:\n- Antworte ausschließlich auf ${lang}.`);
+  // Die Laenge steuert der Prompt, nicht mehr das harte Token-Limit. So bricht
+  // keine Antwort mehr mitten im Satz ab und ein hoeheres Budget bedeutet
+  // wirklich mehr Tiefe statt nur mehr erlaubte Zeichen.
+  if (opts.style === 'chat' && opts.profile.brevity) {
+    const en = (lang ?? '').toLowerCase().startsWith('en');
+    const text = en ? opts.profile.brevity.en : opts.profile.brevity.de;
+    // Die Vorgabe gilt nur fuer Fliesstext. Ohne diesen Zusatz haetten die
+    // Code-Assistenten bei "Minimal" ihren Code-Block gekuerzt, statt kurz
+    // zu erklaeren und den Block vollstaendig zu liefern.
+    const exemption = en
+      ? 'Required sections, code blocks, JSON blocks and edit blocks do not count as prose and always stay complete.'
+      : 'Geforderte Abschnitte, Code-, JSON- und Edit-Bloecke zaehlen nicht als Fliesstext und bleiben immer vollstaendig.';
+    parts.push(`\n\n${en ? 'RESPONSE LENGTH' : 'ANTWORTLÄNGE'}:\n- ${text}\n- ${exemption}`);
+  }
+  return parts.join('');
 }
 
 /**
@@ -248,8 +432,6 @@ function withResponseLanguage(system: string, responseLanguage?: string) {
  * werden kann.
  */
 export async function testAIConnection(settings: AISettings): Promise<void> {
-  // maxTokens großzügig genug, dass auch Thinking-Modelle (die einen Teil des
-  // Budgets fürs interne Nachdenken verbrauchen) noch echten Text ausgeben.
   const reply = await callAI(
     { ...settings, enabled: true },
     {
@@ -259,9 +441,6 @@ export async function testAIConnection(settings: AISettings): Promise<void> {
       temperature: 0,
     },
   );
-  // Ohne diese Prüfung galt der Test schon als bestanden, wenn der Aufruf nur
-  // nicht warf — eine leere Antwort (z.B. weil nur ein Thinking-Block kam) wäre
-  // faelschlich als Erfolg durchgegangen.
   if (!reply || !reply.trim()) {
     throw new Error('Verbindung steht, aber das Modell lieferte keinen Text zurück. Bitte anderes Modell/Budget probieren.');
   }
@@ -273,13 +452,35 @@ export async function callAI(settings: AISettings, options: CallAIOptions): Prom
   const model = resolveModel(provider, settings.selectedModel, settings.ollamaModel);
   const maxTokens = options.maxTokens ?? 2000;
   const temperature = options.temperature ?? 0.7;
-  const system = withResponseLanguage(options.system, options.responseLanguage);
+  const profile = budgetProfile(settings);
+  const system = decorateSystem(options.system, {
+    responseLanguage: options.responseLanguage,
+    style: options.style ?? 'raw',
+    profile,
+  });
   const messages = normalizeMessages(options.messages);
-  const unlimited = settings.tokenBudget === 'unlimited';
   const onTruncated = options.onTruncated;
 
-  if (provider === 'anthropic') return callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, unlimited, onTruncated);
-  if (provider === 'openai') return callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, onTruncated);
-  if (provider === 'groq') return callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, onTruncated);
-  return callOllama(model, system, messages, temperature);
+  let text: string;
+  if (provider === 'anthropic') {
+    text = await callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, profile, onTruncated);
+  } else if (provider === 'openai') {
+    text = await callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, profile, onTruncated);
+  } else if (provider === 'groq') {
+    text = await callOpenAICompat('https://api.groq.com/openai/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, profile, onTruncated);
+  } else {
+    text = await callOllama(model, system, messages, maxTokens, temperature, profile, onTruncated);
+  }
+
+  // Eine leere Antwort ist KEIN Erfolg. Sie entstand regelmaessig, wenn ein
+  // Thinking-Modell das komplette Budget verdacht hatte: die Analyse wurde als
+  // leerer Bericht gespeichert, der Chat zeigte eine leere Blase. Statt still
+  // nichts zu liefern, gibt es jetzt eine Fehlermeldung, die sagt was zu tun ist.
+  if (!text.trim()) {
+    throw new Error(
+      'Das Modell hat keinen Text zurückgegeben (das Antwort-Budget ging vermutlich vollständig für internes Nachdenken drauf). '
+      + 'In den Einstellungen ein größeres Token-Budget wählen oder ein anderes Modell verwenden.',
+    );
+  }
+  return text;
 }

@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Loader2, AlertTriangle, RefreshCw, ArrowRight, Settings as SettingsIcon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
+import { useAISettings, TOKEN_BUDGET_CONFIG, type TokenBudget } from '../contexts/AISettingsContext';
 import { callAI } from '../ai/aiClient';
 import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
 import { navigateTo } from '../ui/navigationEvents';
@@ -37,19 +37,19 @@ interface CachedBriefing {
 
 const CACHE_PREFIX = 'ft_home_briefing_';
 
-const SYSTEM_PROMPT = {
+const SYSTEM_PROMPT_TEMPLATE = {
   de: `Du bist der Trainings-Assistent von FrameTrain, einer Desktop-App fuer lokales ML-Training.
 Der Nutzer sieht gerade die Startseite und will in wenigen Sekunden wissen, wo sein Projekt steht.
 
 Antworte in Markdown, genau in dieser Struktur:
 1. EIN Einleitungsabsatz mit 1-2 Saetzen zur Gesamtlage.
-2. Danach 2 bis 4 Stichpunkte, jeder mit "- " am Zeilenanfang. Ein Stichpunkt = eine Beobachtung.
+2. Danach {BULLETS} Stichpunkte, jeder mit "- " am Zeilenanfang. Ein Stichpunkt = eine Beobachtung.
 3. Zuletzt eine eigene Zeile, die genau so beginnt: "**Naechster Schritt:** " — dahinter EIN konkreter Schritt, den der Nutzer in dieser App tun kann.
 
 Formatregeln:
 - Setze Modellnamen, Zahlen und Kennwerte (Loss, Accuracy) in **Fettschrift**.
 - Keine Ueberschriften, keine Code-Bloecke, keine Tabellen, keine verschachtelten Listen.
-- Hoechstens 150 Woerter insgesamt.
+- Hoechstens {WORDS} Woerter insgesamt.
 
 Inhaltsregeln:
 - Beginne mit dem Wichtigsten, das seit den letzten Laeufen passiert ist.
@@ -60,19 +60,41 @@ The user is looking at the home screen and wants to know within seconds where th
 
 Answer in Markdown, in exactly this structure:
 1. ONE opening paragraph of 1-2 sentences on the overall situation.
-2. Then 2 to 4 bullet points, each starting with "- ". One bullet = one observation.
+2. Then {BULLETS} bullet points, each starting with "- ". One bullet = one observation.
 3. Finally a line of its own starting exactly with: "**Next step:** " — followed by ONE concrete step the user can take inside this app.
 
 Formatting rules:
 - Put model names, numbers and metrics (loss, accuracy) in **bold**.
 - No headings, no code blocks, no tables, no nested lists.
-- 150 words maximum.
+- {WORDS} words maximum.
 
 Content rules:
 - Lead with the most important thing that happened in the recent runs.
 - Quote concrete numbers from the facts where they say something.
 - Invent nothing. If there is barely any data, say so plainly and suggest the first step.`,
 };
+
+/**
+ * Umfang des Briefings nach Token-Budget.
+ *
+ * Vorher standen "150 Woerter" und "2 bis 4 Stichpunkte" fest im Prompt —
+ * unabhaengig davon, ob der Nutzer "Minimal" oder "Unlimited" eingestellt
+ * hatte. Die Struktur bleibt in jedem Fall gleich, nur die Tiefe waechst.
+ */
+function briefingSystemPrompt(language: string, budget: TokenBudget): string {
+  const scale: Record<TokenBudget, { words: number; bullets: string }> = {
+    minimal:   { words: 80,  bullets: '2 bis 3' },
+    balanced:  { words: 150, bullets: '2 bis 4' },
+    quality:   { words: 220, bullets: '3 bis 5' },
+    max:       { words: 320, bullets: '4 bis 6' },
+    unlimited: { words: 450, bullets: '4 bis 8' },
+  };
+  const { words, bullets } = scale[budget] ?? scale.balanced;
+  const en = language === 'en';
+  return SYSTEM_PROMPT_TEMPLATE[en ? 'en' : 'de']
+    .replace('{WORDS}', String(words))
+    .replace('{BULLETS}', en ? bullets.replace('bis', 'to') : bullets);
+}
 
 export default function HomeBriefing({ facts, factsKey, userId }: HomeBriefingProps) {
   const { currentTheme } = useTheme();
@@ -104,7 +126,7 @@ export default function HomeBriefing({ facts, factsKey, userId }: HomeBriefingPr
     setError(null);
     try {
       const text = await callAI(settings, {
-        system: SYSTEM_PROMPT[language === 'en' ? 'en' : 'de'],
+        system: briefingSystemPrompt(language, settings.tokenBudget ?? 'balanced'),
         messages: [{ role: 'user', content: `${t('home.briefing.userPrompt')}\n\n${facts}` }],
         maxTokens: TOKEN_BUDGET_CONFIG[settings.tokenBudget ?? 'balanced'].maxTokens,
         temperature: 0.4,

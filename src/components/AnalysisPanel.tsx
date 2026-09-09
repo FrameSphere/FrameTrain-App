@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
-import { useAISettings, type AIProvider, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
+import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { setRecommendedParams } from '../ai/coachToolEvents';
 import { SETTABLE_CONFIG } from '../ai/coachContext';
@@ -213,6 +213,39 @@ export function extractAIRecommendedParams(reportText: string): Record<string, u
   }
   return extractParamsFrom(reportText);
 }
+/**
+ * Wie viele Epochen-Zeilen der KI-Prompt hoechstens enthaelt.
+ *
+ * Der Kontext soll mit dem Budget wachsen: bei "Minimal" reicht ein grober
+ * Verlauf, bei "Unlimited" darf die KI jede Epoche sehen.
+ */
+export function epochLineBudget(budget: TokenBudget): number {
+  switch (budget) {
+    case 'minimal':   return 12;
+    case 'balanced':  return 20;
+    case 'quality':   return 30;
+    case 'max':       return 60;
+    default:          return 200;
+  }
+}
+
+/**
+ * Reduziert eine Epochenliste auf hoechstens `max` Eintraege: Anfang und Ende
+ * bleiben vollstaendig (dort passiert das Interessante), die Mitte wird
+ * gleichmaessig ausgeduennt. Die Reihenfolge bleibt erhalten.
+ */
+export function sampleEpochs<T>(list: T[], max: number): T[] {
+  if (list.length <= max || max < 4) return list.length <= max ? list : list.slice(-max);
+  const head = list.slice(0, 3);
+  const tail = list.slice(-5);
+  const middle = list.slice(3, list.length - 5);
+  const slots = max - head.length - tail.length;
+  const step = middle.length / slots;
+  const picked: T[] = [];
+  for (let i = 0; i < slots; i++) picked.push(middle[Math.floor(i * step)]);
+  return [...head, ...picked, ...tail];
+}
+
 function niceY(min: number, max: number, ticks = 4): number[] {
   const range = max - min || 1; const step = range / ticks; const result: number[] = [];
   for (let i = 0; i <= ticks; i++) result.push(min + i * step);
@@ -996,7 +1029,53 @@ function settableFieldList(): string {
     .join('\n');
 }
 
-function buildAnalysisSystemPrompt(language: string, taskHint = '') {
+/**
+ * Wie tief jeder Abschnitt des Berichts ausfallen soll.
+ *
+ * Der Bericht hat sechs feste Abschnitte plus JSON-Block. Eine pauschale
+ * "hoechstens 3 Saetze"-Vorgabe (wie im Chat) wuerde diese Struktur
+ * zerlegen — deshalb skaliert hier die Tiefe PRO ABSCHNITT mit dem Budget.
+ */
+function analysisDepthHint(budget: TokenBudget, language: string): string {
+  const de = language === 'de';
+  switch (budget) {
+    case 'minimal':
+      return de ? 'Halte jeden Abschnitt auf 1–2 Sätze. Der JSON-Block bleibt Pflicht.'
+                : 'Keep every section to 1-2 sentences. The JSON block is still mandatory.';
+    case 'balanced':
+      return de ? 'Halte jeden Abschnitt auf 2–3 Sätze.'
+                : 'Keep every section to 2-3 sentences.';
+    case 'quality':
+      return de ? 'Je Abschnitt 3–5 Sätze, jede Empfehlung mit kurzer Begründung.'
+                : '3-5 sentences per section, each recommendation with a short rationale.';
+    case 'max':
+      return de ? 'Ausführlich: je Abschnitt so viel wie nötig, Empfehlungen mit Begründung und Zahlen.'
+                : 'Thorough: as much as needed per section, recommendations with rationale and numbers.';
+    default:
+      return de ? 'Maximale Tiefe: Alternativen, Trade-offs und Risiken benennen, alles mit Zahlen belegen.'
+                : 'Maximum depth: name alternatives, trade-offs and risks, back everything with numbers.';
+  }
+}
+
+/**
+ * System-Prompt fuer den Chat UNTER dem Bericht: gleiche Rolle und gleiche
+ * Formatregeln, aber ohne die Pflicht-Abschnitte des Berichts.
+ */
+function buildAnalysisChatSystemPrompt(language: string, taskHint = '') {
+  const de = language === 'de';
+  const taskBlock = taskHint ? `\nThis run is: ${taskHint}. Judge it by the metrics that matter for THAT task.` : '';
+  return `You are an experienced machine learning engineer and model training expert.
+${de ? 'Antworte ausschließlich auf Deutsch.' : 'Answer exclusively in English.'}${taskBlock}
+${de ? 'Beantworte die Frage des Users direkt und mit den konkreten Zahlen aus den Trainingsdaten.' : "Answer the user's question directly, using the concrete numbers from the training data."}
+
+Formatting rules:
+- No emojis. Use plain glyphs (-, *, >) if you need a marker.
+- Close every code fence you open.
+- Flat lists, no nested numbering.
+- ${de ? 'Nur wenn der User nach neuen Parametern fragt: einen ```json-Block mit den zu ändernden Feldern anhängen.' : 'Only when the user asks for new parameters: append a ```json block with the fields to change.'}`;
+}
+
+function buildAnalysisSystemPrompt(language: string, taskHint = '', budget: TokenBudget = 'balanced') {
   const responseInstruction = language === 'de'
     ? 'Antworte ausschließlich auf Deutsch.'
     : 'Answer exclusively in English.';
@@ -1047,6 +1126,8 @@ Formatting rules:
 - Keep code blocks short and avoid long unbroken lines.
 - Use flat lists. Do not nest ordered lists inside ordered lists;
   prefer a single level of numbering so the numbers stay consecutive.
+
+Depth: ${analysisDepthHint(budget, language)}
 
 Your analysis MUST include the following sections:
 
@@ -1313,7 +1394,11 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       setVersionDetails(detailsRes.status === 'fulfilled' ? detailsRes.value : null);
       setLogs(logsRes.status === 'fulfilled' ? logsRes.value : []);
       setFullData(fullDataRes.status === 'fulfilled' ? fullDataRes.value : null);
-      if (reportRes.status === 'fulfilled' && reportRes.value) {
+      // Ein leerer Bericht ist kein Bericht. Fruehere Laeufe haben leere
+      // Antworten (Thinking hatte das ganze Budget verbraucht) als "Erfolg"
+      // gespeichert; die Seite zeigte danach eine leere Karte ohne jede
+      // Moeglichkeit zu verstehen, was passiert ist.
+      if (reportRes.status === 'fulfilled' && reportRes.value?.report_text?.trim()) {
         const r = reportRes.value;
         setReport(r);
         setChatMessages([{ role: 'assistant', content: r.report_text }]);
@@ -1376,8 +1461,12 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       else if (clsLine) lines.push(clsLine);
       else lines.push('Qualitaetsmetriken: keine vorhanden (nur Loss verfuegbar).');
       if (fullData.epoch_summaries?.length > 0) {
-        lines.push('\nEpochen:');
-        for (const e of fullData.epoch_summaries) lines.push(`E${e.epoch}: Ø=${e.avg_train_loss?.toFixed(4)} Min=${e.min_train_loss?.toFixed(4)} Val=${e.val_loss?.toFixed(4) ?? 'N/A'}`);
+        // Ein 300-Epochen-Lauf schob vorher 300 Zeilen in den Prompt — bei
+        // kleinem Budget bestand die Anfrage fast nur noch daraus. Anfang,
+        // Ende und eine gleichmaessige Stichprobe reichen fuer die Bewertung.
+        const picked = sampleEpochs(fullData.epoch_summaries, epochLineBudget(aiSettings.tokenBudget ?? 'balanced'));
+        lines.push(`\nEpochen${picked.length < fullData.epoch_summaries.length ? ` (Stichprobe aus ${fullData.epoch_summaries.length})` : ''}:`);
+        for (const e of picked) lines.push(`E${e.epoch}: Ø=${e.avg_train_loss?.toFixed(4)} Min=${e.min_train_loss?.toFixed(4)} Val=${e.val_loss?.toFixed(4) ?? 'N/A'}`);
       }
     } else if (metrics) {
       lines.push(`Train Loss: ${metrics.final_train_loss} | Epochen: ${metrics.total_epochs}`);
@@ -1414,11 +1503,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       // knapp — der Bericht brach mitten im Satz ab, samt halbem JSON-Block.
       const budget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
       const text = await callAIClient(aiSettings, {
-        system: buildAnalysisSystemPrompt(language, taskHint()),
+        system: buildAnalysisSystemPrompt(language, taskHint(), aiSettings.tokenBudget ?? 'balanced'),
         messages: [{ role: 'user', content: `Analysiere folgendes Training:\n\n${buildFullContext()}` }],
         maxTokens: budget.maxTokens,
         temperature: 0.4,
         responseLanguage: language,
+        // Kein 'chat': der Bericht hat feste Abschnitte, die Tiefe steuert
+        // analysisDepthHint pro Abschnitt.
         onTruncated: () => setAiTruncated(true),
       });
       await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: resolvedModel, language });
@@ -1452,12 +1543,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     setChatRetryText(null);
     setChatLoading(true);
     try {
-      const sys = `${buildAnalysisSystemPrompt(language, taskHint())}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
+      // Der Chat bekam frueher den KOMPLETTEN Bericht-Prompt inklusive der
+      // sechs Pflicht-Abschnitte. Auf die Frage "warum ist die mAP so
+      // niedrig?" antwortete die KI deshalb mit einem neuen Gesamtbericht
+      // statt mit einer Antwort. Hier zaehlt nur Rolle, Task und Datenlage.
+      const sys = `${buildAnalysisChatSystemPrompt(language, taskHint())}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
       const chatBudget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
       const reply = await callAIClient(aiSettings, {
         system: sys, messages: updated,
         maxTokens: chatBudget.maxTokens,
-        temperature: 0.6, responseLanguage: language,
+        temperature: 0.6, responseLanguage: language, style: 'chat',
       });
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (e: any) {

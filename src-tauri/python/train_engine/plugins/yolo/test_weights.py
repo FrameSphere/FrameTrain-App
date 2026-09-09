@@ -156,5 +156,72 @@ class StopTest(unittest.TestCase):
                                 f"{mod}.{c.__name__} hat kein stop()")
 
 
+class LabelPruefungTest(unittest.TestCase):
+    """Ein Detektions-Training ohne Labels laeuft sonst wirkungslos durch:
+    Ultralytics behandelt jedes Bild als Hintergrund, box- und dfl-Loss sind
+    konstant 0 und mAP ebenfalls."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.plugin = make_plugin(self.root)
+
+    def write_yaml(self, train, val=None):
+        y = self.root / "dataset.yaml"
+        y.write_text(
+            f"path: {self.root}\ntrain: {train}\nval: {val or train}\nnc: 1\nnames: ['object']\n",
+            encoding="utf-8")
+        return y
+
+    def bilder(self, d: Path, n: int, labels_in: Path = None):
+        d.mkdir(parents=True, exist_ok=True)
+        if labels_in:
+            labels_in.mkdir(parents=True, exist_ok=True)
+        for i in range(n):
+            (d / f"bild_{i}.jpg").write_bytes(b"x")
+            if labels_in:
+                (labels_in / f"bild_{i}.txt").write_text("0 0.5 0.5 0.1 0.1", encoding="utf-8")
+
+    def test_bilder_ohne_labels_brechen_ab(self):
+        # Genau der Praxisfall: der Unterordner 'images' wurde als Dataset
+        # importiert, train/ und val/ enthalten nur .jpg-Dateien.
+        self.bilder(self.root / "train", 5)
+        self.bilder(self.root / "val", 2)
+        y = self.write_yaml(self.root / "train", self.root / "val")
+        self.assertFalse(self.plugin._verify_labels(y))
+
+    def test_nested_layout_wird_akzeptiert(self):
+        self.bilder(self.root / "images" / "train", 4, self.root / "labels" / "train")
+        self.bilder(self.root / "images" / "val", 2, self.root / "labels" / "val")
+        y = self.write_yaml(self.root / "images" / "train", self.root / "images" / "val")
+        self.assertTrue(self.plugin._verify_labels(y))
+
+    def test_labels_neben_den_bildern_werden_akzeptiert(self):
+        d = self.root / "train"
+        self.bilder(d, 3, d)
+        y = self.write_yaml(d)
+        self.assertTrue(self.plugin._verify_labels(y))
+
+    def test_teilweise_labels_laufen_weiter(self):
+        # Bilder ohne Label sind gueltige Hintergrundbilder - nur eine Warnung.
+        d = self.root / "images" / "train"
+        lab = self.root / "labels" / "train"
+        self.bilder(d, 4, lab)
+        for i in range(4, 10):
+            (d / f"bild_{i}.jpg").write_bytes(b"x")
+        y = self.write_yaml(d)
+        self.assertTrue(self.plugin._verify_labels(y))
+
+    def test_relative_pfade_in_der_yaml(self):
+        self.bilder(self.root / "images" / "train", 3, self.root / "labels" / "train")
+        y = self.root / "dataset.yaml"
+        y.write_text(
+            f"path: {self.root}\ntrain: images/train\nval: images/train\nnc: 1\nnames: ['object']\n",
+            encoding="utf-8")
+        self.assertEqual(len(self.plugin._yaml_image_dirs(y)), 2)
+        self.assertTrue(self.plugin._verify_labels(y))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

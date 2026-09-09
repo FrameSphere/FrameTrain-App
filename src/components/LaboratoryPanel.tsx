@@ -19,7 +19,7 @@ import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePageContext } from '../contexts/PageContext';
-import { callAI } from './TrainingPanel';
+import { callAI, trimHistory } from './TrainingPanel';
 import OpenLibraryModal from './OpenLibraryModal';
 import { readUserDevScripts } from '../utils/devScriptStorage';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
@@ -484,8 +484,11 @@ print(json.dumps(result))
       const sys = `Du bist ein Code-Assistent für FrameTrain Lab Dev Scripts.
 Das Skript bekommt SAMPLE_INPUT via ENV und soll {"predicted": "...", "confidence": 0.9} auf stdout ausgeben.
 MODEL_PATH="${modelPath}", OUTPUT_PATH="${outputPath}".
-Antworte auf Deutsch. Code in \`\`\`python Blöcken.`;
-      const history = [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
+Code in \`\`\`python Blöcken.`;
+      const history = trimHistory(
+        [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content })),
+        aiSettings,
+      );
       const last = history.pop()!;
       const resp = await callAI(aiSettings, sys, last.content, history, language);
       setAiMessages(m => [...m, { role: 'assistant', content: resp }]);

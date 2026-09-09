@@ -107,3 +107,175 @@ describe('callAI – Verlaufsaufbereitung', () => {
     expect(sentBody().max_tokens).toBe(2000);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Token-Budget: Denk-Reserve, Effort und Laengen-Vorgabe
+//
+// Der Praxisfall, der das noetig machte: bei "Minimal" (400 Tokens) und
+// claude-sonnet-5 verbrauchte das unsichtbare Nachdenken das komplette
+// Budget. Trainingsanalyse und Analyse-Chat lieferten daraufhin einen leeren
+// Text — gespeichert und angezeigt als "Erfolg".
+// ---------------------------------------------------------------------------
+describe('callAI – Token-Budget', () => {
+  beforeEach(() => { mockInvoke.mockReset(); });
+
+  const THINKING: AISettings = { ...ANTHROPIC, selectedModel: 'claude-sonnet-5' };
+
+  it('schlaegt die Denk-Reserve auf das sichtbare Budget auf', async () => {
+    respondAnthropic();
+    await callAI({ ...THINKING, tokenBudget: 'minimal' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], maxTokens: 400,
+    });
+    expect(sentBody().max_tokens).toBe(400 + 2000);
+  });
+
+  it('waehlt den Denk-Aufwand passend zum Budget', async () => {
+    respondAnthropic();
+    await callAI({ ...THINKING, tokenBudget: 'minimal' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }],
+    });
+    expect(sentBody().output_config).toEqual({ effort: 'low' });
+
+    mockInvoke.mockReset();
+    respondAnthropic();
+    await callAI({ ...THINKING, tokenBudget: 'unlimited' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }],
+    });
+    expect(sentBody().output_config).toEqual({ effort: 'max' });
+  });
+
+  it('setzt keinen Effort bei Modellen ohne Effort-Stufen', async () => {
+    respondAnthropic();
+    await callAI(ANTHROPIC, { system: 'sys', messages: [{ role: 'user', content: 'x' }] });
+    expect(sentBody().output_config).toBeUndefined();
+  });
+
+  it('gibt die Laenge nur bei style="chat" im System-Prompt vor', async () => {
+    respondAnthropic();
+    await callAI({ ...ANTHROPIC, tokenBudget: 'minimal' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], style: 'chat',
+    });
+    expect(sentBody().system).toMatch(/hoechstens 3 Saetze/);
+
+    mockInvoke.mockReset();
+    respondAnthropic();
+    await callAI({ ...ANTHROPIC, tokenBudget: 'minimal' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], style: 'raw',
+    });
+    expect(sentBody().system).not.toMatch(/hoechstens/);
+  });
+
+  it('wirft statt still leer zu antworten', async () => {
+    mockInvoke.mockImplementation(async () => ({
+      status: 200,
+      body: JSON.stringify({ content: [{ type: 'thinking', thinking: '…' }], stop_reason: 'max_tokens' }),
+    }));
+    await expect(callAI(THINKING, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }],
+    })).rejects.toThrow(/keinen Text/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ollama: Kontextfenster und Antwortlaenge
+// ---------------------------------------------------------------------------
+describe('callAI – Ollama', () => {
+  beforeEach(() => { mockInvoke.mockReset(); });
+
+  const OLLAMA: AISettings = {
+    enabled: true, provider: 'ollama', apiKey: '',
+    selectedModel: 'llama3.2', ollamaModel: 'llama3.2', tokenBudget: 'balanced',
+  };
+
+  function respondOllama(content = 'ok', extra: Record<string, unknown> = {}) {
+    mockInvoke.mockImplementation(async () => ({
+      status: 200,
+      body: JSON.stringify({ message: { content }, ...extra }),
+    }));
+  }
+
+  it('begrenzt die Antwortlaenge (num_predict) statt sie laufen zu lassen', async () => {
+    respondOllama();
+    await callAI(OLLAMA, { system: 'sys', messages: [{ role: 'user', content: 'x' }], maxTokens: 800 });
+    expect(sentBody().options.num_predict).toBe(800);
+  });
+
+  // Ollama schneidet alles ab, was nicht in num_ctx passt — und zwar vorne,
+  // also genau den System-Prompt. Bei 4096 fest verdrahtet ging der
+  // Seitenkontext still verloren.
+  it('vergroessert das Kontextfenster fuer lange Prompts', async () => {
+    respondOllama();
+    await callAI(OLLAMA, {
+      system: 'S'.repeat(60000), messages: [{ role: 'user', content: 'x' }], maxTokens: 800,
+    });
+    expect(sentBody().options.num_ctx).toBeGreaterThanOrEqual(16384);
+  });
+
+  it('entfernt sichtbare Denk-Bloecke lokaler Reasoning-Modelle', async () => {
+    respondOllama('<think>lange Ueberlegung</think>Die Antwort.');
+    const reply = await callAI(OLLAMA, { system: 'sys', messages: [{ role: 'user', content: 'x' }] });
+    expect(reply).toBe('Die Antwort.');
+  });
+
+  it('erklaert ein fehlendes Modell', async () => {
+    mockInvoke.mockImplementation(async () => ({
+      status: 404, body: JSON.stringify({ error: 'model "llama3.2" not found' }),
+    }));
+    await expect(callAI(OLLAMA, { system: 'sys', messages: [{ role: 'user', content: 'x' }] }))
+      .rejects.toThrow(/ollama pull/);
+  });
+
+  it('meldet ein Abschneiden am Limit', async () => {
+    respondOllama('halber Satz', { done_reason: 'length' });
+    const onTruncated = vi.fn();
+    await callAI(OLLAMA, { system: 'sys', messages: [{ role: 'user', content: 'x' }], onTruncated });
+    expect(onTruncated).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OpenAI-kompatible Provider (OpenAI, Groq)
+// ---------------------------------------------------------------------------
+describe('callAI – OpenAI/Groq', () => {
+  beforeEach(() => { mockInvoke.mockReset(); });
+
+  const GROQ: AISettings = {
+    enabled: true, provider: 'groq', apiKey: 'gsk_test',
+    selectedModel: 'llama-3.3-70b-versatile', ollamaModel: '', tokenBudget: 'balanced',
+  };
+
+  function respondChat(content = 'ok', finish = 'stop') {
+    mockInvoke.mockImplementation(async () => ({
+      status: 200,
+      body: JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }] }),
+    }));
+  }
+
+  it('schickt max_tokens und temperature fuer normale Modelle', async () => {
+    respondChat();
+    await callAI(GROQ, { system: 'sys', messages: [{ role: 'user', content: 'x' }], maxTokens: 800 });
+    const body = sentBody();
+    expect(body.max_tokens).toBe(800);
+    expect(body.temperature).toBeDefined();
+  });
+
+  it('gibt Reasoning-Modellen zusaetzliches Budget', async () => {
+    respondChat();
+    await callAI({ ...GROQ, selectedModel: 'openai/gpt-oss-120b' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], maxTokens: 800,
+    });
+    expect(sentBody().max_tokens).toBe(800 + 3000);
+  });
+
+  // o-Serie und GPT-5 lehnen max_tokens sowie abweichende Temperaturen ab.
+  it('nutzt max_completion_tokens fuer die OpenAI-o-Serie', async () => {
+    respondChat();
+    await callAI({ ...GROQ, provider: 'openai', apiKey: 'sk-test', selectedModel: 'o3-mini' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], maxTokens: 800,
+    });
+    const body = sentBody();
+    expect(body.max_completion_tokens).toBeGreaterThan(800);
+    expect(body.max_tokens).toBeUndefined();
+    expect(body.temperature).toBeUndefined();
+  });
+});

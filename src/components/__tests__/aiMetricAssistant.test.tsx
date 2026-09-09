@@ -107,6 +107,9 @@ describe('AIMetricAssistant', () => {
     expect(screen.queryByText(/"learning_rate":0\.001/)).toBeNull();
   });
 
+  // Die Laengen-Vorgabe steht nicht mehr im User-Prompt, sondern kommt
+  // zentral aus dem Token-Budget (aiClient, style: 'chat'). Hier wird nur
+  // geprueft, dass Budget und Stil korrekt durchgereicht werden.
   it('nutzt das eingestellte Token-Budget', async () => {
     settingsRef.current = { ...settingsRef.current, tokenBudget: 'max' };
     callAIMock.mockResolvedValue(ANTWORT_ABGESCHNITTEN);
@@ -114,11 +117,9 @@ describe('AIMetricAssistant', () => {
     await fragen();
 
     // aiClient.callAI(settings, { system, messages, maxTokens, ... })
-    const opts = callAIMock.mock.calls[0][1] as { maxTokens: number; messages: { content: string }[] };
+    const opts = callAIMock.mock.calls[0][1] as { maxTokens: number; style: string };
     expect(opts.maxTokens).toBe(TOKEN_BUDGET_CONFIG.max.maxTokens);
-    // Bei grossem Budget faellt die feste "3-4 Saetze"-Vorgabe weg.
-    expect(opts.messages[0].content).not.toMatch(/3-4 Sätze/);
-    expect(opts.messages[0].content).toMatch(/ausführlich/);
+    expect(opts.style).toBe('chat');
   });
 
   it('haelt sich bei kleinem Budget kurz', async () => {
@@ -127,8 +128,67 @@ describe('AIMetricAssistant', () => {
     renderAssistant();
     await fragen();
 
-    const opts = callAIMock.mock.calls[0][1] as { maxTokens: number; messages: { content: string }[] };
+    const opts = callAIMock.mock.calls[0][1] as { maxTokens: number; style: string };
     expect(opts.maxTokens).toBe(TOKEN_BUDGET_CONFIG.minimal.maxTokens);
-    expect(opts.messages[0].content).toMatch(/2-3 Sätze/);
+    expect(opts.style).toBe('chat');
+  });
+
+  // Der Praxisfall: bei YOLOv8 stand die komplette NLP-Feldliste im Prompt,
+  // woraufhin die KI drei Absaetze darauf verwendete zu erklaeren, dass LoRA
+  // und max_seq_length fuer einen CNN-Detektor nicht gelten.
+  it('laesst NLP-Felder bei einem Detektor aus dem Prompt', async () => {
+    callAIMock.mockResolvedValue(ANTWORT_ABGESCHNITTEN);
+    render(
+      <AIMetricAssistant
+        config={{ ...DEFAULT_CONFIG, task_type: 'detect' }}
+        datasetName="SkiTrain" datasetSize={580} modelName="YOLOv8"
+        onApply={vi.fn()} onClose={vi.fn()} onSaveAsTemplate={async () => true}
+      />,
+    );
+    await fragen();
+
+    const prompt = (callAIMock.mock.calls[0][1] as { messages: { content: string }[] }).messages[0].content;
+    // Weder in der Feldliste noch im Dump der aktuellen Konfiguration.
+    for (const feld of ['max_seq_length', 'lora_r', 'lora_target_modules', 'group_by_length', 'load_in_4bit']) {
+      expect(prompt, feld).not.toContain(`- ${feld}:`);
+    }
+    expect(prompt).toContain('- epochs:');
+    expect(prompt).toContain('Task: detect');
+    // Der leer gewordene LoRA-Abschnitt darf nicht als Ueberschrift stehenbleiben.
+    expect(prompt).not.toContain('LORA / QLORA');
+    // Der Vorspann der Feldliste bleibt erhalten.
+    expect(prompt).toContain('ALLE VERFÜGBAREN METRIKEN');
+    // plugin_config als Objekt hat im Prompt nichts verloren.
+    expect(prompt).not.toContain('[object Object]');
+  });
+
+  it('behaelt die NLP-Felder bei einem Text-Modell', async () => {
+    callAIMock.mockResolvedValue(ANTWORT_ABGESCHNITTEN);
+    render(
+      <AIMetricAssistant
+        config={{ ...DEFAULT_CONFIG, task_type: 'seq_classification' }}
+        datasetName="Texte" datasetSize={500} modelName="distilbert-base-uncased"
+        onApply={vi.fn()} onClose={vi.fn()} onSaveAsTemplate={async () => true}
+      />,
+    );
+    await fragen();
+
+    const prompt = (callAIMock.mock.calls[0][1] as { messages: { content: string }[] }).messages[0].content;
+    expect(prompt).toContain('- max_seq_length:');
+    expect(prompt).toContain('- lora_r:');
+  });
+
+  // Nach dem Uebernehmen aktualisiert sich die Config-Prop; ohne Schnappschuss
+  // stand in der Diff-Liste dann "50 -> 50".
+  it('zeigt nach dem Uebernehmen weiter den Ausgangswert', async () => {
+    callAIMock.mockResolvedValue(ANTWORT_ABGESCHNITTEN);
+    renderAssistant();
+    await fragen();
+
+    await waitFor(() => expect(screen.getByText('epochs')).toBeTruthy());
+    expect(screen.getByText(String(DEFAULT_CONFIG.epochs))).toBeTruthy();
+    await userEvent.click(screen.getByText('trainingPanel.aiAssistant.applyButton'));
+    // Der durchgestrichene Ausgangswert bleibt stehen.
+    expect(screen.getByText(String(DEFAULT_CONFIG.epochs))).toBeTruthy();
   });
 });

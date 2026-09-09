@@ -19,7 +19,7 @@ import { useAISettings } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { TrainingJob, TrainingProgress, LossPoint, ModelInfo, DatasetInfo } from './TrainingPanel';
-import { callAI, LossChart } from './TrainingPanel';
+import { callAI, trimHistory, LossChart } from './TrainingPanel';
 import TrainingDashboard from './TrainingDashboard';
 import { classifyError, type ErrorCategory } from '../utils/errorClassify';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -762,16 +762,31 @@ ANFORDERUNGEN:
     setLoading(true);
 
     try {
-      const history = withUser.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      // Der Verlauf wird auf das History-Budget der Einstellung gekuerzt.
+      // Vorher ging jede alte Nachricht mit — inklusive kompletter
+      // Skript-Rewrites; nach ein paar Runden bestand die Anfrage fast nur
+      // noch aus altem Code.
+      const history = trimHistory(
+        withUser.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        aiSettings,
+      );
       const last = history.pop()!;
-      const response = await callAI(aiSettings, systemPrompt, last.content, history, language);
+      let cutOff = false;
+      const response = await callAI(aiSettings, systemPrompt, last.content, history, language, () => { cutOff = true; });
 
       const { action, cleaned } = parseAutoAction(response);
       const inferredEdit = (action?.mode === 'edit') || cleaned.includes('##EDIT_START##');
       const edits = inferredEdit ? parseEdits(response) : [];
       const code = action?.mode === 'rewrite' ? (extractFullPythonCode(response) ?? null) : null;
-      const finalContent = code ? [cleaned, '```python', code, '```'].join('\n') : cleaned;
-      setMessages(m => [...m, { role: 'assistant', content: finalContent, edits, action }]);
+      const baseContent = code ? [cleaned, '```python', code, '```'].join('\n') : cleaned;
+      // Am Limit abgeschnittene Antworten enthalten halbe Edit-Bloecke. Ohne
+      // Hinweis haette der User unvollstaendigen Code uebernommen.
+      const finalContent = cutOff
+        ? `${baseContent}\n\n_${language === 'en'
+            ? 'Answer was cut off at the token limit — the change may be incomplete. Choose a larger token budget in settings.'
+            : 'Antwort wurde am Token-Limit abgeschnitten — die Aenderung kann unvollstaendig sein. In den Einstellungen ein groesseres Token-Budget waehlen.'}_`
+        : baseContent;
+      setMessages(m => [...m, { role: 'assistant', content: finalContent, edits: cutOff ? [] : edits, action }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', content: `Fehler: ${String(err)}` }]);
       setRetryText(text);

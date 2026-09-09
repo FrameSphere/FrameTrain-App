@@ -158,6 +158,14 @@ export function MarkdownText({ text, className = '' }: { text: string; className
           {renderInline(trimmed.replace(/^#+\s*/, ''))}
         </div>
       );
+    } else if (/^#\s/.test(trimmed)) {
+      // Eine einzelne Raute fehlte hier — "# Analyse" stand deshalb woertlich
+      // samt Raute im Dialog, sobald das Modell eine H1 schrieb.
+      elements.push(
+        <div key={i} className="font-bold text-white text-base mt-2 mb-1">
+          {renderInline(trimmed.replace(/^#+\s*/, ''))}
+        </div>
+      );
     } else {
       elements.push(
         <p key={i} className="leading-relaxed">

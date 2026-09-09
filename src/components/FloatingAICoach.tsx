@@ -798,6 +798,12 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
       pageChanged,
       includePageKnowledge,
       automation,
+      // Ab "Quality" ist genug Budget da, um dem Modell die Tool-Liste in
+      // jeder Runde mitzugeben — dadurch bietet der Coach auch spaeter im
+      // Gespraech noch Buttons an statt nur Fliesstext.
+      repeatTools: settings.tokenBudget === 'quality'
+        || settings.tokenBudget === 'max'
+        || settings.tokenBudget === 'unlimited',
     });
   };
 
@@ -1020,6 +1026,7 @@ Reply with ONLY the title, nothing else.`;
           maxTokens: budgetCfg.maxTokens,
           temperature: 0.7,
           responseLanguage: language,
+          style: 'chat',
         }),
         thinkingPromise,
       ]);

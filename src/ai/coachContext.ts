@@ -621,18 +621,29 @@ export interface CoachPromptOptions {
   includePageKnowledge: boolean;
   /** Automation-Modus aktiv? → schaltet Start/Stop-Training-Tools frei */
   automation?: boolean;
+  /**
+   * Tool-Protokoll bei jeder Nachricht mitschicken (grosse Token-Budgets).
+   * Bei kleinem Budget geht es nur mit der ersten Nachricht und bei einem
+   * Seitenwechsel raus — dort haengt die Tool-Auswahl ohnehin an der Seite.
+   */
+  repeatTools?: boolean;
 }
 
 const DIVIDER = '────────────────────────────────────────────────────────────';
 
 export function buildCoachSystemPrompt(opts: CoachPromptOptions): string {
-  const { language, pageId, pageContent, isFirstMessage, pageChanged, includePageKnowledge, automation } = opts;
+  const { language, pageId, pageContent, isFirstMessage, pageChanged, includePageKnowledge, automation, repeatTools } = opts;
   const en = language === 'en';
   const parts: string[] = [pick(PERSONA, language)];
 
   // Globale, dünne Bausteine — nur einmal (erste Nachricht).
   if (isFirstMessage) {
     parts.push('', pick(APP_OVERVIEW, language), '', pick(SKILLS, language), '', toolsProtocol(language, !!automation));
+  } else if (pageChanged || repeatTools) {
+    // Welche Tools sinnvoll sind, haengt an der Seite ([[set:…]] gibt es nur
+    // im Training). Nach einem Seitenwechsel bot der Coach sonst weiter die
+    // Tools der alten Seite an — oder gar keine mehr.
+    parts.push('', toolsProtocol(language, !!automation));
   }
 
   // Tiefes Seiten-Wissen — nur wenn für diese Seite noch nicht geschickt.
@@ -641,8 +652,14 @@ export function buildCoachSystemPrompt(opts: CoachPromptOptions): string {
     parts.push('', knowledge);
   }
 
-  // Live-Zustand — bei erster Nachricht oder Seitenwechsel.
-  if ((isFirstMessage || pageChanged) && pageContent.trim()) {
+  // Live-Zustand — bei JEDER Nachricht.
+  //
+  // Vorher ging der Seitenzustand nur mit der ersten Nachricht raus. Ab der
+  // zweiten Frage wusste der Coach deshalb nicht mehr, welches Modell und
+  // welches Dataset ausgewaehlt sind, und fragte den User danach — waehrend
+  // beides auf dem Bildschirm stand. Der Live-Block ist der billigste und
+  // nuetzlichste Teil des Kontexts; das teure Seiten-Wissen bleibt einmalig.
+  if (pageContent.trim()) {
     parts.push(
       '',
       pageChanged && !isFirstMessage
