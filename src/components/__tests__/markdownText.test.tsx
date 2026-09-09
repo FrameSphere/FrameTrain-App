@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MarkdownText } from '../ui/MarkdownText';
+import { MarkdownText, unwrapBoldHeading } from '../ui/MarkdownText';
 
 describe('MarkdownText', () => {
   it('rendert Fettschrift, Kursiv und Inline-Code als echte Elemente', () => {
@@ -63,5 +63,27 @@ describe('MarkdownText', () => {
   it('haelt eine Raute ohne Leerzeichen fuer normalen Text', () => {
     render(<MarkdownText text="#1 im Ranking" />);
     expect(screen.getByText('#1 im Ranking')).toBeTruthy();
+  });
+});
+
+// Groq/compound schreibt Ueberschriften als "**## Titel**" — die Zeile beginnt
+// dann mit ** statt mit #, die Ueberschriften-Erkennung griff nicht und die
+// Rauten standen sichtbar im Trainingsbericht.
+describe('unwrapBoldHeading', () => {
+  it('loest die Fettschrift um eine Ueberschrift', () => {
+    expect(unwrapBoldHeading('**## Gesamtbewertung**')).toBe('## Gesamtbewertung');
+    expect(unwrapBoldHeading('  **# Titel**  ')).toBe('# Titel');
+  });
+
+  it('laesst normale Fettschrift in Ruhe', () => {
+    expect(unwrapBoldHeading('**Wichtig**')).toBe('**Wichtig**');
+    expect(unwrapBoldHeading('## Titel')).toBe('## Titel');
+    expect(unwrapBoldHeading('Text mit **fett** drin')).toBe('Text mit **fett** drin');
+  });
+
+  it('rendert eine fett gesetzte Ueberschrift als Ueberschrift', () => {
+    render(<MarkdownText text={'**## Was lief gut**\nInhalt.'} />);
+    expect(screen.getByText('Was lief gut')).toBeTruthy();
+    expect(screen.queryByText(/##/)).toBeNull();
   });
 });

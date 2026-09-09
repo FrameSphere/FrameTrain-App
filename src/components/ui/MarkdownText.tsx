@@ -40,6 +40,19 @@ export function renderInline(str: string, key?: string): React.ReactNode {
   return parts.length > 0 ? parts : str;
 }
 
+/**
+ * `**## Titel**` → `## Titel`.
+ *
+ * Manche Modelle (z. B. Groq/compound) setzen ihre Ueberschriften zusaetzlich
+ * fett. Die Zeile beginnt dann mit `**` statt mit `#`, die
+ * Ueberschriften-Erkennung greift nicht — und die Rauten standen sichtbar im
+ * Text.
+ */
+export function unwrapBoldHeading(line: string): string {
+  const m = line.trim().match(/^\*\*\s*(#{1,6}\s+.+?)\s*\*\*$/);
+  return m ? m[1] : line;
+}
+
 export function MarkdownText({ text, className = '' }: { text: string; className?: string }) {
   const lines = text.split('\n');
   const elements: React.ReactNode[] = [];
@@ -47,7 +60,7 @@ export function MarkdownText({ text, className = '' }: { text: string; className
 
   while (i < lines.length) {
     const line = lines[i];
-    const trimmed = line.trim();
+    const trimmed = unwrapBoldHeading(line.trim());
 
     // ── Code Block (```...```) ──────────────────────────────────────────────
     if (trimmed.startsWith('```')) {

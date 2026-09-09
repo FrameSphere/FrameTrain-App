@@ -40,7 +40,10 @@ function DiffLine({ type, content, lineNum }: { type: 'removed' | 'added' | 'con
       <div className={`w-6 px-1 py-1 text-center flex-shrink-0 font-semibold ${textColor}`}>
         {prefix}
       </div>
-      <pre className={`flex-1 py-1 px-2 overflow-x-auto text-gray-200 ${textColor}`}>{content}</pre>
+      {/* min-w-0: ohne das waechst das flex-1-Element mit dem Inhalt, statt
+          zu scrollen — lange Zeilen (absolute Pfade) liefen aus dem Dialog
+          heraus und der Rest war nicht erreichbar. */}
+      <pre className={`flex-1 min-w-0 py-1 px-2 overflow-x-auto text-gray-200 ${textColor}`}>{content}</pre>
     </div>
   );
 }

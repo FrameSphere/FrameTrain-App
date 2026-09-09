@@ -23,6 +23,7 @@ import { PROVIDER_META, resolveModel } from '../ai/providerMeta';
 import GradientChatInput from './ui/GradientChatInput';
 import { openAICoach } from '../ai/aiCoachEvents';
 import { dateLocale } from '../utils/dateLocale';
+import { unwrapBoldHeading } from './ui/MarkdownText';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -898,7 +899,9 @@ function ReportText({ text }: { text: string }) {
         let i = 0;
         while (i < lines.length) {
           const line = lines[i];
-          const trimmed = line.trim();
+          // `**## Titel**`: manche Modelle setzen die Ueberschrift zusaetzlich
+          // fett — dann stand die Raute sichtbar im Bericht.
+          const trimmed = unwrapBoldHeading(line.trim());
           if (!trimmed) {
             nodes.push(<div key={i} className="h-2" />);
             i++;
@@ -1120,6 +1123,8 @@ ${responseInstruction}${taskBlock}
 Write the entire answer in that one language — never mix in words from another language.
 
 Formatting rules:
+- Write every heading exactly as "## Title" — never wrap it in ** as well
+  ("**## Title**" renders the hashes as visible text).
 - Do NOT use emojis anywhere in the answer. The application UI is emoji-free.
   If you need a marker, use a plain text glyph such as -, *, > or the section headings.
 - Close every code fence you open, and never leave a trailing unclosed \`\`\`.

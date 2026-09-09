@@ -388,6 +388,15 @@ KONTEXT (lokal):
 ${dsRefs.map(r => `- ${r}`).join('\n')}
 - OUTPUT_PATH = "${outputPath}"
 
+PFAD-KONVENTION (wichtig): FrameTrain setzt diese Pfade beim Start als
+Umgebungsvariablen. Im Skript gehoeren sie deshalb so hinterlegt:
+    MODEL_PATH   = os.environ.get("MODEL_PATH",   "<Pfad oben>")
+    DATASET_PATH = os.environ.get("DATASET_PATH", "<Pfad oben>")
+    OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "<Pfad oben>")
+Schreibe die absoluten Pfade NIE fest ins Skript — sonst laeuft es nur auf
+diesem Rechner mit genau diesem Modell und Dataset und ist ueber die
+Bibliothek nicht mehr teilbar.
+
 INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft
 
 AKTUELLER SCRIPT-INHALT:
