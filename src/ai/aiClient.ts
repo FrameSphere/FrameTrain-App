@@ -52,6 +52,15 @@ export type CallAIOptions = {
   responseLanguage?: string;
   style?: ResponseStyle;
   /**
+   * Obergrenze fuer den Denk-Aufwand dieses einen Aufrufs.
+   *
+   * Bei "Unlimited" denkt Claude auf hoechster Stufe — fuer eine
+   * Trainingsanalyse genau richtig, fuer einen Tippfehler im Skript nicht:
+   * ein Code-Fix brauchte so ueber zwei Minuten. Aufrufe mit klar
+   * umrissener Aufgabe deckeln den Aufwand deshalb.
+   */
+  effortCap?: 'low' | 'medium' | 'high' | 'max';
+  /**
    * Wird aufgerufen, wenn das Modell mitten im Satz aufgehoert hat, weil
    * max_tokens erreicht war. Ohne diesen Hinweis wirkt eine abgeschnittene
    * Antwort wie eine vollstaendige — inklusive halbem JSON-Block, aus dem
@@ -203,15 +212,20 @@ const ANTHROPIC_EFFORT_PATTERN = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-
 /** Nur die neueren Familien kennen die Stufe `max`; opus-4.5 kann nur bis `high`. */
 const ANTHROPIC_MAX_EFFORT_PATTERN = /claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678]|sonnet-4-6)/;
 
-function anthropicEffort(model: string, profile: BudgetProfile): string | null {
+const EFFORT_ORDER = ['low', 'medium', 'high', 'max'] as const;
+
+function anthropicEffort(model: string, profile: BudgetProfile, cap?: CallAIOptions['effortCap']): string | null {
   if (!ANTHROPIC_EFFORT_PATTERN.test(model)) return null;
-  if (profile.effort === 'max' && !ANTHROPIC_MAX_EFFORT_PATTERN.test(model)) return 'high';
-  return profile.effort;
+  let effort: string = profile.effort;
+  if (cap && EFFORT_ORDER.indexOf(cap) < EFFORT_ORDER.indexOf(profile.effort)) effort = cap;
+  if (effort === 'max' && !ANTHROPIC_MAX_EFFORT_PATTERN.test(model)) return 'high';
+  return effort;
 }
 
 async function callAnthropic(
   apiKey: string, model: string, system: string, messages: ChatMessage[],
-  maxTokens: number, temperature: number, profile: BudgetProfile, onTruncated?: () => void,
+  maxTokens: number, temperature: number, profile: BudgetProfile,
+  effortCap?: CallAIOptions['effortCap'], onTruncated?: () => void,
 ) {
   const key = apiKey.trim();
   const oauth = isOAuthToken(key);
@@ -259,7 +273,7 @@ async function callAnthropic(
   // Der Denk-Aufwand folgt jetzt dem Token-Budget (frueher nur "unlimited" =
   // effort:max, sonst gar nichts). Genau das macht "Minimal" bezahlbar: das
   // Modell denkt kurz statt lange, statt dass wir ihm den Text abschneiden.
-  const effort = anthropicEffort(model, profile);
+  const effort = anthropicEffort(model, profile, effortCap);
   if (effort) body.output_config = { effort };
 
   const { status, data } = await backendPost('https://api.anthropic.com/v1/messages', headers, body);
@@ -463,7 +477,7 @@ export async function callAI(settings: AISettings, options: CallAIOptions): Prom
 
   let text: string;
   if (provider === 'anthropic') {
-    text = await callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, profile, onTruncated);
+    text = await callAnthropic(settings.apiKey, model, system, messages, maxTokens, temperature, profile, options.effortCap, onTruncated);
   } else if (provider === 'openai') {
     text = await callOpenAICompat('https://api.openai.com/v1/chat/completions', settings.apiKey, model, system, messages, maxTokens, temperature, profile, onTruncated);
   } else if (provider === 'groq') {

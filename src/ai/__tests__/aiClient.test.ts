@@ -279,3 +279,32 @@ describe('callAI – OpenAI/Groq', () => {
     expect(body.temperature).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Effort-Deckel je Aufruf
+//
+// Bei "Unlimited" denkt Claude auf hoechster Stufe. Fuer eine Trainingsanalyse
+// ist das richtig — fuer einen Tippfehler im Skript nicht: der Code-Assistent
+// brauchte so ueber zwei Minuten fuer eine Zwei-Zeilen-Korrektur.
+// ---------------------------------------------------------------------------
+describe('callAI – Effort-Deckel', () => {
+  beforeEach(() => { mockInvoke.mockReset(); });
+
+  const SONNET: AISettings = { ...ANTHROPIC, selectedModel: 'claude-sonnet-5', tokenBudget: 'unlimited' };
+
+  it('deckelt den Denk-Aufwand fuer klar umrissene Aufgaben', async () => {
+    respondAnthropic();
+    await callAI(SONNET, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], effortCap: 'high',
+    });
+    expect(sentBody().output_config).toEqual({ effort: 'high' });
+  });
+
+  it('hebt den Aufwand nicht ueber das Budget hinaus an', async () => {
+    respondAnthropic();
+    await callAI({ ...SONNET, tokenBudget: 'minimal' }, {
+      system: 'sys', messages: [{ role: 'user', content: 'x' }], effortCap: 'max',
+    });
+    expect(sentBody().output_config).toEqual({ effort: 'low' });
+  });
+});

@@ -155,6 +155,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     discardDraft: discardAIDraft,
     keyLoading: aiKeyLoading,
     keychainAvailable: aiKeychainAvailable,
+    providersWithKey,
   } = useAISettings();
   const [aiSaving, setAiSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
@@ -926,7 +927,16 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                       <div className="text-sm font-semibold">{m.labelKey ? t(m.labelKey, m.label) : m.label}</div>
                       <div className="text-xs opacity-60 mt-0.5 flex items-center gap-1.5">
                         {m.needsKey ? (
-                          <>{t('settings.ai.keyNeeded')}</>
+                          // Jeder Anbieter hat sein eigenes Schluesselbund-Konto:
+                          // ein Wechsel verliert den Key des anderen nicht mehr.
+                          providersWithKey.includes(key as Exclude<AIProvider, 'ollama'>) ? (
+                            <>
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                              {t('settings.ai.keyStored')}
+                            </>
+                          ) : (
+                            <>{t('settings.ai.keyNeeded')}</>
+                          )
                         ) : (
                           <>
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />

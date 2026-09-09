@@ -963,6 +963,8 @@ Keine Floskeln, nur Fakten.`;
         maxTokens: 300,
         temperature: 0.2,
         responseLanguage: language,
+        // Interner Mini-Aufruf ohne Nutzertext — hier zaehlt Tempo.
+        effortCap: 'low',
       });
       if (summary.trim()) {
         aiChatSummaryRef.current = summary.trim();

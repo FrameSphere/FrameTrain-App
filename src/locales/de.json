@@ -214,6 +214,7 @@
       "providerTitle": "KI-ANBIETER WÄHLEN",
       "noKeyNeeded": "Kein API-Key nötig",
       "keyNeeded": "API-Key nötig",
+      "keyStored": "Key hinterlegt",
       "apiKeyTitle": "API-Key",
       "getKey": "Key holen ↗",
       "keyLocalOnly": "Key wird nur lokal gespeichert, nie an FrameTrain übertragen.",
@@ -2833,6 +2834,7 @@
   },
   "common": {
     "loading": "Wird geladen...",
+    "aiDeepThinking": "Hohes Token-Budget — die KI denkt auf höchster Stufe. Das kann eine Minute dauern.",
     "error": "Fehler",
     "notSelected": "nicht gewählt",
     "positionTop": "OBEN (Header):",

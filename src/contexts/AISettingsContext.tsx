@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 /**
@@ -88,6 +88,12 @@ interface AISettingsContextType {
   keyLoading: boolean;
   /** false, wenn der OS-Schlüsselbund nicht erreichbar ist (z.B. außerhalb Tauri). */
   keychainAvailable: boolean;
+  /**
+   * Anbieter, für die bereits ein Key hinterlegt ist. Der Wechsel zwischen
+   * Anbietern verliert keinen Key mehr — die Oberfläche zeigt damit an,
+   * wo schon einer liegt.
+   */
+  providersWithKey: KeyProvider[];
   /** Ändert nur den Draft — wird erst mit saveSettings() wirksam. */
   updateDraft: (updates: Partial<AISettings>) => void;
   /** Alias auf updateDraft (Rückwärtskompatibilität). */
@@ -111,8 +117,28 @@ const DEFAULT_SETTINGS: AISettings = {
   tokenBudget: 'balanced',
 };
 
-/** Konto-Name im Schlüsselbund, pro Nutzer getrennt. */
-const secretAccount = (userId?: string) => `ft_ai_key_${userId || 'anon'}`;
+/**
+ * Konto-Name im Schlüsselbund — pro Nutzer UND pro Anbieter getrennt.
+ *
+ * Vorher teilten sich alle Anbieter ein Konto: wer von Claude auf Groq
+ * wechselte und dort seinen Groq-Key speicherte, hatte den Claude-Key
+ * verloren und musste ihn beim Zurueckwechseln neu eintippen. Jetzt behaelt
+ * jeder Anbieter seinen eigenen Key, und das Umschalten holt ihn zurueck.
+ */
+const secretAccount = (userId: string | undefined, provider: AIProvider) =>
+  `ft_ai_key_${userId || 'anon'}_${provider}`;
+
+/** Altes gemeinsames Konto — wird beim ersten Start auf den Anbieter umgezogen. */
+const legacyAccount = (userId?: string) => `ft_ai_key_${userId || 'anon'}`;
+
+/** Anbieter, fuer die ueberhaupt ein Key im Schluesselbund liegt. */
+export type KeyProvider = Exclude<AIProvider, 'ollama'>;
+
+const KEY_PROVIDERS: KeyProvider[] = ['anthropic', 'openai', 'groq'];
+
+function needsKey(provider: AIProvider): provider is KeyProvider {
+  return provider !== 'ollama';
+}
 
 async function keychainGet(account: string): Promise<{ ok: true; value: string | null } | { ok: false }> {
   try {
@@ -143,7 +169,15 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
 
   // Key pro User, damit AI-Keys nicht zwischen Accounts geteilt werden
   const storageKey = userId ? `ft_ai_settings_${userId}` : 'ft_ai_settings';
-  const account = secretAccount(userId);
+
+  /**
+   * Bereits geladene / eingetippte Keys je Anbieter.
+   *
+   * Haelt den Wechsel zwischen Anbietern verlustfrei: wer von Claude auf Groq
+   * schaltet, findet beim Zurueckwechseln seinen Claude-Key wieder vor —
+   * auch dann, wenn er zwischendurch nichts gespeichert hat.
+   */
+  const [keysByProvider, setKeysByProvider] = useState<Partial<Record<KeyProvider, string>>>({});
 
   /** Persistiert ausschließlich Nicht-Geheimes (Key wird geleert abgelegt). */
   const persistNonSecret = useCallback((s: AISettings) => {
@@ -195,8 +229,9 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
         return;
       }
 
-      // Key aus dem Schlüsselbund holen
-      const got = await keychainGet(account);
+      const provider = base.provider as KeyProvider;
+      // Key aus dem Schlüsselbund holen — aus dem Konto DIESES Anbieters.
+      const got = await keychainGet(secretAccount(userId, provider));
       if (cancelled) return;
 
       let apiKey = '';
@@ -204,18 +239,30 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
         setKeychainAvailable(true);
         if (got.value) {
           apiKey = got.value;
-        } else if (legacyKey) {
-          // 3) Alt-Key aus localStorage in den Schlüsselbund migrieren
-          const migrated = await keychainWrite(account, legacyKey);
+        } else {
+          // 3a) Umzug vom frueheren gemeinsamen Konto auf das Anbieter-Konto.
+          //     Der alte Eintrag bleibt vorerst liegen: aeltere App-Versionen
+          //     auf demselben Rechner lesen ihn noch.
+          const shared = await keychainGet(legacyAccount(userId));
           if (cancelled) return;
-          apiKey = legacyKey;
-          setKeychainAvailable(migrated);
+          if (shared.ok && shared.value) {
+            apiKey = shared.value;
+            await keychainWrite(secretAccount(userId, provider), shared.value);
+            if (cancelled) return;
+          } else if (legacyKey) {
+            // 3b) Alt-Key aus localStorage in den Schlüsselbund migrieren
+            const migrated = await keychainWrite(secretAccount(userId, provider), legacyKey);
+            if (cancelled) return;
+            apiKey = legacyKey;
+            setKeychainAvailable(migrated);
+          }
         }
       } else {
         // Schlüsselbund nicht verfügbar → Key nur für diese Sitzung im Speicher
         setKeychainAvailable(false);
         apiKey = legacyKey;
       }
+      if (apiKey) setKeysByProvider(prev => ({ ...prev, [provider]: apiKey }));
 
       const loaded: AISettings = { ...base, apiKey };
       // localStorage von jeglichem Klartext-Key säubern
@@ -229,20 +276,89 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey, account]);
+  }, [storageKey, userId]);
 
   const updateDraft = useCallback((updates: Partial<AISettings>) => {
-    setDraft(prev => ({ ...prev, ...updates }));
-  }, []);
+    setDraft(prev => {
+      const next = { ...prev, ...updates };
+      // Der eingetippte Key gehoert zum AKTUELLEN Anbieter — merken, bevor
+      // umgeschaltet wird.
+      if (needsKey(prev.provider) && typeof updates.apiKey === 'string') {
+        const typed = updates.apiKey;
+        setKeysByProvider(cache => ({ ...cache, [prev.provider as KeyProvider]: typed }));
+      }
+      // Anbieterwechsel: den Key des NEUEN Anbieters einsetzen (aus dem
+      // Zwischenspeicher; sonst holt ihn der Effekt unten aus dem
+      // Schluesselbund). Der Key des alten Anbieters bleibt erhalten.
+      if (updates.provider && updates.provider !== prev.provider) {
+        if (needsKey(prev.provider) && prev.apiKey.trim()) {
+          const previous = prev.apiKey;
+          setKeysByProvider(cache => ({ ...cache, [prev.provider as KeyProvider]: previous }));
+        }
+        next.apiKey = needsKey(updates.provider)
+          ? (keysByProvider[updates.provider as KeyProvider] ?? '')
+          : '';
+      }
+      return next;
+    });
+  }, [keysByProvider]);
+
+  /**
+   * Key des gewaehlten Anbieters nachladen.
+   *
+   * Beim Start wird der Schluesselbund bewusst nur angefasst, wenn der
+   * GESPEICHERTE Anbieter einen Key braucht (sonst saehe jeder Ollama-Nutzer
+   * den macOS-Dialog). Wer danach im Dialog auf Claude oder Groq umstellt,
+   * stand deshalb vor einem leeren Key-Feld, obwohl der Key im Schluesselbund
+   * lag — jetzt wird er pro Anbieter genau einmal nachgeholt.
+   */
+  const fetchedAccounts = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (keyLoading) return;
+    const provider = draft.provider;
+    if (!needsKey(provider)) return;
+    if (draft.apiKey.trim()) return;
+    if (keysByProvider[provider] !== undefined) return;
+    const acc = secretAccount(userId, provider);
+    if (fetchedAccounts.current.has(acc)) return;
+    fetchedAccounts.current.add(acc);
+    let cancelled = false;
+    (async () => {
+      const got = await keychainGet(acc);
+      if (cancelled || !got.ok) return;
+      const value = got.value ?? '';
+      setKeysByProvider(cache => ({ ...cache, [provider]: value }));
+      if (!value) return;
+      setDraft(prev => (prev.provider === provider && !prev.apiKey.trim() ? { ...prev, apiKey: value } : prev));
+    })();
+    return () => { cancelled = true; };
+  }, [draft.provider, draft.apiKey, keysByProvider, userId, keyLoading]);
 
   const saveSettings = useCallback(async () => {
     const next = draft;
     persistNonSecret(next);
-    const wrote = await keychainWrite(account, next.apiKey.trim());
-    setKeychainAvailable(wrote || !next.apiKey.trim());
-    setSettings({ ...next, apiKey: next.apiKey.trim() });
-    setDraft({ ...next, apiKey: next.apiKey.trim() });
-  }, [draft, account, persistNonSecret]);
+    const trimmed = next.apiKey.trim();
+    // Gespeichert wird immer nur das Konto des GEWAEHLTEN Anbieters. Die Keys
+    // der anderen Anbieter bleiben unberuehrt im Schluesselbund liegen.
+    //
+    // Ein leeres Feld loeschte den Key frueher bedingungslos — auch dann,
+    // wenn nie einer geladen war (etwa direkt nach einem Anbieterwechsel).
+    // Geloescht wird jetzt nur, wenn ein geladener Key bewusst geleert wurde.
+    let wrote = true;
+    if (needsKey(next.provider)) {
+      const acc = secretAccount(userId, next.provider);
+      const known = keysByProvider[next.provider];
+      if (trimmed) {
+        wrote = await keychainWrite(acc, trimmed);
+      } else if ((known ?? '').trim() || (settings.provider === next.provider && settings.apiKey.trim())) {
+        wrote = await keychainWrite(acc, '');
+      }
+      setKeysByProvider(cache => ({ ...cache, [next.provider as KeyProvider]: trimmed }));
+    }
+    setKeychainAvailable(wrote || !trimmed);
+    setSettings({ ...next, apiKey: trimmed });
+    setDraft({ ...next, apiKey: trimmed });
+  }, [draft, userId, persistNonSecret, settings.apiKey, settings.provider, keysByProvider]);
 
   const discardDraft = useCallback(() => {
     setDraft(settings);
@@ -250,15 +366,31 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
 
   const resetSettings = useCallback(async () => {
     persistNonSecret(DEFAULT_SETTINGS);
-    await keychainWrite(account, '');
+    // Zuruecksetzen heisst: ALLE hinterlegten Keys weg, nicht nur der des
+    // gerade gewaehlten Anbieters.
+    for (const provider of KEY_PROVIDERS) {
+      await keychainWrite(secretAccount(userId, provider), '');
+    }
+    await keychainWrite(legacyAccount(userId), '');
+    setKeysByProvider({});
+    fetchedAccounts.current.clear();
     setSettings(DEFAULT_SETTINGS);
     setDraft(DEFAULT_SETTINGS);
-  }, [account, persistNonSecret]);
+  }, [userId, persistNonSecret]);
 
   const isDirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(settings),
     [draft, settings],
   );
+
+  /** Anbieter, fuer die bereits ein Key hinterlegt ist (fuer die Anzeige). */
+  const providersWithKey = useMemo<KeyProvider[]>(() => {
+    const set = new Set<KeyProvider>();
+    for (const p of KEY_PROVIDERS) if ((keysByProvider[p] ?? '').trim()) set.add(p);
+    if (needsKey(draft.provider) && draft.apiKey.trim()) set.add(draft.provider);
+    if (needsKey(settings.provider) && settings.apiKey.trim()) set.add(settings.provider);
+    return KEY_PROVIDERS.filter(p => set.has(p));
+  }, [keysByProvider, draft.provider, draft.apiKey, settings.provider, settings.apiKey]);
 
   const value = useMemo<AISettingsContextType>(() => ({
     settings,
@@ -266,12 +398,13 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
     isDirty,
     keyLoading,
     keychainAvailable,
+    providersWithKey,
     updateDraft,
     updateSettings: updateDraft,
     saveSettings,
     discardDraft,
     resetSettings,
-  }), [settings, draft, isDirty, keyLoading, keychainAvailable, updateDraft, saveSettings, discardDraft, resetSettings]);
+  }), [settings, draft, isDirty, keyLoading, keychainAvailable, providersWithKey, updateDraft, saveSettings, discardDraft, resetSettings]);
 
   return (
     <AISettingsContext.Provider value={value}>

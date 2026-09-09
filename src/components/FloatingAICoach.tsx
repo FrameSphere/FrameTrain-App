@@ -930,6 +930,8 @@ Reply with ONLY the title, nothing else.`;
         messages: [{ role: 'user', content: titlePrompt }],
         maxTokens: 20,
         temperature: 0.4,
+        // Drei bis sechs Woerter brauchen kein tiefes Nachdenken.
+        effortCap: 'low',
       });
 
       const cleanTitle = title.trim().replace(/^["']|["']$/g, '').replace(/\.$/, '').slice(0, 50);

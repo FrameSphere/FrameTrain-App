@@ -214,6 +214,7 @@
       "providerTitle": "CHOOSE AI PROVIDER",
       "noKeyNeeded": "No API key needed",
       "keyNeeded": "API key needed",
+      "keyStored": "Key stored",
       "apiKeyTitle": "API Key",
       "getKey": "Get key ↗",
       "keyLocalOnly": "Key is stored locally only, never sent to FrameTrain.",
@@ -2833,6 +2834,7 @@
   },
   "common": {
     "loading": "Loading...",
+    "aiDeepThinking": "High token budget — the AI is thinking at maximum depth. This can take a minute.",
     "error": "Error",
     "notSelected": "not selected",
     "positionTop": "TOP (Header):",

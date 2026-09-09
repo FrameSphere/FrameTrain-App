@@ -2049,6 +2049,11 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
                 <span className="text-sm">{t('analysisPanel.aiAnalysis.generatingText').replace('{provider}', providerLabel(aiProvider))}</span>
                 <span className="text-xs text-gray-500">{t('analysisPanel.aiAnalysis.generatingSubtext')}</span>
+                {/* Bei hohem Budget denkt das Modell laenger — ohne Hinweis
+                    wirkt die Seite haengend. */}
+                {(aiSettings.tokenBudget === 'max' || aiSettings.tokenBudget === 'unlimited') && (
+                  <span className="text-xs text-gray-500 max-w-sm text-center">{t('common.aiDeepThinking')}</span>
+                )}
               </div>
             )}
 

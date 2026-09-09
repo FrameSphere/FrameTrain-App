@@ -24,7 +24,7 @@ vi.mock('../../contexts/LanguageContext', () => ({
   useLanguage: () => ({ language: 'de' as const, t: (key: string) => key }),
 }));
 
-import { AIMetricAssistant, DEFAULT_CONFIG } from '../TrainingPanel';
+import { AIMetricAssistant, DEFAULT_CONFIG, isSameValue } from '../TrainingPanel';
 import { TOKEN_BUDGET_CONFIG } from '../../contexts/AISettingsContext';
 
 /** Genau die Form, die in der Praxis ankam: Markdown + am Limit gekapptes JSON. */
@@ -190,5 +190,22 @@ describe('AIMetricAssistant', () => {
     await userEvent.click(screen.getByText('trainingPanel.aiAssistant.applyButton'));
     // Der durchgestrichene Ausgangswert bleibt stehen.
     expect(screen.getByText(String(DEFAULT_CONFIG.epochs))).toBeTruthy();
+  });
+});
+
+// Modelle nennen im JSON gern Felder, die sie gar nicht aendern.
+// Als Vorschlagszeile ("lr0 0.01 -> 0.01") kostet das den User nur Pruefzeit.
+describe('isSameValue', () => {
+  it('erkennt gleiche Werte unabhaengig vom Typ', () => {
+    expect(isSameValue(0.01, '0.01')).toBe(true);
+    expect(isSameValue('true', true)).toBe(true);
+    expect(isSameValue('SGD', 'sgd')).toBe(true);
+    expect(isSameValue(2e-5, 0.00002)).toBe(true);
+  });
+
+  it('erkennt echte Aenderungen', () => {
+    expect(isSameValue(640, 800)).toBe(false);
+    expect(isSameValue('adamw', 'sgd')).toBe(false);
+    expect(isSameValue(undefined, 5)).toBe(false);
   });
 });

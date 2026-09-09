@@ -148,6 +148,10 @@ export async function callAI(settings: AISettings, systemPrompt: string, userPro
     // begrenzt nur den Fliesstext — Code-Bloecke und Edit-Bloecke bleiben
     // vollstaendig.
     style: 'chat',
+    // Die Code-Assistenten arbeiten an einer klar umrissenen Aufgabe. Auf der
+    // hoechsten Denk-Stufe brauchte ein Tippfehler-Fix ueber zwei Minuten —
+    // 'high' liefert dieselbe Korrektur in einem Bruchteil der Zeit.
+    effortCap: 'high',
     temperature: 0.7, responseLanguage, onTruncated,
   });
 }
@@ -703,6 +707,21 @@ HINWEIS: Wenn das Modell viel RAM braucht → use_lora=true, lora_r=8, load_in_4
  * sah bei einem YOLO-Lauf nur die generischen HuggingFace-Defaults und redete
  * ueber learning_rate 2e-5 und Warmup — Werte, die dieser Lauf gar nicht nutzt.
  */
+/**
+ * Vergleicht Vorschlag und Ist-Wert tolerant: Zahlen numerisch, alles andere
+ * als getrimmter Text. "0.01" und 0.01 sind derselbe Wert.
+ */
+export function isSameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a === null || b === null) return false;
+  const na = typeof a === 'number' ? a : parseFloat(String(a));
+  const nb = typeof b === 'number' ? b : parseFloat(String(b));
+  if (Number.isFinite(na) && Number.isFinite(nb) && String(a).trim() !== '' && String(b).trim() !== '') {
+    return na === nb;
+  }
+  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+}
+
 export function sanitizePluginPatch(
   raw: Record<string, unknown>,
   current: Record<string, unknown>,
@@ -852,11 +871,17 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
       [k, v, ((baseline ?? config) as unknown as Record<string, unknown>)[k]] as [string, unknown, unknown]),
     ...Object.entries(parsedPlugin ?? {}).map(([k, v]) =>
       [k, v, (pluginParams ?? {})[k]] as [string, unknown, unknown]),
-  ];
+  // Modelle nennen im JSON gern auch Felder, die sie gar nicht aendern
+  // ("lr0: 0.01 -> 0.01"). Als Vorschlag angezeigt sind das nur Zeilen, die
+  // der User pruefen muss, ohne dass etwas passiert.
+  ].filter(([, next, prev]) => !isSameValue(next, prev));
 
   const applySuggestions = () => {
-    if (parsed && Object.keys(parsed).length > 0) onApply(parsed);
-    if (parsedPlugin && Object.keys(parsedPlugin).length > 0) onApplyPlugin?.(parsedPlugin);
+    const changedKeys = new Set(suggestionRows.map(([k]) => k));
+    const cfgPatch = Object.fromEntries(Object.entries(parsed ?? {}).filter(([k]) => changedKeys.has(k)));
+    const pluginPatch = Object.fromEntries(Object.entries(parsedPlugin ?? {}).filter(([k]) => changedKeys.has(k)));
+    if (Object.keys(cfgPatch).length > 0) onApply(cfgPatch as Partial<TrainingConfig>);
+    if (Object.keys(pluginPatch).length > 0) onApplyPlugin?.(pluginPatch);
     setApplied(true);
   };
 
@@ -933,6 +958,11 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                 <div className="flex flex-col items-center gap-3 py-12">
                   <Loader2 className="w-10 h-10 text-violet-400 animate-spin" />
                   <p className="text-gray-400 text-sm">{t('trainingPanel.aiAssistant.analysingText')}</p>
+                  {/* Auf der hoechsten Denk-Stufe dauert die Antwort spuerbar
+                      laenger — ohne Hinweis wirkt die App haengend. */}
+                  {(aiSettings.tokenBudget === 'max' || aiSettings.tokenBudget === 'unlimited') && (
+                    <p className="text-gray-500 text-xs max-w-xs text-center">{t('common.aiDeepThinking')}</p>
+                  )}
                   {goalText && <p className="text-gray-600 text-xs max-w-sm text-center">{t('trainingPanel.aiAssistant.analysingGoal').replace('{goal}', goalText.slice(0, 80))}</p>}
                 </div>
               ) : (
@@ -990,7 +1020,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                             <button onClick={applySuggestions} className="flex-1 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 text-sm font-medium transition-all">
                               <span className="inline-flex items-center gap-2">
                                 <Check className="w-4 h-4" />
-                                {t('trainingPanel.aiAssistant.applyButton').replace('{count}', String(Object.keys(parsed).length))}
+                                {t('trainingPanel.aiAssistant.applyButton').replace('{count}', String(suggestionRows.length))}
                               </span>
                             </button>
                             <button onClick={onClose} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">{t('trainingPanel.aiAssistant.discardButton')}</button>
