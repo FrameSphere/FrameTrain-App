@@ -37,41 +37,68 @@ REPLACE:
 }
 
 
-export function parseAutoAction(text: string): { action: AutoAction | null; cleaned: string } {
-  // Try matching the preferred ft_action fence first
-  let match = text.match(new RegExp("```" + ACTION_FENCE + "\\s*([\\s\\S]*?)\\s*```", 'm'));
-  
-  // Fallback: Try matching ```json fence with valid AutoAction JSON
-  if (!match) {
-    match = text.match(/```json\s*([\s\S]*?)\s*```/m);
-    if (match) {
-      try {
-        const parsed = JSON.parse(match[1].trim());
-        // Only accept as AutoAction if it has the expected shape
-        if (parsed?.mode && typeof parsed.rationale === 'string') {
-          // This looks like an AutoAction, so we'll proceed
-        } else {
-          match = null;
-        }
-      } catch {
-        match = null;
-      }
+/**
+ * Erstes vollstaendiges JSON-Objekt ab `from` — mit Klammerzaehlung statt
+ * Regex, damit verschachtelte Objekte und Klammern in Strings nicht stoeren.
+ */
+function firstJsonObject(input: string, from: number): { json: string; end: number } | null {
+  const start = input.indexOf('{', from);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < input.length; i++) {
+    const c = input[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return { json: input.slice(start, i + 1), end: i + 1 };
     }
   }
-  
-  if (!match) return { action: null, cleaned: text };
-  
-  const rawJson = match[1].trim();
+  return null;
+}
+
+/**
+ * Liest den Steuerblock am Anfang der Antwort und schneidet ihn aus dem Text.
+ *
+ * Der Block kommt nicht immer sauber eingerahmt zurueck: manche Modelle
+ * schliessen den ```ft_action-Block nicht, andere setzen ihn in einen
+ * ```json-Block. Blieb er unerkannt, stand das rohe Steuer-JSON
+ * ("{"mode":"edit","rationale":...}") als Code-Block sichtbar im Chat.
+ * Deshalb wird das JSON per Klammerzaehlung gelesen und der Bereich vom
+ * Fence bis zur schliessenden Klammer (samt optionalem End-Fence) entfernt.
+ */
+export function parseAutoAction(text: string): { action: AutoAction | null; cleaned: string } {
+  const fence = new RegExp('```[ \\t]*(?:' + ACTION_FENCE + '|json)\\b', 'i');
+  const hit = fence.exec(text);
+  if (!hit) return { action: null, cleaned: text };
+
+  const found = firstJsonObject(text, hit.index + hit[0].length);
+  if (!found) return { action: null, cleaned: text };
+
+  let action: AutoAction;
   try {
-    const action = JSON.parse(rawJson) as AutoAction;
-    const cleaned = (text.slice(0, match.index) + text.slice((match.index ?? 0) + match[0].length)).trim();
-    if (!action || (action.mode !== 'chat' && action.mode !== 'edit' && action.mode !== 'rewrite')) {
-      return { action: null, cleaned: text };
-    }
-    if (typeof action.rationale !== 'string') action.rationale = '';
-    return { action, cleaned };
+    action = JSON.parse(found.json) as AutoAction;
   } catch {
     return { action: null, cleaned: text };
   }
+  if (!action || (action.mode !== 'chat' && action.mode !== 'edit' && action.mode !== 'rewrite')) {
+    return { action: null, cleaned: text };
+  }
+  if (typeof action.rationale !== 'string') action.rationale = '';
+
+  // Ein direkt folgender End-Fence gehoert mit weg.
+  const after = text.slice(found.end);
+  const closing = after.match(/^\s*```/);
+  const cutEnd = found.end + (closing ? closing[0].length : 0);
+  const cleaned = (text.slice(0, hit.index) + text.slice(cutEnd)).trim();
+  return { action, cleaned };
 }
 

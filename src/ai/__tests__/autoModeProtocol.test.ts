@@ -1,0 +1,53 @@
+// Der Steuerblock am Anfang jeder Code-Assistenten-Antwort.
+//
+// Blieb er unerkannt, stand das rohe JSON sichtbar im Chat — genau so
+// passiert mit groq/compound-mini, das den ```ft_action-Block nicht
+// geschlossen hat.
+//
+// Ausfuehren: npx vitest run src/ai/__tests__/autoModeProtocol.test.ts --config vitest.config.ts
+
+import { describe, it, expect } from 'vitest';
+import { parseAutoAction } from '../autoModeProtocol';
+
+const ACTION = '{"mode":"edit","rationale":"Tippfehler behoben","title":"Fix"}';
+
+describe('parseAutoAction', () => {
+  it('liest den regulaeren ft_action-Block und schneidet ihn heraus', () => {
+    const { action, cleaned } = parseAutoAction('```ft_action\n' + ACTION + '\n```\n\nHier die Erklaerung.');
+    expect(action?.mode).toBe('edit');
+    expect(action?.rationale).toBe('Tippfehler behoben');
+    expect(cleaned).toBe('Hier die Erklaerung.');
+  });
+
+  // Der Praxisfall aus dem Groq-Test.
+  it('kommt mit einem NICHT geschlossenen Block zurecht', () => {
+    const { action, cleaned } = parseAutoAction('```ft_action\n' + ACTION + '\n\nHier die Erklaerung.');
+    expect(action?.mode).toBe('edit');
+    expect(cleaned).toBe('Hier die Erklaerung.');
+    expect(cleaned).not.toMatch(/mode|rationale/);
+  });
+
+  it('akzeptiert den Block auch als json-Fence', () => {
+    const { action, cleaned } = parseAutoAction('```json\n' + ACTION + '\n```\nText.');
+    expect(action?.mode).toBe('edit');
+    expect(cleaned).toBe('Text.');
+  });
+
+  it('laesst Text ohne Steuerblock unveraendert', () => {
+    const text = 'Nur eine normale Antwort ohne Steuerblock.';
+    expect(parseAutoAction(text)).toEqual({ action: null, cleaned: text });
+  });
+
+  // Ein Antwort-JSON, das kein Steuerblock ist, darf nicht verschluckt werden.
+  it('ignoriert einen json-Block ohne gueltigen mode', () => {
+    const text = '```json\n{"epochs":5}\n```';
+    expect(parseAutoAction(text)).toEqual({ action: null, cleaned: text });
+  });
+
+  it('stolpert nicht ueber Klammern in Strings', () => {
+    const withBrace = '{"mode":"chat","rationale":"nutze dict {a: 1} statt Liste"}';
+    const { action, cleaned } = parseAutoAction('```ft_action\n' + withBrace + '\n```\nFertig.');
+    expect(action?.mode).toBe('chat');
+    expect(cleaned).toBe('Fertig.');
+  });
+});
