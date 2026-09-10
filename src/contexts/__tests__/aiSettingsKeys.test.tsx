@@ -121,6 +121,11 @@ describe('AISettings – Key pro Anbieter', () => {
     storedSettings('anthropic');
     const { result } = await mounted();
 
+    // Ohne geoeffnete KI-Einstellungen wird nur der aktive Anbieter geladen —
+    // ein Schluesselbund-Dialog beim App-Start waere unerklaerlich.
+    await waitFor(() => expect(result.current.providersWithKey).toEqual(['anthropic']));
+
+    act(() => { result.current.ensureProviderKeysLoaded(); });
     await waitFor(() => expect(result.current.providersWithKey).toEqual(['anthropic', 'groq']));
 
     // Umschalten aendert daran nichts und verliert keinen Key.

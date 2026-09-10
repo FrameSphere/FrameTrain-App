@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildCoachSystemPrompt, pageKnowledge, type PageId } from '../coachContext';
+import { PAGE_KNOWLEDGE_PAGES } from './__helpers__/pages';
 
 const prompt = (pageId: PageId | null, automation = false) =>
   buildCoachSystemPrompt({
@@ -76,13 +77,8 @@ describe('Tool-Protokoll pro Seite', () => {
 describe('Seiten-Wissen', () => {
   // Die Startseite meldet einen Live-Zustand, hatte aber als einzige solche
   // Seite kein Wissen hinterlegt — ausgerechnet der Einstiegspunkt.
-  const PAGES_WITH_LIVE_CONTEXT: PageId[] = [
-    'home', 'models', 'training', 'training-dev', 'dataset',
-    'analysis', 'tests', 'tests-dev', 'laboratory', 'versions', 'synapse', 'settings',
-  ];
-
   it('jede Seite, die einen Live-Zustand meldet, bringt auch Wissen mit', () => {
-    for (const page of PAGES_WITH_LIVE_CONTEXT) {
+    for (const page of PAGE_KNOWLEDGE_PAGES) {
       expect(pageKnowledge(page, 'de'), `Seiten-Wissen fehlt: ${page}`).not.toBe('');
       expect(pageKnowledge(page, 'en'), `page knowledge missing: ${page}`).not.toBe('');
     }

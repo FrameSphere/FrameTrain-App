@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent } from 'react';
 import {
   X, Send, Loader2, AlertCircle, CheckCircle, Maximize2, Minimize2,
   MessageSquare, Plus, Trash2, ChevronDown, ChevronRight, Brain,
@@ -19,6 +19,7 @@ import {
   buildCoachSystemPrompt, parseCoachActions, navTargetLabel, linkTargetLabel,
   commandLabel, hasPageKnowledge, type CoachAction, type PageId,
 } from '../ai/coachContext';
+import { matchSkills, skillLabel, skillHint, skillPrompt, type CoachSkill } from '../ai/coachSkills';
 import { navigateTo } from '../ui/navigationEvents';
 import { applyCoachConfig, runCoachCommand } from '../ai/coachToolEvents';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
@@ -593,6 +594,17 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const currentChatPersistedRef = useRef(false);
 
   const [inputText, setInputText] = useState('');
+  // ── Skills ("/") ────────────────────────────────────────────────────────
+  // Vorbereitete, seitenbezogene Fragen. Sie kosten keinen zusaetzlichen
+  // Kontext — sie setzen nur eine praezise formulierte Frage ein, statt den
+  // Nutzer vor einem leeren Feld raten zu lassen, was der Coach kann.
+  const [skillIndex, setSkillIndex] = useState(0);
+  const skillMatches = useMemo(
+    () => matchSkills(inputText, currentPageId),
+    [inputText, currentPageId],
+  );
+  useEffect(() => { setSkillIndex(0); }, [inputText]);
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
@@ -1080,6 +1092,39 @@ Reply with ONLY the title, nothing else.`;
     }
   };
 
+  /** Skill auswaehlen: Feld leeren und die hinterlegte Frage abschicken. */
+  const runSkill = (skill: CoachSkill) => {
+    setInputText('');
+    setSkillIndex(0);
+    sendMessage(skillPrompt(skill, language));
+  };
+
+  /** Enter waehlt den markierten Skill, statt "/ram" als Text zu senden. */
+  const handleSend = () => {
+    if (skillMatches && skillMatches.length > 0) {
+      runSkill(skillMatches[Math.min(skillIndex, skillMatches.length - 1)]);
+      return;
+    }
+    sendMessage();
+  };
+
+  const handleInputKeyDown = (e: KeyboardEvent) => {
+    if (!skillMatches || skillMatches.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSkillIndex(i => (i + 1) % skillMatches.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSkillIndex(i => (i - 1 + skillMatches.length) % skillMatches.length);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      runSkill(skillMatches[Math.min(skillIndex, skillMatches.length - 1)]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setInputText('');
+    }
+  };
+
   const retryLastMessage = () => {
     const text = lastFailedTextRef.current;
     if (!text || isLoading) return;
@@ -1410,12 +1455,35 @@ Reply with ONLY the title, nothing else.`;
       </div>
 
       {/* Input */}
-      <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-white/5 bg-black/10">
+      <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-white/5 bg-black/10 relative">
+        {/* Skill-Liste: oeffnet sich, sobald "/" am Anfang steht. Sie loest das
+            leere Eingabefeld — der Coach kann viel, aber nichts davon ist zu
+            sehen, bevor man die richtige Frage stellt. */}
+        {skillMatches && skillMatches.length > 0 && (
+          <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl border border-white/10 bg-slate-900/95 backdrop-blur shadow-2xl overflow-hidden max-h-64 overflow-y-auto z-10">
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-white/5">
+              {t('aiCoach.skills.heading')}
+            </div>
+            {skillMatches.map((skill, i) => (
+              <button
+                key={skill.id}
+                type="button"
+                onMouseEnter={() => setSkillIndex(i)}
+                onClick={() => runSkill(skill)}
+                className={`w-full text-left px-3 py-2 transition-colors ${i === skillIndex ? 'bg-white/10' : 'hover:bg-white/5'}`}
+              >
+                <div className="text-xs font-medium text-white">{skillLabel(skill, language)}</div>
+                <div className="text-[11px] text-gray-400 leading-snug">{skillHint(skill, language)}</div>
+              </button>
+            ))}
+          </div>
+        )}
         <GradientChatInput
           ref={inputRef}
           value={inputText}
           onChange={setInputText}
-          onSend={sendMessage}
+          onSend={handleSend}
+          onKeyDown={handleInputKeyDown}
           loading={isLoading}
           placeholder={t('aiCoach.inputPlaceholder')}
           size="sm"

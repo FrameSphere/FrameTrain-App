@@ -156,7 +156,15 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     keyLoading: aiKeyLoading,
     keychainAvailable: aiKeychainAvailable,
     providersWithKey,
+    ensureProviderKeysLoaded,
   } = useAISettings();
+
+  // Erst hier nachsehen, fuer welche Anbieter ein Key hinterlegt ist — beim
+  // App-Start koennte ein Schluesselbund-Dialog vor einer noch leeren App
+  // stehen, ohne dass der Nutzer weiss, warum.
+  useEffect(() => {
+    if (activeTab === 'ai-assistant') ensureProviderKeysLoaded();
+  }, [activeTab, ensureProviderKeysLoaded]);
   const [aiSaving, setAiSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestMsg, setAiTestMsg] = useState<{ ok: boolean; text: string } | null>(null);

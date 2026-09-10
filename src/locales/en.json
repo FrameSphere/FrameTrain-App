@@ -532,7 +532,10 @@
     "automationOff": "Automation off — click to enable training actions",
     "thinkingLabel": "Thinking…",
     "configQueued": "Queued for training",
-    "configQueuedHint": "The value is applied as soon as you open the Training page."
+    "configQueuedHint": "The value is applied as soon as you open the Training page.",
+    "skills": {
+      "heading": "Skills — prepared questions for this page"
+    }
   },
   "modelManager": {
     "title": "Models",

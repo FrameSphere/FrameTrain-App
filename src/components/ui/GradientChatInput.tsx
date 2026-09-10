@@ -8,7 +8,7 @@
 //  - Auto-Grow-Textarea, Enter = senden, Shift+Enter = Zeilenumbruch
 //  - Keine externen Dependencies (kein motion/radix) – CSS-Transitions genügen
 
-import { forwardRef, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Loader2, Send, Square } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -18,6 +18,12 @@ export interface GradientChatInputProps {
   onChange: (value: string) => void;
   /** Wird bei Enter oder Klick auf Senden ausgelöst (nur wenn Text vorhanden). */
   onSend: () => void;
+  /**
+   * Tastendruecke im Eingabefeld, bevor die Standardbehandlung greift.
+   * Der AI-Coach steuert damit seine Skill-Liste (Pfeiltasten, Tab, Escape);
+   * ruft der Handler preventDefault, laeuft die Standardbehandlung nicht mehr.
+   */
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   /** Wenn gesetzt und loading=true, wird der Button zum Stop-Button. */
   onStop?: () => void;
   /** KI antwortet gerade – Eingabe wird gesperrt, Button zeigt Spinner/Stop. */
@@ -57,7 +63,7 @@ function darkenHex(hex: string, amount: number): string {
 const GradientChatInput = forwardRef<HTMLTextAreaElement, GradientChatInputProps>(
   function GradientChatInput(
     {
-      value, onChange, onSend, onStop,
+      value, onChange, onSend, onStop, onKeyDown,
       loading = false, disabled = false,
       placeholder, size = 'md',
       gradient, primaryColor,
@@ -120,6 +126,8 @@ const GradientChatInput = forwardRef<HTMLTextAreaElement, GradientChatInputProps
             value={value}
             onChange={e => onChange(e.target.value)}
             onKeyDown={e => {
+              onKeyDown?.(e);
+              if (e.defaultPrevented) return;
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();

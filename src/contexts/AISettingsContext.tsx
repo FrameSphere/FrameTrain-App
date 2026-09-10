@@ -104,6 +104,11 @@ interface AISettingsContextType {
   discardDraft: () => void;
   /** Setzt alles auf Standardwerte zurück (inkl. Key-Löschung) und speichert. */
   resetSettings: () => Promise<void>;
+  /**
+   * Laedt einmalig, fuer welche Anbieter ein Key hinterlegt ist. Von der
+   * KI-Sektion der Einstellungen aufgerufen — nicht beim App-Start.
+   */
+  ensureProviderKeysLoaded: () => void;
 }
 
 const AISettingsContext = createContext<AISettingsContextType | undefined>(undefined);
@@ -323,28 +328,6 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
    * fehlte damit. Nur wenn ohnehin ein Key-Anbieter im Spiel ist: ein reiner
    * Ollama-Nutzer soll den Schluesselbund gar nicht erst wecken.
    */
-  const probedAll = useRef(false);
-  useEffect(() => {
-    if (keyLoading || probedAll.current) return;
-    if (!needsKey(settings.provider) && !needsKey(draft.provider)) return;
-    probedAll.current = true;
-    let cancelled = false;
-    (async () => {
-      for (const provider of KEY_PROVIDERS) {
-        if (cancelled) return;
-        if (keysByProvider[provider] !== undefined) continue;
-        const acc = secretAccount(userId, provider);
-        if (fetchedAccounts.current.has(acc)) continue;
-        fetchedAccounts.current.add(acc);
-        const got = await keychainGet(acc);
-        if (cancelled) return;
-        if (got.ok) setKeysByProvider(cache => ({ ...cache, [provider]: got.value ?? '' }));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyLoading, settings.provider, draft.provider, userId]);
-
   useEffect(() => {
     if (keyLoading) return;
     const provider = draft.provider;
@@ -365,6 +348,39 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
     })();
     return () => { cancelled = true; };
   }, [draft.provider, draft.apiKey, keysByProvider, userId, keyLoading]);
+
+  const probedAll = useRef(false);
+  const [probeRequested, setProbeRequested] = useState(false);
+
+  /**
+   * Anstossen, sobald der Nutzer die KI-Einstellungen oeffnet.
+   *
+   * Bewusst NICHT beim App-Start: das Lesen eines Schluesselbund-Eintrags kann
+   * einen macOS-Dialog ausloesen (etwa wenn der Eintrag von einer aelteren
+   * Signatur stammt). Beim Start waere das ein unerklaerter Dialog vor einer
+   * noch leeren App — hier steht der Nutzer ohnehin vor der Key-Oberflaeche.
+   */
+  const ensureProviderKeysLoaded = useCallback(() => { setProbeRequested(true); }, []);
+
+  useEffect(() => {
+    if (!probeRequested || keyLoading || probedAll.current) return;
+    probedAll.current = true;
+    let cancelled = false;
+    (async () => {
+      for (const provider of KEY_PROVIDERS) {
+        if (cancelled) return;
+        if (keysByProvider[provider] !== undefined) continue;
+        const acc = secretAccount(userId, provider);
+        if (fetchedAccounts.current.has(acc)) continue;
+        fetchedAccounts.current.add(acc);
+        const got = await keychainGet(acc);
+        if (cancelled) return;
+        if (got.ok) setKeysByProvider(cache => ({ ...cache, [provider]: got.value ?? '' }));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probeRequested, keyLoading, userId]);
 
   const saveSettings = useCallback(async () => {
     const next = draft;
@@ -436,7 +452,8 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
     saveSettings,
     discardDraft,
     resetSettings,
-  }), [settings, draft, isDirty, keyLoading, keychainAvailable, providersWithKey, updateDraft, saveSettings, discardDraft, resetSettings]);
+    ensureProviderKeysLoaded,
+  }), [settings, draft, isDirty, keyLoading, keychainAvailable, providersWithKey, updateDraft, saveSettings, discardDraft, resetSettings, ensureProviderKeysLoaded]);
 
   return (
     <AISettingsContext.Provider value={value}>
