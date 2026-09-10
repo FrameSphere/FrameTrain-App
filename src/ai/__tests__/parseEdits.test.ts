@@ -8,7 +8,7 @@
 // Ausfuehren: npx vitest run src/ai/__tests__/parseEdits.test.ts --config vitest.config.ts
 
 import { describe, it, expect } from 'vitest';
-import { parseEdits, isUsableEdit } from '../codeEdits';
+import { parseEdits, isUsableEdit, applyAllEdits } from '../codeEdits';
 
 describe('parseEdits', () => {
   it('liest einen vollstaendigen Block', () => {
@@ -70,5 +70,29 @@ describe('isUsableEdit', () => {
   it('laesst Rauten und Backticks INNERHALB einer Zeile zu', () => {
     // "# Kommentar" ist normaler Python-Code, kein Protokoll-Rest.
     expect(isUsableEdit('x = 1', '# Kommentar\nx = 2')).toBe(true);
+  });
+});
+
+// Die Oberflaeche meldete "uebernommen", auch wenn KEIN Eingriff gepasst hat —
+// das Skript blieb unveraendert, der Rueckgaengig-Button erschien trotzdem.
+describe('applyAllEdits – Erfolg vs. Fehlschlag', () => {
+  const script = 'x = 1\ny = 2\n';
+
+  it('meldet Erfolg pro Eingriff getrennt', () => {
+    const { result, results } = applyAllEdits(script, [
+      { id: 'a', find: 'x = 1', replace: 'x = 42' },
+      { id: 'b', find: 'gibt es nicht', replace: 'egal' },
+    ]);
+    expect(results[0].success).toBe(true);
+    expect(results[1].success).toBe(false);
+    expect(result).toContain('x = 42');
+  });
+
+  it('laesst das Skript unveraendert, wenn nichts passt', () => {
+    const { result, results } = applyAllEdits(script, [
+      { id: 'a', find: 'fehlt', replace: 'neu' },
+    ]);
+    expect(results.every(r => !r.success)).toBe(true);
+    expect(result).toBe(script);
   });
 });

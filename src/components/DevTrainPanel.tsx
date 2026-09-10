@@ -10,8 +10,7 @@ import {
   AlertCircle, CheckCircle, TrendingDown, BarChart3, Zap,
   Save, FileText, Trash2, Pencil, Check, Wand2, Sparkles, Copy,
   History, MessageSquarePlus, Globe,
-  MemoryStick, Database, Package, Bug, HelpCircle,
-} from 'lucide-react';
+  MemoryStick, Database, Package, Bug, HelpCircle, AlertTriangle } from 'lucide-react';
 import OpenLibraryModal from './OpenLibraryModal';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -844,10 +843,20 @@ ANFORDERUNGEN:
     setIsApplyingEdits(true);
     try {
       const applied = applyAllEdits(script, updatedEdits);
-      onApplyEdit(applied.result);
+      // Schlaegt JEDER Eingriff fehl (die gesuchte Stelle steht so nicht im
+      // Skript), darf das Skript nicht angefasst und kein Rueckgaengig-Eintrag
+      // angelegt werden. Vorher meldete die Oberflaeche in genau dem Fall
+      // "uebernommen", obwohl sich nichts geaendert hatte.
+      const anySuccess = applied.results.some(r => r?.success);
+      if (anySuccess) onApplyEdit(applied.result);
       onClearHighlights?.();
       const messageIdx = messages.findIndex(m => m === targetMsg);
-      setAppliedEdits(prev => [...prev, ...updatedEdits.map(e => ({ messageId: messageIdx, editId: e.id, originalScript: script }))]);
+      setAppliedEdits(prev => [
+        ...prev,
+        ...updatedEdits
+          .filter((_, i) => applied.results[i]?.success)
+          .map(e => ({ messageId: messageIdx, editId: e.id, originalScript: script })),
+      ]);
       setMessages(m => m.map(mm =>
         mm === targetMsg
           ? {
@@ -1076,7 +1085,11 @@ ANFORDERUNGEN:
                   <div className="w-full space-y-1.5">
                     {m.edits.map((edit, editIdx) => {
                       const messageIdx = messages.indexOf(m);
-                      const isApplied = appliedEdits.some(ae => ae.messageId === messageIdx && ae.editId === edit.id);
+                      // `failed` gewinnt: ein Eingriff, dessen Fundstelle im Skript
+                      // fehlt, sah vorher wie erfolgreich uebernommen aus.
+                      const isApplied = !edit.failed
+                        && appliedEdits.some(ae => ae.messageId === messageIdx && ae.editId === edit.id);
+                      const hasFailed = !!edit.failed;
                       return (
                         <button
                           key={edit.id}
@@ -1087,17 +1100,21 @@ ANFORDERUNGEN:
                             }
                           }}
                           className={`w-full text-left px-3 py-2 rounded-xl transition-all text-[11px] ${
-                            isApplied
-                              ? 'bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/15'
-                              : 'bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15'
+                            hasFailed
+                              ? 'bg-red-500/10 border border-red-500/25 hover:bg-red-500/15'
+                              : isApplied
+                                ? 'bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/15'
+                                : 'bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15'
                           }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className={`font-medium flex items-center gap-2 ${isApplied ? 'text-emerald-300' : 'text-amber-300'}`}>
-                              {isApplied ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                            <span className={`font-medium flex items-center gap-2 ${hasFailed ? 'text-red-300' : isApplied ? 'text-emerald-300' : 'text-amber-300'}`}>
+                              {hasFailed ? <AlertTriangle className="w-3.5 h-3.5" /> : isApplied ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
                               {t('devTrainPanel.aiSidebar.editChange').replace('{n}', String(editIdx + 1))}
                             </span>
-                            {isApplied ? (
+                            {hasFailed ? (
+                              <span className="text-red-400/80 text-xs">{t('devTrainPanel.aiSidebar.editNotApplicable')}</span>
+                            ) : isApplied ? (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
