@@ -1283,6 +1283,31 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       lines.push(`  Final Train Loss: ${metrics.final_train_loss.toFixed(6)}`);
       if (metrics.final_val_loss) lines.push(`  Final Val Loss: ${metrics.final_val_loss.toFixed(6)}`);
       if (logs.length > 0) lines.push(`  ${t('analysisPanel.derivedStats.logEntries')}: ${logs.length}`);
+
+      // Genau die Kennzahlen, die oben auf der Seite in grossen Ziffern stehen.
+      // Sie fehlten hier — auf die Frage "wie hoch ist mein Overfitting-Gap"
+      // nannte der Coach deshalb eine erfundene Zahl und verwies den User
+      // darauf, sie selbst im Chart abzulesen.
+      const ds = fullData?.derived_stats;
+      if (ds) {
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+        const lossRed = num(ds.loss_reduction_pct);
+        const gap     = num(ds.overfitting_gap_pct);
+        const grad    = num(ds.avg_grad_norm);
+        if (lossRed !== null) lines.push(`  Loss-Reduktion: ${lossRed}%`);
+        if (gap !== null) {
+          lines.push(`  Overfitting-Gap (Val - Train): ${gap}%${Math.abs(gap) > 20 ? ' — auffällig hoch' : ''}`);
+        }
+        if (grad !== null) lines.push(`  Ø Gradient-Norm: ${grad}`);
+      }
+      const summary = fullData?.training_summary as Record<string, unknown> | undefined;
+      if (summary) {
+        const dur = summary.training_duration_seconds;
+        if (typeof dur === 'number' && Number.isFinite(dur)) {
+          lines.push(`  Dauer: ${formatDuration(dur)}`);
+        }
+        if (typeof summary.status === 'string') lines.push(`  Status: ${summary.status}`);
+      }
     }
 
     if (loadingAnalysis) {
@@ -1356,7 +1381,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
     }
 
     setCurrentPageContent(lines.join('\n'), 'analysis');
-  }, [modelsWithVersions, selectedModelId, selectedVersionId, metrics, report, aiRecommendedParams, loadingAnalysis, generatingReport, chatMessages.length, showChat, logs.length, setCurrentPageContent]);
+  }, [modelsWithVersions, selectedModelId, selectedVersionId, metrics, fullData, report, aiRecommendedParams, loadingAnalysis, generatingReport, chatMessages.length, showChat, logs.length, setCurrentPageContent]);
 
   // KI-Empfehlungen als Brücke für das Training bereitstellen ([[apply:recommended]]).
   useEffect(() => {

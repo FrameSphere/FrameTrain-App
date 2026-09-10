@@ -313,6 +313,38 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
    * lag — jetzt wird er pro Anbieter genau einmal nachgeholt.
    */
   const fetchedAccounts = useRef<Set<string>>(new Set());
+
+  /**
+   * Einmal nachsehen, fuer WELCHE Anbieter ueberhaupt ein Key hinterlegt ist.
+   *
+   * Ohne diese Runde stand in den Einstellungen bei Claude "API-Key noetig",
+   * obwohl der Key im Schluesselbund lag — sichtbar wurde er erst, wenn man
+   * auf Claude umschaltete. Genau die Beruhigung, die die Anzeige geben soll,
+   * fehlte damit. Nur wenn ohnehin ein Key-Anbieter im Spiel ist: ein reiner
+   * Ollama-Nutzer soll den Schluesselbund gar nicht erst wecken.
+   */
+  const probedAll = useRef(false);
+  useEffect(() => {
+    if (keyLoading || probedAll.current) return;
+    if (!needsKey(settings.provider) && !needsKey(draft.provider)) return;
+    probedAll.current = true;
+    let cancelled = false;
+    (async () => {
+      for (const provider of KEY_PROVIDERS) {
+        if (cancelled) return;
+        if (keysByProvider[provider] !== undefined) continue;
+        const acc = secretAccount(userId, provider);
+        if (fetchedAccounts.current.has(acc)) continue;
+        fetchedAccounts.current.add(acc);
+        const got = await keychainGet(acc);
+        if (cancelled) return;
+        if (got.ok) setKeysByProvider(cache => ({ ...cache, [provider]: got.value ?? '' }));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyLoading, settings.provider, draft.provider, userId]);
+
   useEffect(() => {
     if (keyLoading) return;
     const provider = draft.provider;

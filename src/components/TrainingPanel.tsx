@@ -17,6 +17,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord } from '../ai/coachContext';
+import { estimateTrainingRam, ramVerdict, ramEstimateLines } from '../ai/resourceEstimate';
 import { clampNumber, parseNumberInput } from './numberInput';
 import { appendLossPoint } from './lossStats';
 import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
@@ -307,47 +308,20 @@ function Toggle({ checked, onChange, label, disabled, title }: { checked: boolea
 
 // ── RAM Calculator ─────────────────────────────────────────────────────────
 
-function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelSizeGb: number }) {
+function RamCalculator({ config, modelSizeGb, systemRamGb }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null }) {
   const { t } = useLanguage();
-  const isFp16      = config.fp16 || config.bf16;
+  const est         = estimateTrainingRam(config, modelSizeGb);
+  const isFp16      = est.mixedPrecision;
   const is4bit      = config.load_in_4bit;
   const is8bit      = config.load_in_8bit;
   const isQuantized = is4bit || is8bit;
-
-  // 1. Gewichte: FP32-Cast = 2×, FP16 = 1×, 4-bit = 0.25× + 5% LoRA-Adapter, 8-bit = 0.5×
-  let weightRam: number;
-  if (is4bit)       { weightRam = modelSizeGb * 0.25 + (config.use_lora ? modelSizeGb * 0.05 : 0); }
-  else if (is8bit)  { weightRam = modelSizeGb * 0.5; }
-  else if (isFp16)  { weightRam = modelSizeGb; }
-  else              { weightRam = modelSizeGb * 2; }
-
-  // 2. Gradienten: LoRA/QLoRA nur Adapter (~5%), FP16 Full = 1×, FP32 Full = 2×
-  let gradRam: number;
-  if (config.use_lora || isQuantized)  { gradRam = modelSizeGb * 0.05; }
-  else if (isFp16)                     { gradRam = modelSizeGb; }
-  else                                 { gradRam = modelSizeGb * 2; }
-
-  // 3. AdamW Optimizer: FP16 Mixed = 4× trainierte Params (Master-Copy+m+v), FP32 = 2× (m+v)
-  //    Adafactor: ~0.5-1×. LoRA: nur 5% der Params trainiert.
-  const trainedFraction = (config.use_lora || isQuantized) ? 0.05 : 1.0;
-  const trainedGb       = modelSizeGb * trainedFraction;
-  let optimizerRam: number;
-  if (config.optimizer === 'adafactor') {
-    optimizerRam = trainedGb * (isFp16 ? 1.0 : 0.5);
-  } else {
-    optimizerRam = isFp16 ? trainedGb * 4 : trainedGb * 2;
-  }
-
-  // 4. Aktivierungen: ~0.30 GB/Sample bei 128 Tokens (FP32), ~0.15 GB (FP16)
-  //    Gradient Checkpointing spart ~70% (nur Checkpoint-Schichten gehalten)
-  const seqFactor      = config.max_seq_length / 128;
-  const bytesPerSample = isFp16 ? 0.15 : 0.30;
-  const activationRam  = config.batch_size * seqFactor * bytesPerSample * (config.gradient_checkpointing ? 0.3 : 1.0);
-
-  // 5. Framework-Overhead (CUDA-Runtime, PyTorch Caches, Tokenizer)
-  const overhead = 1.2;
-
-  const total = weightRam + gradRam + optimizerRam + activationRam + overhead;
+  const weightRam    = est.weights;
+  const gradRam      = est.gradients;
+  const optimizerRam = est.optimizer;
+  const activationRam= est.activations;
+  const overhead     = est.overhead;
+  const total = est.total;
+  const verdict = ramVerdict(total, systemRamGb);
   const color = total > 20 ? 'text-red-400' : total > 12 ? 'text-amber-400' : total > 6 ? 'text-yellow-400' : 'text-emerald-400';
 
   return (
@@ -368,6 +342,16 @@ function RamCalculator({ config, modelSizeGb }: { config: TrainingConfig; modelS
           <div key={l as string} className="flex justify-between"><span className="text-gray-400">{l as string}</span><span className="text-gray-300 tabular-nums">{(v as number).toFixed(2)} GB</span></div>
         ))}
         <div className="flex justify-between pt-2 border-t border-white/10 font-semibold"><span className="text-gray-300">{t('trainingPanel.ramCalculator.total')}</span><span className={`${color} tabular-nums`}>~{total.toFixed(1)} GB</span></div>
+        {/* Eine Zahl ohne Bezugsgroesse sagt nichts: ~17 GB sind auf 64 GB
+            unkritisch und auf 16 GB ein sicherer Abbruch. */}
+        {systemRamGb ? (
+          <div className="flex justify-between text-[11px]">
+            <span className="text-gray-500">{t('trainingPanel.ramCalculator.systemRam')}</span>
+            <span className={`tabular-nums ${verdict === 'exceeds' ? 'text-red-400' : verdict === 'tight' ? 'text-amber-400' : 'text-emerald-400'}`}>
+              {systemRamGb.toFixed(0)} GB {t(`trainingPanel.ramCalculator.verdict.${verdict}`)}
+            </span>
+          </div>
+        ) : null}
       </div>
       {!isFp16 && !config.use_lora && total > 8 && (
         <p className="text-amber-400 text-xs bg-amber-500/10 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -1288,6 +1272,55 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     return () => { u1?.(); u2?.(); u3?.(); u4?.(); u5?.(); };
   }, []);
 
+
+  const selectedModel   = models.find(m => m.id === selectedModelId);
+  const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
+
+  // Auswahl persistieren, damit sie den nächsten Seitenwechsel überlebt.
+  useEffect(() => {
+    if (selectedModelId) saveLastSelection({ modelId: selectedModelId, datasetId: selectedDatasetId ?? undefined });
+  }, [selectedModelId, selectedDatasetId]);
+  const selectedModelTree = modelsWithVersions.find(m => m.id === selectedModelId);
+  const selectedVersionTree = selectedModelTree?.versions.find(v => v.id === selectedVersionId);
+  // Bildklassifikation trainiert ein torchvision-Backbone, nicht die
+  // heruntergeladenen HuggingFace-Gewichte. Ohne dieses Feld stand die Wahl
+  // fest auf resnet18 — sichtbar war das nirgends.
+  const [imageArch, setImageArch] = useState('resnet18');
+
+  // Tatsaechlich vorhandener Arbeitsspeicher. Der Backend-Befehl existierte
+  // schon, wurde aber nie aufgerufen — die RAM-Schaetzung nannte deshalb eine
+  // Zahl ohne Bezugsgroesse, und der Coach konnte nicht sagen, ob ein Lauf auf
+  // diese Maschine passt.
+  const [systemRamGb, setSystemRamGb] = useState<number | null>(null);
+  useEffect(() => {
+    invoke<number>('get_system_ram_gb')
+      .then(gb => setSystemRamGb(Number.isFinite(gb) && gb > 0 ? gb : null))
+      .catch(() => setSystemRamGb(null));
+  }, []);
+
+  const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
+  const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
+  // Beide Bild-Plugins: Sequenzlaenge ist dort ohne Bedeutung.
+  const isImagePlugin   = detection?.supported === true
+    && (detection.plugin.id === 'image-classification'
+        || detection.plugin.id === 'hf-image-classification');
+  // Felder, die das erkannte Plugin gar nicht auswertet (siehe
+  // hiddenTrainingFields in der Plugin-Definition).
+  const hiddenFields    = new Set(
+    detection?.supported === true ? (detection.plugin.hiddenTrainingFields ?? []) : []
+  );
+  const showsField      = (key: string) => !hiddenFields.has(key);
+  // Parameter, die nur dieses Plugin kennt (z. B. imgsz/augment/patience bei
+  // YOLO). Sie kamen bisher ausschliesslich aus defaultPluginConfig und waren
+  // nirgends einstellbar.
+  const { params: pluginParams, setParams: setPluginParams } = usePluginParams(
+    detection?.supported === true ? detection.plugin.id : null,
+    detection?.supported === true ? detection.plugin.defaultPluginConfig : undefined,
+  );
+  // Der torchvision-Hinweis gilt nur fuers alte Plugin — das neue trainiert
+  // ja gerade die heruntergeladenen Gewichte.
+  const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
+
   useEffect(() => {
     const lines: string[] = [
       t('trainingPanel.pageContext.title'),
@@ -1404,63 +1437,31 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
         ? `LoRA: an (lora_r=${config.lora_r}, lora_alpha=${config.lora_alpha}, lora_dropout=${config.lora_dropout})`
         : 'LoRA: aus');
 
-      // Modellgröße + grobe RAM/VRAM-Schätzung (für [[estimate:ram]])
-      const isFp16 = config.fp16 || config.bf16;
-      const isQuant = config.load_in_4bit || config.load_in_8bit;
-      const weightRam = config.load_in_4bit ? modelSizeGb * 0.25 + (config.use_lora ? modelSizeGb * 0.05 : 0)
-        : config.load_in_8bit ? modelSizeGb * 0.5
-        : isFp16 ? modelSizeGb : modelSizeGb * 2;
-      const gradRam = (config.use_lora || isQuant) ? modelSizeGb * 0.05 : isFp16 ? modelSizeGb : modelSizeGb * 2;
-      const trainedFraction = (config.use_lora || isQuant) ? 0.05 : 1.0;
-      const optimizerRam = modelSizeGb * trainedFraction * 2;
-      const activationRam = config.batch_size * (config.max_seq_length / 128) * 0.5 * (config.gradient_checkpointing ? 0.3 : 1.0);
-      const totalRam = weightRam + gradRam + optimizerRam + activationRam;
+      // Plugin-Parameter: die Stellschrauben, die diese Architektur wirklich
+      // nutzt. Ohne sie nannte der Coach den generischen Optimizer (adamw),
+      // waehrend im Formular SGD stand, und empfahl LoRA oder 4-Bit fuer ein
+      // YOLO-Modell, das beides gar nicht kennt.
+      const pluginEntries = Object.entries(pluginParams ?? {});
+      if (detection?.supported && pluginEntries.length > 0) {
+        lines.push('');
+        lines.push(`--- PLUGIN-PARAMETER (${detection.plugin.name}) ---`);
+        lines.push(pluginEntries.map(([k, v]) => `${k}=${String(v)}`).join(', '));
+        lines.push('Diese Werte haben bei diesem Modelltyp Vorrang vor den gleichnamigen Feldern der allgemeinen Config.');
+        if (hiddenFields.size > 0) {
+          lines.push(`Für diesen Modelltyp NICHT verfügbar (nicht empfehlen): ${[...hiddenFields].join(', ')}`);
+        }
+      }
+
+      // Modellgröße + RAM/VRAM-Schätzung — dieselbe Rechnung wie der
+      // RAM-Rechner im Panel (siehe ai/resourceEstimate.ts). Vorher rechneten
+      // beide getrennt und nannten auf demselben Bildschirm verschiedene Zahlen.
       lines.push('');
       lines.push('--- RESSOURCEN-SCHÄTZUNG (grob) ---');
-      lines.push(`Modellgröße: ~${modelSizeGb.toFixed(2)} GB`);
-      lines.push(`Weights ~${weightRam.toFixed(1)} GB, Gradients ~${gradRam.toFixed(1)} GB, Optimizer ~${optimizerRam.toFixed(1)} GB, Activations ~${activationRam.toFixed(1)} GB`);
-      lines.push(`Geschätzter Peak-RAM/VRAM: ~${totalRam.toFixed(1)} GB`);
+      lines.push(...ramEstimateLines(estimateTrainingRam(config, modelSizeGb), modelSizeGb, systemRamGb));
     }
 
     setCurrentPageContent(lines.join('\n'), 'training');
-  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, setCurrentPageContent]);
-
-  const selectedModel   = models.find(m => m.id === selectedModelId);
-  const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
-
-  // Auswahl persistieren, damit sie den nächsten Seitenwechsel überlebt.
-  useEffect(() => {
-    if (selectedModelId) saveLastSelection({ modelId: selectedModelId, datasetId: selectedDatasetId ?? undefined });
-  }, [selectedModelId, selectedDatasetId]);
-  const selectedModelTree = modelsWithVersions.find(m => m.id === selectedModelId);
-  const selectedVersionTree = selectedModelTree?.versions.find(v => v.id === selectedVersionId);
-  // Bildklassifikation trainiert ein torchvision-Backbone, nicht die
-  // heruntergeladenen HuggingFace-Gewichte. Ohne dieses Feld stand die Wahl
-  // fest auf resnet18 — sichtbar war das nirgends.
-  const [imageArch, setImageArch] = useState('resnet18');
-
-  const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
-  const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
-  // Beide Bild-Plugins: Sequenzlaenge ist dort ohne Bedeutung.
-  const isImagePlugin   = detection?.supported === true
-    && (detection.plugin.id === 'image-classification'
-        || detection.plugin.id === 'hf-image-classification');
-  // Felder, die das erkannte Plugin gar nicht auswertet (siehe
-  // hiddenTrainingFields in der Plugin-Definition).
-  const hiddenFields    = new Set(
-    detection?.supported === true ? (detection.plugin.hiddenTrainingFields ?? []) : []
-  );
-  const showsField      = (key: string) => !hiddenFields.has(key);
-  // Parameter, die nur dieses Plugin kennt (z. B. imgsz/augment/patience bei
-  // YOLO). Sie kamen bisher ausschliesslich aus defaultPluginConfig und waren
-  // nirgends einstellbar.
-  const { params: pluginParams, setParams: setPluginParams } = usePluginParams(
-    detection?.supported === true ? detection.plugin.id : null,
-    detection?.supported === true ? detection.plugin.defaultPluginConfig : undefined,
-  );
-  // Der torchvision-Hinweis gilt nur fuers alte Plugin — das neue trainiert
-  // ja gerade die heruntergeladenen Gewichte.
-  const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
+  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, systemRamGb, pluginParams, detectionKey, setCurrentPageContent]);
 
   // Beim Wechsel des Modelltyps sinnvolle Startwerte setzen. Vorher galt fuer
   // jedes Modell 2e-5 — fuer Bild- und Seq2Seq-Training deutlich zu klein.
@@ -2054,7 +2055,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             )}
 
             <SectionCard title={t('trainingPanel.ramCalculator.title')} icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
-              <RamCalculator config={config} modelSizeGb={modelSizeGb} />
+              <RamCalculator config={config} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} />
             </SectionCard>
           </div>
 

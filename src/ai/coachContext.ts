@@ -70,6 +70,7 @@ Du agierst wie ein Profi, der die aktuelle Seite in- und auswendig kennt:
 - Verankere jede Antwort in dem, was der User gerade sieht (Seiten-Wissen + Live-Zustand unten).
 - Nenne nur UI-Elemente, die im Seiten-Wissen oder Live-Zustand unten wirklich vorkommen.
   Rate nie einen Button-Namen — kennst du ihn nicht exakt, beschreibe stattdessen die Stelle.
+- Sprich den User mit **du** an. Die gesamte App duzt; ein "Sie" wirkt darin wie ein Fremdkoerper.
 - Keine Emojis. Die UI ist emoji-frei; nutze schlichte Text-Zeichen (-, *, >) als Marker.
 - Schließe jeden geöffneten Code-Block. Beende eine Antwort nie mit einem offenen \`\`\`.
 - Halte Listen flach — verschachtele keine nummerierte Liste in einer nummerierten Liste,
@@ -103,6 +104,27 @@ You receive detailed knowledge for whichever page the user is currently on (and 
 // ============================================================================
 
 const PAGE_KNOWLEDGE: Partial<Record<PageId, Bilingual>> = {
+  // Die Startseite hatte als einzige Seite mit Live-Zustand gar kein
+  // Seiten-Wissen — ausgerechnet dort, wo ein neuer Nutzer die erste Frage
+  // stellt. Der Coach kannte die Kacheln nicht, auf die der User zeigte.
+  home: {
+    de: `### Seiten-Wissen: Start
+Zweck: Lage-Überblick und Einstieg. Zeigt keine Einstellungen, sondern den Stand des Projekts.
+- **Kennzahlen oben**: Anzahl Modelle, Versionen, Datasets, Trainings.
+- **Laufende Trainings**: mit Fortschritt; Klick führt zum Live-Dashboard.
+- **Letztes Training / letzter Test / bestes Testergebnis**: der jüngste Stand mit Modell- und Versionsnamen.
+- **Loss-Trend**: Entwicklung über die letzten Läufe (negativ = Verbesserung).
+- **Hinweise**: automatisch erkannte offene Punkte (z.B. ungesplittetes Dataset, Training ohne Analyse).
+Typische Fragen: "Was soll ich als Nächstes tun?" → aus Live-Zustand ableiten und per Navigations-Tool dorthin lotsen. "Wie steht mein Projekt?" → Kennzahlen und Trend deuten, nicht nur vorlesen.`,
+    en: `### Page knowledge: Home
+Purpose: overview and entry point. Shows no settings, but the state of the project.
+- **Key figures at the top**: number of models, versions, datasets, trainings.
+- **Running trainings**: with progress; clicking leads to the live dashboard.
+- **Last training / last test / best test result**: the most recent state with model and version names.
+- **Loss trend**: development across recent runs (negative = improvement).
+- **Hints**: automatically detected open items (e.g. unsplit dataset, training without analysis).
+Typical questions: "what should I do next?" → derive it from the live state and route there with the navigation tool. "how is my project doing?" → interpret figures and trend, don't just read them out.`,
+  },
   models: {
     de: `### Seiten-Wissen: Models
 Zweck: alle ML-Modelle der App verwalten — die Basis für Training & Tests.
@@ -448,43 +470,97 @@ export function formatConfigPatch(patch: CoachConfigPatch): string {
     .join(' · ');
 }
 
-function toolsProtocol(language: Language, automation: boolean): string {
+/**
+ * Welche Tools auf welcher Seite ueberhaupt etwas bewirken.
+ *
+ * Vorher ging die vollstaendige Liste an jede Seite — inklusive der langen
+ * Aufzaehlung aller setzbaren Config-Felder. Das kostete rund 570 Token pro
+ * Runde und verleitete das Modell dazu, auf der Dataset-Seite einen
+ * [[set:…]]-Button anzubieten, der dort nichts tut. Navigation, Rueckfrage und
+ * Hilfe-Link gelten ueberall; alles andere haengt an der Seite.
+ */
+const PAGE_TOOLS: Partial<Record<PageId, readonly string[]>> = {
+  training: ['set', 'explain', 'estimate', 'open', 'apply', 'train'],
+  'training-dev': ['explain', 'open'],
+  analysis: ['apply', 'explain'],
+  dataset: ['split'],
+  models: ['hf', 'open'],
+  tests: ['explain'],
+  'tests-dev': ['explain'],
+  home: ['hf'],
+  laboratory: [],
+  versions: [],
+  synapse: [],
+  settings: [],
+};
+
+/** Tools, die unabhaengig von der Seite immer sinnvoll sind. */
+const ALWAYS_TOOLS = ['go', 'ask', 'link'] as const;
+
+function toolsFor(pageId: PageId | null): Set<string> {
+  const set = new Set<string>(ALWAYS_TOOLS);
+  // Ohne bekannte Seite lieber alles anbieten als gar nichts.
+  const page = pageId ? PAGE_TOOLS[pageId] : undefined;
+  if (!pageId) {
+    for (const k of ['set', 'explain', 'estimate', 'open', 'hf', 'split', 'apply', 'train']) set.add(k);
+  } else {
+    for (const k of page ?? []) set.add(k);
+  }
+  return set;
+}
+
+function toolsProtocol(language: Language, automation: boolean, pageId: PageId | null): string {
   const nav = NAV_KEYS.join(' | ');
   const links = LINK_KEYS.join(' | ');
   const setKeys = SETTABLE_KEYS.join(', ');
   const openKeys = OPEN_KEYS.join(' | ');
-  if (language === 'en') {
+  const on = toolsFor(pageId);
+  const en = language === 'en';
+
+  const line = (key: string, de: string, enText: string) => (on.has(key) ? [en ? enText : de] : []);
+
+  const items: string[] = [
+    ...line('go', `- **Navigieren**: \`[[go:SEITE]]\` — SEITE ∈ ${nav}.`,
+                  `- **Navigate**: \`[[go:PAGE]]\` — PAGE ∈ ${nav}.`),
+    ...line('ask', '- **Rückfrage**: `[[ask:kurze Frage]]` — Ein-Klick-Anschlussfrage.',
+                   '- **Follow-up question**: `[[ask:short question]]` — one-click follow-up.'),
+    ...line('link', `- **Hilfe-Link**: \`[[link:KEY]]\` — KEY ∈ ${links}. Öffnet die offizielle Seite.`,
+                    `- **Help link**: \`[[link:KEY]]\` — KEY ∈ ${links}. Opens the official page.`),
+    ...line('set', `- **Trainings-Config setzen**: \`[[set:key=wert;key=wert]]\` — füllt das Formular (startet NICHT). Keys ∈ ${setKeys}. Nenne die Werte immer auch im Fließtext.`,
+                   `- **Apply training config**: \`[[set:key=value;key=value]]\` — fills the form (does NOT start training). Keys ∈ ${setKeys}. Always also state the values in prose.`),
+    ...line('explain', '- **Fehler/Log erklären**: `[[explain:error]]` — wenn die Seite einen Fehler oder ein Log zeigt; hängt das aktuelle Log an.',
+                       '- **Explain error/log**: `[[explain:error]]` — when the page shows an error or log; attaches the latest log.'),
+    ...line('estimate', '- **RAM schätzen**: `[[estimate:ram]]` — meldet die RAM/VRAM-Schätzung für aktuelles Modell + Config.',
+                        '- **Estimate RAM**: `[[estimate:ram]]` — reports the RAM/VRAM estimate for the current model + config.'),
+    ...line('open', `- **Dialog öffnen**: \`[[open:ZIEL]]\` — ZIEL ∈ ${openKeys}.`,
+                    `- **Open dialog**: \`[[open:TARGET]]\` — TARGET ∈ ${openKeys}.`),
+    ...line('hf', '- **HuggingFace suchen**: `[[hf:suchbegriff]]` — öffnet Models und sucht dort ein Modell.',
+                  '- **Search HuggingFace**: `[[hf:query]]` — opens Models and searches HuggingFace.'),
+    ...line('split', '- **Dataset splitten**: `[[split:name]]` — öffnet den 80/20-Split-Dialog (User bestätigt).',
+                     '- **Split dataset**: `[[split:name]]` — opens the 80/20 split dialog (user confirms).'),
+    ...line('apply', '- **Empfohlene Parameter übernehmen**: `[[apply:recommended]]` — übernimmt die in Analysis empfohlenen Parameter in die Trainings-Config.',
+                     '- **Apply recommended params**: `[[apply:recommended]]` — takes the parameters recommended in Analysis into the Training config.'),
+  ];
+  if (automation && on.has('train')) {
+    items.push(en
+      ? '- **Start / stop training** (automation on): `[[train:start]]` / `[[train:stop]]` — start asks for a confirm click. Only when the setup is ready.'
+      : '- **Training starten / stoppen** (Automation an): `[[train:start]]` / `[[train:stop]]` — Start fragt nach Klick-Bestätigung. Nur wenn das Setup bereit ist.');
+  }
+
+  if (en) {
     return `## Tools you can use
 Append tokens at the very END of your reply (never mention the raw syntax in prose). The app turns them into clickable buttons — nothing runs automatically, the user clicks.
+Only the tools listed here work on the current page; do not invent others.
 
-- **Navigate**: \`[[go:PAGE]]\` — PAGE ∈ ${nav}.
-- **Follow-up question**: \`[[ask:short question]]\` — one-click follow-up.
-- **Help link**: \`[[link:KEY]]\` — KEY ∈ ${links}. Opens the official page.
-- **Apply training config**: \`[[set:key=value;key=value]]\` — Training page only. Fills the form (does NOT start training). Keys ∈ ${setKeys}. Always also state the values in prose.
-- **Explain error/log**: \`[[explain:error]]\` — when the current page shows a training error or log; attaches the latest log and asks you to analyse it.
-- **Estimate RAM**: \`[[estimate:ram]]\` — on Training; reports the RAM/VRAM estimate for the current model + config.
-- **Open dialog**: \`[[open:TARGET]]\` — TARGET ∈ ${openKeys}. Opens that dialog/section (navigates there first if needed).
-- **Search HuggingFace**: \`[[hf:query]]\` — opens Models and searches HuggingFace for a model.
-- **Split dataset**: \`[[split:name]]\` — opens the 80/20 split dialog for that dataset (user confirms).
-- **Apply recommended params**: \`[[apply:recommended]]\` — takes the parameters recommended in Analysis into the Training config.${automation ? `
-- **Start / stop training** (automation on): \`[[train:start]]\` / \`[[train:stop]]\` — Training page only; start asks for a confirm click. Only when the setup is ready.` : ''}
+${items.join('\n')}
 
 Only add a token when it genuinely helps. At most 3 tokens total.`;
   }
   return `## Tools die du nutzen kannst
 Hänge Tokens ganz ans ENDE deiner Antwort (Syntax nie im Fließtext erwähnen). Die App macht daraus klickbare Buttons — nichts passiert automatisch, der User klickt.
+Nur die hier aufgeführten Tools wirken auf der aktuellen Seite; erfinde keine weiteren.
 
-- **Navigieren**: \`[[go:SEITE]]\` — SEITE ∈ ${nav}.
-- **Rückfrage**: \`[[ask:kurze Frage]]\` — Ein-Klick-Anschlussfrage.
-- **Hilfe-Link**: \`[[link:KEY]]\` — KEY ∈ ${links}. Öffnet die offizielle Seite.
-- **Trainings-Config setzen**: \`[[set:key=wert;key=wert]]\` — NUR auf der Training-Seite. Füllt das Formular (startet NICHT). Keys ∈ ${setKeys}. Nenne die Werte immer auch im Fließtext.
-- **Fehler/Log erklären**: \`[[explain:error]]\` — wenn die Seite einen Trainings-Fehler oder ein Log zeigt; hängt das aktuelle Log an und lässt dich es analysieren.
-- **RAM schätzen**: \`[[estimate:ram]]\` — auf Training; meldet die RAM/VRAM-Schätzung für aktuelles Modell + Config.
-- **Dialog öffnen**: \`[[open:ZIEL]]\` — ZIEL ∈ ${openKeys}. Öffnet den Dialog/Bereich (navigiert ggf. vorher hin).
-- **HuggingFace suchen**: \`[[hf:suchbegriff]]\` — öffnet Models und sucht ein Modell auf HuggingFace.
-- **Dataset splitten**: \`[[split:name]]\` — öffnet den 80/20-Split-Dialog für das Dataset (User bestätigt).
-- **Empfohlene Parameter übernehmen**: \`[[apply:recommended]]\` — übernimmt die in Analysis empfohlenen Parameter in die Trainings-Config.${automation ? `
-- **Training starten / stoppen** (Automation an): \`[[train:start]]\` / \`[[train:stop]]\` — nur auf Training; Start fragt nach Klick-Bestätigung. Nur wenn das Setup bereit ist.` : ''}
+${items.join('\n')}
 
 Setze ein Token nur, wenn es wirklich hilft. Maximal 3 Tokens insgesamt.`;
 }
@@ -617,6 +693,8 @@ export interface CoachPromptOptions {
   isFirstMessage: boolean;
   /** Seite hat seit der letzten Nachricht gewechselt? */
   pageChanged: boolean;
+  /** Live-Zustand derselben Seite hat sich geaendert (z.B. Config angepasst)? */
+  stateChanged?: boolean;
   /** Wissen der aktuellen Seite wurde noch nicht an das Modell geschickt? */
   includePageKnowledge: boolean;
   /** Automation-Modus aktiv? → schaltet Start/Stop-Training-Tools frei */
@@ -632,18 +710,18 @@ export interface CoachPromptOptions {
 const DIVIDER = '────────────────────────────────────────────────────────────';
 
 export function buildCoachSystemPrompt(opts: CoachPromptOptions): string {
-  const { language, pageId, pageContent, isFirstMessage, pageChanged, includePageKnowledge, automation, repeatTools } = opts;
+  const { language, pageId, pageContent, isFirstMessage, pageChanged, stateChanged, includePageKnowledge, automation, repeatTools } = opts;
   const en = language === 'en';
   const parts: string[] = [pick(PERSONA, language)];
 
   // Globale, dünne Bausteine — nur einmal (erste Nachricht).
   if (isFirstMessage) {
-    parts.push('', pick(APP_OVERVIEW, language), '', pick(SKILLS, language), '', toolsProtocol(language, !!automation));
+    parts.push('', pick(APP_OVERVIEW, language), '', pick(SKILLS, language), '', toolsProtocol(language, !!automation, pageId));
   } else if (pageChanged || repeatTools) {
     // Welche Tools sinnvoll sind, haengt an der Seite ([[set:…]] gibt es nur
     // im Training). Nach einem Seitenwechsel bot der Coach sonst weiter die
     // Tools der alten Seite an — oder gar keine mehr.
-    parts.push('', toolsProtocol(language, !!automation));
+    parts.push('', toolsProtocol(language, !!automation, pageId));
   }
 
   // Tiefes Seiten-Wissen — nur wenn für diese Seite noch nicht geschickt.
@@ -664,7 +742,9 @@ export function buildCoachSystemPrompt(opts: CoachPromptOptions): string {
       '',
       pageChanged && !isFirstMessage
         ? (en ? '## Page changed — new live state' : '## Seite gewechselt — neuer Live-Zustand')
-        : (en ? '## Current page (live state)' : '## Aktuelle Seite (Live-Zustand)'),
+        : stateChanged && !isFirstMessage
+          ? (en ? '## Same page — state updated since the last message' : '## Gleiche Seite — Zustand hat sich seit der letzten Nachricht geändert')
+          : (en ? '## Current page (live state)' : '## Aktuelle Seite (Live-Zustand)'),
       DIVIDER,
       pageContent.trim(),
       DIVIDER,

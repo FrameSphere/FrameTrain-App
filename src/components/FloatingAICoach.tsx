@@ -612,6 +612,10 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   const prevMsgCountRef = useRef(0);
   // Letzter Seitenkontext der dem Modell bekannt ist
   const lastSentPageContentRef = useRef<string>('');
+  // Welche SEITE zuletzt geschickt wurde. Vorher galt jede Aenderung des
+  // Live-Zustands als Seitenwechsel — wer nur die Batch-Size anfasste, bekam
+  // die Ueberschrift "Seite gewechselt" ueber denselben Bildschirm gesetzt.
+  const lastSentPageIdRef = useRef<PageId | null>(null);
   // Seiten, deren tiefes Wissen im aktuellen Chat bereits ans Modell ging
   // (verhindert erneutes Senden bei jeder Nachricht auf derselben Seite)
   const knowledgeSentRef = useRef<Set<PageId>>(new Set());
@@ -775,12 +779,13 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
   //   - sonst: nur die Persona.
   // Sprache folgt der App-Sprache (DE/EN).
   const buildSystemPrompt = (isFirstMessage: boolean): string => {
-    const pageChanged = !isFirstMessage &&
+    const pid = currentPageId;
+    const pageChanged = !isFirstMessage && !!pid && pid !== lastSentPageIdRef.current;
+    const stateChanged = !isFirstMessage &&
       !!pageContent &&
       pageContent !== lastSentPageContentRef.current;
 
     // Tiefes Seiten-Wissen nur senden, wenn für diese Seite in diesem Chat neu.
-    const pid = currentPageId;
     const includePageKnowledge =
       !!pid &&
       hasPageKnowledge(pid) &&
@@ -788,7 +793,8 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
       (isFirstMessage || pageChanged);
 
     if (includePageKnowledge && pid) knowledgeSentRef.current.add(pid);
-    if (isFirstMessage || pageChanged) lastSentPageContentRef.current = pageContent;
+    lastSentPageContentRef.current = pageContent;
+    lastSentPageIdRef.current = pid;
 
     return buildCoachSystemPrompt({
       language,
@@ -796,6 +802,7 @@ export default function FloatingAICoach({ currentPageContent, userId }: Floating
       pageContent,
       isFirstMessage,
       pageChanged,
+      stateChanged,
       includePageKnowledge,
       automation,
       // Ab "Quality" ist genug Budget da, um dem Modell die Tool-Liste in
@@ -921,7 +928,9 @@ Rules:
 - No quotes
 - Capture the core topic
 - Same language as the user message
-- Examples: "YOLO Training Konfiguration", "Batch Size Fehler beheben", "LoRA vs Full Fine-Tuning"
+- Use ONLY words and names that actually appear in the question or the answer above.
+  Never invent a model, product or library name that is not written there.
+- Examples of the FORM (not the content): "YOLO Training Konfiguration", "Batch Size Fehler beheben"
 
 Reply with ONLY the title, nothing else.`;
 

@@ -1825,7 +1825,14 @@
       "fp16Tip": "FP16 aktivieren spart ~{save} GB RAM",
       "loraTip": "LoRA aktivieren reduziert den Bedarf auf ~{save} GB",
       "highRamTitle": "RAM senken:",
-      "highRamDesc": "• LoRA r=8, 4-bit QLoRA, Batch 2–4, FP16 + Grad Checkpointing"
+      "highRamDesc": "• LoRA r=8, 4-bit QLoRA, Batch 2–4, FP16 + Grad Checkpointing",
+      "systemRam": "System-RAM",
+      "verdict": {
+        "fits": "— passt",
+        "tight": "— knapp",
+        "exceeds": "— reicht nicht",
+        "unknown": ""
+      }
     },
     "lossChart": {
       "waitingForData": "Warte auf Trainings-Daten…",

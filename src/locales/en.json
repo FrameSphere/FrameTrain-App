@@ -1825,7 +1825,14 @@
       "fp16Tip": "Enabling FP16 saves ~{save} GB RAM",
       "loraTip": "Enabling LoRA reduces requirements to ~{save} GB",
       "highRamTitle": "Reduce RAM:",
-      "highRamDesc": "• LoRA r=8, 4-bit QLoRA, batch 2–4, FP16 + gradient checkpointing"
+      "highRamDesc": "• LoRA r=8, 4-bit QLoRA, batch 2–4, FP16 + gradient checkpointing",
+      "systemRam": "System RAM",
+      "verdict": {
+        "fits": "— fits",
+        "tight": "— tight",
+        "exceeds": "— not enough",
+        "unknown": ""
+      }
     },
     "lossChart": {
       "waitingForData": "Waiting for training data…",
@@ -1966,7 +1973,7 @@
       "pluginSelected": "✓ Plugin: {name} ({task})",
       "pluginUnsupported": "⚠ Plugin: Not supported",
       "datasetMissing": "❌ Dataset: (not selected) → Choose from dropdown",
-      "datasetSelected": "\u2713 Dataset: {name} ({files} files)",
+      "datasetSelected": "✓ Dataset: {name} ({files} files)",
       "datasetStatus": "  Status: {status}",
       "datasetSplit": "✓ Split (Train/Val/Test)",
       "datasetUnsplit": "⚠ Not split",

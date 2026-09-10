@@ -18,9 +18,10 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }));
 import { AISettingsProvider, useAISettings } from '../AISettingsContext';
 
 /** Schluesselbund-Attrappe: merkt sich Werte pro Konto. */
-function keychain(initial: Record<string, string> = {}) {
+function keychain(initial: Record<string, string> = {}, calls?: string[]) {
   const store: Record<string, string> = { ...initial };
   mockInvoke.mockImplementation(async (cmd: string, args: any) => {
+    calls?.push(cmd);
     if (cmd === 'secret_get') return store[args.key] ?? null;
     if (cmd === 'secret_set') { store[args.key] = args.value; return null; }
     if (cmd === 'secret_delete') { delete store[args.key]; return null; }
@@ -112,13 +113,31 @@ describe('AISettings – Key pro Anbieter', () => {
     expect(store['ft_ai_key_u1_anthropic']).toBe('sk-ant-alt');
   });
 
-  it('meldet, fuer welche Anbieter ein Key hinterlegt ist', async () => {
+  // Die Anzeige meldete "API-Key noetig" fuer Anbieter, deren Key laengst im
+  // Schluesselbund lag — sichtbar wurde er erst beim Umschalten. Genau die
+  // Beruhigung, die die Anzeige geben soll, fehlte damit.
+  it('meldet ALLE Anbieter mit hinterlegtem Key, ohne dass man umschalten muss', async () => {
     keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude', 'ft_ai_key_u1_groq': 'gsk_groq' });
     storedSettings('anthropic');
     const { result } = await mounted();
-    expect(result.current.providersWithKey).toEqual(['anthropic']);
 
-    act(() => { result.current.updateDraft({ provider: 'groq' }); });
     await waitFor(() => expect(result.current.providersWithKey).toEqual(['anthropic', 'groq']));
+
+    // Umschalten aendert daran nichts und verliert keinen Key.
+    act(() => { result.current.updateDraft({ provider: 'groq' }); });
+    await waitFor(() => expect(result.current.draft.apiKey).toBe('gsk_groq'));
+    expect(result.current.providersWithKey).toEqual(['anthropic', 'groq']);
+  });
+
+  // Ein reiner Ollama-Nutzer soll den Schluesselbund gar nicht erst wecken.
+  it('fasst den Schluesselbund nicht an, solange nur Ollama eingestellt ist', async () => {
+    const calls: string[] = [];
+    keychain({}, calls);
+    storedSettings('ollama');
+    const { result } = await mounted();
+
+    await waitFor(() => expect(result.current.keyLoading).toBe(false));
+    expect(calls).toHaveLength(0);
+    expect(result.current.providersWithKey).toEqual([]);
   });
 });
