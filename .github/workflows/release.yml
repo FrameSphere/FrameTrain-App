@@ -106,23 +106,37 @@ jobs:
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
-        timeout-minutes: 12
+        timeout-minutes: 15
         run: |
-          # Die Azure-Mirrors der GitHub-Runner haengen sporadisch minutenlang an
-          # jammy-security; apt wartet dann ohne Timeout weiter und der Job lief
-          # 60 Minuten ins Leere. Fester Mirror + kurze Netz-Timeouts + Retries,
-          # damit der Schritt entweder zuegig durchlaeuft oder klar scheitert.
-          echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
-          for attempt in 1 2 3; do
-            echo "apt-get update (Versuch ${attempt}/3)"
-            if sudo apt-get $APT_OPTS update; then break; fi
-            if [ "$attempt" = "3" ]; then
-              echo "apt-get update nach 3 Versuchen fehlgeschlagen"; exit 1
-            fi
-            sleep 15
-          done
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
+          # Geschichte dieses Schritts:
+          #  - Frueher hing apt-get update minutenlang am Azure-Mirror und der
+          #    Job lief 60 Minuten ins Leere.
+          #  - Der Fix vom 19.08. hat deshalb archive.ubuntu.com als EINZIGEN
+          #    Mirror festgelegt. Seit 1.2.59 ist genau dieser Server von den
+          #    Runnern aus nicht erreichbar ("Connection failed" auf alle
+          #    Canonical-IPs) — ohne Ausweichmoeglichkeit scheiterte jeder
+          #    Linux-Build, waehrend macOS und Windows durchliefen.
+          #
+          # Jetzt: eine Liste mit mehreren Mirrors. apt probiert sie der Reihe
+          # nach und weicht aus, wenn einer nicht antwortet. Kurze Timeouts,
+          # damit ein toter Mirror nach Sekunden statt Minuten aufgegeben wird,
+          # und Wiederholungen auch fuer die Installation — dort hing es zuletzt.
+          printf '%s\n' \
+            'http://azure.archive.ubuntu.com/ubuntu/' \
+            'http://mirrors.edge.kernel.org/ubuntu/' \
+            'http://archive.ubuntu.com/ubuntu/' \
+            | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          APT_OPTS="-o Acquire::Retries=2 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10"
+          retry() {
+            for attempt in 1 2 3; do
+              echo "$1 (Versuch ${attempt}/3)"
+              if sudo apt-get $APT_OPTS "${@:2}"; then return 0; fi
+              [ "$attempt" = "3" ] && { echo "$1 nach 3 Versuchen fehlgeschlagen"; return 1; }
+              sleep 10
+            done
+          }
+          retry "apt-get update" update
+          retry "apt-get install" install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
