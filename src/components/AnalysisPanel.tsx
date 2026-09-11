@@ -1376,7 +1376,9 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       } else {
         lines.push('2. Lies **KI-Bericht** rechts: Bewertung, Probleme, konkrete Empfehlungen');
         lines.push('3. Nutze **Chat Panel** für spezifische Fragen stellen');
-        lines.push('4. Copy/Apply empfohlene Parameter im Training Panel');
+        // Nur Bezeichnungen, die es wirklich gibt — der Coach zitierte vorher
+        // woertlich einen Button "Copy/Apply empfohlene Parameter", den es nie gab.
+        lines.push(`4. Empfehlungen übernehmen: Button [${t('analysisPanel.aiAnalysis.recommendedParams.saveButton')}] im KI-Bericht, oder direkt ins Training über den Coach-Button „Empfohlene Parameter übernehmen“`);
       }
     }
 

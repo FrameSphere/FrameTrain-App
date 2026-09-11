@@ -275,7 +275,12 @@ export default function HomePanel({ userEmail, userId }: HomePanelProps) {
       `Letzter Test: ${sortedTests[0] ? `${sortedTests[0].model_name} (${sortedTests[0].status})` : 'keiner'}`,
       `Bestes Testergebnis: ${ranking[0] ? `${ranking[0].model_name} ${ranking[0].version_name} — ${(ranking[0].accuracy * 100).toFixed(1)}%` : 'noch keins'}`,
       `Loss-Trend: ${trendPct !== null ? `${trendPct >= 0 ? '-' : '+'}${Math.abs(trendPct).toFixed(1)}% ueber ${trend.length} Laeufe` : 'zu wenig Daten'}`,
-      `Offene Hinweise: ${insights.length > 0 ? insights.map(i => i.kind).join(', ') : 'keine'}`,
+      // Dieselben Saetze, die der Nutzer auf der Seite liest. Vorher gingen die
+      // internen Kennungen raus ("trainingFailed"), und der Coach zitierte sie
+      // woertlich in seiner Antwort.
+      insights.length > 0
+        ? `Offene Hinweise:\n${insights.map(i => `  - ${t(insightKey(i), i.params)}`).join('\n')}`
+        : 'Offene Hinweise: keine',
     ];
     setCurrentPageContent(lines.join('\n'), 'home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
