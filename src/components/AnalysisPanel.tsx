@@ -1378,7 +1378,11 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         lines.push('3. Nutze **Chat Panel** für spezifische Fragen stellen');
         // Nur Bezeichnungen, die es wirklich gibt — der Coach zitierte vorher
         // woertlich einen Button "Copy/Apply empfohlene Parameter", den es nie gab.
-        lines.push(`4. Empfehlungen übernehmen: Button [${t('analysisPanel.aiAnalysis.recommendedParams.saveButton')}] im KI-Bericht, oder direkt ins Training über den Coach-Button „Empfohlene Parameter übernehmen“`);
+        // Zwei getrennte Wege, zwei getrennte Zeilen. In einem Satz vermischte
+        // das Modell die Namen und schickte den User im KI-Bericht zu einem
+        // "Übernehmen"-Button, den es dort nicht gibt.
+        lines.push(`4. Empfehlungen sichern: Im KI-Bericht steht unter den empfohlenen Parametern NUR der Button [${t('analysisPanel.aiAnalysis.recommendedParams.saveButton')}] — er legt ein Template an, einen Übernehmen-Button gibt es dort nicht.`);
+        lines.push('5. Empfehlungen direkt ins Training: nur über den Button, den DU (der Coach) per [[apply:recommended]] unter deiner Antwort anbietest.');
       }
     }
 
