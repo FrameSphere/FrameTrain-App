@@ -2838,7 +2838,7 @@ EXTS = ${exts}
 
 
 def collect(root: Path):
-    # Dateien samt Klasse (Ordnername) einsammeln.
+    # Dateien samt Klasse (Ordnername) einsammeln — leere Klassenordner zaehlen nicht.
     class_dirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
     items = []
     for d in class_dirs:
@@ -2853,13 +2853,28 @@ root = Path(DATASET_PATH)
 if not root.exists():
     raise FileNotFoundError(f"DATASET_PATH existiert nicht: {DATASET_PATH}")
 
-train_items = collect(root / "train") if (root / "train").is_dir() else collect(root)
-eval_root = next((root / s for s in ("val", "validation", "test") if (root / s).is_dir()), None)
-eval_items = collect(eval_root) if eval_root else []
+try:
+    # FrameTrain stellt dieselbe Dataset-Logik wie im Training bereit: Klassenordner,
+    # train/ val/ test/ (auch ohne val/) und HF-Parquet mit ${kindLabel}spalte.
+    from ft_data.media import resolve_class_layout
+except ImportError:
+    resolve_class_layout = None
+
+if resolve_class_layout is not None:
+    layout = resolve_class_layout(root, "${isImage ? 'image' : 'audio'}")
+    for note in layout.notes:
+        print(note, flush=True)
+    classes = layout.classes
+    train_items = [(f, classes[i]) for f, i in layout.train]
+    eval_items = [(f, classes[i]) for f, i in layout.val]
+else:
+    train_items = collect(root / "train") if (root / "train").is_dir() else collect(root)
+    eval_root = next((root / s for s in ("val", "validation") if (root / s).is_dir()), None)
+    classes = sorted({cls for _, cls in train_items})
+    eval_items = [it for it in (collect(eval_root) if eval_root else []) if it[1] in classes]
 if not train_items:
     raise RuntimeError(f"Keine ${kindLabel}dateien mit Klassenordnern in {DATASET_PATH} gefunden.")
 
-classes = sorted({cls for _, cls in train_items})
 id2label = {i: c for i, c in enumerate(classes)}
 label2id = {c: i for i, c in id2label.items()}
 print(f"{len(train_items)} Trainings- / {len(eval_items)} Eval-Dateien | Klassen: {classes}", flush=True)

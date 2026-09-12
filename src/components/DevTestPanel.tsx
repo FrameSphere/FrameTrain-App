@@ -1046,8 +1046,9 @@ def load_rows(path: str):
 
 
 rows = load_rows(DATASET_PATH)
-if MAX_SAMPLES:
-    rows = rows[:MAX_SAMPLES]
+if MAX_SAMPLES and len(rows) > MAX_SAMPLES:
+    import random
+    rows = random.Random(42).sample(rows, MAX_SAMPLES)  # zufaellig statt der ersten N
 cols = list(rows[0].keys()) if rows else []
 source_col = SOURCE_COL or next((c for c in ("source", "input", "text", "article", "document", "de") if c in cols), None)
 target_col = TARGET_COL or next((c for c in ("target", "output", "summary", "translation", "en") if c in cols), None)
@@ -1148,8 +1149,18 @@ ${extraConfig}EXTS = ${exts}
 
 def collect_files(root: Path):
     # Dateien samt erwarteter Klasse (Ordnername). Bevorzugt test/, dann val/, train/.
+    try:
+        # Dieselbe Logik wie der Test in FrameTrain: leere Split-Ordner zaehlen
+        # nicht, HF-Parquet mit ${kindLabel}spalte wird entpackt.
+        from ft_data.media import evaluation_files
+        found, split = evaluation_files(root, "${isImage ? 'image' : 'audio'}")
+        if split:
+            print(f"Verwende Split: {split}/", flush=True)
+        return found
+    except ImportError:
+        pass
     for sub in ("test", "val", "validation", "train"):
-        if (root / sub).is_dir():
+        if (root / sub).is_dir() and any(f.suffix.lower() in EXTS for f in (root / sub).rglob("*")):
             root = root / sub
             break
     class_dirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
@@ -1173,8 +1184,11 @@ if not ds_path.exists():
 files = collect_files(ds_path)
 if not files:
     raise RuntimeError(f"Keine ${kindLabel}dateien in {DATASET_PATH} gefunden.")
-if MAX_SAMPLES:
-    files = files[:MAX_SAMPLES]
+if MAX_SAMPLES and len(files) > MAX_SAMPLES:
+    # Zufaellige Stichprobe: die Liste ist nach Klasse sortiert, die ersten N
+    # enthielten sonst oft nur eine Klasse.
+    import random
+    files = random.Random(42).sample(files, MAX_SAMPLES)
 print(f"{len(files)} ${kindLabel}dateien gefunden", flush=True)
 
 print(f"Lade Modell aus: {MODEL_PATH}", flush=True)
@@ -1334,7 +1348,8 @@ if text_col is None:
     raise RuntimeError(f"Text-Spalte nicht gefunden. Vorhanden: {cols}. Setze TEXT_COL oben.")
 
 if MAX_SAMPLES and len(eval_ds) > MAX_SAMPLES:
-    eval_ds = eval_ds.select(range(MAX_SAMPLES))
+    # Zufaellig statt der ersten N: viele Splits sind nach Label sortiert.
+    eval_ds = eval_ds.shuffle(seed=42).select(range(MAX_SAMPLES))
 print(f"Auswertung auf {len(eval_ds)} Beispielen (Spalte '{text_col}')", flush=True)
 
 print(f"Lade Modell aus: {MODEL_PATH}", flush=True)

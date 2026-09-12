@@ -8,6 +8,7 @@ import {
   checkDatasetCompat, LEVEL_META,
   type DatasetCompatResult, type DatasetAnalysis,
 } from '../plugins/datasetCompat';
+import type { CompatPluginInfo } from '../plugins/genericDatasetCompat';
 
 interface DatasetCompatBadgeProps {
   /** Plugin-ID des Modells, z.B. "xlm-roberta" */
@@ -24,6 +25,8 @@ interface DatasetCompatBadgeProps {
   analysis?: DatasetAnalysis | null;
   /** Kompakte Ansicht (nur Badge, kein Detail-Dropdown) */
   compact?: boolean;
+  /** Plugin des Modells — ohne eigene Pruefung entscheiden dessen Dataset-Typen. */
+  modelPlugin?: CompatPluginInfo | null;
 }
 
 export default function DatasetCompatBadge({
@@ -31,6 +34,7 @@ export default function DatasetCompatBadge({
   extensions,
   analysis,
   compact = false,
+  modelPlugin,
 }: DatasetCompatBadgeProps) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useLanguage();
@@ -51,7 +55,7 @@ export default function DatasetCompatBadge({
     );
   }
 
-  const result: DatasetCompatResult = checkDatasetCompat(modelPluginId, extensions, analysis);
+  const result: DatasetCompatResult = checkDatasetCompat(modelPluginId, extensions, analysis, modelPlugin);
   const meta = LEVEL_META[result.overallLevel];
   const levelIcon = (() => {
     const cls = 'w-4 h-4';

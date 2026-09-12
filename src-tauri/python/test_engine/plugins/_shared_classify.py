@@ -36,35 +36,24 @@ def load_label_names(model_path: Path, model_config) -> Dict[int, str]:
     return {int(k): str(v) for k, v in id2label.items()} if id2label else {}
 
 
-def collect_class_files(root: Path, extensions: set) -> List[Tuple[Path, Optional[str]]]:
+def collect_class_files(root: Path, kind: str) -> List[Tuple[Path, Optional[str]]]:
     """
-    Sammelt Dateien samt erwarteter Klasse.
+    Sammelt Dateien samt erwarteter Klasse (gemeinsame Regeln aus ft_data.media).
 
-    Unterstützt das Trainingslayout (Ordner pro Klasse, optional unter
-    train/ val/ test/) und einen flachen Ordner ohne Klassenzuordnung.
+    test/ vor val/ vor train/ — leere Split-Ordner zaehlen nicht (der App-Split
+    legt test/<klasse>/ auch bei 0 % Testanteil an). HF-Parquet mit Bild- oder
+    Audiospalte wird einmalig in Klassenordner entpackt.
     """
-    for sub in ("test", "val", "validation", "train"):
-        if (root / sub).is_dir():
-            root = root / sub
-            break
-
-    class_dirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
-    files: List[Tuple[Path, Optional[str]]] = []
-    if class_dirs:
-        for d in class_dirs:
-            for f in sorted(d.rglob("*")):
-                if f.suffix.lower() in extensions:
-                    files.append((f, d.name))
-    else:
-        for f in sorted(root.rglob("*")):
-            if f.suffix.lower() in extensions:
-                files.append((f, None))
+    from ft_data.media import evaluation_files
+    files, split = evaluation_files(root, kind, status=lambda m: TestProtocol.status("loading", m))
+    if split:
+        TestProtocol.status("loading", f"Verwende Split: {split}/")
     return files
 
 
 def run_dataset_classification(
     plugin,
-    extensions: set,
+    kind: str,
     predict: Callable[[Path], Tuple[str, float, List[Dict[str, Any]]]],
     kind_label: str,
 ) -> None:
@@ -73,14 +62,16 @@ def run_dataset_classification(
     if not root.exists():
         raise FileNotFoundError(f"Dataset-Pfad existiert nicht: {root}")
 
-    files = collect_class_files(root, extensions)
+    from ft_data.media import exts_for, sample
+    files = collect_class_files(root, kind)
     if not files:
         raise ValueError(
             f"Keine {kind_label} in '{root}' gefunden. "
-            f"Erwartet werden: {', '.join(sorted(extensions))}"
+            f"Erwartet werden: {', '.join(sorted(exts_for(kind)))}"
         )
-    if plugin.config.max_samples:
-        files = files[: int(plugin.config.max_samples)]
+    # Zufaellige Stichprobe statt der ersten N: die Liste ist nach Klasse
+    # sortiert, die ersten N enthielten sonst oft nur eine Klasse.
+    files = sample(files, plugin.config.max_samples)
 
     TestProtocol.status("running", f"{len(files)} Dateien werden ausgewertet...")
 

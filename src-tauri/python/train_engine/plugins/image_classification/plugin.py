@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split, Subset
+from torch.utils.data import DataLoader
 from core.config import TrainingConfig
 from core.protocol import MessageProtocol
 
@@ -76,36 +76,41 @@ def _build_transforms(sz: int, augment: bool, training: bool):
     ])
 
 
-def _load_datasets(root: Path, sz: int, augment: bool, batch: int) -> Tuple[DataLoader, DataLoader, List[str]]:
-    from torchvision import datasets
-    train_dir = root / "train"
-    val_dir = root / "val" if (root / "val").is_dir() else root / "valid"
+class _FileImageDataset(torch.utils.data.Dataset):
+    """Bilder aus einer festen (Datei, Klassen-ID)-Liste.
 
-    if train_dir.is_dir() and val_dir.is_dir():
-        try:
-            ds_tr = datasets.ImageFolder(str(train_dir), transform=_build_transforms(sz, augment, True))
-            ds_va = datasets.ImageFolder(str(val_dir),   transform=_build_transforms(sz, False, False))
-        except FileNotFoundError as e:
-            raise ValueError(f"ImageFolder-Fehler: {e}. Erwartet: Unterordner pro Klasse in train/ und val/.")
-        return (DataLoader(ds_tr, batch, shuffle=True, num_workers=0, pin_memory=False),
-                DataLoader(ds_va, batch, shuffle=False, num_workers=0, pin_memory=False),
-                ds_tr.classes)
+    Ersetzt torchvision.ImageFolder: der vergab die IDs pro Ordner neu, sodass
+    eine in val/ fehlende Klasse alle folgenden IDs verschob.
+    """
 
-    if not any(d.is_dir() for d in root.iterdir()):
-        raise ValueError(f"Keine Unterordner in {root}. Erwartet: ein Unterordner pro Klasse.")
-    try:
-        ds_full = datasets.ImageFolder(str(root), transform=_build_transforms(sz, augment, True))
-    except Exception as e:
-        raise ValueError(f"ImageFolder-Fehler: {e}")
-    if len(ds_full) == 0:
-        raise ValueError(f"Keine Bilder in {root}.")
-    n_tr = int(len(ds_full) * 0.8)
-    n_va = len(ds_full) - n_tr
-    ds_tr, ds_va = random_split(ds_full, [n_tr, n_va])
-    ds_va_nfm = Subset(datasets.ImageFolder(str(root), transform=_build_transforms(sz, False, False)), ds_va.indices)
-    return (DataLoader(ds_tr,    batch, shuffle=True,  num_workers=0, pin_memory=False),
-            DataLoader(ds_va_nfm, batch, shuffle=False, num_workers=0, pin_memory=False),
-            ds_full.classes)
+    def __init__(self, items, transform):
+        self.items = list(items)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        from PIL import Image
+        path, label = self.items[i]
+        with Image.open(path) as im:
+            return self.transform(im.convert("RGB")), label
+
+
+def _load_datasets(root: Path, sz: int, augment: bool, batch: int, seed: int = 42) -> Tuple[DataLoader, DataLoader, List[str]]:
+    from ft_data.media import resolve_class_layout
+    # Gemeinsame Regeln (ft_data): train/ + test/ ohne val/ ist geteilt, nicht
+    # "zwei Klassen train und test"; Validierung kommt aus val/ oder train.
+    layout = resolve_class_layout(root, "image", seed=seed, val_fraction=0.2,
+                                  status=lambda m: MessageProtocol.status("setup", m))
+    for note in layout.notes:
+        MessageProtocol.status("setup", note)
+    ds_tr = _FileImageDataset(layout.train, _build_transforms(sz, augment, True))
+    ds_va = _FileImageDataset(layout.val, _build_transforms(sz, False, False))
+    gen = torch.Generator().manual_seed(seed)
+    return (DataLoader(ds_tr, batch, shuffle=True, num_workers=0, pin_memory=False, generator=gen),
+            DataLoader(ds_va, batch, shuffle=False, num_workers=0, pin_memory=False),
+            layout.classes)
 
 
 class ImageClassificationPlugin:
@@ -144,7 +149,7 @@ class ImageClassificationPlugin:
             MessageProtocol.error("Dataset nicht gefunden", f"Pfad: {dsp!r}")
             return False
         try:
-            _, _, self.classes = _load_datasets(Path(dsp), self.image_size, self.augment, self.config.batch_size)
+            _, _, self.classes = _load_datasets(Path(dsp), self.image_size, self.augment, self.config.batch_size, self.config.seed)
         except (ValueError, ImportError) as e:
             MessageProtocol.error("Dataset Setup", str(e)); return False
         if len(self.classes) < 2:
@@ -173,7 +178,7 @@ class ImageClassificationPlugin:
             MessageProtocol.error("Training", "setup() nicht aufgerufen."); return False
         try:
             tr_loader, va_loader, self.classes = _load_datasets(
-                Path(self.config.dataset_path), self.image_size, self.augment, self.config.batch_size)
+                Path(self.config.dataset_path), self.image_size, self.augment, self.config.batch_size, self.config.seed)
             # Fuer die Analyse-Seite: ohne diese Werte stand dort spaeter
             # "0 Steps", "Dauer 0s" und eine unbekannte Architektur.
             self._n_train = len(tr_loader.dataset)
@@ -193,6 +198,9 @@ class ImageClassificationPlugin:
         try:
             # Shape-Test
             sample_x, _ = next(iter(tr_loader))
+            # eval(): BatchNorm im Trainingsmodus scheitert an einem Einzelbild
+            # ("Expected more than 1 value per channel"); die Epoche setzt train() wieder.
+            self.model.eval()
             with torch.no_grad(): self.model(sample_x[:1].to(self.device))
             MessageProtocol.status("train", f"Shape-Test OK: {list(sample_x.shape[1:])}")
         except Exception as e:

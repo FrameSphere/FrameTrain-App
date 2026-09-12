@@ -12,7 +12,8 @@ const audioClassificationPlugin: ModelPlugin = {
   defaultPluginConfig: { max_seconds: 10 },
   detect: detectAudioClassification,
   TestComponent: AudioTestPlugin,
-  supportedDatasetTypes: ['folder_class', 'pre_split'],
+  // flat_file/multi_shard: HF-Parquet mit Audiospalte wird in Klassenordner entpackt.
+  supportedDatasetTypes: ['folder_class', 'pre_split', 'flat_file', 'multi_shard'],
   preferredDatasetType: 'folder_class',
 };
 

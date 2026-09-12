@@ -12,7 +12,8 @@ const hfImageClassificationPlugin: ModelPlugin = {
   defaultPluginConfig: {},
   detect: detectHFImageClassification,
   TestComponent: HFImageTestPlugin,
-  supportedDatasetTypes: ['folder_class', 'pre_split'],
+  // flat_file/multi_shard: HF-Parquet mit Bildspalte wird in Klassenordner entpackt.
+  supportedDatasetTypes: ['folder_class', 'pre_split', 'flat_file', 'multi_shard'],
   preferredDatasetType: 'folder_class',
 };
 

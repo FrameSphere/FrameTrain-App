@@ -53,6 +53,15 @@ class YOLOPlugin:
         yaml_path = self._find_or_build_yaml(Path(dsp))
         if yaml_path is None:
             return False
+        # Pascal VOC (XML) in YOLO-Labels umrechnen und Platzhalter-Klassen aus
+        # dem Import ersetzen — beides liest Ultralytics sonst nicht.
+        try:
+            from ft_data.detection import convert_voc_to_yolo, fill_placeholder_names
+            note = lambda m: MessageProtocol.status("setup", m)
+            convert_voc_to_yolo(Path(dsp), yaml_path, status=note)
+            fill_placeholder_names(Path(dsp), yaml_path, status=note)
+        except Exception as e:
+            MessageProtocol.status("setup", f"Label-Vorbereitung uebersprungen: {e}")
         if not self._verify_labels(yaml_path):
             return False
         self._yaml_path = str(yaml_path)

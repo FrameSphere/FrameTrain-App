@@ -1925,6 +1925,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               {selectedDataset && pluginId && (
                 <DatasetCompatBadge
                   modelPluginId={pluginId}
+                  modelPlugin={detection?.supported ? detection.plugin : null}
                   extensions={selectedDataset.extensions ?? []}
                   analysis={selectedDataset.dataset_type ? {
                     detected_type: selectedDataset.dataset_type,

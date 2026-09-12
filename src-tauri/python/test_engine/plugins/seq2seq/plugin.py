@@ -11,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.config import TestConfig
 from core.protocol import TestProtocol
 from _shared_classify import resolve_device
+from ft_data.media import sample as random_sample
+from ft_data.seq2seq import describe, load_spec, resolve_spec, row_texts
 
-SOURCE_CANDIDATES = ["source", "input", "text", "article", "document", "de", "src", "question"]
-TARGET_CANDIDATES = ["target", "output", "summary", "highlights", "translation", "en", "tgt", "answer"]
 DATA_EXTS = (".json", ".jsonl", ".csv", ".tsv", ".parquet")
 
 
@@ -26,6 +26,7 @@ class Plugin:
         self.prefix = str(config.plugin_config.get("task_prefix", "") or "")
         self.max_new_tokens = int(config.plugin_config.get("max_target_length", 64))
         self.is_stopped = False
+        self.trained_spec: Dict[str, Any] = {}
 
     def stop(self):
         self.is_stopped = True
@@ -43,6 +44,10 @@ class Plugin:
         self.model.eval()
         self.device = resolve_device()
         self.model.to(self.device)
+        # Spalten und Prefix aus dem Training; die Test-Konfiguration kann sie ueberschreiben.
+        self.trained_spec = load_spec(model_path)
+        if not self.config.plugin_config.get("task_prefix") and self.trained_spec.get("task_prefix"):
+            self.prefix = str(self.trained_spec["task_prefix"])
         TestProtocol.status("loading", f"Modell geladen | Gerät: {self.device}")
 
     def _generate(self, text: str) -> str:
@@ -100,13 +105,17 @@ class Plugin:
         if not rows:
             raise ValueError("Dataset enthaelt keine Zeilen.")
         cols = list(rows[0].keys())
-        src = next((c for c in SOURCE_CANDIDATES if c in cols), None)
-        tgt = next((c for c in TARGET_CANDIDATES if c in cols and c != src), None)
-        if src is None:
-            raise ValueError(f"Eingabespalte nicht erkannt. Vorhanden: {cols}")
+        keys = ("source_column", "target_column", "source_lang", "target_lang")
+        overrides = {k: v for k, v in self.trained_spec.items() if k in keys and v}
+        overrides.update({k: v for k, v in (self.config.plugin_config or {}).items() if k in keys and v})
+        try:
+            spec = resolve_spec(cols, rows[0], overrides)
+        except ValueError:
+            # Trainings-Spalten fehlen in diesem Dataset — dann frei erkennen.
+            spec = resolve_spec(cols, rows[0], self.config.plugin_config or {})
+        TestProtocol.status("loading", f"Eingabe → Ziel: {describe(spec)}")
 
-        if self.config.max_samples:
-            rows = rows[: int(self.config.max_samples)]
+        rows = random_sample(rows, self.config.max_samples)
         TestProtocol.status("running", f"{len(rows)} Zeilen werden ausgewertet...")
 
         results: List[Dict[str, Any]] = []
@@ -120,11 +129,11 @@ class Plugin:
                 TestProtocol.status("stopped", "Test abgebrochen.")
                 return
             t0 = time.time()
-            generated = self._generate(str(row.get(src, "")))
+            source_text, expected = row_texts(row, spec)
+            generated = self._generate(source_text)
             dt = time.time() - t0
             total_time += dt
 
-            expected: Optional[str] = str(row[tgt]) if tgt and row.get(tgt) is not None else None
             is_correct: Optional[bool] = None
             if expected is not None:
                 labelled += 1
@@ -134,7 +143,7 @@ class Plugin:
 
             results.append({
                 "sample_id": idx,
-                "input_text": str(row.get(src, ""))[:500],
+                "input_text": source_text[:500],
                 "expected_output": expected,
                 "predicted_output": generated,
                 "is_correct": is_correct,

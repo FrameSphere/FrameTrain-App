@@ -13,7 +13,6 @@ from _shared_classify import (
     load_label_names, resolve_device, run_dataset_classification,
 )
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 
 
 class Plugin:
@@ -78,4 +77,4 @@ class Plugin:
         )
 
     def run_dataset(self):
-        run_dataset_classification(self, IMAGE_EXTS, self._predict, "Bilddateien")
+        run_dataset_classification(self, "image", self._predict, "Bilddateien")

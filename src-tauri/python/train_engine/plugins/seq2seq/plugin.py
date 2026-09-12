@@ -17,8 +17,7 @@ from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 from core import hf_training as hft
 
-SOURCE_CANDIDATES = ["source", "input", "text", "article", "document", "de", "src", "question"]
-TARGET_CANDIDATES = ["target", "output", "summary", "highlights", "translation", "en", "tgt", "answer"]
+from ft_data.seq2seq import batch_texts, describe, resolve_spec, save_spec
 
 
 class Plugin(TrainPlugin):
@@ -30,8 +29,7 @@ class Plugin(TrainPlugin):
         self.eval_dataset = None
         self.model_type = ""
         self.device_used = "cpu"
-        self.source_col = config.get_plugin_value("source_column")
-        self.target_col = config.get_plugin_value("target_column")
+        self.spec: Dict[str, Any] = {}
         self.prefix = str(config.get_plugin_value("task_prefix", "") or "")
         self.max_target_length = int(config.get_plugin_value("max_target_length", 128))
         self._trainer = None
@@ -93,21 +91,9 @@ class Plugin(TrainPlugin):
         raw = self._load_files()
         train_raw = raw["train"]
         cols = list(train_raw.features.keys())
-
-        if not self.source_col:
-            self.source_col = next((c for c in SOURCE_CANDIDATES if c in cols), None)
-        if not self.target_col:
-            self.target_col = next((c for c in TARGET_CANDIDATES if c in cols and c != self.source_col), None)
-        if not self.source_col or not self.target_col:
-            raise ValueError(
-                f"Eingabe- und Zielspalte nicht erkannt. Vorhandene Spalten: {cols}.\n"
-                "Setze sie in der Plugin-Konfiguration, z.B.:\n"
-                '  {"source_column": "artikel", "target_column": "kurzfassung"}'
-            )
-        MessageProtocol.status(
-            "loading_data",
-            f"Eingabe-Spalte: '{self.source_col}' → Ziel-Spalte: '{self.target_col}'",
-        )
+        first_row = train_raw[0] if len(train_raw) else {}
+        self.spec = resolve_spec(cols, first_row, self.config.plugin_config or {})
+        MessageProtocol.status("loading_data", f"Eingabe → Ziel: {describe(self.spec)}")
 
         eval_raw = raw.get("validation") or raw.get("test")
         if eval_raw is None:
@@ -118,13 +104,15 @@ class Plugin(TrainPlugin):
         eval_raw = hft.cap_eval_dataset(eval_raw, getattr(self.config, "max_eval_samples", 0), self.config.seed)
 
         tokenizer = self.tokenizer
-        src, tgt, prefix = self.source_col, self.target_col, self.prefix
+        spec, prefix = self.spec, self.prefix
         max_src, max_tgt = self.config.max_seq_length, self.max_target_length
 
         def tokenize(batch):
-            inputs = [f"{prefix}{t}" for t in batch[src]]
+            # Dict-Spalten (Uebersetzung) und Listen-Ziele (keyphrases) werden hier zu Text.
+            sources, targets = batch_texts(batch, spec)
+            inputs = [f"{prefix}{t}" for t in sources]
             enc = tokenizer(inputs, truncation=True, max_length=max_src)
-            labels = tokenizer(text_target=batch[tgt], truncation=True, max_length=max_tgt)
+            labels = tokenizer(text_target=targets, truncation=True, max_length=max_tgt)
             enc["labels"] = labels["input_ids"]
             return enc
 
@@ -194,5 +182,7 @@ class Plugin(TrainPlugin):
         out.mkdir(parents=True, exist_ok=True)
         self.model.save_pretrained(str(out))
         self.tokenizer.save_pretrained(str(out))
+        # Spalten und Prefix neben dem Modell, damit der Test dieselben nutzt.
+        save_spec(out, self.spec, self.prefix)
         MessageProtocol.status("export", f"Modell gespeichert: {out}")
         return str(out)

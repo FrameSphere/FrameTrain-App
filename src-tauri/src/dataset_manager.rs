@@ -210,6 +210,15 @@ fn upsert_metadata(datasets_dir: &Path, info: &DatasetInfo) -> Result<(), String
 // FILESYSTEM UTILITIES
 // ══════════════════════════════════════════════════════════════════
 
+/// Cache der Engines: HF-Parquet mit Bild-/Audiobytes wird dort einmalig in
+/// Klassenordner entpackt (python/ft_data/media.py). Die Dateien sind eine Kopie
+/// der Parquet-Inhalte und zaehlen weder zu Groesse, Dateianzahl noch Endungen.
+const MEDIA_CACHE_DIR: &str = ".frametrain_media";
+
+fn is_media_cache(p: &Path) -> bool {
+    p.file_name().and_then(|n| n.to_str()) == Some(MEDIA_CACHE_DIR)
+}
+
 fn dir_size(path: &Path) -> (u64, usize) {
     if !path.exists() { return (0, 0); }
     let mut size = 0u64; let mut count = 0usize;
@@ -218,7 +227,7 @@ fn dir_size(path: &Path) -> (u64, usize) {
             for e in entries.flatten() {
                 let ep = e.path();
                 if ep.is_file() { *s += fs::metadata(&ep).map(|m| m.len()).unwrap_or(0); *c += 1; }
-                else if ep.is_dir() { walk(&ep, s, c); }
+                else if ep.is_dir() && !is_media_cache(&ep) { walk(&ep, s, c); }
             }
         }
     }
@@ -247,7 +256,7 @@ fn collect_extensions(dir: &Path) -> Vec<String> {
                     if let Some(ext) = ep.extension().and_then(|s| s.to_str()) {
                         out.insert(format!(".{}", ext.to_lowercase()));
                     }
-                } else if ep.is_dir() { walk(&ep, out); }
+                } else if ep.is_dir() && !is_media_cache(&ep) { walk(&ep, out); }
             }
         }
     }
@@ -278,7 +287,7 @@ fn collect_files_recursive(dir: &Path) -> Vec<PathBuf> {
             for e in entries.flatten() {
                 let ep = e.path();
                 if ep.is_file() { out.push(ep); }
-                else if ep.is_dir() { walk(&ep, out); }
+                else if ep.is_dir() && !is_media_cache(&ep) { walk(&ep, out); }
             }
         }
     }
@@ -1181,7 +1190,9 @@ fn split_folder_class(base: &Path, train_r: f64, val_r: f64, test_r: f64) -> Res
         let n = files.len(); if n == 0 { continue; }
         let indices = shuffle_indices(n);
         let (train_n, val_n, test_n) = split_counts(n, train_r, val_r);
-        for s in &["train", "val", "test"] { fs::create_dir_all(base.join(s).join(class)).ok(); }
+        // Ordner nur fuer Splits anlegen, die wirklich Dateien bekommen (move_or_copy
+        // erzeugt den Zielordner). Leere test/<klasse>/-Ordner liessen den Test
+        // sonst den leeren Split waehlen, obwohl val/ Daten hatte.
         for (slot, &file_idx) in indices.iter().enumerate() {
             let split = if slot < train_n { "train" } else if slot < train_n + val_n { "val" } else { "test" };
             let f = &files[file_idx];
@@ -1331,7 +1342,7 @@ fn split_row_file(
     }
 }
 
-/// Splittet eine Parquet-Datei zeilenweise via Python (pandas), da Parquet ein
+/// Splittet eine Parquet-Datei zeilenweise via Python (pyarrow), da Parquet ein
 /// binaeres Spaltenformat ist und nicht ohne pyarrow/pandas geparst werden kann.
 /// Mischt Zeilen, schreibt train/val/test-Parquet-Dateien mit identischem Schema.
 fn split_parquet_file(
@@ -1342,8 +1353,8 @@ fn split_parquet_file(
     let python = find_python_cmd()?;
     let script = format!(r#"
 import sys, json
-import pandas as pd
 import numpy as np
+import pyarrow.parquet as pq
 
 src       = sys.argv[1]
 train_out = sys.argv[2]
@@ -1352,10 +1363,16 @@ test_out  = sys.argv[4]
 train_r   = float(sys.argv[5])
 val_r     = float(sys.argv[6])
 
-df = pd.read_parquet(src)
-n = len(df)
+# pyarrow statt pandas: pandas verwarf die HuggingFace-Schema-Metadaten
+# (ClassLabel-Namen wie neg/pos) und schrieb eine Spalte __index_level_0__ dazu.
+table = pq.read_table(src)
+n = table.num_rows
+
+def write(indices, out):
+    pq.write_table(table.take(indices), out)
+
 if n < 3:
-    df.to_parquet(train_out)
+    pq.write_table(table, train_out)
     print(json.dumps({{"train": n, "val": 0, "test": 0, "too_small": True}}))
     sys.exit(0)
 
@@ -1376,14 +1393,14 @@ else:
     val_idx   = idx[train_n:train_n+val_n]
     test_idx  = idx[train_n+val_n:]
 
-df.iloc[train_idx].to_parquet(train_out)
+write(train_idx, train_out)
 val_count = 0
 test_count = 0
 if len(val_idx) > 0:
-    df.iloc[val_idx].to_parquet(val_out)
+    write(val_idx, val_out)
     val_count = len(val_idx)
 if len(test_idx) > 0:
-    df.iloc[test_idx].to_parquet(test_out)
+    write(test_idx, test_out)
     test_count = len(test_idx)
 
 print(json.dumps({{"train": len(train_idx), "val": val_count, "test": test_count, "too_small": False}}))
@@ -3143,7 +3160,7 @@ mod flat_split_tests {
 mod split_layout_tests {
     use super::{detect_split_layout, detect_dataset_type, parse_yaml_class_names,
                 read_class_names, generate_split_dataset_yaml, is_auxiliary_file, DatasetType,
-                split_paired_dirs, ensure_dataset_yaml};
+                split_paired_dirs, ensure_dataset_yaml, split_folder_class, dir_size};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3447,6 +3464,32 @@ mod split_layout_tests {
         fs::write(text.path().join("train.csv"), "text,label\na,0\n").unwrap();
         assert_eq!(ensure_dataset_yaml(text.path()), None);
         assert!(!text.path().join("dataset.yaml").exists());
+    }
+
+    /// Bei 0 % Testanteil darf kein leerer test/<klasse>/-Ordner entstehen —
+    /// der Test haette sonst diesen leeren Split gewaehlt.
+    #[test]
+    fn ordner_split_legt_keine_leeren_split_ordner_an() {
+        let dir = TempDir::new("folder_split");
+        let root = dir.path();
+        for cls in ["hund", "katze"] {
+            fs::create_dir_all(root.join(cls)).unwrap();
+            for i in 0..10 { fs::write(root.join(cls).join(format!("{}.jpg", i)), b"x").unwrap(); }
+        }
+        split_folder_class(root, 0.8, 0.2, 0.0).unwrap();
+        assert!(root.join("train/hund").is_dir());
+        assert!(root.join("val/katze").is_dir());
+        assert!(!root.join("test").exists(), "leerer test/-Ordner angelegt");
+    }
+
+    /// Der Parquet-Cache der Engines zaehlt nicht zur Dataset-Groesse.
+    #[test]
+    fn media_cache_zaehlt_nicht_mit() {
+        let dir = TempDir::new("media_cache");
+        fs::write(dir.path().join("train.parquet"), b"1234").unwrap();
+        fs::create_dir_all(dir.path().join(".frametrain_media/train/a")).unwrap();
+        fs::write(dir.path().join(".frametrain_media/train/a/0.png"), b"123456789").unwrap();
+        assert_eq!(dir_size(dir.path()), (4, 1));
     }
 
     #[test]

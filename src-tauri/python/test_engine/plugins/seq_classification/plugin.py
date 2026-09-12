@@ -31,13 +31,9 @@ SUPPORTED_ARCHITECTURES = {
     "xlm", "ernie", "funnel", "mpnet", "squeezebert", "layoutlm",
 }
 
-TEXT_COLUMN_NAMES = [
-    "text", "sentence", "content", "review_body", "input", "document",
-    "title", "body", "description", "abstract", "question", "passage",
-    "premise", "hypothesis",
-]
-LABEL_COLUMN_NAMES = ["label", "labels", "category", "class", "target", "sentiment"]
-ID_COLUMN_NAMES    = {"id", "idx", "index", "row_id", "sample_id", "uid", "uuid", "key"}
+# Spaltenerkennung, Satzpaare und Label-Regeln gemeinsam mit dem Training.
+from ft_data.text import detect_columns, expected_label, safe_text
+from ft_data.media import sample as random_sample
 
 
 class Plugin:
@@ -47,6 +43,9 @@ class Plugin:
         self.model     = None
         self.id2label: Dict[int, str] = {}
         self.label2id: Dict[str, int] = {}
+        # Rohwert im Dataset -> Klassenname und die Spalten aus dem Training
+        self.value_to_label: Dict[str, str] = {}
+        self.train_columns: Dict[str, Optional[str]] = {}
         self.device    = None
         self.is_stopped = False
 
@@ -84,6 +83,8 @@ class Plugin:
                 lm = json.load(f)
             self.label2id = lm.get("label2id", {})
             self.id2label = {int(k): v for k, v in lm.get("id2label", {}).items()}
+            self.value_to_label = {str(k): str(v) for k, v in (lm.get("value_to_label") or {}).items()}
+            self.train_columns = lm.get("columns") or {}
         else:
             # Fallback: aus config.json
             raw_id2label = model_cfg.get("id2label", {})
@@ -127,9 +128,10 @@ class Plugin:
             inference_time=inference_time,
         )
 
-    def _infer_text(self, text: str):
+    def _infer_text(self, text: str, text_pair: Optional[str] = None):
         inputs = self.tokenizer(
             text,
+            text_pair,
             return_tensors="pt",
             truncation=True,
             max_length=128,
@@ -168,8 +170,10 @@ class Plugin:
         TestProtocol.status("loading", f"Lade Dataset: {dataset_path.name}")
 
         samples = self._load_samples(dataset_path)
-        if self.config.max_samples:
-            samples = samples[: self.config.max_samples]
+        # Zufaellige Stichprobe statt der ersten N: viele Splits sind nach Label
+        # sortiert (imdb test: erst 12.500 negative) — die Accuracy mass sonst
+        # nur eine Klasse.
+        samples = random_sample(samples, self.config.max_samples)
 
         total = len(samples)
         TestProtocol.status("running", f"Inferenz auf {total} Samples...")
@@ -177,7 +181,10 @@ class Plugin:
         predictions   = []
         correct_count = 0
         total_loss    = 0.0
-        has_labels    = any("expected" in s for s in samples)
+        # Nur echte Labels zaehlen. Vorher war das immer wahr (der Schluessel
+        # existiert immer) — ein ungelabeltes Dataset zeigte Accuracy 0 %.
+        has_labels    = any(s.get("expected") is not None for s in samples)
+        labelled      = 0
         t_start       = time.time()
         t_last_report = t_start
 
@@ -186,18 +193,19 @@ class Plugin:
                 break
 
             text     = sample.get("text", "")
+            text2    = sample.get("text_pair")
             expected = sample.get("expected")
 
             t0 = time.time()
             try:
-                predicted, confidence, top_preds = self._infer_text(text)
+                predicted, confidence, top_preds = self._infer_text(text, text2)
 
                 # Optional: Loss berechnen wenn Label vorhanden
                 sample_loss = None
                 if expected is not None and expected in self.label2id:
                     label_id = self.label2id[str(expected)]
                     inputs = self.tokenizer(
-                        text, return_tensors="pt", truncation=True,
+                        text, text2, return_tensors="pt", truncation=True,
                         max_length=128, padding=True,
                     )
                     inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -207,7 +215,9 @@ class Plugin:
                         sample_loss = float(out.loss.item())
                     total_loss += sample_loss
 
-                is_correct = (str(predicted) == str(expected)) if expected is not None else False
+                is_correct = (str(predicted) == str(expected)) if expected is not None else None
+                if expected is not None:
+                    labelled += 1
                 if is_correct:
                     correct_count += 1
 
@@ -229,7 +239,7 @@ class Plugin:
                     "input_text":      text[:500],
                     "expected_output": str(expected) if expected is not None else None,
                     "predicted_output": "ERROR",
-                    "is_correct":      False,
+                    "is_correct":      False if expected is not None else None,
                     "loss":            None,
                     "confidence":      None,
                     "inference_time":  time.time() - t0,
@@ -250,10 +260,10 @@ class Plugin:
         completed     = len(predictions)
         sps_final     = completed / max(elapsed_total, 1e-6)
         avg_infer     = elapsed_total / max(completed, 1)
-        accuracy      = correct_count / completed if completed > 0 and has_labels else None
-        avg_loss      = total_loss / completed if completed > 0 and has_labels else None
+        accuracy      = correct_count / labelled if labelled > 0 else None
+        avg_loss      = total_loss / labelled if labelled > 0 else None
 
-        hard_examples = [p for p in predictions if not p["is_correct"] and p.get("expected_output")]
+        hard_examples = [p for p in predictions if p["is_correct"] is False and p.get("expected_output")]
 
         # Ergebnis-JSON speichern
         output_dir = Path(self.config.output_path)
@@ -294,14 +304,23 @@ class Plugin:
 
     # ─── Dataset-Loader ───────────────────────────────────────────────────
 
-    SUPPORTED_DATA_EXTS = (".jsonl", ".ndjson", ".json", ".csv", ".parquet", ".pq")
+    SUPPORTED_DATA_EXTS = (".jsonl", ".ndjson", ".json", ".csv", ".tsv", ".parquet", ".pq")
 
-    def _find_dataset_file(self, root: Path) -> Path:
-        """Wählt die richtige Datei aus einem Dataset-Verzeichnis.
+    def _find_dataset_files(self, root: Path) -> List[Path]:
+        groups = self._dataset_file_groups(root)
+        if not groups:
+            raise ValueError(
+                f"Kein unterstütztes Dataset (jsonl/json/csv/tsv/parquet) in Verzeichnis: {root}"
+            )
+        return groups[0]
+
+    def _dataset_file_groups(self, root: Path) -> List[List[Path]]:
+        """Dateigruppen je Split in Prioritaetsreihenfolge.
 
         WICHTIG: Bei gesplitteten Datasets MUSS der test-Split bevorzugt werden --
         sonst würde die Accuracy auf Trainingsdaten gemessen (Data Leakage).
         Priorität: test/ > val/ > Root-Dateien > alles andere (train/ zuletzt).
+        Alle Shards eines Splits werden gelesen, nicht nur der erste.
         """
         META_NAMES = {"dataset_infos.json", "metadata.json", "config.json", "dataset.yaml"}
 
@@ -312,107 +331,129 @@ class Plugin:
                 if f.is_file()
                 and f.suffix.lower() in self.SUPPORTED_DATA_EXTS
                 and f.name.lower() not in META_NAMES
+                and ".frametrain_media" not in f.parts
             ]
-            # Innerhalb einer Kandidatenmenge: Dateien mit "test" im Namen zuerst,
-            # danach deterministisch alphabetisch.
             found.sort(key=lambda f: (0 if "test" in f.stem.lower() else 1, str(f)))
             return found
 
+        def same_kind(files: List[Path]) -> List[Path]:
+            ext = files[0].suffix.lower()
+            return [f for f in files if f.suffix.lower() == ext]
+
+        groups: List[List[Path]] = []
         # 1. Split-Ordner nach Priorität
         for sub in ("test", "testing", "val", "validation", "valid"):
             d = root / sub
             if d.is_dir():
                 candidates = files_in(d, recursive=True)
                 if candidates:
-                    return candidates[0]
+                    groups.append(same_kind(candidates))
 
-        # 2. Dateien direkt im Root
+        # 2. Dateien direkt im Root: bevorzugt die mit test/val im Namen
         candidates = files_in(root)
         if candidates:
-            return candidates[0]
+            for key in ("test", "val"):
+                named = [f for f in candidates if key in f.stem.lower()]
+                if named:
+                    groups.append(same_kind(named))
+            no_train = [f for f in candidates if "train" not in f.stem.lower()]
+            if no_train:
+                groups.append(same_kind(no_train))
 
-        # 3. Letzter Ausweg: rekursiv, aber train/-Pfade ans Ende sortieren
-        all_files = [f for f in root.rglob("*") if f.is_file() and f.suffix.lower() in self.SUPPORTED_DATA_EXTS]
-        all_files.sort(key=lambda f: (1 if "train" in str(f.relative_to(root)).lower() else 0, str(f)))
-        if all_files:
-            return all_files[0]
+        # 3. Letzter Ausweg: train/ bzw. Trainingsdateien
+        if not groups:
+            all_files = [f for f in root.rglob("*") if f.is_file() and f.suffix.lower() in self.SUPPORTED_DATA_EXTS
+                         and ".frametrain_media" not in f.parts]
+            all_files.sort(key=lambda f: (1 if "train" in str(f.relative_to(root)).lower() else 0, str(f)))
+            if all_files:
+                groups.append(same_kind(all_files))
+        return groups
 
-        raise ValueError(
-            f"Kein unterstütztes Dataset (jsonl/json/csv/parquet) in Verzeichnis: {root}"
-        )
-
-    def _load_samples(self, path: Path) -> List[Dict[str, Any]]:
-        """Lädt Samples aus JSON/JSONL/CSV/Parquet in eine einheitliche Struktur."""
-
-        # Falls der Pfad ein Verzeichnis ist: richtige Split-Datei wählen (test bevorzugt)
-        if path.is_dir():
-            root = path
-            path = self._find_dataset_file(root)
-            try:
-                rel = path.relative_to(root)
-            except ValueError:
-                rel = path.name
-            TestProtocol.status("loading", f"Verwende Datei: {rel}")
-
+    @staticmethod
+    def _read_rows(path: Path) -> List[Dict[str, Any]]:
         ext = path.suffix.lower()
-
-        raw_rows: List[Dict] = []
-
         if ext in (".jsonl", ".ndjson"):
-            with open(path, "r", encoding="utf-8") as f:
+            rows = []
+            with open(path, "r", encoding="utf-8-sig") as f:
                 for line in f:
                     line = line.strip()
                     if line:
-                        raw_rows.append(json.loads(line))
-        elif ext == ".json":
-            with open(path, "r", encoding="utf-8") as f:
+                        rows.append(json.loads(line))
+            return rows
+        if ext == ".json":
+            with open(path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                raw_rows = data
-            elif isinstance(data, dict):
-                # {"data": [...]} o.ä.
+                return data
+            if isinstance(data, dict):
                 for v in data.values():
                     if isinstance(v, list):
-                        raw_rows = v
-                        break
-        elif ext == ".csv":
+                        return v
+            return []
+        if ext in (".csv", ".tsv"):
             import csv
-            with open(path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                raw_rows = list(reader)
-        elif ext in (".parquet", ".pq"):
+            # utf-8-sig: Excel-Exporte beginnen mit einem BOM — sonst hiess die
+            # erste Spalte "\ufefftext" und wurde nicht erkannt.
+            with open(path, "r", encoding="utf-8-sig", newline="") as f:
+                return list(csv.DictReader(f, delimiter="\t" if ext == ".tsv" else ","))
+        if ext in (".parquet", ".pq"):
             # HuggingFace-Downloads liegen standardmäßig als Parquet vor.
             import pandas as pd
             df = pd.read_parquet(path)
-            raw_rows = json.loads(df.to_json(orient="records", date_format="iso", default_handler=str))
-        else:
-            raise ValueError(f"Nicht unterstütztes Dataset-Format: {ext}")
+            return json.loads(df.to_json(orient="records", date_format="iso", default_handler=str))
+        raise ValueError(f"Nicht unterstütztes Dataset-Format: {ext}")
 
-        # Spalten normalisieren
+    def _load_samples(self, path: Path) -> List[Dict[str, Any]]:
+        """Lädt Samples aus JSON/JSONL/CSV/TSV/Parquet in eine einheitliche Struktur."""
+        if not path.is_dir():
+            return self._samples_from([path])
+
+        groups = self._dataset_file_groups(path)
+        if not groups:
+            raise ValueError(
+                f"Kein unterstütztes Dataset (jsonl/json/csv/tsv/parquet) in Verzeichnis: {path}"
+            )
+        first: Optional[List[Dict[str, Any]]] = None
+        for files in groups:
+            rel = ", ".join(str(f.relative_to(path)) for f in files[:3])
+            more = f" (+{len(files) - 3} weitere)" if len(files) > 3 else ""
+            samples = self._samples_from(files)
+            if first is None:
+                first = samples
+            if any(s["expected"] is not None for s in samples):
+                TestProtocol.status("loading", f"Verwende Datei(en): {rel}{more}")
+                return samples
+            # HF-Testsplits (GLUE u.a.) haben label = -1 — dann den naechsten
+            # Split mit echten Labels nehmen, sonst gaebe es keine Accuracy.
+            TestProtocol.status("loading", f"{rel}: keine Labels (z.B. -1) — suche gelabelten Split...")
+        TestProtocol.status("loading", "Kein Split mit Labels gefunden — nur Vorhersagen, keine Accuracy.")
+        return first or []
+
+    def _samples_from(self, files: List[Path]) -> List[Dict[str, Any]]:
+        raw_rows: List[Dict] = []
+        for f in files:
+            raw_rows.extend(self._read_rows(f))
+
         if not raw_rows:
             raise ValueError("Dataset ist leer.")
 
         sample_keys = list(raw_rows[0].keys())
-        non_id_keys = [c for c in sample_keys if c.lower() not in ID_COLUMN_NAMES]
-
-        # Text-Spalte: erst bekannte Namen, dann erste Nicht-ID-Spalte
-        text_col = next((c for c in TEXT_COLUMN_NAMES if c in sample_keys), None)
+        text_col, pair_col, label_col = detect_columns(sample_keys)
+        # Spalten aus dem Training haben Vorrang, wenn es sie hier gibt.
+        trained = self.train_columns or {}
+        if trained.get("text") in sample_keys:
+            text_col = trained["text"]
+            pair_col = trained.get("text_pair") if trained.get("text_pair") in sample_keys else None
+        if trained.get("label") in sample_keys:
+            label_col = trained["label"]
         if text_col is None:
-            text_col = non_id_keys[0] if non_id_keys else sample_keys[0]
-
-        # Label-Spalte: erst bekannte Namen, dann letzte Nicht-ID-Spalte als Fallback
-        label_col = next((c for c in LABEL_COLUMN_NAMES if c in sample_keys), None)
-        if label_col is None and len(non_id_keys) >= 2:
-            label_col = non_id_keys[-1]
+            text_col = sample_keys[0]
 
         samples = []
         for row in raw_rows:
-            raw_label = row.get(label_col) if label_col else None
-            # Listen-Labels (z.B. prmu: ["P","R",...]) → erstes Element nehmen
-            if isinstance(raw_label, list):
-                raw_label = raw_label[0] if raw_label else None
             samples.append({
-                "text":     str(row.get(text_col, "")),
-                "expected": str(raw_label) if raw_label is not None else None,
+                "text":      safe_text(row.get(text_col)),
+                "text_pair": safe_text(row.get(pair_col)) if pair_col else None,
+                "expected":  expected_label(row.get(label_col), self.value_to_label) if label_col else None,
             })
         return samples

@@ -28,13 +28,12 @@ const canvasPlugin: ModelPlugin = {
     return false;
   },
   TestComponent:  CanvasTestStub,
-  // Phase 7: Canvas-Modelle sind flexibel, akzeptieren alle Typen.
-  // Der User bestimmt selbst was er im Synapse Builder verdrahtet.
+  // Nur was die Canvas-Loader wirklich lesen koennen: image_loader (Ordner pro
+  // Klasse, auch train/val/test oder HF-Parquet mit Bildspalte), csv_loader und
+  // parquet_loader. YOLO, Pascal VOC, COCO und Audio-Transkripte standen hier
+  // vorher auch — geladen werden konnten sie nie.
   // Kein preferredDatasetType gesetzt – zeigt stattdessen "flexibel" im UI.
-  supportedDatasetTypes: [
-    'flat_file', 'folder_class', 'yolo_bbox', 'pascal_voc', 'coco_json',
-    'audio_transcript', 'common_voice', 'pre_split', 'multi_shard',
-  ],
+  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],
 };
 
 export default canvasPlugin;

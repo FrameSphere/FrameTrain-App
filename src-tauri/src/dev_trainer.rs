@@ -80,6 +80,21 @@ fn registry_stop(reg: &StdMutex<DevProcEntry>) {
     if let Some(pid) = pid { kill_process_tree(pid); }
 }
 
+/// Macht die gemeinsame Dataset-Logik (python/ft_data) im Dev-Skript importierbar.
+/// Die Vorlagen nutzen sie fuer Klassenordner, Splits und HF-Parquet — dieselben
+/// Regeln wie Training und Test.
+fn add_ft_data_path(cmd: &mut Command, app_handle: &tauri::AppHandle) {
+    if let Some(root) = crate::training_manager::python_root(app_handle) {
+        let mut paths = vec![root];
+        if let Some(existing) = std::env::var_os("PYTHONPATH") {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        if let Ok(joined) = std::env::join_paths(paths) {
+            cmd.env("PYTHONPATH", joined);
+        }
+    }
+}
+
 /// Ergaenzt zu jedem DATASET_PATH[_n] ein DATASET_YAML[_n], wenn das Dataset eine
 /// (gepruefte) dataset.yaml hat. YOLO-Skripte brauchen die yaml, nicht den Ordner —
 /// vorher mussten sie sie selbst suchen und wussten nicht, ob sie noch stimmt.
@@ -183,6 +198,7 @@ pub async fn start_dev_training(
            .stderr(Stdio::piped());
 
         // Env-Variablen setzen
+        add_ft_data_path(&mut cmd, &ah);
         cmd.env("OUTPUT_PATH", &out_p);
         // Ohne das puffert Python seine Ausgabe blockweise, sobald stdout eine
         // Pipe ist: Der Nutzer sieht waehrend des gesamten Laufs nichts und
@@ -404,6 +420,7 @@ pub async fn start_dev_test(
            .stdout(Stdio::piped())
            .stderr(Stdio::piped());
 
+        add_ft_data_path(&mut cmd, &ah);
         cmd.env("OUTPUT_PATH", &out_p);
         cmd.env("PYTHONUNBUFFERED", "1");
         for (k, v) in &env_vars {

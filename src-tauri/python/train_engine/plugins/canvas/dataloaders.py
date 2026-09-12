@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import torch
-from torch.utils.data import DataLoader, Subset, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset, random_split
 
 import sys
 from pathlib import Path
@@ -79,18 +79,11 @@ def get_dataloaders(
                 "und als neues Dataset importieren"
             )
 
-        # H\u00e4ufige Fehlauswahl 2: Parquet-/Tabellen-Dataset
-        if list(root.glob("*.parquet")) or list((root / "train").glob("*.parquet")):
-            raise ValueError(
-                "image_loader: Dieses Dataset enth\u00e4lt Parquet-Dateien (Tabellendaten).\n"
-                "Nutze im Canvas den parquet_loader-Node statt des image_loaders \u2014 "
-                "oder w\u00e4hle ein Bild-Dataset mit einem Ordner pro Klasse."
-            )
-
-        # Unterst\u00fctzte Strukturen:
-        # (A) ImageFolder-Root: Unterordner = Klassen (train/hund/*, train/katze/*)
-        # (B) Split-Root: train/ + val/ Unterordner enthalten selbst Klassen-Unterordner
-        from torchvision import datasets, transforms
+        # Unterstuetzte Strukturen (gemeinsame Regeln aus ft_data.media):
+        #   (A) Ordner pro Klasse, (B) train/ [+ val/ test/] mit Klassenordnern,
+        #   (C) HF-Parquet mit Bildspalte + Label (wird einmalig entpackt).
+        from torchvision import transforms
+        from ft_data.media import resolve_class_layout
 
         sz  = int(data_params.get("imageSize", 224))
         nrm = data_params.get("normalize", True)
@@ -110,248 +103,60 @@ def get_dataloaders(
             )
         tfm = transforms.Compose(steps)
 
-        train_dir = Path(dsp) / "train"
-        val_dir   = Path(dsp) / "val"
-        valid_dir = Path(dsp) / "valid"  # Roboflow-Standard
-
-        if train_dir.is_dir() and (val_dir.is_dir() or valid_dir.is_dir()):
-            # Struktur (B): vorgefertigte Splits
-            effective_val = val_dir if val_dir.is_dir() else valid_dir
-            try:
-                ds_train = datasets.ImageFolder(str(train_dir), transform=tfm)
-                ds_val   = datasets.ImageFolder(str(effective_val), transform=tfm)
-            except FileNotFoundError as e:
-                found = ", ".join(sorted(d.name for d in train_dir.iterdir() if d.is_dir())) or "(keine)"
-                raise ValueError(
-                    f"image_loader: Konnte train/{effective_val.name}/ nicht als ImageFolder lesen.\n"
-                    f"Gefundene Unterordner in train/: {found}\n"
-                    f"Erwartet: Unterordner pro Klasse mit Bildern (z.B. train/hund/*.jpg, train/katze/*.jpg).\n"
-                    f"Detail: {e}"
-                )
-            return (
-                DataLoader(ds_train, batch_size=batch_size, shuffle=True,  num_workers=0),
-                DataLoader(ds_val,   batch_size=batch_size, shuffle=False, num_workers=0),
-            )
-
-        # Struktur (A): kein vorgefertigter Split
-        if not Path(dsp).is_dir():
+        if not root.is_dir():
             raise ValueError(
                 f"image_loader: Pfad existiert nicht: {dsp}\n"
                 "Bitte einen Ordner mit Klassen-Unterordnern ausw\u00e4hlen."
             )
-        subdirs = [d for d in Path(dsp).iterdir() if d.is_dir()]
-        if not subdirs:
-            raise ValueError(
-                f"image_loader: Keine Unterordner in {dsp}.\n"
-                "Erwartet wird ein Ordner pro Klasse (z.B. hund/, katze/)."
-            )
         try:
-            ds = datasets.ImageFolder(dsp, transform=tfm)
-        except Exception as e:
-            found = ", ".join(sorted(d.name for d in subdirs)) or "(keine)"
-            raise ValueError(
-                f"image_loader: Fehler beim Laden des Bild-Datasets aus {dsp}.\n"
-                f"Gefundene Unterordner: {found}\n"
-                f"Erwartet: ein Unterordner pro Klasse mit Bildern (z.B. hund/*.jpg, katze/*.jpg).\n"
-                f"Detail: {e}"
-            )
-        n    = int(len(ds) * 0.8)
-        tr, va = random_split(ds, [n, len(ds) - n])
-        return (
-            DataLoader(tr, batch_size=batch_size, shuffle=True,  num_workers=0),
-            DataLoader(va, batch_size=batch_size, shuffle=False, num_workers=0),
-        )
-
-    # ── csv_loader ───────────────────────────────────────────────
-    if data_type == "csv_loader":
-        if not dsp:
-            raise ValueError(
-                "csv_loader: kein Dataset-Pfad angegeben.\n"
-                "Bitte eine CSV-Datei ausw\u00e4hlen."
-            )
-
-        csv_path = Path(dsp)
-        # Unterst\u00fctze: direkte CSV-Datei oder Ordner mit train.csv
-        if csv_path.is_dir():
-            candidates = list(csv_path.glob("*.csv"))
-            train_csv  = csv_path / "train" / (next(iter((csv_path / "train").glob("*.csv")), None) or Path("")).name if (csv_path / "train").is_dir() else None
-            if train_csv and train_csv.exists():
-                csv_path = train_csv
-            elif candidates:
-                csv_path = candidates[0]
-            else:
+            layout = resolve_class_layout(root, "image", val_fraction=0.2)
+        except ValueError as e:
+            has_parquet = list(root.glob("*.parquet")) or list((root / "train").glob("*.parquet"))
+            if has_parquet:
                 raise ValueError(
-                    f"csv_loader: Keine CSV-Datei gefunden in {dsp}.\n"
-                    "Erwartet: eine .csv-Datei oder einen Ordner mit train/*.csv."
+                    "image_loader: Dieses Dataset enth\u00e4lt Parquet-Dateien ohne Bildspalte (Tabellendaten).\n"
+                    "Nutze im Canvas den parquet_loader-Node statt des image_loaders \u2014 "
+                    "oder w\u00e4hle ein Bild-Dataset mit einem Ordner pro Klasse."
                 )
-
-        if not csv_path.exists():
-            raise ValueError(f"csv_loader: Datei nicht gefunden: {csv_path}")
-
-        import pandas as pd
-        try:
-            tgt = str(data_params.get("targetCol", "label"))
-            sep = str(data_params.get("separator", ",")) or ","
-            if sep in ("\\t", "\\\\t"):
-                sep = "\t"
-            has_header = data_params.get("hasHeader", True)
-            has_header = has_header is True or str(has_header).lower() in ("true", "1", "yes")
-            df = pd.read_csv(str(csv_path), sep=sep, header=0 if has_header else None)
-        except Exception as e:
-            raise ValueError(f"csv_loader: Fehler beim Lesen von {csv_path}: {e}")
-
-        if df.empty:
-            raise ValueError(f"csv_loader: CSV-Datei {csv_path} ist leer.")
-
-        if tgt in df.columns:
-            X = torch.tensor(df.drop(columns=[tgt]).values.astype("float32"))
-            y = torch.tensor(df[tgt].values, dtype=torch.long)
-        elif len(df.columns) >= 2:
-            # Fallback: letzte Spalte als Label (auch bei Header-losen CSVs)
-            X = torch.tensor(df.values[:, :-1].astype("float32"))
-            y = torch.tensor(df.values[:, -1].astype("int64"), dtype=torch.long)
-        else:
+            found = ", ".join(d.name for d in sorted(root.iterdir()) if d.is_dir()) or "(keine)"
             raise ValueError(
-                f"csv_loader: CSV hat nur {len(df.columns)} Spalte(n). "
-                f"Ben\u00f6tigt mindestens 2 (Features + Label). "
-                f"Spalten: {list(df.columns)}"
+                f"image_loader: {e}\n"
+                f"Gefundene Unterordner in {dsp}: {found}\n"
+                "Erwartet: ein Unterordner pro Klasse mit Bildern (z.B. hund/*.jpg, katze/*.jpg), "
+                "optional unter train/ und val/."
             )
 
-        # normalize-Param: Features spaltenweise auf Mittelwert 0 / Std 1 bringen
-        do_norm = data_params.get("normalize", False)
-        if do_norm is True or str(do_norm).lower() in ("true", "1", "yes"):
-            std = X.std(dim=0, keepdim=True)
-            std[std == 0] = 1.0
-            X = (X - X.mean(dim=0, keepdim=True)) / std
+        rgb = channels != 1
 
-        ds   = TensorDataset(X, y)
-        n    = int(len(ds) * 0.8)
-        tr, va = random_split(ds, [n, len(ds) - n])
+        class _Files(torch.utils.data.Dataset):
+            def __init__(self, items):
+                self.items = list(items)
+
+            def __len__(self):
+                return len(self.items)
+
+            def __getitem__(self, i):
+                from PIL import Image
+                path, label = self.items[i]
+                with Image.open(path) as im:
+                    return tfm(im.convert("RGB") if rgb else im.convert("L")), label
+
+        if num_classes and len(layout.classes) > int(num_classes):
+            raise ValueError(
+                f"image_loader: Das Dataset hat {len(layout.classes)} Klassen ({layout.classes[:10]}), "
+                f"das Modell ist auf {num_classes} Klassen eingestellt.\n"
+                "Setze die Klassenanzahl im Synapse Builder auf die Anzahl der Klassenordner."
+            )
+        gen = torch.Generator().manual_seed(42)
         return (
-            DataLoader(tr, batch_size=batch_size, shuffle=True),
-            DataLoader(va, batch_size=batch_size),
+            DataLoader(_Files(layout.train), batch_size=batch_size, shuffle=True, num_workers=0, generator=gen),
+            DataLoader(_Files(layout.val),   batch_size=batch_size, shuffle=False, num_workers=0),
         )
 
-    # ── parquet_loader ───────────────────────────────────────────
-    if data_type == "parquet_loader":
-        if not dsp:
-            raise ValueError("parquet_loader: kein Dataset-Pfad angegeben.")
-
-        import pandas as pd
-        pq_path = Path(dsp)
-
-        # Sammle alle .parquet-Dateien (train-Split bevorzugt)
-        def collect_parquets(root: Path):
-            train_dir = root / "train"
-            if train_dir.is_dir():
-                files = sorted(train_dir.glob("*.parquet"))
-                if files: return files, root / "val"
-            return sorted(root.glob("*.parquet")), None
-
-        train_files, val_dir = collect_parquets(pq_path)
-        if not train_files:
-            raise ValueError(
-                f"parquet_loader: Keine .parquet-Dateien gefunden in {dsp}.\n"
-                "Erwartet: .parquet-Dateien im Root oder in einem train/-Unterordner."
-            )
-
-        try:
-            df_train = pd.concat([pd.read_parquet(str(f)) for f in train_files], ignore_index=True)
-        except Exception as e:
-            raise ValueError(f"parquet_loader: Fehler beim Lesen der Parquet-Dateien: {e}")
-
-        import numpy as np
-
-        # Val-Split VOR dem Label-Mapping laden, damit die Klassen-IDs aus
-        # train UND val gebildet werden (sonst KeyError bei nur-in-val-Labels).
-        df_val = None
-        if val_dir and val_dir.is_dir():
-            val_files = sorted(val_dir.glob("*.parquet"))
-            if val_files:
-                df_val = pd.concat([pd.read_parquet(str(f)) for f in val_files], ignore_index=True)
-
-        tgt = str(data_params.get("targetCol", "label"))
-        if tgt not in df_train.columns:
-            # Fallback: letzte Spalte
-            tgt = df_train.columns[-1]
-
-        # Nur NUMERISCHE Spalten sind als Features nutzbar — Text-Spalten
-        # (z.B. title/abstract) können nicht in Float-Tensoren umgewandelt werden.
-        feat_cols = [
-            c for c in df_train.columns
-            if c != tgt and not c.startswith("__")
-            and np.issubdtype(df_train[c].dtype, np.number)
-        ]
-        skipped = [c for c in df_train.columns if c != tgt and c not in feat_cols and not c.startswith("__")]
-        if not feat_cols:
-            raise ValueError(
-                "parquet_loader: Keine numerischen Feature-Spalten gefunden.\n"
-                f"Spalten: {skipped} | Label: '{tgt}'\n\n"
-                "Der Canvas-parquet_loader erwartet TABELLARISCHE Daten "
-                "(Zahlen-Features + Label-Spalte).\n"
-                "Text-Datasets (Titel, Abstracts, Keyphrases …) brauchen "
-                "Tokenizer + Embedding — nutze dafür das normale Training-Panel "
-                "(z.B. Sequenzklassifikation) statt des Canvas-parquet_loaders."
-            )
-
-        # Label: numerisch direkt übernehmen, Strings auf IDs mappen ('prmu' → 0…K).
-        # Klassen aus train+val vereinigen, damit kein Split unbekannte Labels hat.
-        def label_series(df):
-            return df[tgt].astype(str) if not np.issubdtype(df[tgt].dtype, np.number) else df[tgt]
-
-        numeric_label = np.issubdtype(df_train[tgt].dtype, np.number)
-        label_map = None
-        if not numeric_label:
-            classes = set(label_series(df_train))
-            if df_val is not None and tgt in df_val.columns:
-                classes |= set(label_series(df_val))
-            label_map = {c: i for i, c in enumerate(sorted(classes))}
-
-        def to_tensors(df):
-            X = torch.tensor(df[feat_cols].values.astype("float32"))
-            if numeric_label:
-                y = torch.tensor(df[tgt].values.astype("int64"), dtype=torch.long)
-            else:
-                y = torch.tensor([label_map[v] for v in df[tgt].astype(str)], dtype=torch.long)
-            return X, y
-
-        try:
-            X_train, y_train = to_tensors(df_train)
-        except Exception as e:
-            raise ValueError(
-                f"parquet_loader: Konnte Spalten nicht in Tensoren umwandeln.\n"
-                f"Numerische Feature-Spalten: {feat_cols[:5]} | Label: '{tgt}'"
-                + (f" | Ignorierte Text-Spalten: {skipped[:5]}" if skipped else "") + "\n"
-                f"Detail: {e}"
-            )
-
-        if skipped:
-            try:
-                from core.protocol import MessageProtocol
-                MessageProtocol.status(
-                    "loading_data",
-                    f"parquet_loader: Text-Spalten ignoriert (nicht numerisch): {skipped[:8]}"
-                )
-            except Exception:
-                print(f"[parquet_loader] Text-Spalten ignoriert: {skipped[:8]}", file=sys.stderr)
-
-        ds_train = TensorDataset(X_train, y_train)
-
-        # Val-Split
-        if df_val is not None:
-            X_val, y_val = to_tensors(df_val)
-            ds_val = TensorDataset(X_val, y_val)
-            return (
-                DataLoader(ds_train, batch_size=batch_size, shuffle=True),
-                DataLoader(ds_val,   batch_size=batch_size),
-            )
-
-        n    = int(len(ds_train) * 0.8)
-        tr, va = random_split(ds_train, [n, len(ds_train) - n])
-        return (
-            DataLoader(tr, batch_size=batch_size, shuffle=True),
-            DataLoader(va, batch_size=batch_size),
-        )
+    # ── csv_loader / parquet_loader ─────────────────────────────
+    if data_type in ("csv_loader", "parquet_loader"):
+        regression = getattr(ir.training, "task_type", "") == "regression"
+        return _tabular_loaders(data_type, dsp, data_params, num_classes, batch_size, regression)
 
     # ── Unbekannter data_type ────────────────────────────────────────
     # KEIN stiller Dummy-Fallback mehr -- expliziter Fehler damit der User
@@ -365,3 +170,212 @@ def get_dataloaders(
         "  - Im Synapse Builder den Daten-Node auf einen g\u00fcltigen Typ setzen\n"
         "  - Ein kompatibles Dataset ausw\u00e4hlen (Bilder f\u00fcr image_loader, CSV f\u00fcr csv_loader)"
     )
+
+
+# ── Tabellen (CSV / Parquet) ───────────────────────────────────────────────────
+#
+# Frueher gemachte Fehler, die hier ausgeschlossen werden:
+#   * Bei train.csv / val.csv / test.csv im Root wurde irgendeine Datei genommen
+#     (Reihenfolge von glob) — eventuell test.csv, die Val-Datei wurde ignoriert.
+#   * Text-Labels ("cat") und Labels ab 1 statt 0 stuerzten in CrossEntropy ab.
+#   * Nicht-numerische Feature-Spalten liessen die CSV-Umwandlung abstuerzen.
+#   * Zeilen ohne Label (-1, leer) wurden als Klasse mittrainiert.
+
+_SPLIT_WORDS = {
+    "train": ("train", "training"),
+    "val": ("val", "valid", "validation", "dev"),
+    "test": ("test", "testing"),
+}
+
+
+def _split_of(name: str) -> Optional[str]:
+    import re
+    low = name.lower()
+    for canon, words in _SPLIT_WORDS.items():
+        if any(re.search(rf"(^|[^a-z]){w}([^a-z]|$)", low) for w in words):
+            return canon
+    return None
+
+
+def _tabular_files(root: Path, exts: Tuple[str, ...]):
+    """(train-Dateien, val-Dateien) — test wird nie zum Training genutzt."""
+    if root.is_file():
+        return [root], []
+
+    def files(d: Path):
+        return sorted(f for f in d.iterdir() if f.is_file() and f.suffix.lower() in exts) if d.is_dir() else []
+
+    subdirs = {d.name.lower(): d for d in root.iterdir() if d.is_dir()}
+    train = next((files(subdirs[w]) for w in _SPLIT_WORDS["train"] if w in subdirs and files(subdirs[w])), [])
+    val = next((files(subdirs[w]) for w in _SPLIT_WORDS["val"] if w in subdirs and files(subdirs[w])), [])
+    if train:
+        return train, val
+
+    loose = files(root)
+    named_train = [f for f in loose if _split_of(f.stem) == "train"]
+    named_val = [f for f in loose if _split_of(f.stem) == "val"]
+    if named_train:
+        return named_train, named_val
+    return [f for f in loose if _split_of(f.stem) != "test"] or loose, []
+
+
+def _is_unlabeled(v) -> bool:
+    if v is None:
+        return True
+    try:
+        import math
+        if isinstance(v, float) and math.isnan(v):
+            return True
+    except Exception:
+        pass
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v < 0
+    return str(v).strip() in ("", "-1", "nan", "None")
+
+
+def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_classes, batch_size: int,
+                     regression: bool = False):
+    import numpy as np
+    import pandas as pd
+
+    name = data_type
+    if not dsp:
+        raise ValueError(f"{name}: kein Dataset-Pfad angegeben.")
+    root = Path(dsp)
+    if not root.exists():
+        raise ValueError(f"{name}: Pfad nicht gefunden: {dsp}")
+
+    if data_type == "csv_loader":
+        exts = (".csv", ".tsv", ".txt")
+        sep = str(data_params.get("separator", ",")) or ","
+        if sep in ("\\t", "\\\\t"):
+            sep = "\t"
+        has_header = data_params.get("hasHeader", True)
+        has_header = has_header is True or str(has_header).lower() in ("true", "1", "yes")
+
+        def read(f: Path):
+            return pd.read_csv(str(f), sep="\t" if f.suffix.lower() == ".tsv" else sep,
+                               header=0 if has_header else None, encoding="utf-8-sig")
+    else:
+        exts = (".parquet",)
+
+        def read(f: Path):
+            return pd.read_parquet(str(f))
+
+    train_files, val_files = _tabular_files(root, exts)
+    if not train_files:
+        raise ValueError(
+            f"{name}: Keine {'/'.join(exts)}-Dateien gefunden in {dsp}.\n"
+            "Erwartet: Dateien im Root (train.* / val.*) oder in train/ und val/."
+        )
+    try:
+        df_train = pd.concat([read(f) for f in train_files], ignore_index=True)
+        df_val = pd.concat([read(f) for f in val_files], ignore_index=True) if val_files else None
+    except Exception as e:
+        raise ValueError(f"{name}: Fehler beim Lesen von {[f.name for f in train_files + val_files]}: {e}")
+    if df_train.empty:
+        raise ValueError(f"{name}: {train_files[0].name} ist leer.")
+    if len(df_train.columns) < 2:
+        raise ValueError(
+            f"{name}: Nur {len(df_train.columns)} Spalte(n) — benoetigt werden Features + Label. "
+            f"Spalten: {list(df_train.columns)}"
+        )
+
+    tgt = data_params.get("targetCol", "label")
+    if tgt not in df_train.columns:
+        tgt = df_train.columns[-1]
+
+    def clean(df):
+        # Regression: negative Zielwerte sind gueltig, nur leere Zellen fallen raus.
+        mask = df[tgt].notna() if regression else ~df[tgt].map(_is_unlabeled)
+        return df[mask].reset_index(drop=True), int((~mask).sum())
+
+    df_train, dropped = clean(df_train)
+    if df_val is not None:
+        df_val, dropped_val = clean(df_val)
+        dropped += dropped_val
+    if dropped:
+        _status(f"{name}: {dropped} Zeilen ohne Label (leer/-1) ignoriert.")
+
+    feat_cols = [c for c in df_train.columns
+                 if c != tgt and not str(c).startswith("__") and np.issubdtype(df_train[c].dtype, np.number)]
+    skipped = [c for c in df_train.columns if c != tgt and c not in feat_cols and not str(c).startswith("__")]
+    if not feat_cols:
+        raise ValueError(
+            f"{name}: Keine numerischen Feature-Spalten gefunden.\n"
+            f"Spalten: {skipped} | Label: '{tgt}'\n\n"
+            "Der Canvas-Loader erwartet TABELLARISCHE Daten (Zahlen-Features + Label-Spalte).\n"
+            "Text-Datasets brauchen Tokenizer + Embedding — nutze dafuer das normale "
+            "Training-Panel (z.B. Sequenzklassifikation)."
+        )
+    if skipped:
+        _status(f"{name}: nicht-numerische Spalten ignoriert: {skipped[:8]}")
+
+    if regression:
+        def to_reg(df):
+            feats = df[feat_cols].astype("float32").fillna(0.0)
+            return torch.tensor(feats.values), torch.tensor(df[tgt].astype("float32").values)
+        X_train, y_train = to_reg(df_train)
+        gen = torch.Generator().manual_seed(42)
+        if df_val is not None and len(df_val):
+            X_val, y_val = to_reg(df_val)
+            return (DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, generator=gen),
+                    DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size))
+        ds = TensorDataset(X_train, y_train)
+        n = max(1, int(len(ds) * 0.8))
+        tr, va = random_split(ds, [n, len(ds) - n], generator=torch.Generator().manual_seed(42))
+        return (DataLoader(tr, batch_size=batch_size, shuffle=True, generator=gen), DataLoader(va, batch_size=batch_size))
+
+    # Labels immer auf 0..K-1 abbilden: Text-Labels und Labels ab 1 funktionieren so auch.
+    values = list(df_train[tgt]) + (list(df_val[tgt]) if df_val is not None and tgt in df_val.columns else [])
+    numeric = all(isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool) for v in values)
+    keys = sorted({float(v) for v in values}) if numeric else sorted({str(v) for v in values})
+    label_map = {k: i for i, k in enumerate(keys)}
+    if len(keys) < 2:
+        raise ValueError(f"{name}: Label-Spalte '{tgt}' hat nur einen Wert ({keys[:1]}) — keine Klassifikation moeglich.")
+    if num_classes and len(keys) > int(num_classes):
+        raise ValueError(
+            f"{name}: Label-Spalte '{tgt}' hat {len(keys)} Klassen, das Modell ist auf {num_classes} eingestellt.\n"
+            "Setze die Klassenanzahl im Synapse Builder passend (oder waehle die richtige Label-Spalte)."
+        )
+    if not numeric or keys != [float(i) for i in range(len(keys))]:
+        _status(f"{name}: Labels auf 0..{len(keys) - 1} abgebildet: {dict(list(zip(keys, range(len(keys))))[:10])}")
+
+    def to_tensors(df):
+        feats = df[feat_cols].astype("float32")
+        if feats.isna().any().any():
+            feats = feats.fillna(0.0)
+        X = torch.tensor(feats.values)
+        y = torch.tensor([label_map[float(v) if numeric else str(v)] for v in df[tgt]], dtype=torch.long)
+        return X, y
+
+    X_train, y_train = to_tensors(df_train)
+    do_norm = data_params.get("normalize", False)
+    mean = std = None
+    if do_norm is True or str(do_norm).lower() in ("true", "1", "yes"):
+        mean = X_train.mean(dim=0, keepdim=True)
+        std = X_train.std(dim=0, keepdim=True)
+        std[std == 0] = 1.0
+        X_train = (X_train - mean) / std
+    ds_train = TensorDataset(X_train, y_train)
+
+    gen = torch.Generator().manual_seed(42)
+    if df_val is not None and len(df_val):
+        X_val, y_val = to_tensors(df_val)
+        if mean is not None:
+            X_val = (X_val - mean) / std
+        return (DataLoader(ds_train, batch_size=batch_size, shuffle=True, generator=gen),
+                DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size))
+
+    n = max(1, int(len(ds_train) * 0.8))
+    tr, va = random_split(ds_train, [n, len(ds_train) - n], generator=torch.Generator().manual_seed(42))
+    return (DataLoader(tr, batch_size=batch_size, shuffle=True, generator=gen),
+            DataLoader(va, batch_size=batch_size))
+
+
+def _status(message: str) -> None:
+    try:
+        from core.protocol import MessageProtocol
+        MessageProtocol.status("loading_data", message)
+    except Exception:
+        print(f"[canvas] {message}", file=sys.stderr)

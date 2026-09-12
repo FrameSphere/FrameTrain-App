@@ -56,7 +56,8 @@ const imageClassificationPlugin: ModelPlugin = {
   defaultPluginConfig: { arch: 'resnet18', image_size: 224, freeze_base: true, unfreeze_at: -1, pretrained: true, augment: true },
   detect: detectImageClassification,
   TestComponent: ImageClassificationTestPlugin,
-  supportedDatasetTypes: ['folder_class', 'pre_split'],
+  // flat_file/multi_shard: HF-Parquet mit Bildspalte wird in Klassenordner entpackt.
+  supportedDatasetTypes: ['folder_class', 'pre_split', 'flat_file', 'multi_shard'],
   preferredDatasetType: 'folder_class',
 };
 

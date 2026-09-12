@@ -31,6 +31,7 @@ import type { DatasetCompatPlugin, DatasetCompatResult, DatasetAnalysis } from '
 import { analysisToCheckInput } from './datasetCompatHelpers';
 import { xlmRobertaCompatPlugin } from './xlm-roberta/datasetCompat';
 import { hfEncoderCompatPlugin } from './hf-encoder/datasetCompat';
+import { genericDatasetCompat, type CompatPluginInfo } from './genericDatasetCompat';
 
 const COMPAT_PLUGINS: DatasetCompatPlugin[] = [
   xlmRobertaCompatPlugin,
@@ -54,8 +55,14 @@ export function checkDatasetCompat(
   modelPluginId: string,
   extensions:    string[],
   analysis?:     DatasetAnalysis | null,
+  /** Plugin-Beschreibung fuer Modelle ohne eigene Pruefung (supportedDatasetTypes). */
+  modelPlugin?:  CompatPluginInfo | null,
 ): DatasetCompatResult {
   const plugin = COMPAT_PLUGINS.find(p => p.modelPluginId === modelPluginId);
+
+  if (!plugin && modelPlugin) {
+    return genericDatasetCompat(modelPlugin, analysis ? analysisToCheckInput(analysis) : null, extensions);
+  }
 
   if (!plugin) {
     return {

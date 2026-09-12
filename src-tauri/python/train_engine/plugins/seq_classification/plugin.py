@@ -52,49 +52,19 @@ SUPPORTED_ARCHITECTURES = {
     "xlm", "ernie", "funnel", "mpnet", "squeezebert", "layoutlm",
 }
 
-# ─── Dataset-Formate ──────────────────────────────────────────────────────────
-LABEL_COLUMN_NAMES = ["label", "labels", "category", "class", "target", "sentiment"]
-TEXT_COLUMN_NAMES  = ["text", "sentence", "content", "review_body", "input", "document", "title", "body", "description", "abstract", "question", "passage", "premise", "hypothesis"]
-# Spalten die nie als Text-Eingabe verwendet werden sollen
-ID_COLUMN_NAMES = {
-    "id", "idx", "index", "row_id", "sample_id", "uid", "uuid", "key",
-    "review_id", "product_id", "user_id", "item_id", "doc_id", "article_id",
-    "tweet_id", "post_id", "comment_id", "message_id", "conversation_id",
-    "passage_id", "question_id", "answer_id", "sentence_id", "token_id",
-    "source_id", "target_id", "pair_id", "example_id", "data_id",
-}
+# ─── Dataset-Spalten ──────────────────────────────────────────────────────────
+# Spaltenerkennung, Satzpaare, ungelabelte Zeilen und Label-Namen: ft_data.text
+# (gemeinsam mit dem Test-Plugin, damit beide dieselben Spalten waehlen).
+from ft_data.text import (
+    class_label_names, detect_columns, display_label, is_unlabeled, label_value, safe_text,
+)
 
 
-def _detect_columns(features: dict):
-    """Erkennt automatisch Text- und Label-Spalte."""
-    # Interne Spalten wie '__index_level_0__' (Pandas/Parquet-Artefakt) sind
-    # NIE Text oder Label — vorher wurde genau diese Index-Spalte als "Label"
-    # erkannt (KeyError beim Eval-Split, tausende Pseudo-Klassen).
-    cols = [c for c in features.keys() if not c.startswith("__")]
-    label_col = None
-    text_col  = None
-
-    for name in LABEL_COLUMN_NAMES:
-        if name in cols:
-            label_col = name
-            break
-
-    for name in TEXT_COLUMN_NAMES:
-        if name in cols:
-            text_col = name
-            break
-
-    # Fallback: erste nicht-ID Spalte ist Text, letzte ist Label
-    if text_col is None or label_col is None:
-        non_id_cols = [c for c in cols if c.lower() not in ID_COLUMN_NAMES]
-        if text_col is None and non_id_cols:
-            text_col = non_id_cols[0]
-        if label_col is None and len(non_id_cols) >= 2:
-            label_col = non_id_cols[-1]
-        elif label_col is None and len(cols) >= 2:
-            label_col = cols[-1]
-
-    return text_col, label_col
+def _load(ext_key: str, data_files: dict):
+    """load_dataset mit TSV als CSV mit Tabulator."""
+    if ext_key == "tsv":
+        return load_dataset("csv", data_files=data_files, delimiter="\t")
+    return load_dataset(ext_key, data_files=data_files)
 
 
 class Plugin(TrainPlugin):
@@ -109,7 +79,9 @@ class Plugin(TrainPlugin):
         self.label2id: Dict[str, int] = {}
         self.id2label: Dict[int, str] = {}
         self.text_col:  str = "text"
+        self.text_pair_col: Optional[str] = None
         self.label_col: str = "label"
+        self.value_to_label: Dict[str, str] = {}
         self.num_labels: int = 2
         self._start_time      = time.time()
         self._last_train_loss: float = 0.0
@@ -180,40 +152,70 @@ class Plugin(TrainPlugin):
         else:
             raw = self._load_from_file(dataset_path)
 
-        # Spalten erkennen
+        # Spalten erkennen (gemeinsam mit dem Test-Plugin, ft_data.text)
         split = list(raw.keys())[0]
-        self.text_col, self.label_col = _detect_columns(raw[split].features)
+        columns = list(raw[split].features.keys())
+        self.text_col, self.text_pair_col, self.label_col = detect_columns(columns)
 
         if self.text_col is None or self.label_col is None:
             raise ValueError(
                 f"Konnte Text- und Label-Spalten nicht erkennen.\n"
-                f"Gefundene Spalten: {list(raw[split].features.keys())}\n"
+                f"Gefundene Spalten: {columns}\n"
                 f"Erwartet z.B.: 'text' / 'label'"
             )
 
+        pair_hint = f" + '{self.text_pair_col}' (Satzpaar)" if self.text_pair_col else ""
         MessageProtocol.status(
             "loading_data",
-            f"Text-Spalte: '{self.text_col}', Label-Spalte: '{self.label_col}'"
+            f"Text-Spalte: '{self.text_col}'{pair_hint}, Label-Spalte: '{self.label_col}'"
         )
 
-        # Labels normalisieren — aus ALLEN Splits sammeln, nicht nur dem ersten.
-        # Vorher: Labels nur aus train → unbekanntes Label im Eval-Split = KeyError.
-        unique_labels = set()
-        total_rows = 0
+        # ClassLabel-Namen ('neg'/'pos') statt nackter Indizes.
+        names = class_label_names(raw[split].features, self.label_col)
+        label_col = self.label_col
+
+        # Ungelabelte Zeilen entfernen: HF-Testsplits haben label = -1. Vorher
+        # wurde -1 als eigene Klasse gezaehlt (SST-2: 3 statt 2 Klassen).
+        splits = {}
         for split_name in raw.keys():
-            if self.label_col not in raw[split_name].features:
+            ds = raw[split_name]
+            if label_col not in ds.features:
                 continue
-            total_rows += len(raw[split_name])
-            for val in raw[split_name][self.label_col]:
-                if isinstance(val, list):
-                    # Wenn die Label eine Liste sind, take the first element
-                    if val:
-                        unique_labels.add(val[0])
-                else:
-                    unique_labels.add(val)
-        all_labels = sorted(unique_labels, key=lambda x: str(x))
-        self.label2id = {str(l): i for i, l in enumerate(all_labels)}
-        self.id2label = {i: str(l) for i, l in enumerate(all_labels)}
+            before = len(ds)
+            ds = ds.filter(lambda ex: not is_unlabeled(ex[label_col]))
+            dropped = before - len(ds)
+            if dropped:
+                MessageProtocol.status(
+                    "loading_data",
+                    f"{split_name}: {dropped} von {before} Zeilen ohne Label (z.B. -1) ignoriert.",
+                )
+            if len(ds):
+                splits[split_name] = ds
+        if "train" not in splits and splits:
+            first = next(iter(splits))
+            splits["train"] = splits.pop(first)
+        if not splits:
+            raise ValueError(
+                f"Keine Zeile mit Label in Spalte '{label_col}' gefunden — alle Werte sind leer oder -1.\n\n"
+                "Häufigste Ursache: Es wurde ein Split ohne Labels importiert "
+                "(z.B. der 'unsupervised'-Split von IMDB oder der test-Split von GLUE).\n"
+                "Lösung: Dataset mit dem train-Split neu importieren."
+            )
+
+        # Labels normalisieren — aus ALLEN Splits sammeln, nicht nur dem ersten.
+        unique_labels = {}
+        total_rows = 0
+        for ds in splits.values():
+            total_rows += len(ds)
+            for val in ds[label_col]:
+                v = label_value(val, label_col)   # Multi-Label -> klarer Fehler
+                unique_labels.setdefault(display_label(v, names), v)
+        ordered = sorted(unique_labels.items(), key=lambda kv: (
+            (0, kv[1]) if isinstance(kv[1], (int, float)) and not isinstance(kv[1], bool) else (1, str(kv[1]))))
+        all_labels = [name for name, _ in ordered]
+        self.label2id = {name: i for i, name in enumerate(all_labels)}
+        self.id2label = {i: name for i, name in enumerate(all_labels)}
+        self.value_to_label = {display_label(v, []): name for name, v in ordered}
         self.num_labels = len(all_labels)
 
         # Sanity-Check: weniger als 2 Klassen = keine Klassifikation. Ohne diesen
@@ -223,25 +225,23 @@ class Plugin(TrainPlugin):
         if self.num_labels < 2:
             only = all_labels[0] if all_labels else "—"
             raise ValueError(
-                f"Label-Spalte '{self.label_col}' enthält nur einen einzigen Wert "
+                f"Label-Spalte '{label_col}' enthält nur einen einzigen Wert "
                 f"({only!r}) bei {total_rows} Zeilen — damit lässt sich keine "
                 "Klassifikation trainieren.\n\n"
-                "Häufigste Ursache: Es wurde ein Split ohne Labels importiert "
-                "(z.B. der 'unsupervised'-Split von IMDB, dort ist label immer -1).\n\n"
                 "Lösungen:\n"
                 "  - Dataset neu importieren und den train/test-Split wählen\n"
                 "  - Prüfen, ob die richtige Spalte als Label erkannt wurde "
-                f"(erkannt: '{self.label_col}', vorhanden: {list(raw[split].features.keys())})"
+                f"(erkannt: '{label_col}', vorhanden: {columns})"
             )
 
         # Sanity-Check: fast so viele "Klassen" wie Zeilen = ID-/Index-Spalte,
         # kein Klassifikations-Label. Klare Meldung statt kryptischem Crash.
         if self.num_labels > 1000 or (total_rows > 0 and self.num_labels > total_rows * 0.5):
             raise ValueError(
-                f"Label-Spalte '{self.label_col}' hat {self.num_labels} verschiedene Werte "
+                f"Label-Spalte '{label_col}' hat {self.num_labels} verschiedene Werte "
                 f"bei {total_rows} Zeilen — das sieht nach einer ID-/Index-Spalte aus, "
                 "nicht nach Klassifikations-Labels.\n"
-                f"Gefundene Spalten: {list(raw[split].features.keys())}\n\n"
+                f"Gefundene Spalten: {columns}\n\n"
                 "Lösungen:\n"
                 "  - Dataset mit echter Label-Spalte verwenden (z.B. 'label' mit wenigen Klassen)\n"
                 "  - Dieses Dataset ist evtl. kein Klassifikations-Dataset "
@@ -250,19 +250,16 @@ class Plugin(TrainPlugin):
 
         MessageProtocol.status("loading_data", f"Labels ({self.num_labels}): {all_labels[:10]}")
 
-        # Train/Eval-Split
-        if "train" in raw and "test" in raw:
-            train_raw = raw["train"]
-            eval_raw  = raw["test"]
-        elif "train" in raw and "validation" in raw:
-            train_raw = raw["train"]
-            eval_raw  = raw["validation"]
-        elif "train" in raw:
-            split_ds = raw["train"].train_test_split(test_size=0.1, seed=self.config.seed)
-            train_raw = split_ds["train"]
-            eval_raw  = split_ds["test"]
+        # Train/Eval-Split: validation vor test. Vorher wurde test bevorzugt —
+        # die Testdaten steuerten dann schon die Modellauswahl im Training.
+        train_raw = splits["train"]
+        if "validation" in splits:
+            eval_raw = splits["validation"]
+        elif "test" in splits:
+            eval_raw = splits["test"]
+            MessageProtocol.status("loading_data", "Kein Validierungs-Split — test/ wird zur Evaluation genutzt.")
         else:
-            split_ds = raw[split].train_test_split(test_size=0.1, seed=self.config.seed)
+            split_ds = train_raw.train_test_split(test_size=0.1, seed=self.config.seed)
             train_raw = split_ds["train"]
             eval_raw  = split_ds["test"]
 
@@ -271,27 +268,22 @@ class Plugin(TrainPlugin):
             f"Train: {len(train_raw)} | Eval: {len(eval_raw)} | Tokenisiere..."
         )
 
+        text_col, pair_col = self.text_col, self.text_pair_col
+        label2id = self.label2id
+
         def tokenize_fn(batch):
+            first = [safe_text(t) for t in batch[text_col]]
+            second = [safe_text(t) for t in batch[pair_col]] if pair_col else None
             tokens = self.tokenizer(
-                batch[self.text_col],
+                first,
+                second,
                 truncation=True,
                 padding="max_length",
                 max_length=self.config.max_seq_length,
             )
-            # Handle list values in label column
-            labels = []
-            for l in batch[self.label_col]:
-                if isinstance(l, list):
-                    label_val = str(l[0]) if l else "0"
-                else:
-                    label_val = str(l)
-                labels.append(self.label2id[label_val])
-            tokens["labels"] = labels
+            tokens["labels"] = [label2id[display_label(label_value(l, label_col), names)]
+                                for l in batch[label_col]]
             return tokens
-
-        keep_cols = ["input_ids", "attention_mask", "labels"]
-        if "token_type_ids" in self.tokenizer.model_input_names:
-            keep_cols.append("token_type_ids")
 
         self.train_dataset = train_raw.map(
             tokenize_fn, batched=True,
@@ -330,6 +322,8 @@ class Plugin(TrainPlugin):
             return load_dataset("json", data_files=str(path))
         if ext == ".csv":
             return load_dataset("csv", data_files=str(path))
+        if ext == ".tsv":
+            return load_dataset("csv", data_files=str(path), delimiter="\t")
         if ext in (".parquet", ".pq"):
             return load_dataset("parquet", data_files=str(path))
         raise ValueError(f"Nicht unterstütztes Dateiformat: {ext}")
@@ -361,6 +355,7 @@ class Plugin(TrainPlugin):
                 ("*.jsonl",   "json"),
                 ("*.json",    "json"),
                 ("*.csv",     "csv"),
+                ("*.tsv",     "tsv"),
             ]:
                 train_files = _files(train_subdir, ext_glob)
                 if not train_files:
@@ -382,7 +377,7 @@ class Plugin(TrainPlugin):
                     f"train: {len(train_files)} Datei(en), "
                     f"val: {len(val_files)}, test: {len(test_files)}"
                 )
-                return load_dataset(ext_key, data_files=data_files)
+                return _load(ext_key, data_files)
 
         # Strategie 2: Dateien mit train/test im Namen im Root (Fallback)
         for ext_glob, ext_key in [
@@ -390,6 +385,7 @@ class Plugin(TrainPlugin):
             ("*.jsonl",   "json"),
             ("*.json",    "json"),
             ("*.csv",     "csv"),
+            ("*.tsv",     "tsv"),
         ]:
             files = [f for f in sorted(path.glob(ext_glob)) if f.name not in SKIP]
             if not files:
@@ -401,7 +397,7 @@ class Plugin(TrainPlugin):
             if train_files and test_files:
                 MessageProtocol.status("loading_data",
                     f"Root-Dateien | {ext_key} | train: {len(train_files)}, test: {len(test_files)}")
-                return load_dataset(ext_key, data_files={
+                return _load(ext_key, {
                     "train": [str(f) for f in train_files],
                     "test":  [str(f) for f in test_files],
                 })
@@ -410,8 +406,7 @@ class Plugin(TrainPlugin):
             if files:
                 MessageProtocol.status("loading_data",
                     f"Root-Dateien | {ext_key} | {len(files)} Datei(en) gesamt")
-                return load_dataset(ext_key,
-                    data_files={"train": [str(f) for f in files]})
+                return _load(ext_key, {"train": [str(f) for f in files]})
 
         raise FileNotFoundError(
             f"Keine unterstuetzten Dataset-Dateien in {path} gefunden.\n"
@@ -750,7 +745,15 @@ class Plugin(TrainPlugin):
         self.tokenizer.save_pretrained(str(output_path))
 
         # Label-Mapping sichern
-        label_map = {"label2id": self.label2id, "id2label": self.id2label}
+        # value_to_label: Rohwert im Dataset ("0") -> Klassenname ("neg"), damit
+        # der Test erwartete und vorhergesagte Labels vergleichen kann.
+        # columns: dieselben Spalten (inkl. Satzpaar) im Test verwenden.
+        label_map = {
+            "label2id": self.label2id,
+            "id2label": self.id2label,
+            "value_to_label": self.value_to_label,
+            "columns": {"text": self.text_col, "text_pair": self.text_pair_col, "label": self.label_col},
+        }
         with open(output_path / "label_mapping.json", "w", encoding="utf-8") as f:
             json.dump(label_map, f, ensure_ascii=False, indent=2)
 

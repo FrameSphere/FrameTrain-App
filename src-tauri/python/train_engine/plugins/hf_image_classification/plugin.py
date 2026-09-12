@@ -11,10 +11,12 @@ resnet18. Dieses Plugin laedt die Gewichte aus `model_path`.
 Dataset-Layout: ein Ordner pro Klasse, optional in train/ val/ test/.
     <dataset>/train/katze/*.jpg
     <dataset>/val/hund/*.jpg
+HuggingFace-Parquet mit Bild-/Audio-Spalte und Label wird einmalig in
+Klassenordner entpackt (ft_data.media).
 """
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -22,16 +24,7 @@ from core.config import TrainingConfig
 from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 from core import hf_training as hft
-
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
-
-
-def _class_dirs(root: Path) -> List[Path]:
-    return sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
-
-
-def _images_in(d: Path) -> List[Path]:
-    return sorted(f for f in d.rglob("*") if f.suffix.lower() in IMAGE_EXTS)
+from ft_data.media import resolve_class_layout
 
 
 class Plugin(TrainPlugin):
@@ -72,48 +65,26 @@ class Plugin(TrainPlugin):
         if not root.exists():
             raise FileNotFoundError(f"Dataset-Pfad existiert nicht: {root}")
 
-        train_root = root / "train" if (root / "train").is_dir() else root
-        val_root: Optional[Path] = None
-        for name in ("val", "validation", "test"):
-            if (root / name).is_dir():
-                val_root = root / name
-                break
+        # Gemeinsame Regeln fuer Klassenordner, Splits und HF-Parquet (ft_data).
+        # Validierung ist val/; fehlt sie, wird von train abgetrennt — test/
+        # bleibt fuer den Test unberuehrt.
+        layout = resolve_class_layout(
+            root, "image", seed=self.config.seed,
+            status=lambda m: MessageProtocol.status("loading_data", m))
+        for note in layout.notes:
+            MessageProtocol.status("loading_data", note)
+        self.classes = layout.classes
 
-        self.classes = [d.name for d in _class_dirs(train_root)]
-        if len(self.classes) < 2:
-            raise ValueError(
-                f"In '{train_root}' wurden {len(self.classes)} Klassenordner gefunden "
-                f"({self.classes or 'keine'}). Fuer eine Bildklassifikation braucht es "
-                "mindestens zwei Unterordner — einen pro Klasse."
-            )
-        label2id = {c: i for i, c in enumerate(self.classes)}
+        def as_dict(items):
+            return {"path": [str(f) for f, _ in items], "labels": [label for _, label in items]}
 
-        def collect(base: Path) -> Dict[str, list]:
-            paths, labels = [], []
-            for d in _class_dirs(base):
-                if d.name not in label2id:
-                    continue
-                for f in _images_in(d):
-                    paths.append(str(f))
-                    labels.append(label2id[d.name])
-            return {"path": paths, "labels": labels}
-
-        train_raw = collect(train_root)
-        if not train_raw["path"]:
-            raise ValueError(f"Keine Bilddateien unter '{train_root}' gefunden.")
         MessageProtocol.status(
             "loading_data",
             f"Klassen ({len(self.classes)}): {', '.join(self.classes)} | "
-            f"{len(train_raw['path'])} Trainingsbilder",
+            f"{len(layout.train)} Trainingsbilder",
         )
-
-        train_ds = Dataset.from_dict(train_raw)
-        if val_root is not None:
-            eval_ds = Dataset.from_dict(collect(val_root))
-        else:
-            split = train_ds.train_test_split(test_size=0.1, seed=self.config.seed)
-            train_ds, eval_ds = split["train"], split["test"]
-            MessageProtocol.status("loading_data", "Kein val/-Ordner gefunden — 10% des Trainings als Validierung abgetrennt.")
+        train_ds = Dataset.from_dict(as_dict(layout.train))
+        eval_ds = Dataset.from_dict(as_dict(layout.val))
 
         eval_ds = hft.cap_eval_dataset(eval_ds, getattr(self.config, "max_eval_samples", 0), self.config.seed)
 

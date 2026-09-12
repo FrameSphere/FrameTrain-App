@@ -13,7 +13,6 @@ from _shared_classify import (
     load_label_names, resolve_device, run_dataset_classification,
 )
 
-AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}
 
 
 class Plugin:
@@ -85,4 +84,4 @@ class Plugin:
         )
 
     def run_dataset(self):
-        run_dataset_classification(self, AUDIO_EXTS, self._predict, "Audiodateien")
+        run_dataset_classification(self, "audio", self._predict, "Audiodateien")

@@ -446,6 +446,12 @@ fn get_python_path() -> String {
     crate::python_env::resolve_python()
 }
 
+/// Ordner `python/` der App (enthaelt train_engine, test_engine und ft_data).
+pub fn python_root(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    get_train_engine_path(app_handle).ok()
+        .and_then(|p| p.parent().and_then(|d| d.parent()).map(|d| d.to_path_buf()))
+}
+
 fn get_train_engine_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let candidates = vec![
         // Produktion: gebundelte Ressourcen
