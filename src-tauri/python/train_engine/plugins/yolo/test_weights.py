@@ -222,6 +222,30 @@ class LabelPruefungTest(unittest.TestCase):
         self.assertEqual(len(self.plugin._yaml_image_dirs(y)), 2)
         self.assertTrue(self.plugin._verify_labels(y))
 
+    def test_fehlende_split_ordner_brechen_mit_klarer_meldung_ab(self):
+        # Die alte App-Split-yaml: images/train eingetragen, Dateien in train/images.
+        self.bilder(self.root / "train" / "images", 3, self.root / "train" / "labels")
+        self.bilder(self.root / "val" / "images", 1, self.root / "val" / "labels")
+        y = self.root / "dataset.yaml"
+        y.write_text(f"path: {self.root}\ntrain: images/train\nval: images/val\nnc: 1\nnames: ['o']\n",
+                     encoding="utf-8")
+        self.assertFalse(self.plugin._verify_labels(y))
+
+    def test_roboflow_pfade_mit_punkt_punkt_gelten_als_vorhanden(self):
+        self.bilder(self.root / "train" / "images", 2, self.root / "train" / "labels")
+        y = self.root / "data.yaml"
+        y.write_text("train: ../train/images\nval: ../train/images\nnc: 1\nnames: ['o']\n",
+                     encoding="utf-8")
+        self.assertTrue(self.plugin._verify_labels(y))
+
+    def test_yaml_aus_plugin_config_hat_vorrang(self):
+        eigene = self.root / "sub" / "eigene.yaml"
+        eigene.parent.mkdir()
+        eigene.write_text("train: x\n", encoding="utf-8")
+        (self.root / "dataset.yaml").write_text("train: y\n", encoding="utf-8")
+        self.plugin.config.plugin_config = {"dataset_yaml_path": str(eigene)}
+        self.assertEqual(self.plugin._find_or_build_yaml(self.root), eigene)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

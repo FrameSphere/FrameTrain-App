@@ -91,12 +91,13 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
   const [parquetError, setParquetError] = useState<string | null>(null);
 
   // YAML Editor State
-  interface YamlData { exists: boolean; train_path: string; val_path: string; nc: number; names: string[]; yaml_path?: string; }
+  interface YamlData { exists: boolean; train_path: string; val_path: string; test_path?: string; nc: number; names: string[]; yaml_path?: string; }
   const [yamlData, setYamlData] = useState<YamlData | null>(null);
   const [yamlLoading, setYamlLoading] = useState(false);
   const [yamlSaving, setYamlSaving] = useState(false);
   const [editTrainPath, setEditTrainPath] = useState('');
   const [editValPath, setEditValPath] = useState('');
+  const [editTestPath, setEditTestPath] = useState('');
   const [editNames, setEditNames] = useState<string[]>([]);
   const [newClassName, setNewClassName] = useState('');
   const [yamlSaved, setYamlSaved] = useState(false);
@@ -119,12 +120,13 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
     if (yamlData !== null) return; // bereits geladen
     setYamlLoading(true);
     try {
-      const data = await invoke<{ exists: boolean; train_path: string; val_path: string; nc: number; names: string[]; yaml_path?: string; }>(
+      const data = await invoke<YamlData>(
         'get_dataset_yaml', { datasetId }
       );
       setYamlData(data);
       setEditTrainPath(data.train_path ?? 'images/train');
       setEditValPath(data.val_path ?? 'images/val');
+      setEditTestPath(data.test_path ?? '');
       setEditNames(data.names ?? []);
     } catch (err) {
       error(t('datasetFileManager.yaml.yamlError'), String(err));
@@ -238,9 +240,10 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
         datasetId,
         trainPath: editTrainPath,
         valPath: editValPath,
+        testPath: editTestPath,
         names: editNames,
       });
-      setYamlData(prev => prev ? { ...prev, train_path: editTrainPath, val_path: editValPath, names: editNames, nc: editNames.length } : prev);
+      setYamlData(prev => prev ? { ...prev, train_path: editTrainPath, val_path: editValPath, test_path: editTestPath, names: editNames, nc: editNames.length } : prev);
       setYamlSaved(true);
       setTimeout(() => setYamlSaved(false), 2000);
       success(t('datasetFileManager.yaml.saveSuccess'), t('datasetFileManager.yaml.saveSuccessDetail'));
@@ -385,7 +388,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
                 {/* Pfade */}
                 <section className="space-y-3">
                   <h3 className="text-sm font-semibold text-white">{t('datasetFileManager.yaml.sectionPaths')}</h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-1.5">
                       <label className="block text-xs text-gray-400">
                         <code className="text-orange-400">{t('datasetFileManager.yaml.trainPathLabel')}</code>
@@ -411,6 +414,19 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
                         className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm font-mono focus:outline-none focus:border-white/30 transition-all"
                       />
                       <p className="text-[10px] text-gray-600">z.B. <code>{t('datasetFileManager.yaml.valPathPlaceholder')}</code> oder <code>val/images</code></p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs text-gray-400">
+                        <code className="text-orange-400">{t('datasetFileManager.yaml.testPathLabel')}</code>
+                      </label>
+                      <input
+                        type="text"
+                        value={editTestPath}
+                        onChange={e => setEditTestPath(e.target.value)}
+                        placeholder={t('datasetFileManager.yaml.testPathPlaceholder')}
+                        className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm font-mono focus:outline-none focus:border-white/30 transition-all"
+                      />
+                      <p className="text-[10px] text-gray-600">{t('datasetFileManager.yaml.testPathHint')}</p>
                     </div>
                   </div>
                 </section>
@@ -485,7 +501,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
 path: <dataset-root>
 train: ${editTrainPath || 'images/train'}  # relativer Pfad zum Trainings-Bilder-Ordner
 val:   ${editValPath || 'images/val'}      # relativer Pfad zum Validierungs-Bilder-Ordner
-
+${editTestPath.trim() ? `test:  ${editTestPath.trim()}  # relativer Pfad zum Test-Bilder-Ordner\n` : ''}
 nc: ${editNames.length}
 names:
 ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t('datasetFileManager.yaml.previewNoClasses')}`}`.trim()

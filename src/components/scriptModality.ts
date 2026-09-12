@@ -6,7 +6,7 @@
 
 import { detectPlugin } from '../plugins/registry';
 
-export type ScriptModality = 'text' | 'image' | 'audio' | 'seq2seq';
+export type ScriptModality = 'text' | 'image' | 'audio' | 'seq2seq' | 'detection';
 
 interface ModelLike {
   name: string;
@@ -30,7 +30,24 @@ export function detectScriptModality(model: ModelLike | null): ScriptModality {
       return 'audio';
     case 'seq2seq':
       return 'seq2seq';
+    // YOLO: Ultralytics mit dataset.yaml statt Transformers mit Tabellen.
+    case 'detect':
+      return 'detection';
     default:
       return 'text';
   }
+}
+
+/**
+ * Pfad als Inhalt eines Python-String-Literals ("...").
+ * Ohne Escaping war jede Vorlage auf Windows kaputt: "C:\Users\..." ist in
+ * Python ein ungueltiges \U-Escape und bricht schon beim Parsen ab.
+ */
+export function pyPath(path: string | null | undefined): string {
+  return (path ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Standard-OUTPUT_PATH einer Vorlage, falls sie ausserhalb von FrameTrain laeuft. */
+export function templateOutputPath(outputPath: string, name: 'dev_train' | 'dev_test'): string {
+  return outputPath.replace(/(dev_)?<job_id>|\{wird beim Start gesetzt\}/, name);
 }

@@ -41,6 +41,9 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
+  // Dataset fuer den Dev-Test-Modus. Vorher gab es keine Auswahl: DATASET_PATH
+  // war stumm immer das erste Dataset des Modells.
+  const [devDatasetId, setDevDatasetId] = useState<string | null>(null);
 
   const [selectedModelId, setSelectedModelId]   = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
@@ -184,7 +187,10 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
   useEffect(() => {
     if (!selectedModelId) { setDatasets([]); return; }
     invoke<DatasetInfo[]>('list_datasets_for_model', { modelId: selectedModelId })
-      .then(setDatasets)
+      .then(list => {
+        setDatasets(list);
+        setDevDatasetId(cur => (cur && list.some(d => d.id === cur)) ? cur : (list[0]?.id ?? null));
+      })
       .catch(() => setDatasets([]));
   }, [selectedModelId]);
 
@@ -320,6 +326,25 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
                   }
                 </select>
               </div>
+
+              {mode === 'dev' && (
+                <div className="space-y-1.5 col-span-2">
+                  <label className="block text-sm font-medium text-white">{t('testPanel.modelSelector.datasetLabel')}</label>
+                  <select
+                    value={devDatasetId ?? ''}
+                    onChange={e => setDevDatasetId(e.target.value)}
+                    disabled={datasets.length === 0}
+                    className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500/50 appearance-none transition-all disabled:opacity-50"
+                  >
+                    {datasets.length
+                      ? datasets.map(d => (
+                          <option key={d.id} value={d.id} className="bg-slate-900">{d.name}</option>
+                        ))
+                      : <option value="">{t('testPanel.modelSelector.noDataset')}</option>
+                    }
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Support-Badge – nur im Test Engine Mode relevant */}
@@ -377,6 +402,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
               modelInfo={selectedModel ?? null}
               selectedVersionPath={selectedVersionPath}
               datasets={datasets}
+              selectedDatasetId={devDatasetId}
             />
           )}
 

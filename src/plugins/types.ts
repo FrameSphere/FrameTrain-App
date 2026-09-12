@@ -16,6 +16,8 @@ export interface DatasetInfo {
   warnings?:       string[];
   // v2: Schema-Hint (z.B. dataset.yaml Inhalt bei YOLO)
   schema_hint?:    Record<string, unknown> | null;
+  /** Gepruefte dataset.yaml/data.yaml (YOLO), vom Backend beim Auflisten ermittelt. */
+  dataset_yaml_path?: string | null;
 }
 
 export interface TestPluginProps {

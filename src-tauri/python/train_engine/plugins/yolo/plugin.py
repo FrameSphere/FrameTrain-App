@@ -144,28 +144,48 @@ class YOLOPlugin:
         return found, len(probe)
 
     def _yaml_image_dirs(self, yaml_path: Path) -> list:
-        """Die in der dataset.yaml genannten Bildordner (train/val)."""
+        """Die in der dataset.yaml genannten Bildordner (train/val), die existieren."""
+        return [found for found, _ in self._yaml_split_dirs(yaml_path) if found]
+
+    def _yaml_split_dirs(self, yaml_path: Path) -> list:
+        """(gefundener Ordner oder None, erwarteter Pfad) je train/val-Eintrag.
+
+        Loest wie Ultralytics auf: relativ zu `path:`, sonst zum yaml-Ordner;
+        Roboflow-Exporte schreiben '../train/images', das Ultralytics ebenfalls
+        relativ zum yaml-Ordner findet. Listen-Eintraege ([a, b]) werden nicht
+        geprueft, statt faelschlich als fehlend zu gelten.
+        """
         root = yaml_path.parent
-        dirs = []
         try:
             lines = yaml_path.read_text(encoding="utf-8").splitlines()
         except Exception:
             return []
         base = None
+        entries = []
         for line in lines:
-            line = line.split("#")[0].strip()
-            if ":" not in line:
+            line = line.split(" #")[0].strip()
+            if line.startswith("#") or ":" not in line:
                 continue
             key, value = line.split(":", 1)
-            key, value = key.strip(), value.strip()
-            if key == "path" and value:
-                base = Path(value)
-            elif key in ("train", "val") and value:
-                p = Path(value)
-                if not p.is_absolute():
-                    p = (base or root) / value
-                dirs.append(p)
-        return [d for d in dirs if d.is_dir()]
+            key, value = key.strip(), value.strip().strip("'\"")
+            if not value or value.startswith("["):
+                continue
+            if key == "path":
+                base = Path(value) if Path(value).is_absolute() else root / value
+            elif key in ("train", "val"):
+                entries.append(value)
+        result = []
+        for value in entries:
+            p = Path(value)
+            if p.is_absolute():
+                candidates = [p]
+            else:
+                candidates = [(base or root) / value, root / value]
+                if value.startswith("../"):
+                    candidates.append(root / value[3:])
+            found = next((c for c in candidates if c.is_dir()), None)
+            result.append((found, candidates[0]))
+        return result
 
     def _verify_labels(self, yaml_path: Path) -> bool:
         """Bricht ab, wenn zu den Bildern keine Labels existieren.
@@ -175,6 +195,16 @@ class YOLOPlugin:
         sind dann konstant 0, mAP ebenfalls — die Oberflaeche zeigte
         'loss=0.0000 mAP50=0.0000' und niemand konnte sehen, woran es lag.
         """
+        missing = [expected for found, expected in self._yaml_split_dirs(yaml_path) if not found]
+        if missing:
+            # Sonst bricht erst Ultralytics mit "images not found" ab — und die
+            # Meldung nennt weder die yaml-Zeile noch den Ordner, der wirklich da ist.
+            MessageProtocol.error(
+                "dataset.yaml verweist auf fehlende Ordner",
+                f"In {yaml_path} stehen Bildordner, die es nicht gibt:\n  "
+                + "\n  ".join(str(d) for d in missing)
+                + "\nPruefe train:/val: im Tab 'dataset.yaml' des Datasets.")
+            return False
         dirs = self._yaml_image_dirs(yaml_path)
         found = probed = 0
         for d in dirs:
@@ -200,14 +230,13 @@ class YOLOPlugin:
         return True
 
     def _find_or_build_yaml(self, root: Path) -> Optional[Path]:
+        # Die App traegt die bereits gepruefte (und ggf. reparierte) yaml ein.
+        given = (self.config.plugin_config or {}).get("dataset_yaml_path")
+        if given and Path(given).is_file():
+            return Path(given)
         for c in [root/"dataset.yaml", root/"data.yaml"]:
             if c.exists():
                 return c
-        train_dir = root / "train"
-        if train_dir.is_dir():
-            for c in [train_dir.parent/"dataset.yaml", train_dir.parent/"data.yaml"]:
-                if c.exists():
-                    return c
         MessageProtocol.status("setup", "Kein dataset.yaml — generiere automatisch...")
         return self._generate_yaml(root)
 

@@ -699,10 +699,12 @@ pub async fn start_training(
     // FIX Bug 1: Dataset-Pfad — user-scoped Metadaten-JSON first, SQLite als Fallback.
         let dataset_path = resolve_dataset_path();
         
-        // dataset.yaml in plugin_config eintragen wenn vorhanden
-        // (YOLO-Plugins und Custom-Scripts können den Pfad direkt aus plugin_config lesen)
-        let yaml_path = dataset_path.join("dataset.yaml");
-        if yaml_path.exists() {
+        // dataset.yaml in plugin_config eintragen wenn vorhanden — das YOLO-Plugin
+        // nimmt genau diese Datei. ensure_dataset_yaml korrigiert vorher eine yaml,
+        // deren path/Splits nicht mehr zum Ordner passen.
+        let yaml = if dataset_path.as_os_str().is_empty() { None }
+                   else { crate::dataset_manager::ensure_dataset_yaml(&dataset_path) };
+        if let Some(yaml_path) = yaml {
             let mut pc = final_config.plugin_config.as_object().cloned().unwrap_or_default();
             pc.entry("dataset_yaml_path".to_string()).or_insert_with(|| {
                 serde_json::Value::String(yaml_path.to_string_lossy().to_string())
@@ -1109,7 +1111,9 @@ fn run_training(
         if let Some(ref mut job) = sl.current_job {
             if job.completed_at.is_none() { job.completed_at = Some(Utc::now()); }
             if job.status == TrainingStatus::Pending || job.status == TrainingStatus::Running {
-                job.status = if ok { TrainingStatus::Completed } else { TrainingStatus::Failed };
+                // Die Engine beendet sich auch nach einem gemeldeten Fehler mit
+                // Exit 0 — der Verlauf darf den Lauf dann nicht als abgeschlossen fuehren.
+                job.status = if ok && !(json_error && !json_complete) { TrainingStatus::Completed } else { TrainingStatus::Failed };
             }
             let _ = save_job(&app_handle, job.clone());
         }

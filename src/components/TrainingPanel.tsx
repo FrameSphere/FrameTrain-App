@@ -51,6 +51,8 @@ export interface DatasetInfo {
   dataset_type?: import('../plugins/datasetCompatHelpers').DatasetType;
   pairing_status?: import('../plugins/datasetCompatHelpers').PairingStatus | null;
   warnings?: string[];
+  /** Gepruefte dataset.yaml/data.yaml (YOLO) — kommt als DATASET_YAML in Dev Train/Test an. */
+  dataset_yaml_path?: string | null;
 }
 
 export interface TrainingConfig {

@@ -23,10 +23,12 @@ import { MarkdownText } from './ui/MarkdownText';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, calculateAffectedLines, type CodeEdit, type HighlightedLine } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
-import { detectScriptModality, type ScriptModality } from './scriptModality';
+import { detectScriptModality, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { generateYoloTestScript } from './yoloDevScripts';
 import DiffViewer from './DiffViewer';
 import OpenLibraryModal from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
+import { buildDatasetRefs, refsForPrompt, refsToEnv, selectedFirst, type DevRef } from '../utils/devDatasetRefs';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -241,8 +243,8 @@ function makeSessionTitle(msg: string): string {
   return msg.trim().slice(0, 42) + (msg.trim().length > 42 ? '…' : '');
 }
 
-function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, onReplaceScript, onClose, initialInput, modelPathOverride, onHighlightLines, onClearHighlights }: {
-  script: string; modelInfo: ModelInfo | null; datasets: DatasetInfo[]; outputPath: string;
+function CodeAISidebar({ script, modelInfo, dsRefs, outputPath, onApplyEdit, onReplaceScript, onClose, initialInput, modelPathOverride, onHighlightLines, onClearHighlights }: {
+  script: string; modelInfo: ModelInfo | null; dsRefs: DevRef[]; outputPath: string;
   onApplyEdit: (s: string) => void; onReplaceScript: (s: string) => void; onClose: () => void;
   initialInput?: string; modelPathOverride?: string; onHighlightLines?: (edits: CodeEdit[]) => void; onClearHighlights?: () => void;
 }) {
@@ -350,7 +352,6 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   }, [messages, onHighlightLines]);
 
   const modelPath = modelPathOverride || modelInfo?.local_path || modelInfo?.source_path || modelInfo?.name || 'MODELL_PFAD';
-  const dsRefs    = datasets.map((d, i) => `${i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`} = "${d.storage_path || d.name}" (${d.name})`);
 
   const baseSystemPrompt = `Du bist ein professioneller Code-Side-Assistant in FrameTrain (Dev Test).
 
@@ -358,7 +359,7 @@ ZIEL: Hilf dem User, das Test-Skript schnell, korrekt und robust zu fixen/verbes
 
 KONTEXT (lokal):
 - MODEL_PATH = "${modelPath}"
-${dsRefs.map(r => `- ${r}`).join('\n')}
+${refsForPrompt(dsRefs)}
 - OUTPUT_PATH = "${outputPath}"
 
 PFAD-KONVENTION (wichtig): FrameTrain setzt diese Pfade beim Start als
@@ -366,11 +367,16 @@ Umgebungsvariablen. Im Skript gehoeren sie deshalb so hinterlegt:
     MODEL_PATH   = os.environ.get("MODEL_PATH",   "<Pfad oben>")
     DATASET_PATH = os.environ.get("DATASET_PATH", "<Pfad oben>")
     OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "<Pfad oben>")
+DATASET_YAML ist gesetzt, wenn das Dataset eine dataset.yaml hat (YOLO /
+Objekterkennung). Fuer Ultralytics IMMER data=DATASET_YAML uebergeben, nie den
+Ordner DATASET_PATH. Die yaml ist geprueft: path, train und val stimmen.
+DATASET_PATH_<n> / DATASET_YAML_<n> sind alle Datasets des Modells in fester
+Reihenfolge, DATASET_PATH ist das ausgewaehlte.
 Schreibe die absoluten Pfade NIE fest ins Skript — sonst laeuft es nur auf
 diesem Rechner mit genau diesem Modell und Dataset und ist ueber die
 Bibliothek nicht mehr teilbar.
 
-INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft
+INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, ultralytics (YOLO)
 
 AKTUELLER SCRIPT-INHALT:
 \`\`\`python
@@ -950,6 +956,15 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
 
 function generateDefaultTestScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const modality = detectScriptModality(model);
+  if (modality === 'detection') {
+    const ds = datasets[0];
+    return generateYoloTestScript({
+      modelPath:   pyPath(model?.local_path || model?.source_path || model?.name),
+      datasetPath: pyPath(ds?.storage_path),
+      datasetYaml: pyPath(ds?.dataset_yaml_path),
+      outputPath:  pyPath(templateOutputPath(outputPath, 'dev_test')),
+    });
+  }
   if (modality !== 'text') {
     return generateMediaTestScript(modality, model, datasets, outputPath);
   }
@@ -962,15 +977,15 @@ function generateDefaultTestScript(model: ModelInfo | null, datasets: DatasetInf
  * Tabellendatei mit Quell- und Zielspalte.
  */
 function generateMediaTestScript(
-  modality: Exclude<ScriptModality, 'text'>,
+  modality: Exclude<ScriptModality, 'text' | 'detection'>,
   model: ModelInfo | null,
   datasets: DatasetInfo[],
   outputPath: string,
 ): string {
   const ds = datasets[0];
-  const modelPathDefault   = model?.local_path || model?.source_path || model?.name || '';
-  const datasetPathDefault = ds?.storage_path || '';
-  const outputPathDefault  = outputPath.replace('<job_id>', 'dev_test').replace('{wird beim Start gesetzt}', 'dev_test');
+  const modelPathDefault   = pyPath(model?.local_path || model?.source_path || model?.name);
+  const datasetPathDefault = pyPath(ds?.storage_path);
+  const outputPathDefault  = pyPath(templateOutputPath(outputPath, 'dev_test'));
 
   if (modality === 'seq2seq') {
     return `#!/usr/bin/env python3
@@ -1230,9 +1245,9 @@ print(f"Ergebnisse gespeichert: {OUTPUT_PATH}/results.json", flush=True)
 
 function generateTextTestScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const ds = datasets[0];
-  const modelPathDefault   = model?.local_path || model?.source_path || model?.name || '';
-  const datasetPathDefault = ds?.storage_path || '';
-  const outputPathDefault  = outputPath.replace('<job_id>', 'dev_test').replace('{wird beim Start gesetzt}', 'dev_test');
+  const modelPathDefault   = pyPath(model?.local_path || model?.source_path || model?.name);
+  const datasetPathDefault = pyPath(ds?.storage_path);
+  const outputPathDefault  = pyPath(templateOutputPath(outputPath, 'dev_test'));
 
   return `#!/usr/bin/env python3
 # FrameTrain - Dev Test Script
@@ -1378,10 +1393,14 @@ interface DevTestPanelProps {
   modelInfo: ModelInfo | null;
   selectedVersionPath?: string;
   datasets: DatasetInfo[];
+  /** Im Dropdown gewähltes Dataset — bestimmt, was als DATASET_PATH ankommt. */
+  selectedDatasetId?: string | null;
   userData?: { userId: string; email: string; apiKey: string; password: string };
 }
 
-export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets, userData }: DevTestPanelProps) {
+export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets: allDatasets, selectedDatasetId, userData }: DevTestPanelProps) {
+  const datasets = useMemo(() => selectedFirst(allDatasets, selectedDatasetId), [allDatasets, selectedDatasetId]);
+  const dsRefs = useMemo(() => buildDatasetRefs(allDatasets, selectedDatasetId), [allDatasets, selectedDatasetId]);
   // Globale Legacy-Scripts einmalig in den User-Key übernehmen
   useEffect(() => { migrateLegacyDevScripts(userData?.userId); }, [userData?.userId]);
   const { currentTheme } = useTheme();
@@ -1448,11 +1467,6 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
   const highlightedHtml = useMemo(() => highlightPythonToHtml(script || ''), [script]);
 
   const modelPath = selectedVersionPath || modelInfo?.local_path || modelInfo?.source_path || modelInfo?.name || '';
-  const dsRefs    = datasets.map((d, i) => ({
-    key:   i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`,
-    value: d.storage_path || '',
-    name:  d.name,
-  }));
 
   // ── AI Coach Page Context ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1733,10 +1747,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
 
     setRunning(true); setOutput(''); setExitCode(null);
 
-    const refs: Record<string, string> = {
-      MODEL_PATH: modelPath,
-      ...Object.fromEntries(dsRefs.map(r => [r.key, r.value])),
-    };
+    const refs = refsToEnv(modelPath, dsRefs);
 
     try {
       await invoke('start_dev_test', {
@@ -1835,7 +1846,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                 <FolderOpen className="w-4 h-4 text-blue-400" />
                 <span className="text-sm font-medium text-white">{t('devTestPanel.paths.datasetTitle')}</span>
               </div>
-              {dsRefs.map(r => <RefRow key={r.key} color="text-blue-400" label={r.key} value={r.value} hint={r.name} />)}
+              {dsRefs.map(r => <RefRow key={r.key} color={r.kind === 'yaml' ? 'text-amber-400' : 'text-blue-400'} label={r.key} value={r.value} hint={r.name} />)}
             </div>
 
             <div className="border-t border-white/10" />
@@ -1846,7 +1857,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                 <FolderOpen className="w-4 h-4 text-purple-400" />
                 <span className="text-sm font-medium text-white">{t('devTestPanel.paths.outputTitle')}</span>
               </div>
-              <RefRow color="text-purple-400" label="OUTPUT_PATH" value={outputPath.replace('<job_id>', '{wird beim Start gesetzt}')} />
+              <RefRow color="text-purple-400" label="OUTPUT_PATH" value={outputPath} />
             </div>
           </div>
         )}
@@ -2166,7 +2177,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets,
                 {showAI && (
                   <div className="w-80 border-l border-white/10 flex-shrink-0 flex flex-col overflow-hidden">
                     <CodeAISidebar
-                      script={script} modelInfo={modelInfo} datasets={datasets}
+                      script={script} modelInfo={modelInfo} dsRefs={dsRefs}
                       outputPath={outputPath.replace('<job_id>', 'dev_test')}
                       modelPathOverride={modelPath}
                       onApplyEdit={(newScript) => {

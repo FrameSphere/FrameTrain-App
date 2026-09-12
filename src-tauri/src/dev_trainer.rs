@@ -80,6 +80,23 @@ fn registry_stop(reg: &StdMutex<DevProcEntry>) {
     if let Some(pid) = pid { kill_process_tree(pid); }
 }
 
+/// Ergaenzt zu jedem DATASET_PATH[_n] ein DATASET_YAML[_n], wenn das Dataset eine
+/// (gepruefte) dataset.yaml hat. YOLO-Skripte brauchen die yaml, nicht den Ordner —
+/// vorher mussten sie sie selbst suchen und wussten nicht, ob sie noch stimmt.
+fn add_dataset_yaml_refs(env_vars: &mut HashMap<String, String>) {
+    let extra: Vec<(String, String)> = env_vars.iter()
+        .filter_map(|(k, v)| {
+            let suffix = k.strip_prefix("DATASET_PATH")?;
+            if v.is_empty() { return None; }
+            let key = format!("DATASET_YAML{}", suffix);
+            if env_vars.contains_key(&key) { return None; }
+            let yaml = crate::dataset_manager::ensure_dataset_yaml(std::path::Path::new(v))?;
+            Some((key, yaml.to_string_lossy().to_string()))
+        })
+        .collect();
+    env_vars.extend(extra);
+}
+
 // Dieselbe Python-Auswahl wie das normale Training.
 //
 // Vorher nahm der Dev-Trainer schlicht das erste `python3` auf dem PATH — ohne
@@ -115,15 +132,17 @@ pub async fn start_dev_training(
         eprintln!("[PowerManager] ⚠️ enable_prevent_sleep fehlgeschlagen: {}", e);
     }
 
-    // Tmp-Verzeichnis für Script + Output
-    let tmp_dir = app_handle.path().app_data_dir()
-        .map_err(|e| format!("AppDataDir: {}", e))?
-        .join("dev_scripts");
+    // Script liegt temporaer in dev_scripts/, der Output unter
+    // training_outputs/dev_<id> — genau dort, wo Pfade-Panel und Coach ihn
+    // nennen. Vorher landete er unbemerkt in dev_scripts/dev_<id>.
+    let app_data = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?;
+    let tmp_dir = app_data.join("dev_scripts");
     fs::create_dir_all(&tmp_dir).ok();
 
     let job_id      = format!("dev_{}", &Uuid::new_v4().to_string().replace('-', "")[..12]);
     let script_path = tmp_dir.join(format!("{}.py", job_id));
-    let output_dir  = tmp_dir.join(&job_id);
+    let output_dir  = app_data.join("training_outputs").join(&job_id);
     fs::create_dir_all(&output_dir).ok();
 
     // Script schreiben
@@ -152,7 +171,8 @@ pub async fn start_dev_training(
     let jid      = job_id.clone();
     let script_p = script_path.clone();
     let out_p    = output_path.clone();
-    let env_vars = refs;
+    let mut env_vars = refs;
+    add_dataset_yaml_refs(&mut env_vars);
 
     thread::spawn(move || {
         let mut cmd = Command::new(&python);
@@ -373,7 +393,8 @@ pub async fn start_dev_test(
     let ah       = app_handle.clone();
     let jid      = job_id.clone();
     let out_p    = output_dir.to_string_lossy().to_string();
-    let env_vars = refs;
+    let mut env_vars = refs;
+    add_dataset_yaml_refs(&mut env_vars);
 
     thread::spawn(move || {
         let mut cmd = Command::new(&python);

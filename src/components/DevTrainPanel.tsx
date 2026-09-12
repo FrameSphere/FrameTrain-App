@@ -23,11 +23,13 @@ import { MarkdownText } from './ui/MarkdownText';
 import TrainingDashboard from './TrainingDashboard';
 import { classifyError, type ErrorCategory } from '../utils/errorClassify';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { buildDatasetRefs, refsForPrompt, refsToEnv, selectedFirst, type DevRef } from '../utils/devDatasetRefs';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, calculateAffectedLines, type CodeEdit, type HighlightedLine } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { sendAppErrorReport } from '../utils/errorReport';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
-import { detectScriptModality, type ScriptModality } from './scriptModality';
+import { detectScriptModality, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { generateYoloTrainScript } from './yoloDevScripts';
 import DiffViewer from './DiffViewer';
 import { dateLocale } from '../utils/dateLocale';
 
@@ -534,10 +536,10 @@ function highlightPythonToHtml(code: string) {
   return html.endsWith('\n') ? html + ' ' : html;
 }
 
-function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, onReplaceScript, onClose, initialInput, onHighlightLines, onClearHighlights }: {
+function CodeAISidebar({ script, modelInfo, dsRefs, outputPath, onApplyEdit, onReplaceScript, onClose, initialInput, onHighlightLines, onClearHighlights }: {
   script: string;
   modelInfo: ModelInfo | null;
-  datasets: DatasetInfo[];
+  dsRefs: DevRef[];
   outputPath: string;
   onApplyEdit: (editedScript: string) => void;
   onReplaceScript: (code: string) => void;
@@ -680,7 +682,6 @@ function CodeAISidebar({ script, modelInfo, datasets, outputPath, onApplyEdit, o
   }, [messages, onHighlightLines]);
 
   const modelPath   = modelInfo?.local_path || modelInfo?.source_path || modelInfo?.name || 'MODELL_PFAD';
-  const dsRefs      = datasets.map((d, i) => `${i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`} = "${d.storage_path || d.name}" (${d.name})`);
 
   const baseSystemPrompt = `Du bist ein professioneller Code-Side-Assistant in FrameTrain (Dev Train).
 
@@ -688,7 +689,7 @@ ZIEL: Hilf dem User, das Skript schnell, korrekt und robust zu fixen/verbessern.
 
 KONTEXT (lokal):
 - MODEL_PATH = "${modelPath}"
-${dsRefs.map(r => `- ${r}`).join('\n')}
+${refsForPrompt(dsRefs)}
 - OUTPUT_PATH = "${outputPath}"
 
 PFAD-KONVENTION (wichtig): FrameTrain setzt diese Pfade beim Start als
@@ -696,11 +697,16 @@ Umgebungsvariablen. Im Skript gehoeren sie deshalb so hinterlegt:
     MODEL_PATH   = os.environ.get("MODEL_PATH",   "<Pfad oben>")
     DATASET_PATH = os.environ.get("DATASET_PATH", "<Pfad oben>")
     OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "<Pfad oben>")
+DATASET_YAML ist gesetzt, wenn das Dataset eine dataset.yaml hat (YOLO /
+Objekterkennung). Fuer Ultralytics IMMER data=DATASET_YAML uebergeben, nie den
+Ordner DATASET_PATH. Die yaml ist geprueft: path, train und val stimmen.
+DATASET_PATH_<n> / DATASET_YAML_<n> sind alle Datasets des Modells in fester
+Reihenfolge, DATASET_PATH ist das ausgewaehlte.
 Schreibe die absoluten Pfade NIE fest ins Skript — sonst laeuft es nur auf
 diesem Rechner mit genau diesem Modell und Dataset und ist ueber die
 Bibliothek nicht mehr teilbar.
 
-INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, bitsandbytes
+INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, bitsandbytes, ultralytics (YOLO)
 
 AKTUELLER SCRIPT-INHALT:
 \`\`\`python
@@ -1274,12 +1280,9 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   // Suffix) ist der Pfad, den Skripte und Template verwenden. Vorher wurde
   // stumm immer das erste Dataset der Liste übergeben — wer im Dropdown ein
   // anderes wählte, trainierte unbemerkt auf fremden Daten.
-  const datasets = useMemo(() => {
-    if (!selectedDatasetId) return allDatasets;
-    const idx = allDatasets.findIndex(d => d.id === selectedDatasetId);
-    if (idx <= 0) return allDatasets;
-    return [allDatasets[idx], ...allDatasets.filter((_, i) => i !== idx)];
-  }, [allDatasets, selectedDatasetId]);
+  const datasets = useMemo(() => selectedFirst(allDatasets, selectedDatasetId), [allDatasets, selectedDatasetId]);
+  // Nummerierte Referenzen folgen der festen Liste, nicht der Auswahl.
+  const dsRefs = useMemo(() => buildDatasetRefs(allDatasets, selectedDatasetId), [allDatasets, selectedDatasetId]);
 
   // Globale Legacy-Scripts einmalig in den User-Key übernehmen
   useEffect(() => { migrateLegacyDevScripts(userData?.userId); }, [userData?.userId]);
@@ -1353,12 +1356,6 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
   // ── AI Coach Page Context ──────────────────────────────────────────────────
   useEffect(() => {
-    const dsRefs = datasets.map((d, i) => ({
-      key:   i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`,
-      value: d.storage_path || '',
-      name:  d.name,
-    }));
-
     const lines: string[] = [
       t('devTrainPanel.pageContext.title'),
       '',
@@ -1414,7 +1411,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
     ];
 
     setCurrentPageContent(lines.join('\n'), 'training-dev');
-  }, [script, lineCount, running, isDirty, output, modelInfo, datasets, currentScriptId, outputPath, selectedVersionPath, currentJob, lossPoints, showDashboard, setCurrentPageContent]);
+  }, [script, lineCount, running, isDirty, output, modelInfo, datasets, dsRefs, currentScriptId, outputPath, selectedVersionPath, currentJob, lossPoints, showDashboard, setCurrentPageContent]);
 
   const syncEditorScroll = () => {
     const ta = editorRef.current;
@@ -1537,11 +1534,6 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
   // Echte Pfade
   const modelPath  = selectedVersionPath || modelInfo?.local_path || modelInfo?.source_path || modelInfo?.name || '';
-  const dsRefs     = datasets.map((d, i) => ({
-    key:   i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`,
-    value: d.storage_path || '',
-    name:  d.name,
-  }));
 
   // Output-Pfad aus App-Data-Dir laden
   useEffect(() => {
@@ -1748,10 +1740,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
     setRunning(true); setOutput(''); setLoss([]);
 
-    const refs: Record<string, string> = {
-      MODEL_PATH: modelPath,
-      ...Object.fromEntries(dsRefs.map(r => [r.key, r.value])),
-    };
+    const refs = refsToEnv(modelPath, dsRefs);
 
     try {
       const job = await invoke<TrainingJob>('start_dev_training', {
@@ -1920,11 +1909,11 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 <FolderOpen className="w-4 h-4 text-blue-400" />
                 <span className="text-sm font-medium text-white">{t('devTrainPanel.paths.datasetTitle')}</span>
               </div>
-              {dsRefs.map((r, idx) => (
+              {dsRefs.map(r => (
                 <RefRow
                   key={r.key}
-                  color="text-blue-400"
-                  label={t('devTrainPanel.paths.datasetPathLabel') + (datasets.length > 1 ? ` ${idx + 1}` : '')}
+                  color={r.kind === 'yaml' ? 'text-amber-400' : 'text-blue-400'}
+                  label={r.key}
                   value={r.value}
                   hint={r.name}
                 />
@@ -1943,7 +1932,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
               <RefRow
                 color="text-purple-400"
                 label={t('devTrainPanel.paths.outputPathLabel')}
-                value={outputPath.replace('<job_id>', 'dev_train')}
+                value={outputPath}
               />
             </div>
           </div>
@@ -2336,7 +2325,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                   <CodeAISidebar
                       script={script}
                       modelInfo={modelInfo}
-                      datasets={datasets}
+                      dsRefs={dsRefs}
                       outputPath={outputPath.replace('<job_id>', 'dev_XXX')}
                       onApplyEdit={(newScript) => {
                         setScript(newScript);
@@ -2598,6 +2587,15 @@ export function devProgressPercent(p: {
 
 function generateDefaultScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const modality = detectScriptModality(model);
+  if (modality === 'detection') {
+    const ds = datasets[0];
+    return generateYoloTrainScript({
+      modelPath:   pyPath(model?.local_path || model?.source_path || model?.name),
+      datasetPath: pyPath(ds?.storage_path),
+      datasetYaml: pyPath(ds?.dataset_yaml_path),
+      outputPath:  pyPath(templateOutputPath(outputPath, 'dev_train')),
+    });
+  }
   if (modality !== 'text') {
     return generateMediaTrainScript(modality, model, datasets, outputPath);
   }
@@ -2610,15 +2608,15 @@ function generateDefaultScript(model: ModelInfo | null, datasets: DatasetInfo[],
  * label_mapping.json, damit Labor und Tests spaeter Klassennamen zeigen.
  */
 function generateMediaTrainScript(
-  modality: Exclude<ScriptModality, 'text'>,
+  modality: Exclude<ScriptModality, 'text' | 'detection'>,
   model: ModelInfo | null,
   datasets: DatasetInfo[],
   outputPath: string,
 ): string {
   const ds = datasets[0];
-  const modelPathDefault   = model?.local_path || model?.source_path || model?.name || '';
-  const datasetPathDefault = ds?.storage_path || '';
-  const outputPathDefault  = outputPath.replace('<job_id>', 'dev_train').replace('{wird beim Start gesetzt}', 'dev_train');
+  const modelPathDefault   = pyPath(model?.local_path || model?.source_path || model?.name);
+  const datasetPathDefault = pyPath(ds?.storage_path);
+  const outputPathDefault  = pyPath(templateOutputPath(outputPath, 'dev_train'));
 
   const header = `#!/usr/bin/env python3
 # FrameTrain - Dev Train Script
@@ -2942,9 +2940,9 @@ emit(
 
 function generateTextTrainScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
   const ds = datasets[0];
-  const modelPathDefault  = model?.local_path || model?.source_path || model?.name || '';
-  const datasetPathDefault = ds?.storage_path || '';
-  const outputPathDefault  = outputPath.replace('<job_id>', 'dev_train').replace('{wird beim Start gesetzt}', 'dev_train');
+  const modelPathDefault  = pyPath(model?.local_path || model?.source_path || model?.name);
+  const datasetPathDefault = pyPath(ds?.storage_path);
+  const outputPathDefault  = pyPath(templateOutputPath(outputPath, 'dev_train'));
 
   return `#!/usr/bin/env python3
 # FrameTrain - Dev Train Script

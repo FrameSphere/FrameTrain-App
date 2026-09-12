@@ -1665,7 +1665,9 @@
       "modelLabel": "Model",
       "versionLabel": "Version",
       "versionLatest": " (latest)",
-      "noVersions": "No Versions"
+      "noVersions": "No Versions",
+      "datasetLabel": "Dataset (DATASET_PATH)",
+      "noDataset": "No dataset"
     },
     "pluginBadge": {
       "supported": "{name} – {description}",
@@ -2474,6 +2476,9 @@
       "valPathLabel": "val: – relative path to validation images",
       "valPathPlaceholder": "images/val",
       "valPathHint": "e.g. images/val or val/images",
+      "testPathLabel": "test: – relative path to test images (optional)",
+      "testPathPlaceholder": "test/images",
+      "testPathHint": "Leave empty if there is no test split",
       "sectionClasses": "Classes",
       "ncLabel": "nc = {count}",
       "noClasses": "No classes added yet",

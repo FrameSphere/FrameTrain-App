@@ -174,12 +174,14 @@ Two modes (toggle at top): **Train** (guided config) and **Dev** (custom Python 
 Für Modelle ohne Plugin-Support oder volle Kontrolle: eigenes **Python-Trainingsskript**.
 - Links: Code-Editor (Skript). Rechts: Live-Output/Logs. Oben: Modell + Version-Pfad wählen, Speichern, Skript-Bibliothek.
 - Datasets werden als Referenzen bereitgestellt (Pfade im Kontext). Output landet unter \`[AppData]/training_outputs/dev_<job_id>\`.
+- Referenzen: \`DATASET_PATH\` = gewähltes Dataset, \`DATASET_PATH_<n>\` = alle Datasets in fester Reihenfolge. Hat ein Dataset eine dataset.yaml (YOLO), kommt zusätzlich \`DATASET_YAML\` — Ultralytics braucht \`data=DATASET_YAML\`, nicht den Ordner.
 - Ablauf: Skript schreiben/laden → **Start** → Output live mitlesen → Loss-Dashboard bei erkannten Loss-Werten.
 - Debug: Fehler stehen im rechten Output; typische Ursachen sind falsche Pfade, fehlende Pakete, CUDA. Skript "dirty" = ungespeicherte Änderungen.`,
     en: `### Page knowledge: Training — Dev mode
 For models without plugin support or full control: your own **Python training script**.
 - Left: code editor (script). Right: live output/logs. Top: pick model + version path, save, script library.
 - Datasets are provided as references (paths in context). Output goes to \`[AppData]/training_outputs/dev_<job_id>\`.
+- References: \`DATASET_PATH\` = selected dataset, \`DATASET_PATH_<n>\` = all datasets in a fixed order. If a dataset has a dataset.yaml (YOLO), \`DATASET_YAML\` is set too — Ultralytics needs \`data=DATASET_YAML\`, not the folder.
 - Flow: write/load script → **Start** → follow live output → loss dashboard once loss values are detected.
 - Debug: errors appear in the right-hand output; typical causes are wrong paths, missing packages, CUDA. Script "dirty" = unsaved changes.`,
   },

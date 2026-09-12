@@ -111,6 +111,10 @@ pub struct DatasetInfo {
     pub pairing_status: Option<PairingStatus>,
     #[serde(default)]
     pub warnings:       Vec<String>,
+    /// Absoluter Pfad zur (geprueften) dataset.yaml/data.yaml, falls vorhanden.
+    /// Wird nicht gespeichert, sondern beim Auflisten live ermittelt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_yaml_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -301,6 +305,7 @@ fn make_info(
         training_count: 0, last_used_at: None,
         extensions: collect_extensions(target),
         dataset_type, pairing_status, warnings,
+        dataset_yaml_path: None,
     }
 }
 
@@ -939,9 +944,9 @@ pub fn generate_dataset_yaml(
              # Pfade sind relativ zum 'path'-Eintrag.\n\
              # Labels werden automatisch gesucht: 'images' im Pfad wird zu 'labels' ersetzt.\n\
              path: {}  # absoluter Pfad zum Dataset-Root\n\
-             train: {}/train  # Trainings-Bilder\n\
-             val:   {}/val    # Validierungs-Bilder\n\
-             test:  {}/test   # Test-Bilder (optional)\n\
+             train: train/{}  # Trainings-Bilder\n\
+             val:   val/{}    # Validierungs-Bilder\n\
+             test:  test/{}   # Test-Bilder (optional)\n\
              \n\
              nc: {}\n\
              names:\n{}\n",
@@ -971,6 +976,89 @@ pub fn generate_dataset_yaml(
     fs::write(&yaml_path, &yaml).map_err(|e| format!("dataset.yaml schreiben: {}", e))?;
     eprintln!("[Dataset] \u{2713} dataset.yaml generiert: {:?}", yaml_path);
     Ok(())
+}
+
+/// Schneidet einen YAML-Zeilenkommentar ab (" #…" oder eine ganze #-Zeile).
+/// Ein '#' ohne Leerzeichen davor gehoert zum Wert (z. B. "bilder#1/train").
+/// Ohne das landete "images/train  # 463 Bilder" komplett im Pfad-Feld des
+/// Editors und wurde als Pfad zurueckgeschrieben.
+pub fn strip_yaml_comment(s: &str) -> String {
+    match s.find(" #").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
+        Some(i) => s[..i].trim_end().to_string(),
+        None => s.to_string(),
+    }
+}
+
+/// Liefert die dataset.yaml eines Datasets — und repariert sie, wenn sie nicht
+/// mehr zu dem passt, was auf der Platte liegt.
+///
+/// Zwei Faelle kamen in echten Datasets vor:
+///   * `path:` zeigt auf einen anderen Ordner (Dataset verschoben, andere
+///     Bundle-ID, Kopie). Ultralytics loest train/val relativ zu `path` auf und
+///     findet dann nichts. Nur die `path:`-Zeile wird ersetzt, eigene
+///     Aenderungen an Klassen und Splits bleiben erhalten.
+///   * train/val verweisen auf Ordner, die es nicht gibt (z. B. die alte
+///     Split-yaml mit images/train statt train/images). Ist das Layout
+///     erkennbar, wird die yaml neu erzeugt; Klassennamen werden dabei aus der
+///     alten Datei uebernommen.
+/// Ohne dataset.yaml, aber mit erkennbarem Bild/Label-Layout wird eine erzeugt.
+/// Eine mitgebrachte data.yaml wird nie veraendert, nur zurueckgegeben.
+pub fn ensure_dataset_yaml(base: &Path) -> Option<PathBuf> {
+    let yaml_path = base.join("dataset.yaml");
+    if !yaml_path.exists() {
+        if let Some(layout) = detect_split_layout(base) {
+            if generate_split_dataset_yaml(base, &layout).is_ok() { return Some(yaml_path); }
+        }
+        return ["data.yaml", "data.yml"].iter().map(|n| base.join(n)).find(|p| p.exists());
+    }
+
+    let Ok(raw) = fs::read_to_string(&yaml_path) else { return Some(yaml_path) };
+    let value_of = |key: &str| -> Option<String> {
+        raw.lines().find_map(|l| {
+            let l = strip_yaml_comment(l.trim());
+            let (k, v) = l.split_once(':')?;
+            if k.trim() != key { return None; }
+            let v = v.trim().trim_matches('"').trim_matches('\'').to_string();
+            if v.is_empty() { None } else { Some(v) }
+        })
+    };
+
+    let mut content = raw.clone();
+    let same_dir = |p: &str| {
+        let a = fs::canonicalize(p).ok();
+        let b = fs::canonicalize(base).ok();
+        a.is_some() && a == b
+    };
+    if let Some(p) = value_of("path") {
+        if !same_dir(&p) {
+            content = raw.lines().map(|l| {
+                if l.trim_start().starts_with("path:") {
+                    format!("path: {}  # absoluter Pfad zum Dataset-Root", base.display())
+                } else { l.to_string() }
+            }).collect::<Vec<_>>().join("\n") + "\n";
+            eprintln!("[Dataset] dataset.yaml: path zeigte nicht auf {:?} — korrigiert", base);
+        }
+    }
+
+    let dir_ok = |key: &str| -> bool {
+        match value_of(key) {
+            None => key != "train", // train ist Pflicht, val/test optional
+            Some(v) => {
+                let p = Path::new(&v);
+                if p.is_absolute() { p.is_dir() } else { base.join(p).is_dir() }
+            }
+        }
+    };
+    if !(dir_ok("train") && dir_ok("val")) {
+        if let Some(layout) = detect_split_layout(base) {
+            if generate_split_dataset_yaml(base, &layout).is_ok() {
+                eprintln!("[Dataset] dataset.yaml: Split-Ordner stimmten nicht — neu erzeugt");
+                return Some(yaml_path);
+            }
+        }
+    }
+    if content != raw { fs::write(&yaml_path, &content).ok(); }
+    Some(yaml_path)
 }
 
 /// Splittet zwei gepaarte Ordner (YOLO: images/+labels/, Pascal: images/+annotations/).
@@ -1042,8 +1130,19 @@ fn split_paired_dirs(base: &Path, primary_dir: &str, secondary_dir: &str,
         let src = base.join(extra);
         if src.exists() { for s in &splits { fs::copy(&src, base.join(s).join(extra)).ok(); } }
     }
-    // dataset.yaml nach Split neu generieren (Pfade zeigen jetzt auf train/val/test/images)
-    generate_dataset_yaml(base, primary_dir, secondary_dir, true).ok();
+    // Die jetzt leeren Quellordner entfernen (remove_dir scheitert bei Inhalt
+    // bewusst) — sonst sieht die Layout-Erkennung ein halbes images/+labels/-Paar.
+    fs::remove_dir(&pdir).ok();
+    if sdir.exists() { fs::remove_dir(&sdir).ok(); }
+
+    // dataset.yaml nach Split neu generieren. Die Dateien liegen jetzt in
+    // <split>/images — die yaml muss genau das Layout beschreiben, das auf der
+    // Platte steht. Vorher wurde "images/train" eingetragen, Ultralytics brach
+    // mit "images not found, missing path .../images/val" ab.
+    match detect_split_layout(base) {
+        Some(layout) => { generate_split_dataset_yaml(base, &layout).ok(); }
+        None => { generate_dataset_yaml(base, primary_dir, secondary_dir, true).ok(); }
+    }
     Ok(SplitInfo { train_count: actual_train, val_count: actual_val, test_count: actual_test,
                    train_ratio: train_r, val_ratio: val_r, test_ratio: test_r })
 }
@@ -1433,6 +1532,8 @@ pub async fn list_datasets_for_model(
             let storage = dir.join(&d.id);
             d.storage_path = storage.to_string_lossy().to_string();
             if storage.exists() {
+                d.dataset_yaml_path = ensure_dataset_yaml(&storage)
+                    .map(|p| p.to_string_lossy().to_string());
                 let exts = collect_extensions(&storage);
                 if !exts.is_empty() { d.extensions = exts; }
 
@@ -2785,6 +2886,9 @@ pub async fn get_dataset_yaml(
     let user_id = get_user_id(&state)?;
     let dir     = get_datasets_dir(&app_handle, &user_id)?;
     let ds_dir  = dir.join(&dataset_id);
+    // Vor dem Anzeigen pruefen/reparieren — sonst zeigt der Editor eine yaml,
+    // mit der das Training scheitern wuerde.
+    if ds_dir.exists() { ensure_dataset_yaml(&ds_dir); }
     let yaml_path = ds_dir.join("dataset.yaml");
     if !yaml_path.exists() {
         return Ok(serde_json::json!({ "exists": false }));
@@ -2793,23 +2897,14 @@ pub async fn get_dataset_yaml(
     // Mini-Parser: relevante Felder extrahieren
     let mut train_path  = String::new();
     let mut val_path    = String::new();
+    let mut test_path   = String::new();
     let mut nc: usize   = 0;
     let mut names: Vec<String> = Vec::new();
     let mut in_names    = false;
-    // Kommentare am Zeilenende abschneiden. Ohne das landete "images/train  # 463
-    // Bilder" komplett im Pfad-Feld des Editors und wurde beim Speichern als
-    // Pfad zurueckgeschrieben — Ultralytics fand den Ordner dann nicht mehr.
-    // Betrifft auch mitgebrachte data.yaml-Dateien, die fast immer Kommentare haben.
-    let strip_comment = |s: &str| -> String {
-        match s.find(" #").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
-            Some(i) => s[..i].trim_end().to_string(),
-            None => s.to_string(),
-        }
-    };
     for line in raw.lines() {
         let trimmed_raw = line.trim();
         if trimmed_raw.starts_with('#') { continue; }
-        let stripped = strip_comment(trimmed_raw);
+        let stripped = strip_yaml_comment(trimmed_raw);
         let trimmed = stripped.as_str();
         if trimmed.is_empty() { continue; }
         if in_names {
@@ -2833,6 +2928,7 @@ pub async fn get_dataset_yaml(
             match k {
                 "train" => { if !v.is_empty() && v != "#" { train_path = v; } }
                 "val"   => { if !v.is_empty() && v != "#" { val_path   = v; } }
+                "test"  => { if !v.is_empty() && v != "#" { test_path  = v; } }
                 "nc"    => { nc = v.parse().unwrap_or(0); }
                 "names" => { in_names = true; }
                 _ => {}
@@ -2845,6 +2941,7 @@ pub async fn get_dataset_yaml(
         "exists":     true,
         "train_path": train_path,
         "val_path":   val_path,
+        "test_path":  test_path,
         "nc":         nc,
         "names":      names,
         "raw":        raw,
@@ -2861,6 +2958,9 @@ pub async fn save_dataset_yaml(
     dataset_id: String,
     train_path: String,
     val_path: String,
+    // Optional: Aeltere Frontends schicken kein testPath. Vorher gab es das Feld
+    // gar nicht — ein vorhandener test:-Eintrag ging beim Speichern verloren.
+    test_path: Option<String>,
     names: Vec<String>,
 ) -> Result<String, String> {
     if !is_safe_id(&dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
@@ -2879,12 +2979,17 @@ pub async fn save_dataset_yaml(
          path: {}  # absoluter Pfad zum Dataset-Root\n\
          train: {}  # relativer Pfad zum Trainings-Bilder-Ordner\n\
          val:   {}  # relativer Pfad zum Validierungs-Bilder-Ordner\n\
+         {}\
          \n\
          nc: {}\n\
          names:\n{}\n",
         ds_dir.display(),
         train_path.trim(),
         val_path.trim(),
+        match test_path.as_deref().map(str::trim) {
+            Some(t) if !t.is_empty() => format!("test:  {}  # relativer Pfad zum Test-Bilder-Ordner\n", t),
+            _ => String::new(),
+        },
         nc,
         if names_block.is_empty() { "  # Noch keine Klassen eingetragen".to_string() } else { names_block },
     );
@@ -3037,7 +3142,8 @@ mod flat_split_tests {
 #[cfg(test)]
 mod split_layout_tests {
     use super::{detect_split_layout, detect_dataset_type, parse_yaml_class_names,
-                read_class_names, generate_split_dataset_yaml, is_auxiliary_file, DatasetType};
+                read_class_names, generate_split_dataset_yaml, is_auxiliary_file, DatasetType,
+                split_paired_dirs, ensure_dataset_yaml};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3262,6 +3368,87 @@ mod split_layout_tests {
         assert!(yaml.contains("- 'Tree'"), "{}", yaml);
     }
 
+    /// Flaches YOLO-Dataset (images/ + labels/) in der App aufteilen: Die yaml
+    /// muss auf die Ordner zeigen, in die der Split die Dateien verschoben hat.
+    #[test]
+    fn yaml_nach_app_split_zeigt_auf_die_echten_ordner() {
+        let dir = TempDir::new("appsplit");
+        let root = dir.path();
+        for i in 0..10 {
+            make_pair(&root.join("images"), &root.join("labels"), &format!("img{:02}", i));
+        }
+        fs::write(root.join("classes.txt"), "kreis\nquadrat\n").unwrap();
+
+        split_paired_dirs(root, "images", "labels", 0.8, 0.1, 0.1).unwrap();
+
+        let yaml = fs::read_to_string(root.join("dataset.yaml")).unwrap();
+        assert!(yaml.contains("train: train/images"), "yaml war:\n{}", yaml);
+        assert!(yaml.contains("val: val/images"), "yaml war:\n{}", yaml);
+        assert!(!yaml.contains("images/train"), "yaml war:\n{}", yaml);
+        assert!(yaml.contains("- 'kreis'"), "yaml war:\n{}", yaml);
+        // Jeder eingetragene Bildordner existiert wirklich.
+        for line in yaml.lines() {
+            let l = line.split('#').next().unwrap().trim();
+            for key in ["train:", "val:", "test:"] {
+                if let Some(rel) = l.strip_prefix(key) {
+                    assert!(root.join(rel.trim()).is_dir(), "fehlt: {}", rel);
+                }
+            }
+        }
+        // Die leeren Quellordner sind weg.
+        assert!(!root.join("images").exists());
+        assert!(!root.join("labels").exists());
+    }
+
+    #[test]
+    fn ensure_yaml_korrigiert_fremden_path_und_behaelt_eigene_klassen() {
+        let dir = TempDir::new("ensure_path");
+        let root = dir.path();
+        make_pair(&root.join("images/train"), &root.join("labels/train"), "a");
+        make_pair(&root.join("images/val"), &root.join("labels/val"), "b");
+        fs::write(root.join("dataset.yaml"),
+            "path: /gibt/es/nicht  # alt\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  - 'Eigene'\n").unwrap();
+
+        let y = ensure_dataset_yaml(root).unwrap();
+        let yaml = fs::read_to_string(&y).unwrap();
+        assert!(yaml.contains(&format!("path: {}", root.display())), "{}", yaml);
+        assert!(yaml.contains("- 'Eigene'"), "{}", yaml);
+        // Zweiter Aufruf aendert nichts mehr.
+        ensure_dataset_yaml(root).unwrap();
+        assert_eq!(fs::read_to_string(&y).unwrap(), yaml);
+    }
+
+    #[test]
+    fn ensure_yaml_erneuert_verweise_auf_fehlende_split_ordner() {
+        let dir = TempDir::new("ensure_splits");
+        let root = dir.path();
+        make_pair(&root.join("train/images"), &root.join("train/labels"), "a");
+        make_pair(&root.join("val/images"), &root.join("val/labels"), "b");
+        fs::write(root.join("dataset.yaml"), format!(
+            "path: {}\ntrain: images/train\nval: images/val\nnc: 2\nnames:\n  - 'kreis'\n  - 'quadrat'\n",
+            root.display())).unwrap();
+
+        let yaml = fs::read_to_string(ensure_dataset_yaml(root).unwrap()).unwrap();
+        assert!(yaml.contains("train: train/images"), "{}", yaml);
+        assert!(yaml.contains("val: val/images"), "{}", yaml);
+        assert!(yaml.contains("- 'quadrat'"), "{}", yaml);
+    }
+
+    #[test]
+    fn ensure_yaml_laesst_mitgebrachte_data_yaml_und_textdaten_in_ruhe() {
+        let dir = TempDir::new("ensure_data");
+        let root = dir.path();
+        let original = "train: ../train/images\nval: ../valid/images\nnc: 1\nnames: ['x']\n";
+        fs::write(root.join("data.yaml"), original).unwrap();
+        assert_eq!(ensure_dataset_yaml(root), Some(root.join("data.yaml")));
+        assert_eq!(fs::read_to_string(root.join("data.yaml")).unwrap(), original);
+
+        let text = TempDir::new("ensure_text");
+        fs::write(text.path().join("train.csv"), "text,label\na,0\n").unwrap();
+        assert_eq!(ensure_dataset_yaml(text.path()), None);
+        assert!(!text.path().join("dataset.yaml").exists());
+    }
+
     #[test]
     fn ohne_val_split_zeigt_val_auf_train() {
         let dir = TempDir::new("noval");
@@ -3308,14 +3495,8 @@ mod split_layout_tests {
 #[cfg(test)]
 mod yaml_comment_tests {
     // Der Editor las "images/train  # 463 Bilder" komplett als Pfad ein und
-    // schrieb ihn beim Speichern zurueck. Der Parser sitzt in get_dataset_yaml
-    // (async, braucht AppHandle) — hier wird die Kommentar-Regel selbst geprueft.
-    fn strip_comment(s: &str) -> String {
-        match s.find(" #").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
-            Some(i) => s[..i].trim_end().to_string(),
-            None => s.to_string(),
-        }
-    }
+    // schrieb ihn beim Speichern zurueck.
+    use super::strip_yaml_comment as strip_comment;
 
     #[test]
     fn zeilenkommentar_wird_abgeschnitten() {

@@ -327,18 +327,24 @@ class Orchestrator:
                 # setup() hat bereits eine Fehlermeldung gesendet — nicht duplizieren
                 return
 
-            self.plugin.load_data()
+            # Wie bei setup(): Ein explizites False heisst, das Plugin hat den
+            # Fehler schon gemeldet. Vorher lief die Engine trotzdem weiter bis
+            # complete — ein YOLO-Lauf, der an einem fehlenden Bildordner
+            # scheiterte, erschien als "Training erfolgreich abgeschlossen".
+            if self.plugin.load_data() is False: return
             if self.plugin.is_stopped: return
 
-            self.plugin.build_model()
+            if self.plugin.build_model() is False: return
             if self.plugin.is_stopped: return
 
             MessageProtocol.status("training", "Training gestartet...")
             train_started = time.time()
-            self.plugin.train()
+            train_ok = self.plugin.train()
             train_seconds = int(time.time() - train_started)
             if self.plugin.is_stopped:
                 MessageProtocol.status("stopped", "Training gestoppt")
+                return
+            if train_ok is False:
                 return
 
             MessageProtocol.status("validating", "Finale Validierung...")
@@ -365,6 +371,8 @@ class Orchestrator:
 
             MessageProtocol.status("saving", f"Speichere nach: {self.config.output_path}")
             output_path = self.plugin.export()
+            if output_path is False:
+                return  # export() hat den Fehler gemeldet; ohne Modell kein complete.
 
             MessageProtocol.complete(output_path, metrics)
 
