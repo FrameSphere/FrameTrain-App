@@ -549,7 +549,7 @@ function toolsProtocol(language: Language, automation: boolean, pageId: PageId |
 
   if (en) {
     return `## Tools you can use
-Append tokens at the very END of your reply (never mention the raw syntax in prose). The app turns them into clickable buttons — nothing runs automatically, the user clicks.
+Append tokens at the very END of your reply (never mention the raw syntax in prose). The app turns them into clickable buttons shown directly BELOW your reply — if you mention where they are, say exactly that. Nothing runs automatically, the user clicks.
 Only the tools listed here work on the current page; do not invent others.
 
 ${items.join('\n')}
@@ -557,7 +557,7 @@ ${items.join('\n')}
 Only add a token when it genuinely helps. At most 3 tokens total.`;
   }
   return `## Tools die du nutzen kannst
-Hänge Tokens ganz ans ENDE deiner Antwort (Syntax nie im Fließtext erwähnen). Die App macht daraus klickbare Buttons — nichts passiert automatisch, der User klickt.
+Hänge Tokens ganz ans ENDE deiner Antwort (Syntax nie im Fließtext erwähnen). Die App macht daraus klickbare Buttons direkt UNTER deiner Antwort — nennst du ihren Ort, dann genau so. Nichts passiert automatisch, der User klickt.
 Nur die hier aufgeführten Tools wirken auf der aktuellen Seite; erfinde keine weiteren.
 
 ${items.join('\n')}

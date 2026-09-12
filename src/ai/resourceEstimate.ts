@@ -44,13 +44,29 @@ export interface RamEstimate {
 /** Framework-Overhead: CUDA-Runtime, PyTorch-Caches, Tokenizer. */
 const FRAMEWORK_OVERHEAD_GB = 1.2;
 
+export interface RamEstimateOptions {
+  /**
+   * Bildkantenlaenge in Pixeln (z. B. YOLO imgsz). Gesetzt fuer Bildmodelle:
+   * dort bestimmt die Aufloesung die Aktivierungen, nicht max_seq_length —
+   * das Feld existiert bei YOLO nicht einmal im Formular.
+   */
+  imageSize?: number;
+}
+
+/** Referenz-Aufloesung, auf die sich der Aktivierungs-Faktor bezieht. */
+const REFERENCE_IMAGE_SIZE = 640;
+
 /**
  * Grobe Peak-Schaetzung des Trainings-Speicherbedarfs in GB.
  *
  * Bewusst konservativ und einfach nachvollziehbar — es geht darum, ob ein Lauf
  * ueberhaupt auf die Maschine passt, nicht um zwei Nachkommastellen.
  */
-export function estimateTrainingRam(config: RamRelevantConfig, modelSizeGb: number): RamEstimate {
+export function estimateTrainingRam(
+  config: RamRelevantConfig,
+  modelSizeGb: number,
+  options: RamEstimateOptions = {},
+): RamEstimate {
   const size = Number.isFinite(modelSizeGb) && modelSizeGb > 0 ? modelSizeGb : 0;
   const mixedPrecision = !!(config.fp16 || config.bf16);
   const is4bit = !!config.load_in_4bit;
@@ -80,9 +96,14 @@ export function estimateTrainingRam(config: RamRelevantConfig, modelSizeGb: numb
     ? trainedGb * (mixedPrecision ? 1.0 : 0.5)
     : trainedGb * (mixedPrecision ? 4 : 2);
 
-  // 4. Aktivierungen: ~0.30 GB je Sample bei 128 Tokens (FP32), halb so viel
-  //    in Mixed Precision. Gradient Checkpointing spart rund 70%.
-  const seqFactor = Math.max(1, config.max_seq_length || 128) / 128;
+  // 4. Aktivierungen: ~0.30 GB je Sample bei 128 Tokens bzw. 640 px (FP32),
+  //    halb so viel in Mixed Precision. Gradient Checkpointing spart rund 70%.
+  //    Text skaliert linear mit der Sequenzlaenge, Bilder quadratisch mit der
+  //    Kantenlaenge (die Pixelzahl waechst mit der Flaeche).
+  const imageSize = options.imageSize;
+  const seqFactor = imageSize && Number.isFinite(imageSize) && imageSize > 0
+    ? (imageSize / REFERENCE_IMAGE_SIZE) ** 2
+    : Math.max(1, config.max_seq_length || 128) / 128;
   const bytesPerSample = mixedPrecision ? 0.15 : 0.30;
   const batch = Math.max(1, config.batch_size || 1);
   const activations = batch * seqFactor * bytesPerSample * (config.gradient_checkpointing ? 0.3 : 1.0);

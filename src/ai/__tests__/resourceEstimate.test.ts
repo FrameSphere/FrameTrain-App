@@ -108,3 +108,22 @@ describe('ramEstimateLines', () => {
     expect(text).not.toMatch(/PASST/);
   });
 });
+
+// Fuer Bildmodelle hing die Schaetzung an max_seq_length — ein Feld, das YOLO
+// gar nicht kennt. Die Aufloesung bestimmt dort die Aktivierungen.
+describe('estimateTrainingRam – Bildmodelle', () => {
+  it('ergibt bei 640 px dieselben Aktivierungen wie die Referenz', () => {
+    const text = estimateTrainingRam(base, 0.28);
+    const image = estimateTrainingRam(base, 0.28, { imageSize: 640 });
+    expect(image.activations).toBeCloseTo(text.activations, 6);
+  });
+
+  it('skaliert quadratisch mit der Bildgroesse und ignoriert max_seq_length', () => {
+    const small = estimateTrainingRam(base, 0.28, { imageSize: 320 });
+    const large = estimateTrainingRam(base, 0.28, { imageSize: 1280 });
+    expect(large.activations).toBeCloseTo(small.activations * 16, 6);
+
+    const longSeq = estimateTrainingRam({ ...base, max_seq_length: 2048 }, 0.28, { imageSize: 640 });
+    expect(longSeq.activations).toBeCloseTo(estimateTrainingRam(base, 0.28, { imageSize: 640 }).activations, 6);
+  });
+});

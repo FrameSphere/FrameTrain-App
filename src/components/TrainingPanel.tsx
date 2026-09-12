@@ -308,9 +308,9 @@ function Toggle({ checked, onChange, label, disabled, title }: { checked: boolea
 
 // ── RAM Calculator ─────────────────────────────────────────────────────────
 
-function RamCalculator({ config, modelSizeGb, systemRamGb }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null }) {
+function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null; imageSize?: number }) {
   const { t } = useLanguage();
-  const est         = estimateTrainingRam(config, modelSizeGb);
+  const est         = estimateTrainingRam(config, modelSizeGb, { imageSize });
   const isFp16      = est.mixedPrecision;
   const is4bit      = config.load_in_4bit;
   const is8bit      = config.load_in_8bit;
@@ -1319,6 +1319,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   );
   // Der torchvision-Hinweis gilt nur fuers alte Plugin — das neue trainiert
   // ja gerade die heruntergeladenen Gewichte.
+  // Bildmodelle (YOLO & Co.) bringen ihre Aufloesung als Plugin-Parameter mit.
+  // Sie bestimmt die RAM-Schaetzung — max_seq_length ist dort bedeutungslos.
+  const pluginImageSize = typeof pluginParams.imgsz === 'number' ? pluginParams.imgsz
+    : typeof pluginParams.imgsz === 'string' && Number.isFinite(Number(pluginParams.imgsz)) ? Number(pluginParams.imgsz)
+    : undefined;
   const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
 
   useEffect(() => {
@@ -1457,7 +1462,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       // beide getrennt und nannten auf demselben Bildschirm verschiedene Zahlen.
       lines.push('');
       lines.push('--- RESSOURCEN-SCHÄTZUNG (grob) ---');
-      lines.push(...ramEstimateLines(estimateTrainingRam(config, modelSizeGb), modelSizeGb, systemRamGb));
+      lines.push(...ramEstimateLines(estimateTrainingRam(config, modelSizeGb, { imageSize: pluginImageSize }), modelSizeGb, systemRamGb));
     }
 
     setCurrentPageContent(lines.join('\n'), 'training');
@@ -2055,7 +2060,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             )}
 
             <SectionCard title={t('trainingPanel.ramCalculator.title')} icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
-              <RamCalculator config={config} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} />
+              <RamCalculator config={config} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} imageSize={pluginImageSize} />
             </SectionCard>
           </div>
 
