@@ -1835,6 +1835,14 @@
         "tight": "— tight",
         "exceeds": "— not enough",
         "unknown": ""
+      },
+      "measures": {
+        "lora": "LoRA r=8",
+        "qlora": "4-bit QLoRA",
+        "batch": "batch 2–4",
+        "imgsz": "reduce imgsz (e.g. 640)",
+        "fp16": "FP16",
+        "gradCkpt": "grad checkpointing"
       }
     },
     "lossChart": {

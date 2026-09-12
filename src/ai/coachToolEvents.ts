@@ -131,3 +131,41 @@ export function setRecommendedParams(params: Record<string, unknown> | null) {
 export function getRecommendedParams(): Record<string, unknown> | null {
   return lastRecommendedParams;
 }
+
+// ── 4. Nicht verfuegbare Config-Felder (haengt am erkannten Modelltyp) ──────
+// Das Training meldet hier, welche Felder das aktuelle Plugin nicht auswertet.
+// Der Coach filtert damit seine [[set:…]]-Buttons: vorher bot er fuer YOLO
+// "Uebernehmen: Gradient Checkpointing an" an — ein Schalter, der dort nichts
+// bewirkt.
+
+/** Plugin-Kennungen, die fuer mehrere Config-Felder stehen. */
+const HIDDEN_FIELD_GROUPS: Record<string, readonly string[]> = {
+  lora: ['use_lora', 'lora_r', 'lora_alpha', 'lora_dropout', 'lora_target_modules', 'load_in_4bit', 'load_in_8bit'],
+};
+
+/** Loest Gruppen-Kennungen ("lora") in die einzelnen Config-Felder auf. */
+export function expandHiddenFields(hidden: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const key of hidden) {
+    out.add(key);
+    for (const field of HIDDEN_FIELD_GROUPS[key] ?? []) out.add(field);
+  }
+  return out;
+}
+
+let unavailableConfigFields: Set<string> = new Set();
+
+export function setUnavailableConfigFields(fields: Iterable<string>) {
+  unavailableConfigFields = new Set(fields);
+}
+
+export function getUnavailableConfigFields(): ReadonlySet<string> {
+  return unavailableConfigFields;
+}
+
+/** Entfernt nicht verfuegbare Felder aus einem Patch. */
+export function withoutUnavailableFields(patch: CoachConfigPatch, unavailable: ReadonlySet<string>): CoachConfigPatch {
+  const out: CoachConfigPatch = {};
+  for (const [k, v] of Object.entries(patch)) if (!unavailable.has(k)) out[k] = v;
+  return out;
+}

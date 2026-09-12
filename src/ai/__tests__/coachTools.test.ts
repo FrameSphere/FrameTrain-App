@@ -7,7 +7,8 @@
 // Ausfuehren: npx vitest run src/ai/__tests__/coachTools.test.ts --config vitest.config.ts
 
 import { describe, it, expect } from 'vitest';
-import { buildCoachSystemPrompt, pageKnowledge, type PageId } from '../coachContext';
+import { buildCoachSystemPrompt, pageKnowledge, parseCoachActions, dropUnavailableSetFields, type PageId } from '../coachContext';
+import { expandHiddenFields } from '../coachToolEvents';
 import { PAGE_KNOWLEDGE_PAGES } from './__helpers__/pages';
 
 const prompt = (pageId: PageId | null, automation = false) =>
@@ -110,5 +111,35 @@ describe('Ueberschrift des Live-Blocks', () => {
   it('bleibt neutral, wenn sich nichts geaendert hat', () => {
     const p = withState({ pageChanged: false, stateChanged: false });
     expect(p).toContain('Aktuelle Seite (Live-Zustand)');
+  });
+});
+
+// Praxisfall 1.2.61: Fuer YOLO bot der Coach "Uebernehmen: Gradient
+// Checkpointing an" an — ein Schalter, den Ultralytics nicht kennt.
+describe('Nicht verfuegbare Felder', () => {
+  it('loest die Gruppe "lora" in die einzelnen Felder auf', () => {
+    const fields = expandHiddenFields(['lora', 'gradient_checkpointing']);
+    for (const f of ['use_lora', 'lora_r', 'load_in_4bit', 'gradient_checkpointing']) {
+      expect(fields.has(f), f).toBe(true);
+    }
+  });
+
+  it('wirft nicht verfuegbare Felder aus einem Button und behaelt den Rest', () => {
+    const { actions } = parseCoachActions('Text [[set:gradient_checkpointing=true;batch_size=16]]');
+    const filtered = dropUnavailableSetFields(actions, new Set(['gradient_checkpointing']));
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]).toMatchObject({ type: 'set', patch: { batch_size: 16 } });
+    expect((filtered[0] as { summary: string }).summary).not.toMatch(/Checkpointing/);
+  });
+
+  it('entfernt einen Button ganz, wenn nichts Verfuegbares uebrig bleibt', () => {
+    const { actions } = parseCoachActions('Text [[set:use_lora=true]] [[go:analysis]]');
+    const filtered = dropUnavailableSetFields(actions, expandHiddenFields(['lora']));
+    expect(filtered.map(a => a.type)).toEqual(['navigate']);
+  });
+
+  it('laesst ohne Einschraenkung alles durch', () => {
+    const { actions } = parseCoachActions('Text [[set:gradient_checkpointing=true]]');
+    expect(dropUnavailableSetFields(actions, new Set())).toEqual(actions);
   });
 });

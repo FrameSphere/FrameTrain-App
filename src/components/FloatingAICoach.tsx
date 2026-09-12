@@ -17,11 +17,11 @@ import { PROVIDER_META } from '../ai/providerMeta';
 import { onOpenAICoach } from '../ai/aiCoachEvents';
 import {
   buildCoachSystemPrompt, parseCoachActions, navTargetLabel, linkTargetLabel,
-  commandLabel, hasPageKnowledge, type CoachAction, type PageId,
+  commandLabel, hasPageKnowledge, dropUnavailableSetFields, type CoachAction, type PageId,
 } from '../ai/coachContext';
 import { matchSkills, skillLabel, skillHint, skillPrompt, type CoachSkill } from '../ai/coachSkills';
 import { navigateTo } from '../ui/navigationEvents';
-import { applyCoachConfig, runCoachCommand } from '../ai/coachToolEvents';
+import { applyCoachConfig, runCoachCommand, getUnavailableConfigFields } from '../ai/coachToolEvents';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import type { Language } from '../contexts/LanguageContext';
 
@@ -1380,7 +1380,9 @@ Reply with ONLY the title, nothing else.`;
         {currentChat?.messages.map(msg => (
           <div key={msg.id} className={`ft-coach-message flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'assistant' ? (() => {
-              const { cleanedText, actions } = parseCoachActions(msg.content);
+              const parsed = parseCoachActions(msg.content);
+              const cleanedText = parsed.cleanedText;
+              const actions = dropUnavailableSetFields(parsed.actions, getUnavailableConfigFields());
               return (
               <div className="max-w-[88%] min-w-0 space-y-1">
                 {/* Thinking block — shown above the message when finished */}

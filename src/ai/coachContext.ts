@@ -15,7 +15,7 @@
 
 import type { Language } from '../contexts/LanguageContext';
 import type { AppView } from '../ui/navigationEvents';
-import type { CoachConfigPatch, CoachCommand } from './coachToolEvents';
+import { withoutUnavailableFields, type CoachConfigPatch, type CoachCommand } from './coachToolEvents';
 
 // ── Stabile Seiten-IDs (matchen die Sidebar-Navigation + Dev-Modi) ──────────
 export type PageId =
@@ -662,6 +662,22 @@ export function parseCoachActions(text: string): { cleanedText: string; actions:
     .trim();
 
   return { cleanedText, actions };
+}
+
+/**
+ * Wirft aus den Coach-Aktionen alle Config-Felder, die der aktuelle Modelltyp
+ * nicht kennt. Bleibt von einem [[set:…]] nichts uebrig, verschwindet der
+ * Button ganz — lieber keiner als einer, der ins Leere greift.
+ */
+export function dropUnavailableSetFields(actions: CoachAction[], unavailable: ReadonlySet<string>): CoachAction[] {
+  if (unavailable.size === 0) return actions;
+  const out: CoachAction[] = [];
+  for (const a of actions) {
+    if (a.type !== 'set') { out.push(a); continue; }
+    const patch = withoutUnavailableFields(a.patch, unavailable);
+    if (Object.keys(patch).length > 0) out.push({ type: 'set', patch, summary: formatConfigPatch(patch) });
+  }
+  return out;
 }
 
 export function navTargetLabel(view: AppView, language: Language): string {

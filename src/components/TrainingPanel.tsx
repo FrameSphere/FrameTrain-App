@@ -15,7 +15,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
-import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, type CoachCommand } from '../ai/coachToolEvents';
+import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, expandHiddenFields, setUnavailableConfigFields, withoutUnavailableFields, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord } from '../ai/coachContext';
 import { estimateTrainingRam, ramVerdict, ramEstimateLines } from '../ai/resourceEstimate';
 import { clampNumber, parseNumberInput } from './numberInput';
@@ -308,7 +308,7 @@ function Toggle({ checked, onChange, label, disabled, title }: { checked: boolea
 
 // ── RAM Calculator ─────────────────────────────────────────────────────────
 
-function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null; imageSize?: number }) {
+function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize, unavailable }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null; imageSize?: number; unavailable: ReadonlySet<string> }) {
   const { t } = useLanguage();
   const est         = estimateTrainingRam(config, modelSizeGb, { imageSize });
   const isFp16      = est.mixedPrecision;
@@ -359,13 +359,25 @@ function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize }: { config
           {t('trainingPanel.ramCalculator.fp16Tip').replace('{save}', (gradRam * 0.5 + activationRam * 0.5 + optimizerRam * 0.5).toFixed(1))}
         </p>
       )}
-      {!config.use_lora && total > 12 && (
+      {!unavailable.has('use_lora') && !config.use_lora && total > 12 && (
         <p className="text-violet-300 text-xs bg-violet-500/10 rounded-lg px-3 py-2 flex items-center gap-2">
           <Lightbulb className="w-3.5 h-3.5 flex-shrink-0" />
           {t('trainingPanel.ramCalculator.loraTip').replace('{save}', (total * 0.85).toFixed(1))}
         </p>
       )}
-      {total > 20 && <div className="text-red-300 text-xs bg-red-500/10 rounded-lg px-3 py-2 space-y-1"><p className="font-medium">{t('trainingPanel.ramCalculator.highRamTitle')}</p><p>{t('trainingPanel.ramCalculator.highRamDesc')}</p></div>}
+      {total > 20 && (() => {
+        // Nur Massnahmen, die dieser Modelltyp kennt. Vorher stand hier fuer
+        // YOLO "LoRA r=8, 4-bit QLoRA … Grad Checkpointing".
+        const measures = [
+          !unavailable.has('use_lora') && t('trainingPanel.ramCalculator.measures.lora'),
+          !unavailable.has('load_in_4bit') && t('trainingPanel.ramCalculator.measures.qlora'),
+          t('trainingPanel.ramCalculator.measures.batch'),
+          imageSize && t('trainingPanel.ramCalculator.measures.imgsz'),
+          t('trainingPanel.ramCalculator.measures.fp16'),
+          !unavailable.has('gradient_checkpointing') && t('trainingPanel.ramCalculator.measures.gradCkpt'),
+        ].filter(Boolean).join(', ');
+        return <div className="text-red-300 text-xs bg-red-500/10 rounded-lg px-3 py-2 space-y-1"><p className="font-medium">{t('trainingPanel.ramCalculator.highRamTitle')}</p><p>• {measures}</p></div>;
+      })()}
     </div>
   );
 }
@@ -1310,6 +1322,24 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     detection?.supported === true ? (detection.plugin.hiddenTrainingFields ?? []) : []
   );
   const showsField      = (key: string) => !hiddenFields.has(key);
+  // Aufgeloest auf einzelne Config-Felder ("lora" steht fuer use_lora,
+  // lora_r, load_in_4bit …). Grundlage fuer Coach-Buttons, RAM-Tipps und
+  // die Config-Zeilen im Kontext.
+  const unavailableFields = expandHiddenFields(hiddenFields);
+  const unavailableKey    = [...unavailableFields].sort().join(',');
+  useEffect(() => {
+    setUnavailableConfigFields(unavailableKey ? unavailableKey.split(',') : []);
+    return () => setUnavailableConfigFields([]);
+  }, [unavailableKey]);
+  // Fuer die Schaetzung zaehlt nur, was der Modelltyp wirklich auswertet — ein
+  // eingeschalteter, aber wirkungsloser Schalter darf die Zahl nicht senken.
+  const ramConfig = {
+    ...config,
+    gradient_checkpointing: unavailableFields.has('gradient_checkpointing') ? false : config.gradient_checkpointing,
+    use_lora:     unavailableFields.has('use_lora') ? false : config.use_lora,
+    load_in_4bit: unavailableFields.has('load_in_4bit') ? false : config.load_in_4bit,
+    load_in_8bit: unavailableFields.has('load_in_8bit') ? false : config.load_in_8bit,
+  };
   // Parameter, die nur dieses Plugin kennt (z. B. imgsz/augment/patience bei
   // YOLO). Sie kamen bisher ausschliesslich aus defaultPluginConfig und waren
   // nirgends einstellbar.
@@ -1433,14 +1463,26 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       const precision = config.fp16 ? 'FP16' : config.bf16 ? 'BF16' : 'FP32';
       lines.push('');
       lines.push('--- AKTUELLE CONFIG (Train-Modus) ---');
-      lines.push(`epochs=${config.epochs}, batch_size=${config.batch_size}, learning_rate=${config.learning_rate}`);
-      lines.push(`warmup_ratio=${config.warmup_ratio}, weight_decay=${config.weight_decay}, max_seq_length=${config.max_seq_length}`);
-      lines.push(`gradient_accumulation_steps=${config.gradient_accumulation_steps}, gradient_checkpointing=${config.gradient_checkpointing}, precision=${precision}`);
-      lines.push(`optimizer=${config.optimizer}, scheduler=${config.scheduler}, dropout=${config.dropout}, label_smoothing=${config.label_smoothing}`);
-      lines.push(`load_in_4bit=${config.load_in_4bit}, load_in_8bit=${config.load_in_8bit}`);
-      lines.push(config.use_lora
-        ? `LoRA: an (lora_r=${config.lora_r}, lora_alpha=${config.lora_alpha}, lora_dropout=${config.lora_dropout})`
-        : 'LoRA: aus');
+      // Nur Felder, die der erkannte Modelltyp auswertet. Stand hier fuer YOLO
+      // "gradient_checkpointing=false", empfahl der Coach genau diesen Schalter
+      // als Sparmassnahme — trotz des Hinweises weiter unten.
+      const avail = (key: string) => !unavailableFields.has(key);
+      const pairs: [string, unknown][] = ([
+        ['epochs', config.epochs], ['batch_size', config.batch_size], ['learning_rate', config.learning_rate],
+        ['warmup_ratio', config.warmup_ratio], ['weight_decay', config.weight_decay], ['max_seq_length', config.max_seq_length],
+        ['gradient_accumulation_steps', config.gradient_accumulation_steps], ['gradient_checkpointing', config.gradient_checkpointing],
+        ['precision', precision], ['optimizer', config.optimizer], ['scheduler', config.scheduler],
+        ['dropout', config.dropout], ['label_smoothing', config.label_smoothing],
+        ['load_in_4bit', config.load_in_4bit], ['load_in_8bit', config.load_in_8bit],
+      ] as [string, unknown][]).filter(([k]) => k === 'precision' || avail(k));
+      for (let i = 0; i < pairs.length; i += 3) {
+        lines.push(pairs.slice(i, i + 3).map(([k, v]) => `${k}=${String(v)}`).join(', '));
+      }
+      if (avail('use_lora')) {
+        lines.push(config.use_lora
+          ? `LoRA: an (lora_r=${config.lora_r}, lora_alpha=${config.lora_alpha}, lora_dropout=${config.lora_dropout})`
+          : 'LoRA: aus');
+      }
 
       // Plugin-Parameter: die Stellschrauben, die diese Architektur wirklich
       // nutzt. Ohne sie nannte der Coach den generischen Optimizer (adamw),
@@ -1452,8 +1494,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
         lines.push(`--- PLUGIN-PARAMETER (${detection.plugin.name}) ---`);
         lines.push(pluginEntries.map(([k, v]) => `${k}=${String(v)}`).join(', '));
         lines.push('Diese Werte haben bei diesem Modelltyp Vorrang vor den gleichnamigen Feldern der allgemeinen Config.');
-        if (hiddenFields.size > 0) {
-          lines.push(`Für diesen Modelltyp NICHT verfügbar (nicht empfehlen): ${[...hiddenFields].join(', ')}`);
+        if (unavailableFields.size > 0) {
+          lines.push(`Für diesen Modelltyp NICHT verfügbar — weder empfehlen noch als Sparmaßnahme nennen: ${[...unavailableFields].join(', ')}`);
         }
       }
 
@@ -1462,11 +1504,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       // beide getrennt und nannten auf demselben Bildschirm verschiedene Zahlen.
       lines.push('');
       lines.push('--- RESSOURCEN-SCHÄTZUNG (grob) ---');
-      lines.push(...ramEstimateLines(estimateTrainingRam(config, modelSizeGb, { imageSize: pluginImageSize }), modelSizeGb, systemRamGb));
+      lines.push(...ramEstimateLines(estimateTrainingRam(ramConfig, modelSizeGb, { imageSize: pluginImageSize }), modelSizeGb, systemRamGb));
+      if (pluginImageSize) lines.push(`Aktivierungen skalieren hier mit imgsz=${pluginImageSize} (quadratisch) — imgsz senken ist bei diesem Modelltyp die wirksamste Sparmaßnahme neben der Batch-Größe.`);
     }
 
     setCurrentPageContent(lines.join('\n'), 'training');
-  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, systemRamGb, pluginParams, detectionKey, setCurrentPageContent]);
+  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, systemRamGb, pluginParams, detectionKey, unavailableKey, setCurrentPageContent]);
 
   // Beim Wechsel des Modelltyps sinnvolle Startwerte setzen. Vorher galt fuer
   // jedes Modell 2e-5 — fuer Bild- und Seq2Seq-Training deutlich zu klein.
@@ -1983,8 +2026,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 <Field label={t('trainingPanel.fields.numWorkers')} tooltip={t('trainingPanel.fields.numWorkersTooltip')}><NumInput value={config.num_workers} onChange={v => updateConfig({ num_workers: v })} min={0} max={8} step={1} /></Field>
               </div>
               <div className="grid grid-cols-2 gap-4 pt-2">
-                <Toggle checked={config.gradient_checkpointing} onChange={v => updateConfig({ gradient_checkpointing: v })} label={t('trainingPanel.fields.gradientCheckpointing')} />
-                <Toggle checked={config.group_by_length} onChange={v => updateConfig({ group_by_length: v })} label={t('trainingPanel.fields.groupByLength')} />
+                {showsField('gradient_checkpointing') && <Toggle checked={config.gradient_checkpointing} onChange={v => updateConfig({ gradient_checkpointing: v })} label={t('trainingPanel.fields.gradientCheckpointing')} />}
+                {showsField('group_by_length') && <Toggle checked={config.group_by_length} onChange={v => updateConfig({ group_by_length: v })} label={t('trainingPanel.fields.groupByLength')} />}
                 <Toggle checked={config.pin_memory} onChange={v => updateConfig({ pin_memory: v })} label={t('trainingPanel.fields.pinMemory')} />
               </div>
             </SectionCard>
@@ -2060,7 +2103,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             )}
 
             <SectionCard title={t('trainingPanel.ramCalculator.title')} icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
-              <RamCalculator config={config} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} imageSize={pluginImageSize} />
+              <RamCalculator config={ramConfig} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} imageSize={pluginImageSize} unavailable={unavailableFields} />
             </SectionCard>
           </div>
 
