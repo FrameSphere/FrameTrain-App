@@ -80,8 +80,22 @@ export function analyzeError(errorMsg: string, t: (key: string) => string): { ca
 
 // ── Big Loss Chart ────────────────────────────────────────────────────────
 
-function BigLossChart({ points }: { points: LossPoint[] }) {
+function BigLossChart({ points, finished = false }: { points: LossPoint[]; finished?: boolean }) {
   const { t } = useLanguage();
+  // Nach dem Lauf nicht weiter "Warte auf erste Loss-Werte" mit Spinner zeigen:
+  // Kurze Laeufe (z. B. 10 Steps bei logging_steps 10) liefern nur einen Punkt.
+  if (points.length < 2 && finished) {
+    return (
+      <div className="h-52 flex flex-col items-center justify-center gap-1 text-center px-6">
+        <p className="text-gray-400 text-sm">{t('trainingDashboard.chart.tooFewPoints').replace('{count}', String(points.length))}</p>
+        {points.length === 1 && (
+          <p className="text-gray-500 text-xs font-mono">
+            Train {points[0].train_loss.toFixed(4)}{points[0].val_loss != null ? ` · Val ${points[0].val_loss.toFixed(4)}` : ''}
+          </p>
+        )}
+      </div>
+    );
+  }
   if (points.length < 2) {
     return (
       <div className="h-52 flex flex-col items-center justify-center gap-2">
@@ -826,7 +840,7 @@ export default function TrainingDashboard({
                 <p className="text-xs font-medium text-gray-400 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-emerald-400" /> {t('trainingDashboard.chart.title')}</p>
                 <span className="text-[10px] text-gray-600">{t('trainingDashboard.chart.points').replace('{count}', String(lossPoints.length))}</span>
               </div>
-              <BigLossChart points={lossPoints} />
+              <BigLossChart points={lossPoints} finished={isDone} />
               {lossPoints.length >= 2 && (
                 <div className="flex items-center gap-4 text-[10px] text-gray-500 border-t border-white/8 pt-2">
                   <span>{t('trainingDashboard.chart.start')} <span className="text-gray-300 font-mono">{firstLoss?.toFixed(4)}</span></span>

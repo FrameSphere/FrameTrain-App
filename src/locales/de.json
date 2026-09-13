@@ -1246,6 +1246,7 @@
       "title": "Loss-Verlauf",
       "points": "{count} Punkte",
       "waitingForData": "Warte auf erste Loss-Werte…",
+      "tooFewPoints": "Zu wenige Messpunkte für eine Kurve ({count}) — der Lauf war kürzer als ein Logging-Intervall.",
       "legendTrain": "Train Loss",
       "legendVal": "Val Loss",
       "start": "Start:",

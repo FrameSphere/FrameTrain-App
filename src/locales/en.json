@@ -1246,6 +1246,7 @@
       "title": "Loss History",
       "points": "{count} points",
       "waitingForData": "Waiting for first loss values…",
+      "tooFewPoints": "Too few data points for a curve ({count}) — the run was shorter than one logging interval.",
       "legendTrain": "Train Loss",
       "legendVal": "Val Loss",
       "start": "Start:",

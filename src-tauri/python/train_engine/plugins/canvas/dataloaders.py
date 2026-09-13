@@ -126,6 +126,11 @@ def get_dataloaders(
                 "optional unter train/ und val/."
             )
 
+        for note in layout.notes:
+            _status(f"image_loader: {note}")
+        _status(f"image_loader: Klassen ({len(layout.classes)}): {layout.classes[:10]} | "
+                f"Train: {len(layout.train)} | Val: {len(layout.val)}")
+
         rgb = channels != 1
 
         class _Files(torch.utils.data.Dataset):
