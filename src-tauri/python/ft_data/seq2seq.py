@@ -20,6 +20,16 @@ TARGET_CANDIDATES = ["target", "output", "summary", "highlights", "translation",
 SPEC_FILE = "frametrain_seq2seq.json"
 
 
+def file_split_name(stem: str) -> Optional[str]:
+    """Split einer Datei nach Namen: train.csv, test-00000-of-00001.parquet, validation_0.jsonl."""
+    import re
+    m = re.match(r"^([a-z]+)(?:[-_](\d.*))?$", stem.lower())
+    if not m:
+        return None
+    return {"train": "train", "training": "train", "val": "val", "valid": "val", "validation": "val",
+            "dev": "val", "test": "test", "testing": "test", "eval": "test"}.get(m.group(1))
+
+
 def _as_text(value: Any) -> str:
     if value is None or (isinstance(value, float) and value != value):
         return ""

@@ -12,7 +12,7 @@ from core.config import TestConfig
 from core.protocol import TestProtocol
 from _shared_classify import resolve_device
 from ft_data.media import sample as random_sample
-from ft_data.seq2seq import describe, load_spec, resolve_spec, row_texts
+from ft_data.seq2seq import describe, file_split_name, load_spec, resolve_spec, row_texts
 
 DATA_EXTS = (".json", ".jsonl", ".csv", ".tsv", ".parquet")
 
@@ -80,9 +80,13 @@ class Plugin:
                 for f in sorted(d.rglob("*")):
                     if f.suffix.lower() in DATA_EXTS:
                         return f
-        for f in sorted(root.rglob("*")):
-            if f.suffix.lower() in DATA_EXTS:
-                return f
+        loose = [f for f in sorted(root.rglob("*")) if f.suffix.lower() in DATA_EXTS
+                 and ".frametrain_media" not in f.parts]
+        # Im Root nach Namen: test vor val vor dem Rest — sonst gewann train.csv alphabetisch vor val.csv.
+        rank = {"test": 0, "val": 1}
+        loose.sort(key=lambda f: rank.get(file_split_name(f.stem), 2))
+        if loose:
+            return loose[0]
         raise ValueError(f"Keine Datendatei in '{root}' gefunden (erwartet: {', '.join(DATA_EXTS)}).")
 
     def _load_rows(self, path: Path) -> List[Dict[str, Any]]:

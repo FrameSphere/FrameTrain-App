@@ -2438,6 +2438,29 @@ fn count_text_rows(path: &Path) -> Option<usize> {
     Some(if matches!(ext.as_str(), "csv" | "tsv") { lines.saturating_sub(1) } else { lines })
 }
 
+/// Split einer Datei im Dataset-Root anhand ihres Namens.
+///
+/// Neben `train.csv` auch das HuggingFace-Schema `train-00000-of-00001.parquet`
+/// und `test_0.jsonl`. Vorher galt nur der exakte Name — ein so heruntergeladenes
+/// Dataset stand auf "Kein Split" und liess sich nicht trainieren. Nach dem
+/// Splitnamen muss eine Ziffer folgen, damit `train_labels.csv` nicht mitzaehlt.
+fn flat_split_name(stem: &str) -> Option<&'static str> {
+    let stem = stem.to_lowercase();
+    let (base, rest) = match stem.find(|c| c == '-' || c == '_') {
+        Some(i) => (&stem[..i], &stem[i + 1..]),
+        None    => (stem.as_str(), ""),
+    };
+    if !rest.is_empty() && !rest.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        return None;
+    }
+    match base {
+        "train" | "training" => Some("train"),
+        "val" | "valid" | "validation" | "dev" => Some("val"),
+        "test" | "testing" | "eval" => Some("test"),
+        _ => None,
+    }
+}
+
 fn detect_flat_split_files(storage: &Path) -> Option<SplitInfo> {
     let entries = fs::read_dir(storage).ok()?;
     let (mut train_count, mut val_count, mut test_count) = (0usize, 0usize, 0usize);
@@ -2458,10 +2481,10 @@ fn detect_flat_split_files(storage: &Path) -> Option<SplitInfo> {
         // train.csv/val.csv/test.csv "1 / 1 / 1" und 33/33/33 Prozent,
         // egal wie die Daten tatsaechlich verteilt sind.
         let n = count_text_rows(&path).unwrap_or(1);
-        match stem.as_str() {
-            "train" | "training" => { train_count += n; found_any = true; }
-            "val" | "valid" | "validation" | "dev" => { val_count += n; found_any = true; }
-            "test" | "testing" | "eval" => { test_count += n; found_any = true; }
+        match flat_split_name(&stem) {
+            Some("train") => { train_count += n; found_any = true; }
+            Some("val")   => { val_count += n; found_any = true; }
+            Some("test")  => { test_count += n; found_any = true; }
             _ => {}
         }
     }
@@ -3490,6 +3513,17 @@ mod split_layout_tests {
         fs::create_dir_all(dir.path().join(".frametrain_media/train/a")).unwrap();
         fs::write(dir.path().join(".frametrain_media/train/a/0.png"), b"123456789").unwrap();
         assert_eq!(dir_size(dir.path()), (4, 1));
+    }
+
+    #[test]
+    fn hf_dateinamen_gelten_als_split() {
+        use super::flat_split_name;
+        assert_eq!(flat_split_name("train-00000-of-00001"), Some("train"));
+        assert_eq!(flat_split_name("test-00000-of-00002"), Some("test"));
+        assert_eq!(flat_split_name("validation_0"), Some("val"));
+        assert_eq!(flat_split_name("train"), Some("train"));
+        assert_eq!(flat_split_name("train_labels"), None);
+        assert_eq!(flat_split_name("trainings"), None);
     }
 
     #[test]

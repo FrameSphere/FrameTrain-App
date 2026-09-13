@@ -17,7 +17,7 @@ from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 from core import hf_training as hft
 
-from ft_data.seq2seq import batch_texts, describe, resolve_spec, save_spec
+from ft_data.seq2seq import batch_texts, describe, file_split_name, resolve_spec, save_spec
 
 
 class Plugin(TrainPlugin):
@@ -73,10 +73,19 @@ class Plugin(TrainPlugin):
                     data_files[split] = found
                     break
         if not data_files:
-            loose = [str(f) for f in sorted(root.rglob("*")) if f.suffix.lower() in exts]
+            loose = [f for f in sorted(root.rglob("*")) if f.suffix.lower() in exts
+                     and ".frametrain_media" not in f.parts]
             if not loose:
                 raise ValueError(f"Keine Datendateien in '{root}' gefunden (erwartet: {', '.join(exts)}).")
-            data_files["train"] = loose
+            # train.csv / validation-00000-of-00001.parquet / test.jsonl im Root nach
+            # Namen zuordnen. Vorher landete alles im Training — auch die Testdaten.
+            by_split: Dict[str, List[str]] = {}
+            for f in loose:
+                split = file_split_name(f.stem) or "train"
+                by_split.setdefault({"val": "validation"}.get(split, split), []).append(str(f))
+            if "train" not in by_split:
+                by_split["train"] = by_split.pop(next(iter(by_split)))
+            data_files = by_split
 
         ext = Path(data_files["train"][0]).suffix.lower()
         if ext in (".json", ".jsonl"):

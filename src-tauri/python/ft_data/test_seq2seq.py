@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ft_data.seq2seq import batch_texts, load_spec, resolve_spec, row_texts, save_spec
+from ft_data.seq2seq import batch_texts, file_split_name, load_spec, resolve_spec, row_texts, save_spec
 
 
 class Seq2SeqSpecTest(unittest.TestCase):
@@ -28,6 +28,13 @@ class Seq2SeqSpecTest(unittest.TestCase):
             resolve_spec(list(row), row, {})
         spec = resolve_spec(list(row), row, {"source_column": "artikel", "target_column": "kurz"})
         self.assertEqual(batch_texts({"artikel": ["x", None], "kurz": ["y", "z"]}, spec), (["x", ""], ["y", "z"]))
+
+    def test_dateinamen_ergeben_splits(self):
+        self.assertEqual(file_split_name("train-00000-of-00001"), "train")
+        self.assertEqual(file_split_name("validation"), "val")
+        self.assertEqual(file_split_name("test_0"), "test")
+        self.assertIsNone(file_split_name("train_labels"))
+        self.assertIsNone(file_split_name("daten"))
 
     def test_spec_wird_neben_dem_modell_gespeichert(self):
         with tempfile.TemporaryDirectory() as d:
