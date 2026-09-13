@@ -1586,7 +1586,9 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       // configForBackend (nicht das nackte config) traegt task_type + plugin_config;
       // nur damit kann der Konfig-Block im Dashboard die je nach Plugin
       // irrelevanten Felder (z. B. "Max. Sequenzlaenge" bei YOLO) ausblenden.
-      setTrainingConfigContext(configForBackend);
+      // Die vom Backend zurueckgegebene Config ist die, mit der wirklich trainiert
+      // wird (Canvas: Werte aus dem Synapse Builder statt aus diesem Formular).
+      setTrainingConfigContext(job.config ?? configForBackend);
       
       success(t('trainingPanel.notifications.started'), t('trainingPanel.notifications.startedDetail'));
     } catch (err: unknown) { error(t('trainingPanel.notifications.startFailed'), String(err)); }

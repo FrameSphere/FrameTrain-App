@@ -1718,7 +1718,7 @@
       "statusSplit": " (split)",
       "statusUnsplit": " (not split)",
       "noSplitWarning": "No split – split it in the Dataset Manager first.",
-      "canvasBadge": "⚡ Canvas model — supports any dataset type (images, CSV, text)"
+      "canvasBadge": "Canvas model — epochs, batch size, learning rate, optimizer and scheduler come from the Synapse Builder, not from this form."
     },
     "requirements": {
       "notReadyTitle": "Python environment not ready",

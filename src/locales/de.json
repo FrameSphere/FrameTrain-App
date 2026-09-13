@@ -1718,7 +1718,7 @@
       "statusSplit": " (aufgeteilt)",
       "statusUnsplit": " (nicht aufgeteilt)",
       "noSplitWarning": "Kein Split – erst im Dataset-Manager aufteilen.",
-      "canvasBadge": "⚡ Canvas-Modell — beliebige Datensätze unterstützt (Bilder, CSV, Text)"
+      "canvasBadge": "Canvas-Modell — Epochen, Batch-Größe, Lernrate, Optimizer und Scheduler kommen aus dem Synapse Builder, nicht aus diesem Formular."
     },
     "requirements": {
       "notReadyTitle": "Python-Umgebung nicht bereit",

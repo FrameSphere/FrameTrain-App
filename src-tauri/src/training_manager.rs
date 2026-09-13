@@ -198,6 +198,29 @@ impl Default for TrainingConfig {
 }
 
 /// True when canvas_graph IR has nodes (not empty object/array).
+/// Uebernimmt die Trainingswerte aus dem Canvas-Graph in die Job-Config.
+///
+/// Das Canvas-Plugin trainiert mit Epochen, Batch-Groesse, Lernrate, Optimizer
+/// und Scheduler aus dem Synapse Builder (graphIR.training). Die Job-Config trug
+/// aber die Werte aus dem Trainings-Formular — Dashboard, Verlauf und Analyse
+/// zeigten "3 Epochen, Batch 8, Lernrate 2e-5", waehrend 10 / 32 / 0,001 liefen.
+fn apply_canvas_training_spec(config: &mut TrainingConfig) {
+    let Some(tr) = config.canvas_graph.get("training").and_then(|t| t.as_object()).cloned() else { return };
+    let num = |keys: &[&str]| keys.iter().find_map(|k| tr.get(*k).and_then(|v| v.as_f64()));
+    let text = |key: &str| tr.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    if let Some(v) = num(&["epochs"]) { config.epochs = v.max(1.0) as u32; }
+    if let Some(v) = num(&["batchSize", "batch_size"]) { config.batch_size = v.max(1.0) as u32; }
+    if let Some(v) = num(&["learningRate", "learning_rate"]) { config.learning_rate = v; }
+    if let Some(v) = num(&["weightDecay", "weight_decay"]) { config.weight_decay = v; }
+    if let Some(v) = num(&["clipGrad", "clip_grad"]) { config.max_grad_norm = v; }
+    if let Some(v) = num(&["labelSmoothing", "label_smoothing"]) { config.label_smoothing = v; }
+    if let Some(v) = num(&["gradAccum", "grad_accum"]) { config.gradient_accumulation_steps = v.max(1.0) as u32; }
+    if let Some(v) = num(&["warmupSteps", "warmup_steps"]) { config.warmup_steps = v.max(0.0) as u32; }
+    if let Some(v) = num(&["minLr", "min_lr"]) { config.cosine_min_lr = v; }
+    if let Some(v) = text("optimizer") { config.optimizer = v; }
+    if let Some(v) = text("scheduler") { config.scheduler = v; }
+}
+
 fn has_canvas_graph_ir(cg: &serde_json::Value) -> bool {
     match cg {
         serde_json::Value::Object(m) => {
@@ -666,6 +689,7 @@ pub async fn start_training(
         final_config.task_type = "canvas".to_string();
         final_config.model_path = String::new();
         final_config.canvas_model_code = String::new();
+        apply_canvas_training_spec(&mut final_config);
         let dp = resolve_dataset_path();
         if !dp.as_os_str().is_empty() {
             final_config.dataset_path = dp.to_string_lossy().to_string();
@@ -1948,5 +1972,24 @@ mod model_weights_tests {
         fs::write(d.join("train/weights/last.pt"), "x").unwrap();
         assert!(has_model_weights(&d));
         let _ = fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod canvas_config_tests {
+    use super::{apply_canvas_training_spec, TrainingConfig};
+
+    #[test]
+    fn canvas_trainingswerte_ersetzen_die_formularwerte() {
+        let mut c = TrainingConfig::default();
+        c.epochs = 3; c.batch_size = 8; c.learning_rate = 2e-5; c.scheduler = "linear".into();
+        c.canvas_graph = serde_json::json!({"training": {
+            "epochs": 10, "batchSize": 32, "learningRate": 0.001, "optimizer": "adamw",
+            "scheduler": "cosine", "clipGrad": 1, "gradAccum": 2
+        }});
+        apply_canvas_training_spec(&mut c);
+        assert_eq!((c.epochs, c.batch_size, c.gradient_accumulation_steps), (10, 32, 2));
+        assert_eq!(c.learning_rate, 0.001);
+        assert_eq!(c.scheduler, "cosine");
     }
 }

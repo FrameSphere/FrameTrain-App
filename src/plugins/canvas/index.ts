@@ -28,6 +28,13 @@ const canvasPlugin: ModelPlugin = {
     return false;
   },
   TestComponent:  CanvasTestStub,
+  // Das Canvas-Plugin wertet diese Formularfelder nicht aus: Sequenzlaenge,
+  // Warmup, Dropout und Seed stehen (wenn ueberhaupt) als Nodes im Graph, LoRA
+  // und Gradient Checkpointing gibt es fuer Canvas-Netze nicht.
+  hiddenTrainingFields: [
+    'max_seq_length', 'warmup_ratio', 'lora', 'gradient_checkpointing',
+    'group_by_length', 'dropout', 'seed',
+  ],
   // Nur was die Canvas-Loader wirklich lesen koennen: image_loader (Ordner pro
   // Klasse, auch train/val/test oder HF-Parquet mit Bildspalte), csv_loader und
   // parquet_loader. YOLO, Pascal VOC, COCO und Audio-Transkripte standen hier
