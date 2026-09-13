@@ -198,6 +198,13 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
                          if k not in ("eval_loss", "epoch", "eval_runtime",
                                       "eval_samples_per_second", "eval_steps_per_second")
                          and isinstance(v, (int, float))}
+                if not getattr(plugin, "_train_loss_seen", False):
+                    # Kurze Laeufe: die Evaluierung kommt vor dem ersten Trainings-Log.
+                    # Frueher ging sie mit dem Startwert train_loss=0.0 raus — Dashboard
+                    # und Log zeigten "Train: 0.0000" und die Kurve begann bei 0.
+                    # Der Val-Loss wird mit dem naechsten Trainings-Log gemeldet.
+                    plugin._pending_eval = (logs.get("eval_loss"), extra)
+                    return
                 MessageProtocol.progress(
                     epoch=_epoch_number(state, plugin.config), total_epochs=plugin.config.epochs,
                     step=state.global_step, total_steps=total,
@@ -207,14 +214,19 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
                     metrics=extra,
                 )
             else:
-                t_loss = logs.get("loss", logs.get("train_loss", 0.0))
-                lr = logs.get("learning_rate", plugin.config.learning_rate)
+                if "loss" not in logs and "train_loss" not in logs:
+                    return
+                t_loss = logs.get("loss", logs.get("train_loss"))
+                lr = logs.get("learning_rate", getattr(plugin, "_last_lr", plugin.config.learning_rate))
                 plugin._last_train_loss = t_loss
                 plugin._last_lr = lr
+                plugin._train_loss_seen = True
+                pending_val, pending_extra = getattr(plugin, "_pending_eval", None) or (None, {})
+                plugin._pending_eval = None
                 MessageProtocol.progress(
                     epoch=_epoch_number(state, plugin.config), total_epochs=plugin.config.epochs,
                     step=state.global_step, total_steps=total,
-                    train_loss=t_loss, val_loss=None, learning_rate=lr, metrics={},
+                    train_loss=t_loss, val_loss=pending_val, learning_rate=lr, metrics=pending_extra,
                 )
 
     return _Progress()
