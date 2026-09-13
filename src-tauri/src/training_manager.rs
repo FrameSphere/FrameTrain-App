@@ -1,6 +1,6 @@
 use std::fs;
 use crate::command_ext::{NoWindow, PythonUtf8};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::io::{BufRead, BufReader};
@@ -766,6 +766,22 @@ pub async fn start_training(
     Ok(job)
 }
 
+/// Enthaelt der Ordner (rekursiv) Modellgewichte?
+pub fn has_model_weights(dir: &Path) -> bool {
+    fn walk(p: &Path, depth: usize) -> bool {
+        if depth > 4 { return false; }
+        let Ok(entries) = fs::read_dir(p) else { return false };
+        entries.flatten().any(|e| {
+            let ep = e.path();
+            if ep.is_dir() { return walk(&ep, depth + 1); }
+            matches!(ep.extension().and_then(|x| x.to_str()).map(|x| x.to_lowercase()).as_deref(),
+                     Some("pt" | "pth" | "safetensors" | "bin" | "ckpt" | "onnx" | "gguf"))
+        })
+    }
+    if dir.is_file() { return true; }
+    walk(dir, 0)
+}
+
 fn create_version(
     app_handle: &tauri::AppHandle,
     model_id: &str,
@@ -1041,7 +1057,17 @@ fn run_training(
                 "complete" => {
                     json_complete = true;
                     if let Some(data) = msg.get("data") {
-                        if let Some(mp) = data.get("model_path").and_then(|v| v.as_str()) {
+                        if let Some(mp) = data.get("model_path").and_then(|v| v.as_str()).filter(|mp| !has_model_weights(Path::new(mp))) {
+                            // Kein Gewicht im Output: keine leere Version anlegen. Frueher
+                            // entstand so "YOLOv8 v3" ohne model.pt, die als neueste
+                            // Version vorausgewaehlt das naechste Training scheitern liess.
+                            json_error = true;
+                            json_complete = false;
+                            let _ = ah.emit("training-error", serde_json::json!({"job_id":jid,"data":{
+                                "error": "Training ohne gespeichertes Modell beendet",
+                                "details": format!("Im Ausgabeordner liegen keine Modellgewichte (.pt, .safetensors, .bin): {}", mp)
+                            }}));
+                        } else if let Some(mp) = data.get("model_path").and_then(|v| v.as_str()) {
                             match create_version(&ah, &mid, &mname, vid.clone(), mp, &uid) {
                                 Ok(new_vid) => {
                                     if let Err(e) = save_metrics(&ah, &new_vid, data, &uid) {
@@ -1905,4 +1931,22 @@ pub async fn run_canvas_inference(
             .to_string(),
         error: None,
     })
+}
+
+#[cfg(test)]
+mod model_weights_tests {
+    use super::has_model_weights;
+    use std::fs;
+
+    #[test]
+    fn leerer_output_hat_keine_gewichte() {
+        let d = std::env::temp_dir().join(format!("ft_weights_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("train/weights")).unwrap();
+        fs::write(d.join("train/args.yaml"), "x").unwrap();
+        assert!(!has_model_weights(&d));
+        fs::write(d.join("train/weights/last.pt"), "x").unwrap();
+        assert!(has_model_weights(&d));
+        let _ = fs::remove_dir_all(&d);
+    }
 }

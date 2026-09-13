@@ -53,6 +53,16 @@ class ResolveWeightsTest(unittest.TestCase):
         p = make_plugin(self.dir, {"yolo_model": "yolo11x.pt"})
         self.assertEqual(Path(p._resolve_weights()).name, "yolo11x.pt")
 
+    def test_leere_version_nimmt_vorgaenger_statt_download(self):
+        with tempfile.TemporaryDirectory() as d:
+            versions = Path(d) / "versions"
+            (versions / "ver_alt").mkdir(parents=True)
+            (versions / "ver_alt" / "model.pt").write_bytes(b"x")
+            leer = versions / "ver_leer"
+            (leer / "train").mkdir(parents=True)
+            (leer / "train" / "args.yaml").write_text("x")
+            self.assertEqual(Path(make_plugin(leer)._resolve_weights()), versions / "ver_alt" / "model.pt")
+
     def test_ohne_gewichte_bleibt_der_download_fallback(self):
         empty = Path(tempfile.mkdtemp())
         p = make_plugin(empty)

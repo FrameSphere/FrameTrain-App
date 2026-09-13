@@ -77,6 +77,38 @@ class YOLOPlugin:
     # Groessenreihenfolge: klein zuerst, damit ein Fine-Tuning auf einem Laptop nicht ausufert.
     _SIZE_ORDER = ["n", "s", "m", "l", "x"]
 
+    def _weights_from_related(self, model_dir: Path) -> Optional[Path]:
+        """Gewichte, wenn die gewaehlte Version selbst keine model.pt hat.
+
+        Ein Lauf, der vor 1.2.63 scheiterte, legte trotzdem eine Version an —
+        nur mit train/args.yaml. Als "neueste" Version vorausgewaehlt, liess sie
+        das naechste Training yolov8n.pt aus dem Netz laden (offline: Abbruch).
+        Reihenfolge: eigene train/weights, dann die neueste Vorgaenger-Version mit
+        model.pt, dann das importierte Originalmodell.
+        """
+        for name in ("best.pt", "last.pt"):
+            p = model_dir / "train" / "weights" / name
+            if p.is_file():
+                MessageProtocol.status("setup", f"Startgewichte: train/weights/{name} dieser Version")
+                return p
+        if model_dir.parent.name != "versions":
+            return None
+        siblings = sorted(
+            (d for d in model_dir.parent.iterdir() if d.is_dir() and d != model_dir and (d / "model.pt").is_file()),
+            key=lambda d: (d / "model.pt").stat().st_mtime, reverse=True)
+        if siblings:
+            MessageProtocol.status("setup",
+                f"Diese Version enthaelt keine Gewichte (vermutlich ein abgebrochener Lauf) — "
+                f"nutze {siblings[0].name}/model.pt")
+            return siblings[0] / "model.pt"
+        root = model_dir.parent.parent
+        originals = sorted(root.glob("*.pt"))
+        if originals:
+            MessageProtocol.status("setup",
+                f"Diese Version enthaelt keine Gewichte — nutze das importierte Modell {originals[0].name}")
+            return min(originals, key=lambda p: p.stat().st_size)
+        return None
+
     def _resolve_weights(self) -> str:
         """Waehlt die Startgewichte.
 
@@ -97,6 +129,9 @@ class YOLOPlugin:
         model_dir = Path(self.config.model_path or "")
         candidates = sorted(model_dir.glob("*.pt")) if model_dir.is_dir() else []
         if not candidates:
+            fallback = self._weights_from_related(model_dir)
+            if fallback is not None:
+                return str(fallback)
             MessageProtocol.status("setup",
                 "Keine .pt-Gewichte im Modellordner – Ultralytics laedt yolov8n.pt aus dem Netz.")
             return "yolov8n.pt"
