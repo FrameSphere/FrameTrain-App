@@ -869,7 +869,7 @@ function EpochDurationBar({ summaries }: { summaries: EpochSummary[] }) {
 // Report Renderer
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ReportText({ text }: { text: string }) {
+export function ReportText({ text }: { text: string }) {
   // Der Berichtstext kommt vom Sprachmodell und wird als HTML eingesetzt.
   // Ohne Escaping würde darin enthaltenes Markup direkt ausgeführt.
   const escapeHtml = (input: string): string =>
@@ -879,15 +879,23 @@ function ReportText({ text }: { text: string }) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const renderInline = (input: string): string =>
-    escapeHtml(input)
+  // Inline-Code stand vorher mit sichtbaren Backticks im Chat (`p = 0.30`).
+  // Code wird erst geparkt, damit ein * darin nicht als Kursiv gilt und
+  // **`x`** trotzdem fett wird.
+  const renderInline = (input: string): string => {
+    const codes: string[] = [];
+    return escapeHtml(input)
+      .replace(/`([^`\n]+)`/g, (_m, c: string) => `\u0000${codes.push(c) - 1}\u0000`)
       .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em class="text-gray-200">$1</em>');
+      .replace(/\*(.*?)\*/g, '<em class="text-gray-200">$1</em>')
+      .replace(/\u0000(\d+)\u0000/g, (_m, n: string) =>
+        `<code class="px-1.5 py-0.5 bg-white/10 rounded text-[12px] font-mono text-purple-300">${codes[Number(n)]}</code>`);
+  };
 
   // Überschriften werden als React-Child gerendert, nicht als HTML. Dort darf
   // kein Markup zurückkommen – sonst stünden die <strong>-Tags sichtbar da.
   const plainInline = (input: string): string =>
-    input.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1');
+    input.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`([^`\n]+)`/g, '$1');
 
   const renderParagraph = (line: string, key: number) => (
     <p key={key} className="text-gray-300" dangerouslySetInnerHTML={{ __html: renderInline(line) }} />
