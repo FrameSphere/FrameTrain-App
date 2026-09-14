@@ -1,7 +1,7 @@
 // Regression aus dem App-Durchgang vom 14.09.2026: Die KI-Analyse eines
 // Canvas-Modells empfahl Dropout und Warmup, die das Netz gar nicht hat.
 import { describe, it, expect } from 'vitest';
-import { canvasGraphSummary, unavailableAnalysisFields } from '../analysisTaskContext';
+import { canvasGraphSummary, sanitizeChatJson, unavailableAnalysisFields } from '../analysisTaskContext';
 
 const graph = {
   nodes: [
@@ -29,5 +29,15 @@ describe('analysisTaskContext', () => {
 
   it('Textmodelle behalten alle Felder', () => {
     expect(unavailableAnalysisFields('seq_classification', ['dropout', 'warmup_ratio']).size).toBe(0);
+  });
+
+  it('Chat: JSON-Felder, die es nicht gibt oder die bei Canvas nicht wirken, fallen raus', () => {
+    const settable = ['epochs', 'learning_rate', 'dropout', 'warmup_steps'];
+    const u = unavailableAnalysisFields('canvas', settable);
+    const reply = 'Empfehlung\n\n```json\n{"dropout_rate": 0.4, "warmup_steps": 4}\n```\n\nFazit';
+    expect(sanitizeChatJson(reply, settable, u)).toBe('Empfehlung\n\nFazit');
+    const mixed = '```json\n{"learning_rate": 0.0003, "dropout": 0.2}\n```';
+    expect(sanitizeChatJson(mixed, settable, u)).toBe('```json\n{\n  "learning_rate": 0.0003\n}\n```');
+    expect(sanitizeChatJson('```json\n{kaputt\n```', settable, u)).toBe('```json\n{kaputt\n```');
   });
 });

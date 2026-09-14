@@ -17,7 +17,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { setRecommendedParams } from '../ai/coachToolEvents';
 import { SETTABLE_CONFIG } from '../ai/coachContext';
 import { withoutUnavailableFields } from '../ai/coachToolEvents';
-import { canvasGraphSummary, canvasPromptBlock, isCanvasTask, unavailableAnalysisFields } from '../ai/analysisTaskContext';
+import { canvasGraphSummary, canvasPromptBlock, chatFieldRule, isCanvasTask, sanitizeChatJson, unavailableAnalysisFields } from '../ai/analysisTaskContext';
 import { findLastJsonObject } from '../ai/jsonBlock';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
@@ -1068,7 +1068,8 @@ function analysisDepthHint(budget: TokenBudget, language: string): string {
  * System-Prompt fuer den Chat UNTER dem Bericht: gleiche Rolle und gleiche
  * Formatregeln, aber ohne die Pflicht-Abschnitte des Berichts.
  */
-function buildAnalysisChatSystemPrompt(language: string, taskHint = '', canvas = false) {
+function buildAnalysisChatSystemPrompt(language: string, taskHint = '', canvas = false,
+                                       unavailable: ReadonlySet<string> = new Set()) {
   const de = language === 'de';
   const taskBlock = (taskHint ? `\nThis run is: ${taskHint}. Judge it by the metrics that matter for THAT task.` : '')
     + (canvas ? `\n${canvasPromptBlock(language)}` : '');
@@ -1080,7 +1081,9 @@ Formatting rules:
 - No emojis. Use plain glyphs (-, *, >) if you need a marker.
 - Close every code fence you open.
 - Flat lists, no nested numbering.
-- ${de ? 'Nur wenn der User nach neuen Parametern fragt: einen ```json-Block mit den zu ändernden Feldern anhängen.' : 'Only when the user asks for new parameters: append a ```json block with the fields to change.'}`;
+- ${de ? 'Nur wenn der User nach neuen Parametern fragt: einen ```json-Block mit den zu ändernden Feldern anhängen.' : 'Only when the user asks for new parameters: append a ```json block with the fields to change.'}
+
+${chatFieldRule(language, settableFieldList(unavailable), canvas)}`;
 }
 
 function buildAnalysisSystemPrompt(language: string, taskHint = '', budget: TokenBudget = 'balanced',
@@ -1609,14 +1612,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       // sechs Pflicht-Abschnitte. Auf die Frage "warum ist die mAP so
       // niedrig?" antwortete die KI deshalb mit einem neuen Gesamtbericht
       // statt mit einer Antwort. Hier zaehlt nur Rolle, Task und Datenlage.
-      const sys = `${buildAnalysisChatSystemPrompt(language, taskHint(), isCanvasRun)}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
+      const sys = `${buildAnalysisChatSystemPrompt(language, taskHint(), isCanvasRun, unavailableFields)}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
       const chatBudget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
       const reply = await callAIClient(aiSettings, {
         system: sys, messages: updated,
         maxTokens: chatBudget.maxTokens,
         temperature: 0.6, responseLanguage: language, style: 'chat',
       });
-      setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      // Nicht setzbare oder hier wirkungslose Felder aus JSON-Bloecken entfernen.
+      const cleaned = sanitizeChatJson(reply, Object.keys(SETTABLE_CONFIG), unavailableFields);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: cleaned }]);
     } catch (e: any) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: `${t('common.error')}: ${String(e)}` }]);
       setChatRetryText(text);

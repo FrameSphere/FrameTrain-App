@@ -70,3 +70,37 @@ Architektur-Aenderungen (z. B. "Dropout-Node nach Dense einfuegen", "zweiten Den
     : `This is a Canvas network from the Synapse Builder. Regularization (dropout, normalization), architecture and warmup exist only as nodes in the graph — judge only what the graph contains and do not invent values for nodes that are absent.
 Architecture changes (e.g. "add a Dropout node after Dense") belong in the improvement suggestions as text. The JSON block contains only fields that are set as training values in the Synapse Builder.`;
 }
+
+/**
+ * Entfernt aus ```json-Bloecken einer Chat-Antwort alle Felder, die nicht
+ * setzbar sind oder fuer diesen Task-Typ nicht wirken.
+ *
+ * Regression aus dem App-Durchgang vom 14.09.2026: Auf "Soll ich Dropout
+ * erhoehen oder Warmup einstellen?" antwortete der Chat eines Canvas-Modells
+ * mit {"dropout_rate": 0.4, "warmup_steps": 4} — ein Feld, das es nirgends
+ * gibt, und eines, das Canvas nur als Node kennt. Bleibt nichts uebrig,
+ * verschwindet der Block ganz.
+ */
+export function sanitizeChatJson(reply: string, settable: Iterable<string>, unavailable: ReadonlySet<string>): string {
+  const allowed = new Set([...settable].filter(k => !unavailable.has(k)));
+  return reply.replace(/```json\s*([\s\S]*?)```\n?/gi, (block, body: string) => {
+    let parsed: unknown;
+    try { parsed = JSON.parse(body.trim()); } catch { return block; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return block;
+    const kept = Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([k]) => allowed.has(k)));
+    if (Object.keys(kept).length === 0) return '';
+    return '```json\n' + JSON.stringify(kept, null, 2) + '\n```\n';
+  }).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Zusatz fuer den Chat-Prompt: welche Felder ein JSON-Block enthalten darf. */
+export function chatFieldRule(language: string, fieldList: string, canvas: boolean): string {
+  const de = language === 'de';
+  const base = de
+    ? `Ein JSON-Block darf ausschliesslich diese Felder enthalten (exakt diese Namen):\n${fieldList}`
+    : `A JSON block may contain only these fields (exactly these names):\n${fieldList}`;
+  if (!canvas) return base;
+  return base + (de
+    ? `\nFragt der User nach etwas, das bei Canvas nur als Node existiert (Dropout, Normalisierung, Warmup, Layer): sag klar, ob der Node im Graph vorhanden ist. Fehlt er, erklaere, welchen Node er wo im Synapse Builder einfuegen soll und mit welchem Parameter — als Text, niemals als JSON-Feld.`
+    : `\nIf the user asks about something that exists only as a node in Canvas (dropout, normalization, warmup, layers): say clearly whether that node is in the graph. If it is absent, explain which node to add where in the Synapse Builder and with which parameter — as text, never as a JSON field.`);
+}
