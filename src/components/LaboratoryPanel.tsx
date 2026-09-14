@@ -206,12 +206,24 @@ function samplesFromRows(rows: unknown[]): LabSample[] {
   }));
 }
 
-function parseSamples(content: string, fileName: string): LabSample[] {
+/**
+ * Zerlegt eine Datei in Samples.
+ *
+ * Regression aus dem App-Durchgang mit 1.2.76: Eine formatierte JSON-Liste kam
+ * abgeschnitten an (Vorschau mit 200 Zeilen), JSON.parse schlug fehl und der
+ * Fallback machte jede Zeile zu einem Sample — "[", "{", "\"label\": …,".
+ * Eine .json-Datei, die weder als JSON noch als JSONL lesbar ist, liefert jetzt
+ * einen Fehler statt Zeilen-Muell.
+ */
+export function parseSamples(content: string, fileName: string): LabSample[] {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
   const raw: unknown[] = [];
+  // Vorschau-Hinweis von read_dataset_file — nie ein Sample.
+  const body = content.replace(/^\uFEFF/, '').replace(/\n*--- \[Vorschau: \d+ von \d+ Zeilen\] ---\s*$/, '');
+  const lines = () => body.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
   // Auto-Detect: Erkennt JSON/JSONL auch ohne korrekte Erweiterung
-  const trimmed = content.trim();
+  const trimmed = body.trim();
   const looksLikeJsonArray  = trimmed.startsWith('[');
   const looksLikeJsonObject = trimmed.startsWith('{');
   const firstLine = trimmed.split('\n')[0].trim();
@@ -225,31 +237,45 @@ function parseSamples(content: string, fileName: string): LabSample[] {
     return 'txt';
   })();
 
-  try {
-    if (effectiveExt === 'json') {
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) raw.push(...parsed);
-      else if (typeof parsed === 'object' && parsed !== null) {
-        // { samples: [...] } oder { data: [...] } Pattern
-        const obj = parsed as Record<string, unknown>;
-        const arr = obj['samples'] ?? obj['data'] ?? obj['items'] ?? obj['examples'];
-        if (Array.isArray(arr)) raw.push(...arr);
-        else raw.push(parsed);
+  const pushJson = (parsed: unknown) => {
+    if (Array.isArray(parsed)) raw.push(...parsed);
+    else if (typeof parsed === 'object' && parsed !== null) {
+      // { samples: [...] } oder { data: [...] } Pattern
+      const obj = parsed as Record<string, unknown>;
+      const arr = obj['samples'] ?? obj['data'] ?? obj['items'] ?? obj['examples'];
+      if (Array.isArray(arr)) raw.push(...arr);
+      else raw.push(parsed);
+    } else raw.push(parsed);
+  };
+
+  if (effectiveExt === 'json') {
+    try {
+      pushJson(JSON.parse(trimmed));
+    } catch (err) {
+      // Manche .json-Dateien sind in Wahrheit JSONL (ein Objekt pro Zeile).
+      const objects: unknown[] = [];
+      for (const l of lines()) {
+        try {
+          const v = JSON.parse(l);
+          if (typeof v === 'object' && v !== null) objects.push(v);
+          else { objects.length = 0; break; }
+        } catch { objects.length = 0; break; }
       }
-    } else if (effectiveExt === 'jsonl') {
-      content.split('\n').filter(l => l.trim()).forEach(l => {
-        try { raw.push(JSON.parse(l)); } catch { raw.push(l.trim()); }
-      });
-    } else if (effectiveExt === 'csv' || effectiveExt === 'tsv') {
-      // Anfuehrungszeichen beachten: "Bingen: sonnig, 0 Grad" ist ein Feld.
-      raw.push(...parseDelimitedRows(content, effectiveExt === 'tsv' ? '\t' : ','));
-    } else {
-      // Plain text: jede nicht-leere Zeile
-      content.split('\n').filter(l => l.trim()).forEach(l => raw.push(l.trim()));
+      if (objects.length === 0) {
+        throw new Error(`${fileName}: kein gültiges JSON (${err instanceof Error ? err.message : String(err)})`);
+      }
+      raw.push(...objects);
     }
-  } catch {
-    // Fallback: plain text
-    content.split('\n').filter(l => l.trim()).forEach(l => raw.push(l.trim()));
+  } else if (effectiveExt === 'jsonl') {
+    lines().forEach(l => {
+      try { raw.push(JSON.parse(l)); } catch { raw.push(l); }
+    });
+  } else if (effectiveExt === 'csv' || effectiveExt === 'tsv') {
+    // Anfuehrungszeichen beachten: "Bingen: sonnig, 0 Grad" ist ein Feld.
+    raw.push(...parseDelimitedRows(body, effectiveExt === 'tsv' ? '\t' : ','));
+  } else {
+    // Plain text: jede nicht-leere Zeile
+    raw.push(...lines());
   }
 
   return raw.map((item, i) => ({
@@ -1241,7 +1267,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
             allSamples.push(...samplesFromRows(rows));
             continue;
           }
-          const content = await invoke<string>('read_dataset_file', { filePath: file.path });
+          // Komplett lesen — read_dataset_file liefert nur eine 200-Zeilen-Vorschau.
+          const content = await invoke<string>('read_dataset_samples_file', { filePath: file.path });
           console.log(`[Lab] Datei gelesen: ${file.name}, Länge: ${content.length}`);
           const parsed = parseSamples(content, file.name);
           console.log(`[Lab] Samples aus ${file.name}:`, parsed.length);
@@ -1284,7 +1311,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     const reader = new FileReader();
     reader.onload = ev => {
       const content = ev.target?.result as string;
-      const parsed = parseSamples(content, file.name);
+      let parsed: LabSample[];
+      try { parsed = parseSamples(content, file.name); }
+      catch (err) { error(t('laboratoryPanel.setup.notifications.loadError'), String(err instanceof Error ? err.message : err)); return; }
       if (parsed.length === 0) { warning(t('laboratoryPanel.setup.notifications.fileEmpty'), t('laboratoryPanel.setup.notifications.fileEmptyDetail')); return; }
       setSamples(parsed);
       setSourceFileName(file.name);

@@ -194,6 +194,7 @@ fn main() {
             dataset_manager::get_dataset_filter_options,
             dataset_manager::get_dataset_files,
             dataset_manager::read_dataset_file,
+            dataset_manager::read_dataset_samples_file,
             dataset_manager::preview_parquet_file,
             dataset_manager::move_dataset_files,
             dataset_manager::delete_dataset_files,

@@ -2278,6 +2278,40 @@ except Exception as e:
     serde_json::from_str(stdout.trim()).map_err(|e| format!("JSON-Parse: {} (raw: {})", e, stdout.trim()))
 }
 
+/// Obergrenze fuer Textdateien, die das Labor komplett einliest.
+const LAB_TEXT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Liest eine Text-Datei komplett (fuer die Samples im Labor).
+///
+/// Das Labor nutzte read_dataset_file, das nur die ersten 200 Zeilen plus eine
+/// Vorschau-Zeile liefert. Eine formatierte JSON-Liste (6801 Zeilen) war danach
+/// kein gueltiges JSON mehr, und das Labor machte aus jeder Zeile ein Sample:
+/// "[", "{", "\"label\": \"Textgenerierung\"," … — 201 Samples statt 1360.
+fn read_text_for_samples(path: &Path, max_bytes: u64) -> Result<String, String> {
+    if !path.is_file() { return Err(format!("Datei nicht gefunden: {}", path.display())); }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if !matches!(ext.as_str(), "txt" | "json" | "jsonl" | "csv" | "tsv") {
+        return Err(format!("Keine Text-Datei fuer Samples: .{}", ext));
+    }
+    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if size > max_bytes {
+        return Err(format!(
+            "{} ist zu gross fuer das Labor ({} MB, maximal {} MB).",
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            size / (1024 * 1024), max_bytes / (1024 * 1024)
+        ));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("Lesen: {}", e))?;
+    // UTF-8-BOM (Excel-Export) wuerde sonst JSON.parse und den ersten CSV-Header stoeren.
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    Ok(String::from_utf8_lossy(bytes).into_owned())
+}
+
+#[tauri::command]
+pub async fn read_dataset_samples_file(file_path: String) -> Result<String, String> {
+    read_text_for_samples(Path::new(&file_path), LAB_TEXT_MAX_BYTES)
+}
+
 #[tauri::command]
 pub async fn read_dataset_file(file_path: String) -> Result<String, String> {
     let path = Path::new(&file_path);
@@ -3591,5 +3625,31 @@ mod yaml_comment_tests {
     #[test]
     fn ganze_kommentarzeile_wird_leer() {
         assert_eq!(strip_comment("# nur ein Kommentar"), "");
+    }
+}
+
+#[cfg(test)]
+mod lab_samples_file_tests {
+    use super::*;
+
+    #[test]
+    fn liest_formatierte_json_liste_komplett() {
+        let dir = std::env::temp_dir().join(format!("ft_lab_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("daten.json");
+        let entries: Vec<String> = (0..300)
+            .map(|i| format!("  {{\n    \"label\": \"L{}\",\n    \"text\": \"Satz {}\"\n  }}", i % 3, i))
+            .collect();
+        fs::write(&file, format!("\u{feff}[\n{}\n]\n", entries.join(",\n"))).unwrap();
+
+        let text = read_text_for_samples(&file, LAB_TEXT_MAX_BYTES).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), 300);
+        assert!(!text.contains("Vorschau"));
+
+        assert!(read_text_for_samples(&file, 10).unwrap_err().contains("zu gross"));
+        fs::write(dir.join("bild.png"), b"x").unwrap();
+        assert!(read_text_for_samples(&dir.join("bild.png"), LAB_TEXT_MAX_BYTES).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
