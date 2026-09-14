@@ -17,8 +17,18 @@ describe('analysisTaskContext', () => {
   it('beschreibt den Graph in Ausfuehrungsreihenfolge und nennt fehlende Regularisierung', () => {
     const s = canvasGraphSummary(graph)!;
     expect(s).toContain('csv_loader(targetCol=label) -> dense(inputSize=4, outputSize=2) -> output_node(numClasses=2) -> loss(type=cross_entropy)');
-    expect(s).toContain('Nicht im Graph vorhanden: dropout');
+    expect(s).toContain("Nicht im Graph vorhanden: dropout = Node 'Dropout' (Parameter p)");
     expect(canvasGraphSummary({ nodes: [] })).toBeNull();
+  });
+
+  it('Warmup: kein eigener Node, Feld im LR Scheduler, Steps pro Epoche fuer die Rechnung', () => {
+    // 1.2.72: Der Chat empfahl "vor dem Scheduler einen Warmup-Node einfuegen"
+    // und rechnete "25 Epochen = 7 Warmup-Schritte".
+    const s = canvasGraphSummary({ ...graph, training: { scheduler: 'cosine', warmupSteps: 0 } }, 70 / 10)!;
+    expect(s).toContain("scheduler = Node 'LR Scheduler' (Parameter Schedule, Warmup Steps, Min LR)");
+    expect(s).toContain('Scheduler im Training: cosine, warmupSteps=0 (kein Warmup). Einen eigenen Warmup-Node gibt es nicht.');
+    expect(s).toContain('Optimizer-Steps pro Epoche: 7.');
+    expect(canvasGraphSummary(graph)).not.toContain('Steps pro Epoche');
   });
 
   it('Canvas: nur Trainingswerte aus dem Synapse Builder sind empfehlbar', () => {

@@ -1474,7 +1474,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         // wertet das Plugin nicht aus — die KI bewertete sonst Werte, die das
         // Netz gar nicht hat. Stattdessen die tatsaechliche Graph-Struktur.
         lines.push(`Trainingswerte (aus dem Synapse Builder): weight_decay=${cfg.weight_decay} max_grad_norm=${cfg.max_grad_norm} grad_accum=${cfg.gradient_accumulation_steps} label_smoothing=${cfg.label_smoothing}`);
-        const graph = canvasGraphSummary(cfg.canvas_graph);
+        const graph = canvasGraphSummary(cfg.canvas_graph, s.total_epochs > 0 ? s.total_steps / s.total_epochs : null);
         if (graph) lines.push(graph);
       } else {
         // Diese Felder fehlten im Prompt. Die KI bemaengelte daraufhin ein

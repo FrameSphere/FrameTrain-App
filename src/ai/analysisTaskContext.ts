@@ -29,7 +29,22 @@ export function unavailableAnalysisFields(taskType: string | null | undefined, a
 }
 
 interface IRNode { id: string; type: string; params?: Record<string, unknown> }
-interface CanvasIR { nodes?: IRNode[]; execution_order?: string[] }
+interface CanvasIR {
+  nodes?: IRNode[];
+  execution_order?: string[];
+  training?: { scheduler?: string; warmupSteps?: number; minLr?: number };
+}
+
+// Wie der Nutzer fehlende Nodes im Synapse Builder einbaut. Regression aus dem
+// App-Durchgang mit 1.2.72: Der Chat empfahl "vor dem Scheduler einen
+// Warmup-Node einfuegen" — den gibt es nicht. Warmup ist das Feld
+// "Warmup Steps" im Node "LR Scheduler"; ohne diesen Node laeuft cosine ohne Warmup.
+const ABSENT_HINTS: Record<string, string> = {
+  dropout: "Node 'Dropout' (Parameter p)",
+  batchnorm: "Node 'BatchNorm'",
+  layernorm: "Node 'LayerNorm'",
+  scheduler: "Node 'LR Scheduler' (Parameter Schedule, Warmup Steps, Min LR) — ohne ihn: cosine ohne Warmup",
+};
 
 const PARAM_KEYS: Record<string, string[]> = {
   csv_loader: ['targetCol'], parquet_loader: ['targetCol'], image_loader: ['imageSize', 'channels'],
@@ -40,7 +55,7 @@ const PARAM_KEYS: Record<string, string[]> = {
 };
 
 /** Kompakte Beschreibung des Canvas-Graphs in Ausfuehrungsreihenfolge. */
-export function canvasGraphSummary(graph: unknown): string | null {
+export function canvasGraphSummary(graph: unknown, stepsPerEpoch?: number | null): string | null {
   const ir = graph as CanvasIR | null;
   const nodes = ir?.nodes ?? [];
   if (nodes.length === 0) return null;
@@ -58,16 +73,25 @@ export function canvasGraphSummary(graph: unknown): string | null {
   const types = new Set(all.map(n => n.type));
   const absent = ['dropout', 'batchnorm', 'layernorm', 'scheduler'].filter(t => !types.has(t));
   const lines = [`Graph (${all.length} Nodes): ${all.map(describe).join(' -> ')}`];
-  if (absent.length) lines.push(`Nicht im Graph vorhanden: ${absent.join(', ')}`);
+  if (absent.length) lines.push(`Nicht im Graph vorhanden: ${absent.map(t => `${t} = ${ABSENT_HINTS[t]}`).join('; ')}`);
+  const tr = ir?.training;
+  if (tr) {
+    const warm = Number(tr.warmupSteps ?? 0);
+    lines.push(`Scheduler im Training: ${tr.scheduler ?? 'cosine'}, warmupSteps=${warm}${warm > 0 ? '' : ' (kein Warmup)'}. Einen eigenen Warmup-Node gibt es nicht.`);
+  }
+  if (stepsPerEpoch && stepsPerEpoch > 0) {
+    const spe = Math.round(stepsPerEpoch);
+    lines.push(`Optimizer-Steps pro Epoche: ${spe}. Warmup Steps werden auf ganze Epochen aufgerundet (1-${spe} Steps = 1 Epoche Warmup, one_cycle ignoriert Warmup Steps).`);
+  }
   return lines.join('\n');
 }
 
 /** Zusatz fuer den System-Prompt bei Canvas-Modellen. */
 export function canvasPromptBlock(language: string): string {
   return language === 'de'
-    ? `Dies ist ein Canvas-Netz aus dem Synapse Builder. Regularisierung (Dropout, Normalisierung), Architektur und Warmup gibt es nur als Nodes im Graph — bewerte ausschliesslich, was im Graph steht, und erfinde keine Werte fuer Nodes, die fehlen.
+    ? `Dies ist ein Canvas-Netz aus dem Synapse Builder. Regularisierung (Dropout, Normalisierung) und Architektur gibt es nur als Nodes im Graph; Warmup ist das Feld "Warmup Steps" im Node "LR Scheduler" (es gibt keinen Warmup-Node). Bewerte ausschliesslich, was im Graph steht, und erfinde keine Werte fuer Nodes, die fehlen.
 Architektur-Aenderungen (z. B. "Dropout-Node nach Dense einfuegen", "zweiten Dense-Layer mit ReLU ergaenzen") gehoeren in die Verbesserungsvorschlaege als Text. Der JSON-Block enthaelt nur Felder, die im Synapse Builder als Trainingswerte gesetzt werden.`
-    : `This is a Canvas network from the Synapse Builder. Regularization (dropout, normalization), architecture and warmup exist only as nodes in the graph — judge only what the graph contains and do not invent values for nodes that are absent.
+    : `This is a Canvas network from the Synapse Builder. Regularization (dropout, normalization) and architecture exist only as nodes in the graph; warmup is the "Warmup Steps" field of the "LR Scheduler" node (there is no warmup node). Judge only what the graph contains and do not invent values for nodes that are absent.
 Architecture changes (e.g. "add a Dropout node after Dense") belong in the improvement suggestions as text. The JSON block contains only fields that are set as training values in the Synapse Builder.`;
 }
 
@@ -101,6 +125,6 @@ export function chatFieldRule(language: string, fieldList: string, canvas: boole
     : `A JSON block may contain only these fields (exactly these names):\n${fieldList}`;
   if (!canvas) return base;
   return base + (de
-    ? `\nFragt der User nach etwas, das bei Canvas nur als Node existiert (Dropout, Normalisierung, Warmup, Layer): sag klar, ob der Node im Graph vorhanden ist. Fehlt er, erklaere, welchen Node er wo im Synapse Builder einfuegen soll und mit welchem Parameter — als Text, niemals als JSON-Feld.`
-    : `\nIf the user asks about something that exists only as a node in Canvas (dropout, normalization, warmup, layers): say clearly whether that node is in the graph. If it is absent, explain which node to add where in the Synapse Builder and with which parameter — as text, never as a JSON field.`);
+    ? `\nFragt der User nach etwas, das bei Canvas nur als Node existiert (Dropout, Normalisierung, Warmup, Layer): sag klar, ob der Node im Graph vorhanden ist. Fehlt er, erklaere, welchen Node er wo im Synapse Builder einfuegen soll und mit welchem Parameter — als Text, niemals als JSON-Feld. Nenne nur Nodes und Parameter, die im Kontext stehen. Rechne Warmup in Optimizer-Steps mit den Steps pro Epoche aus dem Kontext.`
+    : `\nIf the user asks about something that exists only as a node in Canvas (dropout, normalization, warmup, layers): say clearly whether that node is in the graph. If it is absent, explain which node to add where in the Synapse Builder and with which parameter — as text, never as a JSON field. Name only nodes and parameters given in the context. Compute warmup in optimizer steps using the steps per epoch from the context.`);
 }
