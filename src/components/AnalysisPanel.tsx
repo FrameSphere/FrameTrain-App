@@ -17,7 +17,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { setRecommendedParams } from '../ai/coachToolEvents';
 import { SETTABLE_CONFIG } from '../ai/coachContext';
 import { withoutUnavailableFields } from '../ai/coachToolEvents';
-import { canvasGraphSummary, canvasPromptBlock, chatFieldRule, isCanvasTask, sanitizeChatJson, unavailableAnalysisFields } from '../ai/analysisTaskContext';
+import { canvasGraphSummary, canvasPromptBlock, canvasSettingsLocation, chatFieldRule, isCanvasTask, sanitizeChatJson, unavailableAnalysisFields } from '../ai/analysisTaskContext';
 import { findLastJsonObject } from '../ai/jsonBlock';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
@@ -1349,7 +1349,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         const graph = canvasGraphSummary(coachCfg.canvas_graph, s && s.total_epochs > 0 ? s.total_steps / s.total_epochs : null);
         if (graph) lines.push(graph);
         lines.push(canvasPromptBlock(language));
-        lines.push('Alle Trainingswerte und Architektur-Aenderungen setzt der User im Synapse Builder (Nodes bzw. Trainingsleiste) — das Trainings-Formular und Templates wirken bei Canvas nicht. Keine Features empfehlen, die es dort nicht gibt (z. B. Early Stopping, Klassen-Gewichtung).');
+        lines.push('Alle Trainingswerte und Architektur-Aenderungen setzt der User im Synapse Builder — das Trainings-Formular und Templates wirken bei Canvas nicht.');
+        lines.push(canvasSettingsLocation(language));
       } else {
         lines.push(`warmup_ratio=${coachCfg.warmup_ratio} dropout=${coachCfg.dropout} label_smoothing=${coachCfg.label_smoothing} grad_accum=${coachCfg.gradient_accumulation_steps}`);
       }
@@ -1513,6 +1514,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         lines.push(`Trainingswerte (aus dem Synapse Builder): weight_decay=${cfg.weight_decay} max_grad_norm=${cfg.max_grad_norm} grad_accum=${cfg.gradient_accumulation_steps} label_smoothing=${cfg.label_smoothing}`);
         const graph = canvasGraphSummary(cfg.canvas_graph, s.total_epochs > 0 ? s.total_steps / s.total_epochs : null);
         if (graph) lines.push(graph);
+        lines.push(canvasSettingsLocation(language));
       } else {
         // Diese Felder fehlten im Prompt. Die KI bemaengelte daraufhin ein
         // "fehlendes Warm-up", obwohl warmup_ratio gesetzt war — sie konnte es

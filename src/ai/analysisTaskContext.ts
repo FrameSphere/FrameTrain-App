@@ -86,6 +86,28 @@ export function canvasGraphSummary(graph: unknown, stepsPerEpoch?: number | null
   return lines.join('\n');
 }
 
+/**
+ * Wo im Synapse Builder welcher Trainingswert steht.
+ *
+ * Regression aus dem App-Durchgang mit 1.2.75: Der Coach auf der Trainingsseite
+ * schickte den User zum "Synapse Builder oben rechts im Trainings-Header" (ist
+ * ein Eintrag in der Seitenleiste), zu Nodes "Epochen" und "Lernrate" (gibt es
+ * nicht) und zu LoRA-Einstellungen (kennt Canvas nicht).
+ * Die Lernrate aus der Konsole hat Vorrang vor dem Feld im Optimizer-Node
+ * (graphIR: config.learningRate ?? optimizer.lr).
+ */
+export function canvasSettingsLocation(language: string): string {
+  return language === 'en'
+    ? `Where Canvas training values are set (Synapse Builder = entry in the left sidebar, [[go:synapse]]):
+- Training console, tab "Config": Epochs, Batch size, Learning rate (wins over the Optimizer node's LR field), GPU, Precision, Grad accum.
+- Node "Optimizer": Type, Weight Decay, Gradient Clip. Node "Loss": Loss Type, Label Smoothing. Node "LR Scheduler": Schedule, Warmup Steps, Min LR. Node "Dropout": Drop Prob.
+- There are no nodes named "Epochs" or "Learning rate", and no LoRA, early stopping or class weights.`
+    : `Wo Canvas-Trainingswerte eingestellt werden (Synapse Builder = Eintrag in der linken Seitenleiste, [[go:synapse]]):
+- Trainings-Konsole, Tab "Konfiguration": Epochen, Batch-Größe, Lernrate (hat Vorrang vor dem Lernraten-Feld im Optimizer-Node), GPU, Genauigkeit, Grad-Akkum.
+- Node "Optimizer": Type, Weight Decay, Gradient Clip. Node "Loss": Loss Type, Label Smoothing. Node "LR Scheduler": Schedule, Warmup Steps, Min LR. Node "Dropout": Drop Prob.
+- Es gibt keine Nodes "Epochen" oder "Lernrate", und kein LoRA, Early Stopping oder Klassen-Gewichtung.`;
+}
+
 /** Zusatz fuer den System-Prompt bei Canvas-Modellen. */
 export function canvasPromptBlock(language: string): string {
   return language === 'de'

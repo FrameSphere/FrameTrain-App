@@ -17,6 +17,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, expandHiddenFields, setUnavailableConfigFields, withoutUnavailableFields, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord, SETTABLE_CONFIG } from '../ai/coachContext';
+import { canvasSettingsLocation } from '../ai/analysisTaskContext';
 import { estimateTrainingRam, ramVerdict, ramEstimateLines } from '../ai/resourceEstimate';
 import { clampNumber, parseNumberInput } from './numberInput';
 import { appendLossPoint } from './lossStats';
@@ -1471,7 +1472,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       lines.push('');
       lines.push('--- AKTUELLE CONFIG (Train-Modus) ---');
       if (isCanvasSelected) {
-        lines.push('Canvas-Modell: Epochen, Batch, Lernrate, Optimizer, Scheduler, Weight Decay, Warmup und Loss kommen aus dem Synapse Builder (Trainingsleiste und Nodes). Die Formularwerte unten werden beim Start ueberschrieben — keine [[set:…]]- oder [[apply:recommended]]-Buttons anbieten, sondern auf den Synapse Builder verweisen.');
+        lines.push('Canvas-Modell: Epochen, Batch, Lernrate, Optimizer, Scheduler, Weight Decay, Warmup und Loss kommen aus dem Synapse Builder. Die Formularwerte unten werden beim Start ueberschrieben — keine [[set:…]]- oder [[apply:recommended]]-Buttons anbieten, sondern auf den Synapse Builder verweisen.');
+        lines.push(canvasSettingsLocation(language));
       }
       // Nur Felder, die der erkannte Modelltyp auswertet. Stand hier fuer YOLO
       // "gradient_checkpointing=false", empfahl der Coach genau diesen Schalter

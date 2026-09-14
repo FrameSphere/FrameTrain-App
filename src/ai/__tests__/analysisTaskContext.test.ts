@@ -1,7 +1,7 @@
 // Regression aus dem App-Durchgang vom 14.09.2026: Die KI-Analyse eines
 // Canvas-Modells empfahl Dropout und Warmup, die das Netz gar nicht hat.
 import { describe, it, expect } from 'vitest';
-import { canvasGraphSummary, sanitizeChatJson, unavailableAnalysisFields } from '../analysisTaskContext';
+import { canvasGraphSummary, canvasSettingsLocation, sanitizeChatJson, unavailableAnalysisFields } from '../analysisTaskContext';
 
 const graph = {
   nodes: [
@@ -49,5 +49,14 @@ describe('analysisTaskContext', () => {
     const mixed = '```json\n{"learning_rate": 0.0003, "dropout": 0.2}\n```';
     expect(sanitizeChatJson(mixed, settable, u)).toBe('```json\n{\n  "learning_rate": 0.0003\n}\n```');
     expect(sanitizeChatJson('```json\n{kaputt\n```', settable, u)).toBe('```json\n{kaputt\n```');
+  });
+
+  it('nennt die echten Orte im Synapse Builder (1.2.75: "Nodes Epochen und Lernrate", "oben rechts im Trainings-Header")', () => {
+    const de = canvasSettingsLocation('de');
+    expect(de).toContain('linken Seitenleiste');
+    expect(de).toContain('Tab "Konfiguration": Epochen, Batch-Größe, Lernrate');
+    expect(de).toContain('Node "LR Scheduler": Schedule, Warmup Steps, Min LR');
+    expect(de).toContain('keine Nodes "Epochen" oder "Lernrate"');
+    expect(canvasSettingsLocation('en')).toContain('tab "Config"');
   });
 });
