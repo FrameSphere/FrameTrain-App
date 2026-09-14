@@ -1008,7 +1008,8 @@ function ReportText({ text }: { text: string }) {
 function isImageArchitecture(arch?: string): boolean {
   if (!arch) return false;
   // yolo* gehoert dazu: bei einem Detektor ist "max_seq_length 128" sinnlos.
-  return /^(resnet|efficientnet|vit|deit|beit|swin|convnext|regnet|mobilenet|mobilevit|levit|poolformer|cvt|wav2vec2|hubert|wavlm|unispeech|sew|whisper|ast|yolo)/i
+  // canvas: Canvas-Netze werten das Formularfeld nicht aus (Sequenzlaenge steht im Graph).
+  return /^(resnet|efficientnet|vit|deit|beit|swin|convnext|regnet|mobilenet|mobilevit|levit|poolformer|cvt|wav2vec2|hubert|wavlm|unispeech|sew|whisper|ast|yolo|canvas)/i
     .test(arch);
 }
 

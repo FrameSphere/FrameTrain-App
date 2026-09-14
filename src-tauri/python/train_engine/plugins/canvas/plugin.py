@@ -52,6 +52,10 @@ class CanvasPlugin:
             "train_losses": [],
             "val_losses": [],
         }
+        # Abschlusswerte fuer die Analyse-Seite. Vorher lieferte validate() nur
+        # {"val_loss": 0.0}: die Analyse zeigte "Final Train Loss 0.0000",
+        # "Val N/A", "0 Steps", "device cpu" und "n_train 0" — egal was lief.
+        self._final: Dict[str, Any] = {}
 
     # ── K2: Legacy-Erkennung ─────────────────────────────────────────────────
     _LEGACY_ERROR = (
@@ -296,6 +300,12 @@ class CanvasPlugin:
                     stub, self.config.dataset_path, batch_size
                 )
 
+            self._final = {
+                "n_train": len(train_loader.dataset),
+                "n_val": len(val_loader.dataset),
+                "device": self.device,
+                "architecture": "canvas",
+            }
             optimizer = self._make_optimizer()
             self._optimizer = optimizer  # Fix 1.3: für save_model (optimizer_state_dict)
 
@@ -363,14 +373,13 @@ class CanvasPlugin:
             is_batch_scheduler = scheduler is not None and isinstance(
                 scheduler, torch.optim.lr_scheduler.OneCycleLR
             )
-            # W1 Edit 3a: Scheduler-State für Resume laden
-            prev_scheduler_state = getattr(self, "_prev_scheduler_state", None)
-            if scheduler is not None and prev_scheduler_state is not None:
-                try:
-                    scheduler.load_state_dict(prev_scheduler_state)
-                    MessageProtocol.status("train", "✓ Scheduler-State aus Checkpoint geladen")
-                except Exception as e:
-                    MessageProtocol.status("train", f"[Warn] Scheduler-State konnte nicht geladen werden: {e}")
+            # Scheduler-State aus dem vorherigen Lauf NICHT uebernehmen: jeder Lauf
+            # plant seinen eigenen Verlauf ueber `epochs`. Der alte State stand
+            # schon am Ende (cosine: T_max erreicht) — weitergezaehlt stieg die
+            # Lernrate im naechsten Lauf wieder von 1e-5 auf 1e-3 an, statt zu fallen.
+            # Gewichte und Optimizer-Momente werden weiterhin fortgesetzt.
+            if getattr(self, "_prev_scheduler_state", None) is not None and scheduler is not None:
+                MessageProtocol.status("train", "Scheduler startet neu (Gewichte und Optimizer werden fortgesetzt)")
             if scheduler is not None:
                 sched_name = self.ir.training.scheduler if self.ir else "none"
                 MessageProtocol.status("train", f"✓ Scheduler aktiv: {sched_name}")
@@ -442,6 +451,8 @@ class CanvasPlugin:
                 self.model.eval()
                 val_sum = 0.0
                 val_steps = 0
+                val_correct = 0
+                val_n = 0
                 with torch.no_grad():
                     for vx, vy in val_loader:
                         vx, vy = vx.to(self.device), vy.to(self.device)
@@ -451,10 +462,15 @@ class CanvasPlugin:
                             if is_clf
                             else criterion(vo.squeeze(-1), vy.float()).item()
                         )
+                        if is_clf and vo.dim() >= 2:
+                            val_correct += (vo.argmax(dim=-1) == vy).sum().item()
+                        val_n += vy.size(0)
                         val_steps += 1
                 val_loss = val_sum / max(val_steps, 1)
+                val_acc = val_correct / val_n if (is_clf and val_n) else None
                 if val_loss < best_val:
                     best_val = val_loss
+                    self._final["best_epoch"] = epoch + 1
 
                 # W1 Edit 3c: Epoch-Level Scheduler (cosine, linear, exponential)
                 if scheduler is not None and not is_batch_scheduler:
@@ -463,6 +479,17 @@ class CanvasPlugin:
                 self.train_history["epochs"].append(epoch + 1)
                 self.train_history["train_losses"].append(avg_loss)
                 self.train_history["val_losses"].append(val_loss)
+                self._total_optimizer_steps = getattr(self, "_total_optimizer_steps", 0) + optimizer_steps
+                self._final.update({
+                    "final_train_loss": avg_loss,
+                    "final_val_loss": val_loss,
+                    "total_epochs": epoch + 1,
+                    "total_steps": self._total_optimizer_steps,
+                })
+                if is_clf:
+                    self._final["train_accuracy"] = acc
+                    if val_acc is not None:
+                        self._final["accuracy"] = val_acc
 
                 lr_now = optimizer.param_groups[0]["lr"]
                 total_steps = max(len(train_loader), 1) * epochs // accum_steps
@@ -475,7 +502,10 @@ class CanvasPlugin:
                     train_loss=avg_loss,
                     val_loss=val_loss,
                     learning_rate=lr_now,
-                    metrics={"accuracy": acc},
+                    # accuracy = Validierung (wie bei den anderen Plugins); vorher
+                    # stand hier die Trainings-Accuracy unter diesem Namen.
+                    metrics=({"accuracy": val_acc, "train_accuracy": acc} if val_acc is not None
+                             else {"train_accuracy": acc}),
                 )
                 MessageProtocol.status(
                     "train",
@@ -489,8 +519,9 @@ class CanvasPlugin:
             MessageProtocol.error("Training Fehler", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
             return False
 
-    def validate(self) -> Dict[str, float]:
-        return {"val_loss": 0.0}
+    def validate(self) -> Dict[str, Any]:
+        """Abschlusswerte in den Namen, die die Analyse-Seite liest."""
+        return dict(self._final)
 
     def save_model(self, output_path: str, optimizer: Optional[optim.Optimizer] = None) -> bool:
         """Fix 1.3: Speichert vollständigen IR + optimizer_state_dict für Inference-Reload und echten Resume."""
