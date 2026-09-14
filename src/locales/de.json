@@ -2175,6 +2175,7 @@
         "countLabel": "{count} Parameter empfohlen",
         "moreLabel": "+{n} weitere",
         "saveButton": "Als Training-Template speichern",
+        "canvasHint": "Bei Canvas-Modellen wirken diese Werte nur im Synapse Builder: Epochen, Batch und Lernrate in der Trainingsleiste, Optimizer, Loss und Scheduler in ihren Nodes. Ein Training-Template hätte hier keine Wirkung.",
         "savingButton": "Speichere…"
       },
       "chat": {

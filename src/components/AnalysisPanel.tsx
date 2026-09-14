@@ -16,6 +16,8 @@ import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG }
 import { usePageContext } from '../contexts/PageContext';
 import { setRecommendedParams } from '../ai/coachToolEvents';
 import { SETTABLE_CONFIG } from '../ai/coachContext';
+import { withoutUnavailableFields } from '../ai/coachToolEvents';
+import { canvasGraphSummary, canvasPromptBlock, isCanvasTask, unavailableAnalysisFields } from '../ai/analysisTaskContext';
 import { findLastJsonObject } from '../ai/jsonBlock';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
@@ -1022,8 +1024,9 @@ function isImageArchitecture(arch?: string): boolean {
  * damit Vorschlag und Uebernahme nicht auseinanderlaufen: die feste Vorlage
  * nannte frueher neun Felder, obwohl die Trainings-Config deutlich mehr kennt.
  */
-function settableFieldList(): string {
+function settableFieldList(unavailable: ReadonlySet<string> = new Set()): string {
   return Object.entries(SETTABLE_CONFIG)
+    .filter(([key]) => !unavailable.has(key))
     .map(([key, meta]) => {
       if (meta.type === 'enum') return `- ${key}: ${(meta.values ?? []).map(v => `"${v}"`).join(' | ')}`;
       if (meta.type === 'bool') return `- ${key}: true | false`;
@@ -1065,9 +1068,10 @@ function analysisDepthHint(budget: TokenBudget, language: string): string {
  * System-Prompt fuer den Chat UNTER dem Bericht: gleiche Rolle und gleiche
  * Formatregeln, aber ohne die Pflicht-Abschnitte des Berichts.
  */
-function buildAnalysisChatSystemPrompt(language: string, taskHint = '') {
+function buildAnalysisChatSystemPrompt(language: string, taskHint = '', canvas = false) {
   const de = language === 'de';
-  const taskBlock = taskHint ? `\nThis run is: ${taskHint}. Judge it by the metrics that matter for THAT task.` : '';
+  const taskBlock = (taskHint ? `\nThis run is: ${taskHint}. Judge it by the metrics that matter for THAT task.` : '')
+    + (canvas ? `\n${canvasPromptBlock(language)}` : '');
   return `You are an experienced machine learning engineer and model training expert.
 ${de ? 'Antworte ausschließlich auf Deutsch.' : 'Answer exclusively in English.'}${taskBlock}
 ${de ? 'Beantworte die Frage des Users direkt und mit den konkreten Zahlen aus den Trainingsdaten.' : "Answer the user's question directly, using the concrete numbers from the training data."}
@@ -1079,7 +1083,8 @@ Formatting rules:
 - ${de ? 'Nur wenn der User nach neuen Parametern fragt: einen ```json-Block mit den zu ändernden Feldern anhängen.' : 'Only when the user asks for new parameters: append a ```json block with the fields to change.'}`;
 }
 
-function buildAnalysisSystemPrompt(language: string, taskHint = '', budget: TokenBudget = 'balanced') {
+function buildAnalysisSystemPrompt(language: string, taskHint = '', budget: TokenBudget = 'balanced',
+                                   unavailable: ReadonlySet<string> = new Set(), canvas = false) {
   const responseInstruction = language === 'de'
     ? 'Antworte ausschließlich auf Deutsch.'
     : 'Answer exclusively in English.';
@@ -1117,6 +1122,7 @@ function buildAnalysisSystemPrompt(language: string, taskHint = '', budget: Toke
     ? `\n\nThis run is: ${taskHint}.
 Judge it by the metrics that matter for THAT task (e.g. mAP50/mAP50-95 for object detection, accuracy/F1 for classification).
 Only recommend parameters that are meaningful for this task — leave out fields that do not apply (e.g. max_seq_length or LoRA for a CNN detector).`
+      + (canvas ? `\n${canvasPromptBlock(language)}` : '')
     : '';
 
   return `You are an experienced machine learning engineer and model training expert.
@@ -1152,7 +1158,7 @@ ${sectionTitles.suggestionsText}
 ${sectionTitles.params}
 Use a \`\`\`json block with only the fields you want to change.
 Every field the user can set is allowed — these and no others:
-${settableFieldList()}
+${settableFieldList(unavailable)}
 Example: {"epochs": 4, "learning_rate": 0.00002, "optimizer": "sgd", "fp16": true}
 
 ${sectionTitles.forecast}
@@ -1439,7 +1445,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         const r = reportRes.value;
         setReport(r);
         setChatMessages([{ role: 'assistant', content: r.report_text }]);
-        setAiRecommendedParams(extractAIRecommendedParams(r.report_text));
+        setAiRecommendedParams(recommendedFor(r.report_text));
       } else { setReport(null); setChatMessages([]); setAiRecommendedParams(null); }
     } finally { setLoadingAnalysis(false); }
   };
@@ -1460,12 +1466,21 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       if (ctxLossRed !== null) lines.push(`Loss-Reduktion: ${ctxLossRed}% | Overfitting-Gap: ${ctxGap ?? 'N/A'}%`);
       if (ctxAvgNorm !== null) lines.push(`\u00d8 Grad Norm: ${ctxAvgNorm} | Max: ${ctxMaxNorm ?? 'N/A'}`);
       lines.push(`\nConfig: epochs=${cfg.epochs} batch=${cfg.batch_size} lr=${cfg.learning_rate} opt=${cfg.optimizer} sched=${cfg.scheduler}`);
-      // Diese Felder fehlten im Prompt. Die KI bemaengelte daraufhin ein
-      // "fehlendes Warm-up", obwohl warmup_ratio gesetzt war — sie konnte es
-      // schlicht nicht sehen.
-      lines.push(`Regularisierung: warmup_ratio=${cfg.warmup_ratio} warmup_steps=${cfg.warmup_steps} weight_decay=${cfg.weight_decay} max_grad_norm=${cfg.max_grad_norm} label_smoothing=${cfg.label_smoothing} dropout=${cfg.dropout}`);
-      lines.push(`Ablauf: max_steps=${cfg.max_steps} grad_accum=${cfg.gradient_accumulation_steps} eval_strategy=${cfg.eval_strategy} eval_steps=${cfg.eval_steps} grad_checkpointing=${cfg.gradient_checkpointing}`);
-      lines.push(`LoRA: ${cfg.use_lora} | fp16: ${cfg.fp16} | seq_len: ${cfg.max_seq_length}`);
+      if (isCanvasTask(cfg.task_type)) {
+        // Canvas: Die Formularfelder (Dropout, Warmup, Sequenzlaenge, LoRA)
+        // wertet das Plugin nicht aus — die KI bewertete sonst Werte, die das
+        // Netz gar nicht hat. Stattdessen die tatsaechliche Graph-Struktur.
+        lines.push(`Trainingswerte (aus dem Synapse Builder): weight_decay=${cfg.weight_decay} max_grad_norm=${cfg.max_grad_norm} grad_accum=${cfg.gradient_accumulation_steps} label_smoothing=${cfg.label_smoothing}`);
+        const graph = canvasGraphSummary(cfg.canvas_graph);
+        if (graph) lines.push(graph);
+      } else {
+        // Diese Felder fehlten im Prompt. Die KI bemaengelte daraufhin ein
+        // "fehlendes Warm-up", obwohl warmup_ratio gesetzt war — sie konnte es
+        // schlicht nicht sehen.
+        lines.push(`Regularisierung: warmup_ratio=${cfg.warmup_ratio} warmup_steps=${cfg.warmup_steps} weight_decay=${cfg.weight_decay} max_grad_norm=${cfg.max_grad_norm} label_smoothing=${cfg.label_smoothing} dropout=${cfg.dropout}`);
+        lines.push(`Ablauf: max_steps=${cfg.max_steps} grad_accum=${cfg.gradient_accumulation_steps} eval_strategy=${cfg.eval_strategy} eval_steps=${cfg.eval_steps} grad_checkpointing=${cfg.gradient_checkpointing}`);
+        lines.push(`LoRA: ${cfg.use_lora} | fp16: ${cfg.fp16} | seq_len: ${cfg.max_seq_length}`);
+      }
       lines.push(`Hardware: ${hw.device?.toUpperCase()} ${hw.system_ram_gb}GB RAM | Val-Set: ${ds.has_validation ? 'Ja' : 'NEIN'}`);
       // Ohne Architektur und Datenmenge bewertete die KI ins Blaue hinein.
       // Ohne den Task-Typ bewertete die KI jeden Lauf als NLP-Feintuning und
@@ -1518,6 +1533,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
    * Kurzbeschreibung des Task-Typs fuer den System-Prompt. Ohne sie schlug die
    * KI bei einem YOLO-Lauf NLP-Parameter (max_seq_length, LoRA) vor.
    */
+  const isCanvasRun = isCanvasTask(fullData?.config?.task_type);
+  /** Felder, die fuer den Task des gewaehlten Laufs keine Wirkung haben. */
+  const unavailableFields = unavailableAnalysisFields(fullData?.config?.task_type, Object.keys(SETTABLE_CONFIG));
+  const recommendedFor = (text: string) => {
+    const params = extractAIRecommendedParams(text);
+    if (!params) return null;
+    const filtered = withoutUnavailableFields(params as Record<string, never>, unavailableFields) as Record<string, unknown>;
+    return Object.keys(filtered).length ? filtered : null;
+  };
+
   function taskHint(): string {
     const task = String(fullData?.config?.task_type ?? '').trim();
     const arch = String(fullData?.model_info?.architecture ?? '').trim();
@@ -1540,7 +1565,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       // knapp — der Bericht brach mitten im Satz ab, samt halbem JSON-Block.
       const budget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
       const text = await callAIClient(aiSettings, {
-        system: buildAnalysisSystemPrompt(language, taskHint(), aiSettings.tokenBudget ?? 'balanced'),
+        system: buildAnalysisSystemPrompt(language, taskHint(), aiSettings.tokenBudget ?? 'balanced', unavailableFields, isCanvasRun),
         messages: [{ role: 'user', content: `Analysiere folgendes Training:\n\n${buildFullContext()}` }],
         maxTokens: budget.maxTokens,
         temperature: 0.4,
@@ -1551,7 +1576,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       });
       await invoke('save_ai_analysis_report', { versionId: selectedVersionId, reportText: text, provider: aiProvider, model: resolvedModel, language });
       const newReport: AIAnalysisReport = { version_id: selectedVersionId, report_text: text, provider: aiProvider, model: resolvedModel, language, generated_at: new Date().toISOString() };
-      setReport(newReport); setAiRecommendedParams(extractAIRecommendedParams(text));
+      setReport(newReport); setAiRecommendedParams(recommendedFor(text));
       setChatMessages([{ role: 'assistant', content: text }]); setShowChat(true);
       success(t('common.success'), t('analysisPanel.aiAnalysis.createdWith', { provider: providerLabel(aiProvider) }));
     } catch (e: any) {
@@ -1584,7 +1609,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       // sechs Pflicht-Abschnitte. Auf die Frage "warum ist die mAP so
       // niedrig?" antwortete die KI deshalb mit einem neuen Gesamtbericht
       // statt mit einer Antwort. Hier zaehlt nur Rolle, Task und Datenlage.
-      const sys = `${buildAnalysisChatSystemPrompt(language, taskHint())}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
+      const sys = `${buildAnalysisChatSystemPrompt(language, taskHint(), isCanvasRun)}\n\n${language === 'de' ? 'Vorherige Analyse' : 'Previous analysis'}:\n${report.report_text}\n\n${language === 'de' ? 'Trainingsdaten' : 'Training data'}:\n${buildFullContext()}`;
       const chatBudget = TOKEN_BUDGET_CONFIG[aiSettings.tokenBudget ?? 'balanced'];
       const reply = await callAIClient(aiSettings, {
         system: sys, messages: updated,
@@ -2127,9 +2152,18 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                         <span className="px-2 py-0.5 bg-white/10 rounded text-xs text-gray-400">{t('analysisPanel.aiAnalysis.recommendedParams.moreLabel').replace('{n}', String(Object.keys(aiRecommendedParams).length - 7))}</span>
                       )}
                     </div>
+                    {isCanvasRun ? (
+                      // Ein Training-Template setzt Formularwerte — die ignoriert
+                      // das Canvas-Plugin. Die Werte gehoeren in den Synapse Builder.
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-300">
+                        <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-purple-300" />
+                        <span>{t('analysisPanel.aiAnalysis.recommendedParams.canvasHint')}</span>
+                      </div>
+                    ) : (
                     <button onClick={saveAIRecommendationAsTemplate} disabled={savingAITemplate} className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-lg text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-40`}>
                       {savingAITemplate ? <><Loader2 className="w-4 h-4 animate-spin" />{t('analysisPanel.aiAnalysis.recommendedParams.savingButton')}</> : <><Save className="w-4 h-4" />{t('analysisPanel.aiAnalysis.recommendedParams.saveButton')}</>}
                     </button>
+                    )}
                   </div>
                 ) : fullData?.config && (
                   <div className="text-xs text-gray-500 text-center py-2">

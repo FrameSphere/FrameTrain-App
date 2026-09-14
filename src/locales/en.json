@@ -2175,6 +2175,7 @@
         "countLabel": "{count} parameters recommended",
         "moreLabel": "+{n} more",
         "saveButton": "Save as Training Template",
+        "canvasHint": "For Canvas models these values only take effect in the Synapse Builder: epochs, batch size and learning rate in the training bar, optimizer, loss and scheduler in their nodes. A training template would have no effect here.",
         "savingButton": "Saving…"
       },
       "chat": {
