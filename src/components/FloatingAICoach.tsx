@@ -21,7 +21,7 @@ import {
 } from '../ai/coachContext';
 import { matchSkills, skillLabel, skillHint, skillPrompt, type CoachSkill } from '../ai/coachSkills';
 import { navigateTo } from '../ui/navigationEvents';
-import { applyCoachConfig, runCoachCommand, getUnavailableConfigFields } from '../ai/coachToolEvents';
+import { applyCoachConfig, runCoachCommand, getUnavailableConfigFields, recommendedParamsApplicable } from '../ai/coachToolEvents';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import type { Language } from '../contexts/LanguageContext';
 
@@ -1382,7 +1382,7 @@ Reply with ONLY the title, nothing else.`;
             {msg.role === 'assistant' ? (() => {
               const parsed = parseCoachActions(msg.content);
               const cleanedText = parsed.cleanedText;
-              const actions = dropUnavailableSetFields(parsed.actions, getUnavailableConfigFields());
+              const actions = dropUnavailableSetFields(parsed.actions, getUnavailableConfigFields(), { applyRecommended: recommendedParamsApplicable() });
               return (
               <div className="max-w-[88%] min-w-0 space-y-1">
                 {/* Thinking block — shown above the message when finished */}

@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildCoachSystemPrompt, pageKnowledge, parseCoachActions, dropUnavailableSetFields, type PageId } from '../coachContext';
-import { expandHiddenFields } from '../coachToolEvents';
+import { expandHiddenFields, setRecommendedParams, recommendedParamsApplicable } from '../coachToolEvents';
 import { PAGE_KNOWLEDGE_PAGES } from './__helpers__/pages';
 
 const prompt = (pageId: PageId | null, automation = false) =>
@@ -141,5 +141,23 @@ describe('Nicht verfuegbare Felder', () => {
   it('laesst ohne Einschraenkung alles durch', () => {
     const { actions } = parseCoachActions('Text [[set:gradient_checkpointing=true]]');
     expect(dropUnavailableSetFields(actions, new Set())).toEqual(actions);
+  });
+
+  // App-Durchgang mit 1.2.74: Nach der KI-Analyse eines Canvas-Modells bot der
+  // Coach "Empfohlene Parameter uebernehmen" an; der Button schrieb 25 Epochen /
+  // Batch 16 ins Formular, das bei Canvas nicht wirkt.
+  it('entfernt [[apply:recommended]], wenn die Empfehlung nichts bewirken kann', () => {
+    const { actions } = parseCoachActions('Text [[apply:recommended]] [[go:training]]');
+    expect(dropUnavailableSetFields(actions, new Set(), { applyRecommended: false }).map(a => a.type)).toEqual(['navigate']);
+    expect(dropUnavailableSetFields(actions, new Set(), { applyRecommended: true })).toEqual(actions);
+  });
+
+  it('Empfehlungen aus Canvas-Analysen gelten nicht als uebernehmbar', () => {
+    setRecommendedParams({ epochs: 25 }, 'canvas');
+    expect(recommendedParamsApplicable()).toBe(false);
+    setRecommendedParams({ epochs: 25 }, 'seq_classification');
+    expect(recommendedParamsApplicable()).toBe(true);
+    setRecommendedParams(null);
+    expect(recommendedParamsApplicable()).toBe(false);
   });
 });

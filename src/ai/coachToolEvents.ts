@@ -123,9 +123,22 @@ export function consumePendingCoachCommand(canHandle: (cmd: CoachCommand) => boo
 // übernehmen. Wir halten den letzten Satz modulweit vor (kurzlebige Brücke).
 
 let lastRecommendedParams: Record<string, unknown> | null = null;
+let lastRecommendedTaskType: string | null = null;
 
-export function setRecommendedParams(params: Record<string, unknown> | null) {
+export function setRecommendedParams(params: Record<string, unknown> | null, taskType: string | null = null) {
   lastRecommendedParams = params;
+  lastRecommendedTaskType = taskType;
+}
+
+/**
+ * Kann [[apply:recommended]] etwas bewirken? Nicht bei Canvas-Modellen: Das
+ * Plugin trainiert mit den Werten aus dem Synapse Builder. Im App-Durchgang mit
+ * 1.2.74 schrieb der Button 25 Epochen / Batch 16 / 3.5e-4 ins Formular,
+ * direkt neben dem Hinweis, dass das Formular bei Canvas nicht wirkt.
+ */
+export function recommendedParamsApplicable(): boolean {
+  return !!lastRecommendedParams && Object.keys(lastRecommendedParams).length > 0
+    && String(lastRecommendedTaskType ?? '').trim() !== 'canvas';
 }
 
 export function getRecommendedParams(): Record<string, unknown> | null {

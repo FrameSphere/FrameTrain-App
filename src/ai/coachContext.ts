@@ -671,10 +671,14 @@ export function parseCoachActions(text: string): { cleanedText: string; actions:
  * nicht kennt. Bleibt von einem [[set:…]] nichts uebrig, verschwindet der
  * Button ganz — lieber keiner als einer, der ins Leere greift.
  */
-export function dropUnavailableSetFields(actions: CoachAction[], unavailable: ReadonlySet<string>): CoachAction[] {
-  if (unavailable.size === 0) return actions;
+export function dropUnavailableSetFields(actions: CoachAction[], unavailable: ReadonlySet<string>,
+                                         opts: { applyRecommended?: boolean } = {}): CoachAction[] {
+  const dropApply = opts.applyRecommended === false;
+  if (unavailable.size === 0 && !dropApply) return actions;
   const out: CoachAction[] = [];
   for (const a of actions) {
+    // "Empfohlene Parameter uebernehmen" nur, wenn es etwas Wirksames zu uebernehmen gibt.
+    if (dropApply && a.type === 'command' && a.command.kind === 'applyRecommended') continue;
     if (a.type !== 'set') { out.push(a); continue; }
     const patch = withoutUnavailableFields(a.patch, unavailable);
     if (Object.keys(patch).length > 0) out.push({ type: 'set', patch, summary: formatConfigPatch(patch) });

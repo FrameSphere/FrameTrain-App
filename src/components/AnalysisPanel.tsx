@@ -1332,6 +1332,29 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       lines.push(`⏳ ${t('analysisPanel.aiAnalysis.generatingSubtext')}`);
     }
 
+    // Modelltyp, Config und bei Canvas der Graph. Fehlten hier: Im App-Durchgang
+    // mit 1.2.74 empfahl der Coach fuer ein CSV-Canvas-Netz (Dense 4 -> 2)
+    // "Dense-Layer von 256 auf 128 Neuronen", "Weight-Decay auf 1e-4 fuer mehr
+    // Regularisierung" (eingestellt: 0.01) und "Lernrate auf 5e-4 erhoehen"
+    // (eingestellt: 1e-3) — er kannte weder Graph noch Werte.
+    const coachCfg = fullData?.config;
+    const coachCanvas = isCanvasTask(coachCfg?.task_type);
+    if (coachCfg) {
+      lines.push('');
+      lines.push('--- MODELLTYP & TRAININGSWERTE ---');
+      lines.push(`Task: ${coachCfg.task_type ?? 'unbekannt'} | Architektur: ${fullData?.model_info?.architecture ?? 'unbekannt'}`);
+      lines.push(`epochs=${coachCfg.epochs} batch_size=${coachCfg.batch_size} learning_rate=${coachCfg.learning_rate} optimizer=${coachCfg.optimizer} scheduler=${coachCfg.scheduler} weight_decay=${coachCfg.weight_decay}`);
+      if (coachCanvas) {
+        const s = fullData?.training_summary;
+        const graph = canvasGraphSummary(coachCfg.canvas_graph, s && s.total_epochs > 0 ? s.total_steps / s.total_epochs : null);
+        if (graph) lines.push(graph);
+        lines.push(canvasPromptBlock(language));
+        lines.push('Alle Trainingswerte und Architektur-Aenderungen setzt der User im Synapse Builder (Nodes bzw. Trainingsleiste) — das Trainings-Formular und Templates wirken bei Canvas nicht. Keine Features empfehlen, die es dort nicht gibt (z. B. Early Stopping, Klassen-Gewichtung).');
+      } else {
+        lines.push(`warmup_ratio=${coachCfg.warmup_ratio} dropout=${coachCfg.dropout} label_smoothing=${coachCfg.label_smoothing} grad_accum=${coachCfg.gradient_accumulation_steps}`);
+      }
+    }
+
     lines.push('');
     lines.push('--- AI-BERICHT & EMPFEHLUNGEN ---');
 
@@ -1399,18 +1422,24 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         // Zwei getrennte Wege, zwei getrennte Zeilen. In einem Satz vermischte
         // das Modell die Namen und schickte den User im KI-Bericht zu einem
         // "Übernehmen"-Button, den es dort nicht gibt.
-        lines.push(`4. Empfehlungen sichern: Im KI-Bericht steht unter den empfohlenen Parametern NUR der Button [${t('analysisPanel.aiAnalysis.recommendedParams.saveButton')}] — er legt ein Template an, einen Übernehmen-Button gibt es dort nicht.`);
-        lines.push('5. Empfehlungen direkt ins Training: nur über den Button, den DU (der Coach) per [[apply:recommended]] unter deiner Antwort anbietest.');
+        if (coachCanvas) {
+          // Bei Canvas ist der Template-Button ausgeblendet, und [[apply:recommended]]
+          // schriebe nur wirkungslose Formularwerte.
+          lines.push('4. Canvas-Modell: Unter den empfohlenen Parametern steht nur ein Hinweis, KEIN Template-Button. Empfehlungen setzt der User im Synapse Builder um — biete [[apply:recommended]] NICHT an.');
+        } else {
+          lines.push(`4. Empfehlungen sichern: Im KI-Bericht steht unter den empfohlenen Parametern NUR der Button [${t('analysisPanel.aiAnalysis.recommendedParams.saveButton')}] — er legt ein Template an, einen Übernehmen-Button gibt es dort nicht.`);
+          lines.push('5. Empfehlungen direkt ins Training: nur über den Button, den DU (der Coach) per [[apply:recommended]] unter deiner Antwort anbietest.');
+        }
       }
     }
 
     setCurrentPageContent(lines.join('\n'), 'analysis');
-  }, [modelsWithVersions, selectedModelId, selectedVersionId, metrics, fullData, report, aiRecommendedParams, loadingAnalysis, generatingReport, chatMessages.length, showChat, logs.length, setCurrentPageContent]);
+  }, [modelsWithVersions, selectedModelId, selectedVersionId, metrics, fullData, report, aiRecommendedParams, loadingAnalysis, generatingReport, chatMessages.length, showChat, logs.length, setCurrentPageContent, language]);
 
   // KI-Empfehlungen als Brücke für das Training bereitstellen ([[apply:recommended]]).
   useEffect(() => {
-    setRecommendedParams(aiRecommendedParams);
-  }, [aiRecommendedParams]);
+    setRecommendedParams(aiRecommendedParams, fullData?.config?.task_type ?? null);
+  }, [aiRecommendedParams, fullData?.config?.task_type]);
 
   // ── Loaders ────────────────────────────────────────────────────────────────
 

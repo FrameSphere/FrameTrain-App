@@ -16,7 +16,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
 import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, expandHiddenFields, setUnavailableConfigFields, withoutUnavailableFields, type CoachCommand } from '../ai/coachToolEvents';
-import { coercePatchFromRecord } from '../ai/coachContext';
+import { coercePatchFromRecord, SETTABLE_CONFIG } from '../ai/coachContext';
 import { estimateTrainingRam, ramVerdict, ramEstimateLines } from '../ai/resourceEstimate';
 import { clampNumber, parseNumberInput } from './numberInput';
 import { appendLossPoint } from './lossStats';
@@ -1328,7 +1328,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   // lora_r, load_in_4bit …). Grundlage fuer Coach-Buttons, RAM-Tipps und
   // die Config-Zeilen im Kontext.
   const unavailableFields = expandHiddenFields(hiddenFields);
-  const unavailableKey    = [...unavailableFields].sort().join(',');
+  // Canvas trainiert mit den Werten aus dem Synapse Builder (Backend:
+  // apply_canvas_training_spec) — kein Formularfeld wirkt, also auch kein
+  // [[set:…]]-Button des Coaches.
+  const isCanvasSelected  = !!selectedModelId?.startsWith('canvas_');
+  const coachUnavailable  = isCanvasSelected ? new Set([...unavailableFields, ...Object.keys(SETTABLE_CONFIG)]) : unavailableFields;
+  const unavailableKey    = [...coachUnavailable].sort().join(',');
   useEffect(() => {
     setUnavailableConfigFields(unavailableKey ? unavailableKey.split(',') : []);
     return () => setUnavailableConfigFields([]);
@@ -1465,6 +1470,9 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       const precision = config.fp16 ? 'FP16' : config.bf16 ? 'BF16' : 'FP32';
       lines.push('');
       lines.push('--- AKTUELLE CONFIG (Train-Modus) ---');
+      if (isCanvasSelected) {
+        lines.push('Canvas-Modell: Epochen, Batch, Lernrate, Optimizer, Scheduler, Weight Decay, Warmup und Loss kommen aus dem Synapse Builder (Trainingsleiste und Nodes). Die Formularwerte unten werden beim Start ueberschrieben — keine [[set:…]]- oder [[apply:recommended]]-Buttons anbieten, sondern auf den Synapse Builder verweisen.');
+      }
       // Nur Felder, die der erkannte Modelltyp auswertet. Stand hier fuer YOLO
       // "gradient_checkpointing=false", empfahl der Coach genau diesen Schalter
       // als Sparmassnahme — trotz des Hinweises weiter unten.
@@ -1696,8 +1704,17 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
         else if (cmd.target === 'ram') setSections(s => ({ ...s, ram: true }));
         break;
       case 'applyRecommended': {
+        if (isCanvasSelected) {
+          warning(
+            language === 'en' ? 'Set in the Synapse Builder' : 'Im Synapse Builder einstellen',
+            language === 'en'
+              ? 'Canvas models train with epochs, batch size, learning rate, optimizer and scheduler from the Synapse Builder — this form has no effect.'
+              : 'Canvas-Modelle trainieren mit Epochen, Batch, Lernrate, Optimizer und Scheduler aus dem Synapse Builder — dieses Formular wirkt nicht.',
+          );
+          break;
+        }
         const rec = getRecommendedParams();
-        const patch = rec ? coercePatchFromRecord(rec) : {};
+        const patch = rec ? withoutUnavailableFields(coercePatchFromRecord(rec), unavailableFields) : {};
         if (Object.keys(patch).length > 0) {
           updateConfig(patch as Partial<TrainingConfig>);
           success(t('trainingPanel.notifications.aiTemplateSaved'), Object.keys(patch).join(', '));
