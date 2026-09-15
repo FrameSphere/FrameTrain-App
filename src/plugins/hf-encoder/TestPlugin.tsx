@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Loader2, Play, Square, RefreshCw, FlaskConical, AlertTriangle } from 'lucide-react';
 import type { TestPluginProps } from '../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 type TopPred = { label?: string; score?: number };
 
@@ -35,6 +36,8 @@ export default function HFEncoderTestPlugin({
   versionName,
   datasets,
 }: TestPluginProps) {
+  const { t } = useLanguage();
+
   // ── Single Input ────────────────────────────────────────────────────────
   const [inputText, setInputText] = useState('');
   const [singleLoading, setSingleLoading] = useState(false);
@@ -95,7 +98,7 @@ export default function HFEncoderTestPlugin({
               inference_time: d.inference_time ?? 0,
             });
           } else {
-            setSingleError('Keine Ergebnisse vom Modell erhalten.');
+            setSingleError(t('testPlugins.common.noResults'));
           }
           setSingleLoading(false);
         },
@@ -103,7 +106,7 @@ export default function HFEncoderTestPlugin({
 
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', (e) => {
         if (e.payload.test_id !== testId) return;
-        setSingleError(e.payload.data?.error ?? 'Unbekannter Fehler.');
+        setSingleError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
         setSingleLoading(false);
       });
 
@@ -112,7 +115,7 @@ export default function HFEncoderTestPlugin({
       setSingleError(String(e));
       setSingleLoading(false);
     }
-  }, [inputText, versionId]);
+  }, [inputText, versionId, t]);
 
   // ── Dataset-Test ─────────────────────────────────────────────────────────
   const handleStartDatasetTest = useCallback(async () => {
@@ -123,7 +126,7 @@ export default function HFEncoderTestPlugin({
     const trimmedMax = maxSamples.trim();
     const parsedMax = trimmedMax === '' ? null : Math.floor(Number(trimmedMax));
     if (parsedMax !== null && (!Number.isFinite(parsedMax) || parsedMax < 1)) {
-      setDatasetError('Max Samples muss eine ganze Zahl >= 1 sein (oder leer fuer alle).');
+      setDatasetError(t('testPlugins.hfEncoder.maxSamplesInvalid'));
       return;
     }
 
@@ -175,7 +178,7 @@ export default function HFEncoderTestPlugin({
 
       const u3 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', (e) => {
         if (e.payload.test_id !== jobId) return;
-        setDatasetError(e.payload.data?.error ?? 'Unbekannter Fehler.');
+        setDatasetError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
         setDatasetLoading(false);
       });
 
@@ -189,7 +192,7 @@ export default function HFEncoderTestPlugin({
       setDatasetError(String(e));
       setDatasetLoading(false);
     }
-  }, [datasets, selectedDatasetId, modelId, modelName, versionId, versionName, batchSize, maxSamples]);
+  }, [datasets, selectedDatasetId, modelId, modelName, versionId, versionName, batchSize, maxSamples, t]);
 
   const handleResetDataset = () => {
     setDatasetError(null);
@@ -208,17 +211,17 @@ export default function HFEncoderTestPlugin({
         </div>
         <div className="min-w-0">
           <p className="text-amber-300 text-sm font-medium truncate">{headerModel}</p>
-          <p className="text-gray-400 text-xs">Sequence Classification (Encoder)</p>
+          <p className="text-gray-400 text-xs">{t('testPlugins.hfEncoder.subtitle')}</p>
         </div>
       </div>
 
       {/* Single input */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
-        <p className="text-white text-sm font-medium">Einzelner Text</p>
+        <p className="text-white text-sm font-medium">{t('testPlugins.hfEncoder.singleTitle')}</p>
         <textarea
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Text eingeben…"
+          placeholder={t('testPlugins.hfEncoder.placeholder')}
           className="w-full min-h-[90px] bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40"
         />
 
@@ -229,14 +232,14 @@ export default function HFEncoderTestPlugin({
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {singleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Testen
+            {t('testPlugins.hfEncoder.testButton')}
           </button>
           <button
             onClick={() => { setInputText(''); setSingleResult(null); setSingleError(null); }}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all"
           >
             <RefreshCw className="w-4 h-4" />
-            Reset
+            {t('testPlugins.common.reset')}
           </button>
         </div>
 
@@ -249,8 +252,8 @@ export default function HFEncoderTestPlugin({
         {singleResult && (
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-white text-sm font-medium">Prediction</p>
-              <p className="text-gray-400 text-xs">Inference: {singleResult.inference_time.toFixed(0)}ms</p>
+              <p className="text-white text-sm font-medium">{t('testPlugins.hfEncoder.prediction')}</p>
+              <p className="text-gray-400 text-xs">{t('testPlugins.hfEncoder.inference', { ms: singleResult.inference_time.toFixed(0) })}</p>
             </div>
             <p className="text-amber-200 font-mono text-sm">{singleResult.predicted_output}</p>
             {Array.isArray(singleResult.top_predictions) && singleResult.top_predictions.length > 0 && (
@@ -258,7 +261,7 @@ export default function HFEncoderTestPlugin({
                 onClick={() => setShowAllPreds(s => !s)}
                 className="text-xs text-gray-400 hover:text-white"
               >
-                {showAllPreds ? 'Top-Predictions ausblenden' : 'Top-Predictions anzeigen'}
+                {showAllPreds ? t('testPlugins.hfEncoder.hideTop') : t('testPlugins.hfEncoder.showTop')}
               </button>
             )}
             {showAllPreds && (
@@ -278,21 +281,21 @@ export default function HFEncoderTestPlugin({
       {/* Dataset test */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <p className="text-white text-sm font-medium">Dataset-Test</p>
+          <p className="text-white text-sm font-medium">{t('testPlugins.hfEncoder.datasetTitle')}</p>
           {datasetLoading && (
             <button
               onClick={() => invoke('stop_test').catch(() => {})}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/15 hover:bg-red-500/20 border border-red-500/30 text-red-300 text-sm transition-all"
             >
               <Square className="w-4 h-4" />
-              Stop
+              {t('testPlugins.common.stop')}
             </button>
           )}
         </div>
 
         <div className="grid grid-cols-3 gap-3">
           <div className="space-y-1">
-            <label className="text-xs text-gray-400">Dataset</label>
+            <label className="text-xs text-gray-400">{t('testPlugins.common.dataset')}</label>
             <select
               value={selectedDatasetId}
               onChange={(e) => setSelectedDatasetId(e.target.value)}
@@ -302,7 +305,7 @@ export default function HFEncoderTestPlugin({
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-gray-400">Batch Size</label>
+            <label className="text-xs text-gray-400">{t('testPlugins.common.batchSize')}</label>
             <input
               type="number"
               min={1}
@@ -312,12 +315,12 @@ export default function HFEncoderTestPlugin({
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-gray-400">Max Samples</label>
+            <label className="text-xs text-gray-400">{t('testPlugins.common.maxSamples')}</label>
             <input
               type="text"
               value={maxSamples}
               onChange={(e) => setMaxSamples(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="leer = alle"
+              placeholder={t('testPlugins.common.maxSamplesEmptyAll')}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/40"
             />
           </div>
@@ -330,20 +333,24 @@ export default function HFEncoderTestPlugin({
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {datasetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Start
+            {t('testPlugins.common.start')}
           </button>
           <button
             onClick={handleResetDataset}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm transition-all"
           >
             <RefreshCw className="w-4 h-4" />
-            Reset
+            {t('testPlugins.common.reset')}
           </button>
         </div>
 
         {datasetProgress && (
           <div className="text-gray-300 text-sm">
-            Fortschritt: {Math.round(datasetProgress.progress_percent ?? 0)}% ({datasetProgress.current_sample ?? 0}/{datasetProgress.total_samples ?? 0})
+            {t('testPlugins.hfEncoder.progress', {
+              percent: Math.round(datasetProgress.progress_percent ?? 0),
+              current: datasetProgress.current_sample ?? 0,
+              total: datasetProgress.total_samples ?? 0,
+            })}
           </div>
         )}
         {datasetError && (
@@ -354,18 +361,18 @@ export default function HFEncoderTestPlugin({
         )}
         {datasetResults && (
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-2">
-            <p className="text-white text-sm font-medium">Ergebnisse</p>
-            <div className="text-gray-300 text-sm">Samples: {datasetResults.total_samples}</div>
+            <p className="text-white text-sm font-medium">{t('testPlugins.hfEncoder.results')}</p>
+            <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.samples', { n: datasetResults.total_samples })}</div>
             {typeof datasetResults.accuracy === 'number' && (
-              <div className="text-gray-300 text-sm">Accuracy: {(datasetResults.accuracy * 100).toFixed(2)}%</div>
+              <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.accuracy', { value: (datasetResults.accuracy * 100).toFixed(2) })}</div>
             )}
-            <div className="text-gray-300 text-sm">Avg inference: {datasetResults.average_inference_time.toFixed(0)}ms</div>
+            <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.avgInference', { ms: datasetResults.average_inference_time.toFixed(0) })}</div>
             {typeof datasetResults.samples_per_second === 'number' && (
-              <div className="text-gray-300 text-sm">Speed: {datasetResults.samples_per_second.toFixed(2)} samples/s</div>
+              <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.speed', { value: datasetResults.samples_per_second.toFixed(2) })}</div>
             )}
             {Array.isArray(datasetResults.predictions) && datasetResults.predictions.length > 0 && (
               <button className="text-xs text-gray-400 hover:text-white" onClick={() => setShowPredTable(s => !s)}>
-                {showPredTable ? 'Predictions ausblenden' : 'Predictions anzeigen'}
+                {showPredTable ? t('testPlugins.hfEncoder.hidePreds') : t('testPlugins.hfEncoder.showPreds')}
               </button>
             )}
             {showPredTable && (
@@ -374,9 +381,9 @@ export default function HFEncoderTestPlugin({
                   <thead className="sticky top-0 bg-slate-900/80 backdrop-blur border-b border-white/10">
                     <tr>
                       <th className="text-left px-3 py-2 text-gray-400 font-medium">#</th>
-                      <th className="text-left px-3 py-2 text-gray-400 font-medium">Expected</th>
-                      <th className="text-left px-3 py-2 text-gray-400 font-medium">Predicted</th>
-                      <th className="text-left px-3 py-2 text-gray-400 font-medium">Conf</th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium">{t('testPlugins.hfEncoder.colExpected')}</th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium">{t('testPlugins.hfEncoder.colPredicted')}</th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium">{t('testPlugins.hfEncoder.colConf')}</th>
                     </tr>
                   </thead>
                   <tbody>

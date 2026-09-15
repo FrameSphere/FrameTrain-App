@@ -4,10 +4,12 @@ import { listen } from '@tauri-apps/api/event';
 import { ImageIcon, Loader2, Play, RefreshCw, AlertTriangle, Upload } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import type { TestPluginProps } from '../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 type Prediction = { label: string; confidence: number };
 
 export default function ImageClassificationTestPlugin({ versionId, modelId, modelName, versionName, datasets }: TestPluginProps) {
+  const { t } = useLanguage();
   const [imagePath, setImagePath] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,9 +22,9 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
   useEffect(() => () => { unlistenRef.current.forEach(f => f()); }, []);
 
   const pickImage = useCallback(async () => {
-    const path = await openDialog({ filters: [{ name: 'Bild', extensions: ['jpg','jpeg','png','bmp','webp'] }] });
+    const path = await openDialog({ filters: [{ name: t('testPlugins.common.imageFilter'), extensions: ['jpg','jpeg','png','bmp','webp'] }] });
     if (typeof path === 'string') setImagePath(path);
-  }, []);
+  }, [t]);
 
   const handleSingleTest = useCallback(async () => {
     if (!imagePath) return;
@@ -43,11 +45,11 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
       );
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', e => {
         if (e.payload.test_id !== testId) return;
-        setError(e.payload.data?.error ?? 'Fehler'); setLoading(false);
+        setError(e.payload.data?.error ?? t('testPlugins.imageClassification.error')); setLoading(false);
       });
       unlistenRef.current = [u1, u2];
     } catch (e) { setError(String(e)); setLoading(false); }
-  }, [imagePath, versionId]);
+  }, [imagePath, versionId, t]);
 
   const handleDatasetTest = useCallback(async () => {
     const ds = datasets.find(d => d.id === selectedDs);
@@ -70,11 +72,11 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
       );
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', e => {
         if (e.payload.test_id !== job.id) return;
-        setDsError(e.payload.data?.error ?? 'Fehler'); setDsLoading(false);
+        setDsError(e.payload.data?.error ?? t('testPlugins.imageClassification.error')); setDsLoading(false);
       });
       unlistenRef.current = [u1, u2];
     } catch (e) { setDsError(String(e)); setDsLoading(false); }
-  }, [datasets, selectedDs, modelId, modelName, versionId, versionName]);
+  }, [datasets, selectedDs, modelId, modelName, versionId, versionName, t]);
 
   return (
     <div className="space-y-6">
@@ -84,36 +86,36 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
         </div>
         <div>
           <p className="text-blue-300 text-sm font-medium">{modelName} · {versionName}</p>
-          <p className="text-gray-400 text-xs">Image Classification</p>
+          <p className="text-gray-400 text-xs">{t('testPlugins.imageClassification.subtitle')}</p>
         </div>
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
-        <p className="text-white text-sm font-medium">Einzelbild testen</p>
+        <p className="text-white text-sm font-medium">{t('testPlugins.imageClassification.singleTitle')}</p>
         <div className="flex gap-2">
-          <input value={imagePath} readOnly placeholder="Bild auswählen…"
+          <input value={imagePath} readOnly placeholder={t('testPlugins.imageClassification.pickPlaceholder')}
             className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-gray-300 text-sm placeholder:text-gray-600" />
           <button onClick={pickImage}
             className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-gray-300 text-sm flex items-center gap-1.5 transition-all">
-            <Upload className="w-4 h-4" /> Bild
+            <Upload className="w-4 h-4" /> {t('testPlugins.imageClassification.imageButton')}
           </button>
         </div>
         <div className="flex gap-2">
           <button onClick={handleSingleTest} disabled={loading || !imagePath}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 text-sm font-medium transition-all disabled:opacity-50">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Klassifizieren
+            {t('testPlugins.imageClassification.classify')}
           </button>
           <button onClick={() => { setImagePath(''); setResult(null); setError(null); }}
             className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm flex items-center gap-1.5 transition-all">
-            <RefreshCw className="w-4 h-4" /> Reset
+            <RefreshCw className="w-4 h-4" /> {t('testPlugins.common.reset')}
           </button>
         </div>
         {error && <p className="text-red-300 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4"/>{error}</p>}
         {result && (
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-2">
             <div className="flex justify-between text-xs text-gray-400 mb-1">
-              <span>Top Predictions</span>
+              <span>{t('testPlugins.imageClassification.topPredictions')}</span>
               <span>{result.inference_time.toFixed(0)}ms</span>
             </div>
             {result.top.slice(0, 5).map((p, i) => (
@@ -134,7 +136,7 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
 
       {datasets.length > 0 && (
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
-          <p className="text-white text-sm font-medium">Dataset-Accuracy</p>
+          <p className="text-white text-sm font-medium">{t('testPlugins.imageClassification.datasetTitle')}</p>
           <select value={selectedDs} onChange={e => setSelectedDs(e.target.value)}
             className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none">
             {datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -142,13 +144,13 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
           <button onClick={handleDatasetTest} disabled={dsLoading}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 text-sm font-medium transition-all disabled:opacity-50">
             {dsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Accuracy messen
+            {t('testPlugins.imageClassification.measure')}
           </button>
           {dsError && <p className="text-red-300 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4"/>{dsError}</p>}
           {dsResult && (
             <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-1">
               <p className="text-2xl font-bold text-white">{(dsResult.accuracy * 100).toFixed(2)}%</p>
-              <p className="text-gray-400 text-xs">Accuracy über {dsResult.total} Samples</p>
+              <p className="text-gray-400 text-xs">{t('testPlugins.imageClassification.accuracyOver', { n: dsResult.total })}</p>
             </div>
           )}
         </div>

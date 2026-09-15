@@ -10,6 +10,7 @@ import {
   FlaskConical, AlertTriangle,
 } from 'lucide-react';
 import type { TestPluginProps } from '../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 // ── Typen ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ export default function XLMRobertaTestPlugin({
   versionName,
   datasets,
 }: TestPluginProps) {
+  const { t } = useLanguage();
 
   const [tab, setTab] = useState<'text' | 'dataset'>('text');
 
@@ -135,14 +137,14 @@ export default function XLMRobertaTestPlugin({
             inference_time: d.inference_time ?? 0,
           });
         } else {
-          setSingleError('Keine Ergebnisse vom Modell erhalten.');
+          setSingleError(t('testPlugins.common.noResults'));
         }
         setSingleLoading(false);
       });
 
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', (e) => {
         if (e.payload.test_id !== testId) return;
-        setSingleError(e.payload.data?.error ?? 'Unbekannter Fehler beim Test.');
+        setSingleError(e.payload.data?.error ?? t('testPlugins.xlmRoberta.unknownTestError'));
         setSingleLoading(false);
       });
 
@@ -157,7 +159,7 @@ export default function XLMRobertaTestPlugin({
       setSingleError(String(e));
       setSingleLoading(false);
     }
-  }, [inputText, versionId]);
+  }, [inputText, versionId, t]);
 
   // ── Dataset-Test ──────────────────────────────────────────────────────────
 
@@ -213,7 +215,7 @@ export default function XLMRobertaTestPlugin({
 
       const u3 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', (e) => {
         if (e.payload.test_id !== jobId) return;
-        setDatasetError(e.payload.data?.error ?? 'Unbekannter Fehler.');
+        setDatasetError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
         setDatasetLoading(false);
       });
 
@@ -227,7 +229,7 @@ export default function XLMRobertaTestPlugin({
       setDatasetError(String(e));
       setDatasetLoading(false);
     }
-  }, [selectedDatasetId, datasets, modelId, modelName, versionId, versionName, batchSize, maxSamples]);
+  }, [selectedDatasetId, datasets, modelId, modelName, versionId, versionName, batchSize, maxSamples, t]);
 
   const handleStopTest = async () => {
     try { await invoke('stop_test'); } catch { /* ignore */ }
@@ -255,19 +257,19 @@ export default function XLMRobertaTestPlugin({
       {/* Tab-Auswahl */}
       <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
         {([
-          { key: 'text',    label: 'Text-Eingabe', icon: <Type    className="w-3.5 h-3.5" /> },
-          { key: 'dataset', label: 'Dataset',      icon: <FileText className="w-3.5 h-3.5" /> },
-        ] as const).map(t => (
+          { key: 'text',    label: t('testPlugins.xlmRoberta.tabText'), icon: <Type    className="w-3.5 h-3.5" /> },
+          { key: 'dataset', label: t('testPlugins.common.dataset'), icon: <FileText className="w-3.5 h-3.5" /> },
+        ] as const).map(item => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={item.key}
+            onClick={() => setTab(item.key)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${
-              tab === t.key
+              tab === item.key
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            {t.icon}{t.label}
+            {item.icon}{item.label}
           </button>
         ))}
       </div>
@@ -283,13 +285,13 @@ export default function XLMRobertaTestPlugin({
           )}
 
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
-            <label className="block text-white text-sm font-medium">Eingabetext</label>
+            <label className="block text-white text-sm font-medium">{t('testPlugins.xlmRoberta.inputLabel')}</label>
             <textarea
               rows={4}
               value={inputText}
               onChange={(e) => { setInputText(e.target.value); setSingleResult(null); setSingleError(null); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSingleTest(); }}
-              placeholder="Text zum Testen eingeben… (⌘/Strg + Enter zum Starten)"
+              placeholder={t('testPlugins.xlmRoberta.placeholder')}
               disabled={singleLoading}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-amber-500/50 resize-none disabled:opacity-50 transition-all"
             />
@@ -299,8 +301,8 @@ export default function XLMRobertaTestPlugin({
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {singleLoading
-                ? <><Loader2 className="w-4 h-4 animate-spin" />Analysiere…</>
-                : '▶ Testen'}
+                ? <><Loader2 className="w-4 h-4 animate-spin" />{t('testPlugins.xlmRoberta.analyzing')}</>
+                : t('testPlugins.xlmRoberta.testButton')}
             </button>
           </div>
 
@@ -310,7 +312,7 @@ export default function XLMRobertaTestPlugin({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-amber-400" />
-                  <span className="text-white font-medium text-sm">Ergebnis</span>
+                  <span className="text-white font-medium text-sm">{t('testPlugins.xlmRoberta.result')}</span>
                 </div>
                 <span className="text-gray-500 text-xs">{(singleResult.inference_time * 1000).toFixed(0)} ms</span>
               </div>
@@ -333,7 +335,7 @@ export default function XLMRobertaTestPlugin({
                     className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
                   >
                     <BarChart3 className="w-3.5 h-3.5" />
-                    Alle {singleResult.top_predictions.length} Klassen
+                    {t('testPlugins.xlmRoberta.allClasses', { n: singleResult.top_predictions.length })}
                     {showAllPreds ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </button>
 
@@ -378,9 +380,9 @@ export default function XLMRobertaTestPlugin({
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-4">
 
             <div className="space-y-1.5">
-              <label className="block text-white text-sm font-medium">Dataset</label>
+              <label className="block text-white text-sm font-medium">{t('testPlugins.common.dataset')}</label>
               {datasets.length === 0 ? (
-                <p className="text-gray-500 text-sm py-2">Kein Dataset für dieses Modell vorhanden.</p>
+                <p className="text-gray-500 text-sm py-2">{t('testPlugins.common.noDatasetForModel')}</p>
               ) : (
                 <select
                   value={selectedDatasetId}
@@ -390,7 +392,7 @@ export default function XLMRobertaTestPlugin({
                 >
                   {datasets.map(d => (
                     <option key={d.id} value={d.id} className="bg-slate-900">
-                      {d.name}{d.status === 'split' ? ' (aufgeteilt)' : ' (nicht aufgeteilt)'} · {d.file_count} Dateien · {formatBytes(d.size_bytes)}
+                      {d.name}{d.status === 'split' ? t('testPlugins.xlmRoberta.split') : t('testPlugins.xlmRoberta.notSplit')} · {t('testPlugins.xlmRoberta.files', { n: d.file_count })} · {formatBytes(d.size_bytes)}
                     </option>
                   ))}
                 </select>
@@ -398,7 +400,7 @@ export default function XLMRobertaTestPlugin({
               {selectedDataset?.status === 'unused' && (
                 <p className="text-amber-400 text-xs inline-flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4" />
-                  Dataset hat noch keinen Split – erst im Dataset-Manager aufteilen.
+                  {t('testPlugins.xlmRoberta.noSplitWarning')}
                 </p>
               )}
             </div>
@@ -406,7 +408,7 @@ export default function XLMRobertaTestPlugin({
             {/* Optionen */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs text-gray-400">Batch Size</label>
+                <label className="text-xs text-gray-400">{t('testPlugins.common.batchSize')}</label>
                 <input
                   type="number"
                   value={batchSize}
@@ -418,13 +420,13 @@ export default function XLMRobertaTestPlugin({
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs text-gray-400">
-                  Max. Samples <span className="text-gray-600">(leer = alle)</span>
+                  {t('testPlugins.xlmRoberta.maxSamples')} <span className="text-gray-600">{t('testPlugins.xlmRoberta.maxSamplesHint')}</span>
                 </label>
                 <input
                   type="number"
                   value={maxSamples}
                   min={1}
-                  placeholder="Alle"
+                  placeholder={t('testPlugins.xlmRoberta.allPlaceholder')}
                   disabled={datasetLoading}
                   onChange={e => setMaxSamples(e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value) || 1))}
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500/50 disabled:opacity-50 placeholder:text-gray-600"
@@ -438,7 +440,7 @@ export default function XLMRobertaTestPlugin({
                 onClick={handleStopTest}
                 className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-medium text-sm transition-all"
               >
-                <Square className="w-4 h-4" /> Test stoppen
+                <Square className="w-4 h-4" /> {t('testPlugins.xlmRoberta.stopButton')}
               </button>
             ) : (
               <button
@@ -446,7 +448,7 @@ export default function XLMRobertaTestPlugin({
                 disabled={!selectedDatasetId || selectedDataset?.status !== 'split' || datasets.length === 0}
                 className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                ▶ Dataset testen
+                {t('testPlugins.xlmRoberta.startButton')}
               </button>
             )}
           </div>
@@ -459,13 +461,13 @@ export default function XLMRobertaTestPlugin({
                   <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
                   <span className="text-white">
                     {datasetProgress
-                      ? `Teste… ${datasetProgress.current_sample}/${datasetProgress.total_samples}`
-                      : 'Starte Test-Engine…'}
+                      ? t('testPlugins.xlmRoberta.testing', { current: datasetProgress.current_sample, total: datasetProgress.total_samples })
+                      : t('testPlugins.xlmRoberta.starting')}
                   </span>
                 </div>
                 {datasetProgress && (
                   <span className="text-gray-400 text-xs tabular-nums">
-                    {datasetProgress.samples_per_second.toFixed(1)} S/s
+                    {t('testPlugins.xlmRoberta.samplesPerSecShort', { value: datasetProgress.samples_per_second.toFixed(1) })}
                   </span>
                 )}
               </div>
@@ -491,7 +493,7 @@ export default function XLMRobertaTestPlugin({
               <div className="grid grid-cols-2 gap-3">
                 {[
                   {
-                    label: 'Genauigkeit',
+                    label: t('testPlugins.xlmRoberta.metricAccuracy'),
                     value: datasetResults.accuracy != null
                       ? `${(datasetResults.accuracy * 100).toFixed(1)}%`
                       : '–',
@@ -502,17 +504,17 @@ export default function XLMRobertaTestPlugin({
                       : 'text-gray-400',
                   },
                   {
-                    label: 'Richtig / Gesamt',
+                    label: t('testPlugins.xlmRoberta.metricCorrect'),
                     value: `${datasetResults.correct_predictions ?? '–'} / ${datasetResults.total_samples}`,
                     color: 'text-white',
                   },
                   {
-                    label: 'Ø Inferenzzeit',
+                    label: t('testPlugins.xlmRoberta.metricAvgInference'),
                     value: `${(datasetResults.average_inference_time * 1000).toFixed(0)} ms`,
                     color: 'text-blue-400',
                   },
                   {
-                    label: 'Samples / Sek.',
+                    label: t('testPlugins.xlmRoberta.metricSamplesPerSec'),
                     value: datasetResults.samples_per_second != null
                       ? datasetResults.samples_per_second.toFixed(1)
                       : '–',
@@ -534,7 +536,7 @@ export default function XLMRobertaTestPlugin({
                     className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-white/5 transition-colors"
                   >
                     <span className="text-white text-sm font-medium">
-                      Einzelne Vorhersagen ({datasetResults.predictions.length})
+                      {t('testPlugins.xlmRoberta.predictionsTitle', { n: datasetResults.predictions.length })}
                     </span>
                     {showPredTable
                       ? <ChevronUp className="w-4 h-4 text-gray-400" />
@@ -546,7 +548,7 @@ export default function XLMRobertaTestPlugin({
                       <table className="w-full text-xs">
                         <thead className="sticky top-0 bg-slate-900/90 backdrop-blur-sm">
                           <tr className="text-left text-gray-400 border-b border-white/10">
-                            {['#', 'Eingabe', 'Erwartet', 'Vorhergesagt', 'OK', 'ms'].map(h => (
+                            {['#', t('testPlugins.xlmRoberta.colInput'), t('testPlugins.xlmRoberta.colExpected'), t('testPlugins.xlmRoberta.colPredicted'), 'OK', 'ms'].map(h => (
                               <th key={h} className="px-4 py-2.5 font-medium">{h}</th>
                             ))}
                           </tr>

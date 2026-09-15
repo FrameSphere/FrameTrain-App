@@ -1,15 +1,17 @@
 import type { TestPluginProps } from '../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 import GenericTestPanel from '../GenericTestPanel';
 
 export default function AudioTestPlugin(props: TestPluginProps) {
+  const { t } = useLanguage();
   return (
     <GenericTestPanel
       {...props}
       taskType="audio_classification"
       inputKind="file"
-      singleLabel="Einzelne Audiodatei"
-      singlePlaceholder="Vollständiger Pfad zu einer Audiodatei, z.B. /Users/du/toene/probe.wav"
-      resultLabel="Erkannte Klasse"
+      singleLabel={t('testPlugins.generic.audioLabel')}
+      singlePlaceholder={t('testPlugins.generic.audioPlaceholder')}
+      resultLabel={t('testPlugins.generic.detectedClass')}
     />
   );
 }

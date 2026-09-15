@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { AlertTriangle, Loader2, Play, Square } from 'lucide-react';
 import type { TestPluginProps } from './types';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface TopPred { label?: string; score?: number }
 
@@ -30,6 +31,7 @@ export default function GenericTestPanel({
   taskType, inputKind, singleLabel, singlePlaceholder, resultLabel,
   showConfidence = true, pluginConfig = {},
 }: GenericTestPanelProps) {
+  const { t } = useLanguage();
   const [input, setInput] = useState('');
   const [singleBusy, setSingleBusy] = useState(false);
   const [single, setSingle] = useState<{ predicted: string; confidence?: number; top: TopPred[]; ms: number } | null>(null);
@@ -49,7 +51,7 @@ export default function GenericTestPanel({
   useEffect(() => () => { unlistenRef.current.forEach(fn => fn()); }, []);
 
   const runSingle = async () => {
-    if (!input.trim()) { setError(singleLabel + ' fehlt.'); return; }
+    if (!input.trim()) { setError(t('testPlugins.generic.inputMissing', { label: singleLabel })); return; }
     setError(null); setSingle(null); setStatus(null); setSingleBusy(true);
     try {
       const testId = await invoke<string>('test_single_input', {
@@ -74,7 +76,7 @@ export default function GenericTestPanel({
         });
       const offErr = await listen<{ test_id?: string; data?: { error?: string } }>(
         'test-error', e => {
-          setError(e.payload.data?.error ?? 'Unbekannter Fehler');
+          setError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
           setStatus(null);
           setSingleBusy(false);
         });
@@ -88,7 +90,7 @@ export default function GenericTestPanel({
 
   const runDataset = async () => {
     const ds = datasets.find(d => d.id === datasetId);
-    if (!ds) { setError('Kein Dataset ausgewählt.'); return; }
+    if (!ds) { setError(t('testPlugins.generic.noDatasetSelected')); return; }
     setError(null); setSummary(null); setProgress(null); setStatus(null); setRunning(true);
     try {
       const job = await invoke<{ id: string }>('start_test', {
@@ -118,7 +120,7 @@ export default function GenericTestPanel({
           setRunning(false);
         });
       const offE = await listen<{ data?: { error?: string } }>('test-error', e => {
-        setError(e.payload.data?.error ?? 'Unbekannter Fehler');
+        setError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
         setStatus(null);
         setRunning(false);
       });
@@ -156,12 +158,12 @@ export default function GenericTestPanel({
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-xs font-medium disabled:opacity-50"
         >
           {singleBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-          Auswerten
+          {t('testPlugins.generic.evaluate')}
         </button>
 
         {singleBusy && (
           <p className="text-gray-400 text-[11px]">
-            {status ?? 'Test-Engine wird gestartet…'}
+            {status ?? t('testPlugins.common.engineStarting')}
           </p>
         )}
 
@@ -171,16 +173,16 @@ export default function GenericTestPanel({
             <p className="text-white text-sm break-words">{single.predicted}</p>
             <p className="text-gray-500 text-[11px]">
               {showConfidence && single.confidence != null
-                ? `Konfidenz ${(single.confidence * 100).toFixed(1)} % · `
+                ? t('testPlugins.generic.confidence', { value: (single.confidence * 100).toFixed(1) })
                 : ''}
               {single.ms} ms
             </p>
             {showConfidence && single.top.length > 1 && (
               <div className="space-y-1 pt-1">
-                {single.top.map((t, i) => (
+                {single.top.map((pred, i) => (
                   <div key={i} className="flex items-center justify-between text-[11px] text-gray-400">
-                    <span>{t.label}</span>
-                    <span className="tabular-nums">{((t.score ?? 0) * 100).toFixed(1)} %</span>
+                    <span>{pred.label}</span>
+                    <span className="tabular-nums">{((pred.score ?? 0) * 100).toFixed(1)} %</span>
                   </div>
                 ))}
               </div>
@@ -191,9 +193,9 @@ export default function GenericTestPanel({
 
       {/* Datensatz-Lauf */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
-        <p className="text-white font-medium text-sm">Auf einem Dataset auswerten</p>
+        <p className="text-white font-medium text-sm">{t('testPlugins.generic.datasetTitle')}</p>
         {datasets.length === 0 ? (
-          <p className="text-gray-500 text-xs">Kein Dataset für dieses Modell vorhanden.</p>
+          <p className="text-gray-500 text-xs">{t('testPlugins.common.noDatasetForModel')}</p>
         ) : (
           <>
             <div className="flex gap-2">
@@ -210,7 +212,7 @@ export default function GenericTestPanel({
                 onChange={e => setMaxSamples(e.target.value === '' ? '' : Number(e.target.value))}
                 min={1}
                 className="w-28 px-3 py-2 bg-slate-900/60 border border-white/10 rounded-xl text-white text-xs"
-                title="Maximale Anzahl Beispiele"
+                title={t('testPlugins.generic.maxSamplesTitle')}
               />
             </div>
             <div className="flex gap-2">
@@ -220,21 +222,21 @@ export default function GenericTestPanel({
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-xs font-medium disabled:opacity-50"
               >
                 {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                Test starten
+                {t('testPlugins.generic.startTest')}
               </button>
               {running && (
                 <button
                   onClick={() => { invoke('stop_test').catch(() => {}); }}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-200 text-xs font-medium"
                 >
-                  <Square className="w-3.5 h-3.5" /> Stoppen
+                  <Square className="w-3.5 h-3.5" /> {t('testPlugins.generic.stop')}
                 </button>
               )}
             </div>
 
             {running && !progress && (
               <p className="text-gray-400 text-[11px]">
-                {status ?? 'Test-Engine wird gestartet…'}
+                {status ?? t('testPlugins.common.engineStarting')}
               </p>
             )}
 
@@ -252,10 +254,10 @@ export default function GenericTestPanel({
 
             {summary && (
               <div className="rounded-xl bg-slate-900/60 border border-white/10 p-4 text-xs text-gray-300 space-y-1">
-                <p>{summary.total} Beispiele ausgewertet</p>
+                <p>{t('testPlugins.generic.evaluated', { n: summary.total })}</p>
                 {summary.accuracy != null
-                  ? <p className="text-white font-medium">Treffer: {(summary.accuracy * 100).toFixed(1)} % ({summary.correct} richtig)</p>
-                  : <p className="text-gray-500">Ohne erwartete Werte im Dataset lässt sich keine Trefferquote berechnen.</p>}
+                  ? <p className="text-white font-medium">{t('testPlugins.generic.hits', { value: (summary.accuracy * 100).toFixed(1), correct: summary.correct ?? 0 })}</p>
+                  : <p className="text-gray-500">{t('testPlugins.generic.noExpected')}</p>}
               </div>
             )}
           </>

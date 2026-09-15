@@ -38,10 +38,36 @@ interface LanguageContextValue {
   t: (key: string, paramsOrFallback?: string | Record<string, string | number>) => string
 }
 
+function lookup(language: Language, key: string): unknown {
+  return key
+    .split('.')
+    .reduce((obj: unknown, k: string) =>
+      obj != null && typeof obj === 'object' ? (obj as Record<string, unknown>)[k] : undefined,
+      LOCALES[language] as unknown,
+    )
+}
+
+function translate(
+  language: Language,
+  key: string,
+  paramsOrFallback?: string | Record<string, string | number>,
+): string {
+  // Fallback zur deutschen Version wenn EN-Key fehlt
+  const value = [lookup(language, key), lookup('de', key)].find(v => typeof v === 'string')
+  if (typeof value === 'string') {
+    if (paramsOrFallback && typeof paramsOrFallback === 'object') {
+      return replacePlaceholders(value, paramsOrFallback)
+    }
+    return value
+  }
+  return typeof paramsOrFallback === 'string' ? paramsOrFallback : key
+}
+
+// Ohne Provider (z. B. in Komponenten-Tests) deutsch statt roher Keys.
 const LanguageContext = createContext<LanguageContextValue>({
   language: 'de',
   setLanguage: () => {},
-  t: (_key, paramsOrFallback) => typeof paramsOrFallback === 'string' ? paramsOrFallback : _key,
+  t: (key, paramsOrFallback) => translate('de', key, paramsOrFallback),
 })
 
 // ── Provider ─────────────────────────────────────────────────────
@@ -56,36 +82,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setLanguageState(lang)
   }
 
-  const t = (key: string, paramsOrFallback?: string | Record<string, string | number>): string => {
-    const value = key
-      .split('.')
-      .reduce((obj: unknown, k: string) =>
-        obj != null && typeof obj === 'object' ? (obj as Record<string, unknown>)[k] : undefined,
-        LOCALES[language] as unknown,
-      )
-    if (typeof value === 'string') {
-      if (paramsOrFallback && typeof paramsOrFallback === 'object') {
-        return replacePlaceholders(value, paramsOrFallback)
-      }
-      return value
-    }
-    // Fallback zur deutschen Version wenn EN-Key fehlt
-    if (language !== 'de') {
-      const deFallback = key
-        .split('.')
-        .reduce((obj: unknown, k: string) =>
-          obj != null && typeof obj === 'object' ? (obj as Record<string, unknown>)[k] : undefined,
-          LOCALES['de'] as unknown,
-      )
-      if (typeof deFallback === 'string') {
-        if (paramsOrFallback && typeof paramsOrFallback === 'object') {
-          return replacePlaceholders(deFallback, paramsOrFallback)
-        }
-        return deFallback
-      }
-    }
-    return typeof paramsOrFallback === 'string' ? paramsOrFallback : key
-  }
+  const t = (key: string, paramsOrFallback?: string | Record<string, string | number>): string =>
+    translate(language, key, paramsOrFallback)
 
   return (
     <LanguageContext.Provider value={{ language, setLanguage, t }}>

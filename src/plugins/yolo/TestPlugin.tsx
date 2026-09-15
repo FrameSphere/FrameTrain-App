@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Upload, Target, AlertTriangle, Loader2, FolderOpen } from 'lucide-react';
 import type { TestPluginProps } from '../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface Detection {
   label: string;
@@ -20,6 +21,7 @@ interface InferenceResult {
 }
 
 export default function YOLOTestPlugin({ modelPath, modelName, versionId }: TestPluginProps) {
+  const { t } = useLanguage();
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [result, setResult] = useState<InferenceResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -29,7 +31,7 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
 
   const handlePickImage = async () => {
     const sel = await open({
-      filters: [{ name: 'Bilder', extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'] }],
+      filters: [{ name: t('testPlugins.common.imageFilter'), extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'] }],
       multiple: false,
     });
     if (sel && typeof sel === 'string') setImagePath(sel);
@@ -67,15 +69,15 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
           <Target className="w-5 h-5 text-orange-400" />
         </div>
         <div>
-          <h3 className="font-semibold text-white">{modelName} – Test</h3>
-          <p className="text-xs text-gray-500">Einzelbild-Inferenz · Bounding Box Detection</p>
+          <h3 className="font-semibold text-white">{t('testPlugins.yolo.title', { name: modelName })}</h3>
+          <p className="text-xs text-gray-500">{t('testPlugins.yolo.subtitle')}</p>
         </div>
       </div>
 
       {/* Schwellwerte */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-xs text-gray-500">Konfidenz-Schwelle</label>
+          <label className="text-xs text-gray-500">{t('testPlugins.yolo.confThreshold')}</label>
           <input
             type="range" min={0.01} max={0.99} step={0.01} value={confThreshold}
             onChange={e => setConfThreshold(Number(e.target.value))}
@@ -84,7 +86,7 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
           <span className="text-xs text-orange-400">{(confThreshold * 100).toFixed(0)}%</span>
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-gray-500">IoU-Schwelle (NMS)</label>
+          <label className="text-xs text-gray-500">{t('testPlugins.yolo.iouThreshold')}</label>
           <input
             type="range" min={0.01} max={0.99} step={0.01} value={iouThreshold}
             onChange={e => setIouThreshold(Number(e.target.value))}
@@ -107,18 +109,18 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
               onClick={handlePickImage}
               className="text-xs text-gray-400 hover:text-white underline transition-colors"
             >
-              Anderes Bild wählen
+              {t('testPlugins.yolo.changeImage')}
             </button>
           </div>
         ) : (
           <div className="space-y-3">
             <Upload className="w-8 h-8 text-gray-500 mx-auto" />
-            <p className="text-gray-400 text-xs">Bild für Inferenz auswählen</p>
+            <p className="text-gray-400 text-xs">{t('testPlugins.yolo.pickPrompt')}</p>
             <button
               onClick={handlePickImage}
               className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white text-xs transition-all"
             >
-              <FolderOpen className="w-3.5 h-3.5" /> Bild öffnen
+              <FolderOpen className="w-3.5 h-3.5" /> {t('testPlugins.yolo.openImage')}
             </button>
           </div>
         )}
@@ -131,8 +133,8 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
         className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-40"
       >
         {running
-          ? <><Loader2 className="w-4 h-4 animate-spin" /> Inferenz läuft…</>
-          : <><Target className="w-4 h-4" /> Inferenz starten</>
+          ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('testPlugins.yolo.running')}</>
+          : <><Target className="w-4 h-4" /> {t('testPlugins.yolo.run')}</>
         }
       </button>
 
@@ -149,12 +151,14 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
         <div className="space-y-3 p-4 rounded-2xl border border-white/10 bg-white/5">
           <div className="flex items-center justify-between">
             <p className="font-medium text-white">
-              {result.detections.length} Objekt{result.detections.length !== 1 ? 'e' : ''} erkannt
+              {result.detections.length === 1
+                ? t('testPlugins.yolo.detectedOne')
+                : t('testPlugins.yolo.detectedMany', { n: result.detections.length })}
             </p>
             <span className="text-xs text-gray-500">{result.inference_time_ms.toFixed(1)} ms</span>
           </div>
           {result.detections.length === 0 ? (
-            <p className="text-gray-500 text-xs">Keine Objekte über dem Konfidenz-Schwellwert.</p>
+            <p className="text-gray-500 text-xs">{t('testPlugins.yolo.noDetections')}</p>
           ) : (
             <div className="space-y-1.5">
               {result.detections.map((det, i) => (
