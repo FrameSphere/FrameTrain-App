@@ -212,6 +212,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   const cancelRef      = useRef(false);
   const fitTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenersRef = useRef<Array<() => void>>([]);
+  const canvasWrapRef  = useRef<HTMLDivElement | null>(null);
+  const layoutAnimRef  = useRef<number | null>(null);
 
   // ── Resolve output dir from Tauri once ────────────────────────────────
   useEffect(() => {
@@ -830,15 +832,53 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     else performClear();
   }, [nodes.length, edges.length, hasUnsavedChanges, performClear]);
 
-  // ── Auto-Layout: Knoten übersichtlich in Ebenen anordnen ──────────────────
-  // Ordnet den Canvas per Layering-Algorithmus (links→rechts, gestapelte
-  // Knoten werden entzerrt), sodass Kanten sichtbar werden — kein manuelles
-  // Auseinanderziehen mehr nötig.
+  // ── Auto-Layout: Fluss-Layout links→rechts, lange Netze in Bahnen ─────────
+  // Die Canvas-Größe bestimmt, in wie viele Bahnen umgebrochen wird. Knoten
+  // gleiten animiert an ihren Platz, danach wird auf den Graphen gezoomt.
   const handleAutoLayout = useCallback(() => {
     if (nodes.length === 0) return;
-    setNodes((nds) => autoLayoutNodes(nds, edges));
-    setTimeout(() => rfRef.current?.fitView({ duration: 400, padding: 0.18, maxZoom: 1.1 }), 60);
-  }, [nodes.length, edges, setNodes]);
+    const rect = canvasWrapRef.current?.getBoundingClientRect();
+    const target = autoLayoutNodes(nodes, edges, {
+      viewport: rect ? { width: rect.width, height: rect.height } : undefined,
+    });
+    const to = new Map(target.map((nd) => [nd.id, nd.position] as const));
+    const from = new Map(nodes.map((nd) => [nd.id, nd.position] as const));
+    const fit = () => rfRef.current?.fitView({ duration: 400, padding: 0.18, maxZoom: 1.1 });
+
+    if (layoutAnimRef.current !== null) cancelAnimationFrame(layoutAnimRef.current);
+    const reduceMotion = typeof window !== "undefined"
+      && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) {
+      setNodes((nds) => nds.map((nd) => (to.has(nd.id) ? { ...nd, position: to.get(nd.id)! } : nd)));
+      setTimeout(fit, 60);
+      return;
+    }
+
+    const DURATION = 420;
+    const start = performance.now();
+    const frame = (now: number) => {
+      const k = Math.min(1, (now - start) / DURATION);
+      const e = 1 - Math.pow(1 - k, 3); // ease-out
+      setNodes((nds) => nds.map((nd) => {
+        const b = to.get(nd.id);
+        if (!b) return nd;
+        const a = from.get(nd.id) ?? b;
+        const position = k >= 1 ? b : { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+        return { ...nd, position };
+      }));
+      if (k < 1) {
+        layoutAnimRef.current = requestAnimationFrame(frame);
+      } else {
+        layoutAnimRef.current = null;
+        setTimeout(fit, 30);
+      }
+    };
+    layoutAnimRef.current = requestAnimationFrame(frame);
+  }, [nodes, edges, setNodes]);
+
+  useEffect(() => () => {
+    if (layoutAnimRef.current !== null) cancelAnimationFrame(layoutAnimRef.current);
+  }, []);
 
   // ── Rechtsklick-Menü: Synapse-Aktionen ────────────────────────────────────
   useContextMenuActions(() => [
@@ -1314,7 +1354,7 @@ Keine Floskeln, nur Fakten.`;
         <NodeLibrary onAddNode={handleAddNode} />
 
         {/* Canvas — onDrop/onDragOver on <ReactFlow> directly (v12 requirement) */}
-        <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+        <div ref={canvasWrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
