@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   labelPathsForImage, classNamesFromYaml, labelForClassId,
   parseYoloLabelFile, summarizeBoxes, compareClassSets,
+  classColor, legendEntries, CLASS_COLORS,
 } from '../labGroundTruth';
 
 describe('labelPathsForImage', () => {
@@ -124,5 +125,46 @@ describe('compareClassSets', () => {
 
   it('meldet alles als fehlend, wenn nichts erkannt wurde', () => {
     expect(compareClassSets(b('Tree'), [])).toEqual({ missing: ['Tree'], extra: [] });
+  });
+});
+
+describe('classColor', () => {
+  it('gibt derselben Klasse immer dieselbe Farbe', () => {
+    // Beim Durchklicken muss "Tree" in jedem Bild gleich aussehen.
+    expect(classColor('Tree')).toBe(classColor('Tree'));
+  });
+
+  it('liefert nur Farben aus der Palette', () => {
+    for (const label of ['Tree', 'Sky', 'Lift', 'Klasse 7', 'ä ö ü', '']) {
+      expect(CLASS_COLORS).toContain(classColor(label));
+    }
+  });
+
+  it('nutzt die Klassenliste des Modells und trennt damit sauber', () => {
+    const ski = ['Tree','Stone','Person','Hole','Building','Stick','Emptyspace',
+                 'Lift','Slopesign','Slopeborder','Sky','Generallobstacle','Offroad'];
+    const used = new Set(ski.map(l => classColor(l, ski)));
+    // 13 Klassen auf 12 Farben: genau eine Wiederholung, keine zufaelligen Dopplungen.
+    expect(used.size).toBe(CLASS_COLORS.length);
+    expect(classColor('Tree', ski)).toBe(CLASS_COLORS[0]);
+    expect(classColor('Stone', ski)).toBe(CLASS_COLORS[1]);
+  });
+
+  it('faellt fuer unbekannte Klassen auf den Namens-Hash zurueck', () => {
+    const color = classColor('Klasse 42', ['Tree', 'Sky']);
+    expect(CLASS_COLORS).toContain(color);
+    expect(color).toBe(classColor('Klasse 42'));
+  });
+});
+
+describe('legendEntries', () => {
+  it('fuehrt Soll und Erkennung zusammen, ohne Wiederholung', () => {
+    const entries = legendEntries([{ label: 'Sky' }, { label: 'Sky' }], [{ label: 'Tree' }]);
+    expect(entries.map(e => e.label)).toEqual(['Sky', 'Tree']);
+    expect(entries[0].color).toBe(classColor('Sky'));
+  });
+
+  it('bleibt leer, wenn es nichts zu zeigen gibt', () => {
+    expect(legendEntries([], [])).toEqual([]);
   });
 });

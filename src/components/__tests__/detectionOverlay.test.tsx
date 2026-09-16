@@ -50,4 +50,39 @@ describe('DetectionOverlay', () => {
     const fontOf = (c: HTMLElement) => Number(c.querySelector('text')!.getAttribute('font-size'));
     expect(fontOf(big.container)).toBeGreaterThan(fontOf(small.container));
   });
+
+  it('faerbt jede Klasse eigen und nimmt dafuer die Klassenliste des Modells', () => {
+    const classes = ['Tree', 'Sky'];
+    const { container } = render(
+      <DetectionOverlay
+        boxes={[BOX, { ...BOX, label: 'Sky' }]}
+        classes={classes}
+        width={512}
+        height={512}
+      />,
+    );
+    const strokes = [...container.querySelectorAll('rect')].map(r => r.getAttribute('stroke'));
+    expect(strokes[0]).not.toBe(strokes[1]);
+    // Beschriftung in derselben Farbe wie ihre Box – sonst ist die Zuordnung Raten.
+    expect(container.querySelector('text')?.getAttribute('fill')).toBe(strokes[0]);
+  });
+
+  it('zeichnet Soll gestrichelt und Erkennung durchgezogen, beide in Klassenfarbe', () => {
+    const truth = [{ label: 'Tree', x1: 10, y1: 10, x2: 60, y2: 60 }];
+    const { container } = render(
+      <DetectionOverlay boxes={[BOX]} truthBoxes={truth} classes={['Tree']} width={512} height={512} />,
+    );
+    const rects = [...container.querySelectorAll('rect')];
+    expect(rects[0].getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(rects[1].getAttribute('stroke-dasharray')).toBeNull();
+    expect(rects[0].getAttribute('stroke')).toBe(rects[1].getAttribute('stroke'));
+  });
+
+  it('zeigt Soll-Boxen auch ohne Erkennung', () => {
+    const truth = [{ label: 'Tree', x1: 10, y1: 10, x2: 60, y2: 60 }];
+    const { container } = render(
+      <DetectionOverlay boxes={[]} truthBoxes={truth} width={512} height={512} />,
+    );
+    expect(container.querySelectorAll('rect')).toHaveLength(1);
+  });
 });

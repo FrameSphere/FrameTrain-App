@@ -191,3 +191,53 @@ export function compareClassSets(
     extra: [...predSet].filter(l => !truthSet.has(l)),
   };
 }
+
+/**
+ * Farbpalette fuer Klassen im Bild-Overlay.
+ *
+ * Helle Toene, weil das Overlay auf dunklen Fotos ebenso lesbar sein muss wie
+ * auf hellen. Reihenfolge so gewaehlt, dass benachbarte Eintraege sich deutlich
+ * unterscheiden — bei einem Modell mit vielen Klassen liegen sonst zwei
+ * aehnliche Toene nebeneinander im selben Bild.
+ */
+export const CLASS_COLORS = [
+  '#f472b6', '#38bdf8', '#34d399', '#fbbf24', '#a78bfa', '#fb923c',
+  '#22d3ee', '#f87171', '#4ade80', '#c084fc', '#facc15', '#2dd4bf',
+] as const;
+
+/**
+ * Feste Farbe je Klasse.
+ *
+ * Erste Wahl ist die Position in der Klassenliste des Modells: die ist pro
+ * Modell fest, und benachbarte Klassen bekommen dadurch garantiert
+ * verschiedene Farben. Ein reiner Namens-Hash tut das nicht — bei den 13
+ * Ski-Klassen fielen darueber mehrere auf denselben Ton.
+ *
+ * Der Hash bleibt als Rueckfall fuer Klassen, die nicht in der Liste stehen
+ * (etwa aus einer Labeldatei mit eigenen Ids). Wichtig ist in beiden Faellen:
+ * dieselbe Klasse behaelt beim Durchklicken ihre Farbe, und Soll und
+ * Erkennung derselben Klasse gehoeren sichtbar zusammen.
+ */
+export function classColor(label: string, classes: readonly string[] = []): string {
+  const index = classes.indexOf(label);
+  if (index >= 0) return CLASS_COLORS[index % CLASS_COLORS.length];
+
+  let hash = 0;
+  for (let i = 0; i < label.length; i++) {
+    hash = (hash * 31 + label.charCodeAt(i)) | 0;
+  }
+  return CLASS_COLORS[Math.abs(hash) % CLASS_COLORS.length];
+}
+
+/** Klassen im Bild – Soll und Erkennung zusammen, fuer die Legende. */
+export function legendEntries(
+  truth: { label: string }[],
+  predicted: { label: string }[],
+  classes: readonly string[] = [],
+): { label: string; color: string }[] {
+  const seen: string[] = [];
+  for (const b of [...truth, ...predicted]) {
+    if (!seen.includes(b.label)) seen.push(b.label);
+  }
+  return seen.sort().map(label => ({ label, color: classColor(label, classes) }));
+}

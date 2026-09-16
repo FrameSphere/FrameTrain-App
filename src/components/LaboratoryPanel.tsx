@@ -16,7 +16,7 @@ import {
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import {
   labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes,
-  compareClassSets, type TruthBox,
+  compareClassSets, classColor, legendEntries, type TruthBox,
 } from './labGroundTruth';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
@@ -832,10 +832,12 @@ type LabPhase = 'setup' | 'testing' | 'analysis';
  * preserveAspectRatio wie object-contain, also passen die Koordinaten ohne
  * Umrechnung auf die dargestellte Groesse.
  */
-export function DetectionOverlay({ boxes, truthBoxes = [], width, height }: {
+export function DetectionOverlay({ boxes, truthBoxes = [], classes = [], width, height }: {
   boxes: DetectionBox[];
   /** Soll-Boxen aus der Labeldatei des Datasets, gestrichelt gezeichnet. */
   truthBoxes?: TruthBox[];
+  /** Klassenliste des Modells – bestimmt die Farbe je Klasse. */
+  classes?: string[];
   width: number;
   height: number;
 }) {
@@ -855,8 +857,9 @@ export function DetectionOverlay({ boxes, truthBoxes = [], width, height }: {
           key={`truth-${b.label}-${i}`}
           x={b.x1} y={b.y1}
           width={Math.max(0, b.x2 - b.x1)} height={Math.max(0, b.y2 - b.y1)}
-          fill="none" stroke="#34d399" strokeWidth={stroke}
+          fill="none" stroke={classColor(b.label, classes)} strokeWidth={stroke}
           strokeDasharray={`${stroke * 3} ${stroke * 2}`} rx={stroke}
+          opacity={0.9}
         />
       ))}
       {boxes.map((b, i) => {
@@ -864,16 +867,17 @@ export function DetectionOverlay({ boxes, truthBoxes = [], width, height }: {
         const h = Math.max(0, b.y2 - b.y1);
         // Sitzt die Box oben am Rand, wandert die Beschriftung nach innen.
         const labelY = b.y1 > font * 1.4 ? b.y1 - font * 0.35 : b.y1 + font * 1.1;
+        const color = classColor(b.label, classes);
         return (
           <g key={`${b.label}-${i}`}>
             <rect
               x={b.x1} y={b.y1} width={w} height={h}
-              fill="none" stroke="#f472b6" strokeWidth={stroke} rx={stroke}
+              fill="none" stroke={color} strokeWidth={stroke} rx={stroke}
             />
             <text
               x={b.x1 + stroke} y={labelY}
-              fontSize={font} fill="#fbcfe8"
-              style={{ paintOrder: 'stroke', stroke: '#0f172a', strokeWidth: font / 4 }}
+              fontSize={font} fill={color}
+              style={{ paintOrder: 'stroke', stroke: '#0f172a', strokeWidth: font / 3 }}
             >
               {b.label} {(b.confidence * 100).toFixed(0)}%
             </text>
@@ -2037,7 +2041,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                           <img
                             src={convertFileSrc(currentSample.filePath)}
                             alt={currentSample.text}
-                            className="max-h-40 max-w-full rounded-lg object-contain block"
+                            className="max-h-80 max-w-full rounded-lg object-contain block"
                             onLoad={(e) => setImageSize({
                               w: e.currentTarget.naturalWidth,
                               h: e.currentTarget.naturalHeight,
@@ -2052,6 +2056,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                               <DetectionOverlay
                                 boxes={testResult?.boxes ?? []}
                                 truthBoxes={truthBoxes}
+                                classes={modelClasses}
                                 width={w}
                                 height={h}
                               />
@@ -2066,20 +2071,38 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                         />
                       )}
                       <span className="text-gray-400 text-[10px] font-mono truncate max-w-full">{currentSample.text}</span>
-                      {truthBoxes.length > 0 && (
-                        <div className="flex items-center gap-3 text-[10px]">
-                          <span className="flex items-center gap-1 text-emerald-300">
-                            <span className="inline-block w-3 border-t border-dashed border-emerald-400" />
-                            {t('laboratoryPanel.testing.truthLegend')}
-                          </span>
-                          {(testResult?.boxes?.length ?? 0) > 0 && (
-                            <span className="flex items-center gap-1 text-pink-300">
-                              <span className="inline-block w-3 border-t border-pink-400" />
-                              {t('laboratoryPanel.testing.predictionLegend')}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      {(() => {
+                        // Farbe = Klasse, Strichart = Soll oder Erkennung. Ohne
+                        // diese Legende raet man bei einem Bild mit acht Boxen.
+                        const entries = legendEntries(truthBoxes, testResult?.boxes ?? [], modelClasses);
+                        if (entries.length === 0) return null;
+                        return (
+                          <div className="w-full space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-400">
+                              {truthBoxes.length > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <span className="inline-block w-3.5 border-t border-dashed border-gray-400" />
+                                  {t('laboratoryPanel.testing.truthLegend')}
+                                </span>
+                              )}
+                              {(testResult?.boxes?.length ?? 0) > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <span className="inline-block w-3.5 border-t border-gray-400" />
+                                  {t('laboratoryPanel.testing.predictionLegend')}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-x-2.5 gap-y-1 text-[10px]">
+                              {entries.map(e => (
+                                <span key={e.label} className="flex items-center gap-1" style={{ color: e.color }}>
+                                  <span className="inline-block w-2 h-2 rounded-sm" style={{ background: e.color }} />
+                                  {e.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-36 overflow-y-auto">

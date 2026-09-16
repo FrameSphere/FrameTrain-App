@@ -2666,8 +2666,8 @@
       "allDoneTitle": "Alle Samples bewertet!",
       "noSamplesLoaded": "Keine Samples geladen — lade oben in der Konfiguration Samples aus einem Dataset.",
       "toAnalysisButton": "Zur Auswertung",
-      "truthLegend": "Soll (aus dem Dataset)",
-      "predictionLegend": "Erkannt",
+      "truthLegend": "gestrichelt = Soll",
+      "predictionLegend": "durchgezogen = erkannt",
       "detectionAllFound": "Alle Soll-Klassen erkannt",
       "detectionMissing": "Nicht erkannt: {labels}",
       "detectionExtra": "zusätzlich: {labels}"
