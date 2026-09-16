@@ -11,13 +11,17 @@ import {
   Trash2, RotateCcw, Download, Eye, Sparkles, Terminal,
   ThumbsUp, ThumbsDown, Minus, TrendingUp, TrendingDown,
   ClipboardList, Save, FolderOpen, Bot, Send, Pencil,
-  Check, Wand2, Copy, Maximize2, Minimize2, Zap,
+  Check, Wand2, Copy, Maximize2, Minimize2, Zap, Database,
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import {
   labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes,
   compareClassSets, classColor, legendEntries, type TruthBox,
 } from './labGroundTruth';
+import {
+  correctionKindFor, initialCorrection, isCorrectionEmpty, describeCorrection,
+  clientToImagePoint, boxFromPoints, isUsableBox, type Correction,
+} from './labCorrection';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -87,6 +91,12 @@ interface LabResult {
   sampleIndex: number;
   inputText: string;
   expectedLabel?: string;
+  /** Vom Nutzer erfasst: so haette das Ergebnis aussehen muessen. */
+  correction?: Correction;
+  /** Bildpfad und -masse – der Dataset-Export braucht beides. */
+  filePath?: string;
+  imageWidth?: number;
+  imageHeight?: number;
   predicted: string;
   confidence?: number;
   topPredictions?: TopPred[];
@@ -613,6 +623,55 @@ Code in \`\`\`python Blöcken.`;
 
 function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => void }) {
   const { t } = useLanguage();
+  const { success, error, warning } = useNotification();
+  const [exporting, setExporting] = useState(false);
+
+  /**
+   * Korrekturen als neues Dataset – der eigentliche Zweck des Labors.
+   *
+   * Das Ursprungs-Dataset bleibt unangetastet; hier entsteht ein zweites mit
+   * genau den Samples, die der Nutzer richtiggestellt hat.
+   */
+  const exportCorrections = async () => {
+    const items = session.results
+      .filter(r => !isCorrectionEmpty(r.correction))
+      .map(r => ({
+        kind: r.correction!.kind,
+        inputText: r.inputText,
+        filePath: r.filePath ?? null,
+        boxes: r.correction!.kind === 'boxes' ? r.correction!.boxes : null,
+        label: r.correction!.kind === 'label' ? r.correction!.label : null,
+        text: r.correction!.kind === 'text' ? r.correction!.text : null,
+        imageWidth: r.imageWidth ?? null,
+        imageHeight: r.imageHeight ?? null,
+      }));
+
+    if (items.length === 0) {
+      warning(t('laboratoryPanel.analysis.exportDatasetEmpty'), t('laboratoryPanel.analysis.exportDatasetEmptyDetail'));
+      return;
+    }
+    setExporting(true);
+    try {
+      const res = await invoke<{ written: number; skipped: number; dataset: { name: string } }>(
+        'lab_export_corrections',
+        {
+          modelId: session.modelId,
+          datasetName: `${session.name} – Korrekturen`,
+          items,
+        },
+      );
+      success(
+        t('laboratoryPanel.analysis.exportDatasetDone'),
+        res.skipped > 0
+          ? t('laboratoryPanel.analysis.exportDatasetDoneSkipped', { count: res.written, skipped: res.skipped })
+          : t('laboratoryPanel.analysis.exportDatasetDoneDetail', { count: res.written }),
+      );
+    } catch (e: unknown) {
+      error(t('laboratoryPanel.analysis.exportDatasetError'), e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
   const [filterRating, setFilterRating] = useState<'all' | 'correct' | 'wrong' | 'skipped'>('all');
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -639,12 +698,13 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 
   const exportCSV = () => {
     const rows = [
-      [t('laboratoryPanel.analysis.csvHeaderIndex'), t('laboratoryPanel.analysis.csvHeaderInput'), t('laboratoryPanel.analysis.csvHeaderExpected'), t('laboratoryPanel.analysis.csvHeaderPredicted'), t('laboratoryPanel.analysis.csvHeaderConfidence'), t('laboratoryPanel.analysis.csvHeaderRating'), t('laboratoryPanel.analysis.csvHeaderNote')],
+      [t('laboratoryPanel.analysis.csvHeaderIndex'), t('laboratoryPanel.analysis.csvHeaderInput'), t('laboratoryPanel.analysis.csvHeaderExpected'), t('laboratoryPanel.analysis.csvHeaderPredicted'), t('laboratoryPanel.analysis.csvHeaderConfidence'), t('laboratoryPanel.analysis.csvHeaderRating'), t('laboratoryPanel.analysis.csvHeaderCorrection'), t('laboratoryPanel.analysis.csvHeaderNote')],
       ...results.map(r => [
         r.sampleIndex + 1, `"${r.inputText.replace(/"/g, '""')}"`,
         r.expectedLabel ?? '', r.predicted,
         r.confidence != null ? (r.confidence * 100).toFixed(1) + '%' : '',
-        r.userRating, `"${r.userNote.replace(/"/g, '""')}"`,
+        r.userRating, `"${describeCorrection(r.correction).replace(/"/g, '""')}"`,
+        `"${r.userNote.replace(/"/g, '""')}"`,
       ]),
     ];
     const csv = rows.map(r => r.join(',')).join('\n');
@@ -662,9 +722,19 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
           <button onClick={onBack} className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white border border-white/10 transition-all"><ChevronLeft className="w-4 h-4" /></button>
           <div><h2 className="text-lg font-bold text-white">{session.name}</h2><p className="text-gray-500 text-xs">{session.modelName} · {session.versionName} · {session.engineMode === 'engine' ? t('laboratoryPanel.sessionsModal.engineBadge') : t('laboratoryPanel.sessionsModal.devScriptBadge')}</p></div>
         </div>
-        <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-sm transition-all">
-          <Download className="w-4 h-4" /> {t('laboratoryPanel.analysis.exportButton')}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white text-sm transition-all">
+            <Download className="w-4 h-4" /> {t('laboratoryPanel.analysis.exportButton')}
+          </button>
+          <button
+            onClick={exportCorrections}
+            disabled={exporting}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 border border-emerald-500/30 text-emerald-300 text-sm transition-all"
+          >
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+            {t('laboratoryPanel.analysis.exportDatasetButton')}
+          </button>
+        </div>
       </div>
 
       {/* Stats Overview */}
@@ -832,16 +902,18 @@ type LabPhase = 'setup' | 'testing' | 'analysis';
  * preserveAspectRatio wie object-contain, also passen die Koordinaten ohne
  * Umrechnung auf die dargestellte Groesse.
  */
-export function DetectionOverlay({ boxes, truthBoxes = [], classes = [], width, height }: {
+export function DetectionOverlay({ boxes, truthBoxes = [], draftBox = null, classes = [], width, height }: {
   boxes: DetectionBox[];
   /** Soll-Boxen aus der Labeldatei des Datasets, gestrichelt gezeichnet. */
   truthBoxes?: TruthBox[];
+  /** Box, die gerade mit der Maus gezogen wird. */
+  draftBox?: TruthBox | null;
   /** Klassenliste des Modells – bestimmt die Farbe je Klasse. */
   classes?: string[];
   width: number;
   height: number;
 }) {
-  if ((!boxes.length && !truthBoxes.length) || width <= 0 || height <= 0) return null;
+  if ((!boxes.length && !truthBoxes.length && !draftBox) || width <= 0 || height <= 0) return null;
   // Schrift und Linien in Bildpixeln — bei einem 4000px-Foto waere 12px unsichtbar.
   const stroke = Math.max(1.5, width / 320);
   const font   = Math.max(9, width / 40);
@@ -862,6 +934,15 @@ export function DetectionOverlay({ boxes, truthBoxes = [], classes = [], width, 
           opacity={0.9}
         />
       ))}
+      {draftBox && (
+        <rect
+          x={draftBox.x1} y={draftBox.y1}
+          width={Math.max(0, draftBox.x2 - draftBox.x1)}
+          height={Math.max(0, draftBox.y2 - draftBox.y1)}
+          fill={classColor(draftBox.label, classes)} fillOpacity={0.15}
+          stroke={classColor(draftBox.label, classes)} strokeWidth={stroke} rx={stroke}
+        />
+      )}
       {boxes.map((b, i) => {
         const w = Math.max(0, b.x2 - b.x1);
         const h = Math.max(0, b.y2 - b.y1);
@@ -935,6 +1016,16 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const [modelClasses, setModelClasses] = useState<string[]>([]);
   const [datasetClasses, setDatasetClasses] = useState<Record<number, string>>({});
   const [truthBoxes, setTruthBoxes] = useState<TruthBox[]>([]);
+  // Nur Boxen ab dieser Konfidenz werden gezeigt und verglichen. Der Server
+  // liefert ab 0.05, damit der Regler nach unten Luft hat.
+  const [confThreshold, setConfThreshold] = useState(0.25);
+  // "So haette es aussehen muessen" – vom Nutzer erfasst, pro Sample.
+  const [correction, setCorrection] = useState<Correction | null>(null);
+  const [correcting, setCorrecting] = useState(false);
+  const [drawLabel, setDrawLabel] = useState('');
+  const [dragFrom, setDragFrom] = useState<{ x: number; y: number } | null>(null);
+  const [dragTo, setDragTo] = useState<{ x: number; y: number } | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null);
   const [testResult, setTestResult] = useState<{
     predicted: string; confidence?: number; topPredictions?: TopPred[]; inferenceMs: number;
@@ -1301,9 +1392,89 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   }, [currentSample, imageSize, datasetClasses, modelClasses]);
 
   /** Erwartung: bei Objekterkennung die Labeldatei, sonst der Ordnername. */
-  const expectedLabel = truthBoxes.length > 0
+  const datasetExpected = truthBoxes.length > 0
     ? summarizeBoxes(truthBoxes)
     : currentSample?.label;
+  // Die Korrektur des Nutzers schlaegt das Dataset – sie ist das juengere Wissen.
+  const expectedLabel = !isCorrectionEmpty(correction)
+    ? describeCorrection(correction)
+    : datasetExpected;
+
+  /** Boxen oberhalb der eingestellten Konfidenz. */
+  const visibleBoxes = (testResult?.boxes ?? []).filter(b => b.confidence >= confThreshold);
+  const hiddenBoxCount = (testResult?.boxes?.length ?? 0) - visibleBoxes.length;
+
+  const correctionKind = correctionKindFor(serverModality, currentSample?.fileKind);
+  /** Klassen zur Auswahl beim Korrigieren: Modell, Dataset, bisher Korrigiertes. */
+  const correctionClasses = (() => {
+    const out: string[] = [...modelClasses];
+    for (const name of Object.values(datasetClasses)) if (!out.includes(name)) out.push(name);
+    for (const b of truthBoxes) if (!out.includes(b.label)) out.push(b.label);
+    return out;
+  })();
+
+  /** Die Korrektur gehoert zum Sample – beim Wechsel faengt sie von vorn an. */
+  const resetCorrection = () => {
+    setCorrection(null);
+    setCorrecting(false);
+    setDragFrom(null);
+    setDragTo(null);
+  };
+
+  const startCorrection = () => {
+    setCorrection(initialCorrection(correctionKind, {
+      truthBoxes,
+      predictedBoxes: visibleBoxes.map(b => ({ label: b.label, x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 })),
+      expectedLabel: datasetExpected,
+      predictedText: testResult?.predicted,
+    }));
+    setDrawLabel(prev => prev || correctionClasses[0] || '');
+    setCorrecting(true);
+  };
+
+  // ── Boxen zeichnen ──────────────────────────────────────────────────────
+  const imagePoint = (e: React.PointerEvent) => {
+    const el = imageRef.current;
+    const w = testResult?.imageWidth ?? imageSize?.w ?? 0;
+    const h = testResult?.imageHeight ?? imageSize?.h ?? 0;
+    if (!el) return { x: 0, y: 0 };
+    return clientToImagePoint(el.getBoundingClientRect(), w, h, e.clientX, e.clientY);
+  };
+
+  const handleDrawStart = (e: React.PointerEvent) => {
+    if (!correcting || correction?.kind !== 'boxes' || !drawLabel) return;
+    e.preventDefault();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    setDragFrom(imagePoint(e));
+    setDragTo(null);
+  };
+
+  const handleDrawMove = (e: React.PointerEvent) => {
+    if (!dragFrom) return;
+    setDragTo(imagePoint(e));
+  };
+
+  const handleDrawEnd = (e: React.PointerEvent) => {
+    if (!dragFrom || correction?.kind !== 'boxes') { setDragFrom(null); setDragTo(null); return; }
+    const end = imagePoint(e);
+    const box = boxFromPoints(dragFrom, end, drawLabel);
+    const w = testResult?.imageWidth ?? imageSize?.w ?? 0;
+    const h = testResult?.imageHeight ?? imageSize?.h ?? 0;
+    // Ein Klick ohne Ziehen ist kein Rechteck – der haette sonst eine
+    // unsichtbare Box hinterlassen.
+    if (isUsableBox(box, w, h)) {
+      setCorrection({ kind: 'boxes', boxes: [...correction.boxes, box] });
+    }
+    setDragFrom(null);
+    setDragTo(null);
+  };
+
+  /** Im Box-Editor zeigt das Bild nur die Korrektur – sonst wird es unlesbar. */
+  const editingBoxes = correcting && correction?.kind === 'boxes';
+
+  const draftBox = dragFrom && dragTo && drawLabel
+    ? boxFromPoints(dragFrom, dragTo, drawLabel)
+    : null;
   // Erwartet der geladene Server eine andere Eingabeart als das aktuelle Sample?
   const inputMismatch: 'inputMismatchImage' | 'inputMismatchAudio' | 'inputMismatchText' | null =
     !currentSample || !serverInputKind || serverInputKind === 'tensor'
@@ -1583,6 +1754,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       sampleIndex: currentSample.index,
       inputText: currentSample.text,
       expectedLabel,
+      correction: isCorrectionEmpty(correction) ? undefined : correction,
+      filePath: currentSample.filePath,
+      imageWidth: testResult.imageWidth ?? imageSize?.w,
+      imageHeight: testResult.imageHeight ?? imageSize?.h,
       predicted: testResult.predicted,
       confidence: testResult.confidence,
       topPredictions: testResult.topPredictions,
@@ -1608,6 +1783,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       setTestError(null);
       setUserNote('');
       setShowNote(false);
+      resetCorrection();
     } else {
       // Session abgeschlossen
       setPhase('analysis');
@@ -1990,7 +2166,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
               {/* Navigation + Satz-Strip */}
               <div className="flex items-center gap-3">
-                <button onClick={() => { if (currentSampleIdx > 0) { setCurrentSampleIdx(v => v - 1); setTestResult(null); setTestError(null); setUserNote(''); }}}
+                <button onClick={() => { if (currentSampleIdx > 0) { setCurrentSampleIdx(v => v - 1); setTestResult(null); setTestError(null); setUserNote(''); resetCorrection(); }}}
                   disabled={currentSampleIdx === 0} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-all disabled:opacity-30 flex-shrink-0">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
@@ -2019,7 +2195,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     );
                   })()}
                 </div>
-                <button onClick={() => { if (currentSampleIdx < samples.length - 1) { setCurrentSampleIdx(v => v + 1); setTestResult(null); setTestError(null); setUserNote(''); }}}
+                <button onClick={() => { if (currentSampleIdx < samples.length - 1) { setCurrentSampleIdx(v => v + 1); setTestResult(null); setTestError(null); setUserNote(''); resetCorrection(); }}}
                   disabled={currentSampleIdx === samples.length - 1} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-all disabled:opacity-30 flex-shrink-0">
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -2039,13 +2215,18 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {currentSample.fileKind === 'image' ? (
                         <div className="relative inline-block">
                           <img
+                            ref={imageRef}
                             src={convertFileSrc(currentSample.filePath)}
                             alt={currentSample.text}
-                            className="max-h-80 max-w-full rounded-lg object-contain block"
+                            className={`max-h-80 max-w-full rounded-lg object-contain block ${correcting && correction?.kind === 'boxes' ? 'cursor-crosshair' : ''}`}
+                            draggable={false}
                             onLoad={(e) => setImageSize({
                               w: e.currentTarget.naturalWidth,
                               h: e.currentTarget.naturalHeight,
                             })}
+                            onPointerDown={handleDrawStart}
+                            onPointerMove={handleDrawMove}
+                            onPointerUp={handleDrawEnd}
                           />
                           {(() => {
                             // Die Masse aus dem Ergebnis sind die des Originals;
@@ -2054,8 +2235,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             const h = testResult?.imageHeight ?? imageSize?.h ?? 0;
                             return (
                               <DetectionOverlay
-                                boxes={testResult?.boxes ?? []}
-                                truthBoxes={truthBoxes}
+                                boxes={editingBoxes ? [] : visibleBoxes}
+                                truthBoxes={editingBoxes && correction?.kind === 'boxes' ? correction.boxes : truthBoxes}
+                                draftBox={draftBox}
                                 classes={modelClasses}
                                 width={w}
                                 height={h}
@@ -2074,7 +2256,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       {(() => {
                         // Farbe = Klasse, Strichart = Soll oder Erkennung. Ohne
                         // diese Legende raet man bei einem Bild mit acht Boxen.
-                        const entries = legendEntries(truthBoxes, testResult?.boxes ?? [], modelClasses);
+                        const entries = legendEntries(truthBoxes, visibleBoxes, modelClasses);
                         if (entries.length === 0) return null;
                         return (
                           <div className="w-full space-y-1.5">
@@ -2085,7 +2267,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                                   {t('laboratoryPanel.testing.truthLegend')}
                                 </span>
                               )}
-                              {(testResult?.boxes?.length ?? 0) > 0 && (
+                              {visibleBoxes.length > 0 && (
                                 <span className="flex items-center gap-1">
                                   <span className="inline-block w-3.5 border-t border-gray-400" />
                                   {t('laboratoryPanel.testing.predictionLegend')}
@@ -2188,7 +2370,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                           Bei Objekterkennung waere ein Textvergleich sinnlos —
                           dort zaehlt, welche Klasse fehlt oder dazukam. */}
                       {truthBoxes.length > 0 ? (() => {
-                        const { missing, extra } = compareClassSets(truthBoxes, testResult.boxes ?? []);
+                        const { missing, extra } = compareClassSets(truthBoxes, visibleBoxes);
                         const ok = missing.length === 0;
                         return (
                           <div className={`flex items-start gap-2 px-3 py-2 rounded-xl text-xs ${ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
@@ -2210,6 +2392,159 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             : <><XCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.mismatchLabel')} <strong>{currentSample.label}</strong></>}
                       </div>
                       )}
+
+                      {/* Konfidenz-Regler – nur wenn es Boxen gibt */}
+                      {(testResult.boxes?.length ?? 0) > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-500">
+                              {t('laboratoryPanel.testing.confThreshold', { value: (confThreshold * 100).toFixed(0) })}
+                            </span>
+                            <span className="text-gray-500 tabular-nums">
+                              {t('laboratoryPanel.testing.boxesShown', {
+                                shown: visibleBoxes.length,
+                                total: testResult.boxes?.length ?? 0,
+                              })}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={5} max={95} step={5}
+                            value={Math.round(confThreshold * 100)}
+                            onChange={(e) => setConfThreshold(Number(e.target.value) / 100)}
+                            className="w-full accent-pink-500"
+                          />
+                          {hiddenBoxCount > 0 && (
+                            <p className="text-[10px] text-gray-600">
+                              {t('laboratoryPanel.testing.boxesHidden', { count: hiddenBoxCount })}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Korrektur: "so haette es aussehen muessen" */}
+                      <div className="space-y-2 pt-1 border-t border-white/10">
+                        {!correcting ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-gray-500">
+                              {isCorrectionEmpty(correction)
+                                ? t('laboratoryPanel.testing.correctionHint')
+                                : t('laboratoryPanel.testing.correctionSaved', { value: describeCorrection(correction) })}
+                            </span>
+                            <button
+                              onClick={startCorrection}
+                              className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs transition-all flex-shrink-0"
+                            >
+                              {isCorrectionEmpty(correction)
+                                ? t('laboratoryPanel.testing.correctionStart')
+                                : t('laboratoryPanel.testing.correctionEdit')}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-xs text-gray-400">{t('laboratoryPanel.testing.correctionTitle')}</p>
+
+                            {correction?.kind === 'boxes' && (
+                              <div className="space-y-2">
+                                <p className="text-[10px] text-gray-500">{t('laboratoryPanel.testing.correctionBoxHint')}</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {correctionClasses.map(name => (
+                                    <button
+                                      key={name}
+                                      onClick={() => setDrawLabel(name)}
+                                      className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                                        drawLabel === name ? 'border-white/40' : 'border-white/10 hover:border-white/25'
+                                      }`}
+                                      style={{ color: classColor(name, modelClasses) }}
+                                    >
+                                      {name}
+                                    </button>
+                                  ))}
+                                </div>
+                                {correctionClasses.length === 0 && (
+                                  <input
+                                    value={drawLabel}
+                                    onChange={(e) => setDrawLabel(e.target.value)}
+                                    placeholder={t('laboratoryPanel.testing.correctionClassPlaceholder')}
+                                    className="w-full px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs placeholder-gray-600 focus:outline-none focus:border-white/30"
+                                  />
+                                )}
+                                <div className="space-y-1 max-h-24 overflow-y-auto">
+                                  {correction.boxes.map((b, i) => (
+                                    <div key={`${b.label}-${i}`} className="flex items-center gap-2 text-[11px]">
+                                      <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: classColor(b.label, modelClasses) }} />
+                                      <span className="flex-1 truncate text-gray-300">{b.label}</span>
+                                      <button
+                                        onClick={() => setCorrection({
+                                          kind: 'boxes',
+                                          boxes: correction.boxes.filter((_, j) => j !== i),
+                                        })}
+                                        className="text-gray-600 hover:text-red-400 transition-colors"
+                                        title={t('common.delete')}
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {correction?.kind === 'label' && (
+                              <div className="space-y-2">
+                                {correctionClasses.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {correctionClasses.map(name => (
+                                      <button
+                                        key={name}
+                                        onClick={() => setCorrection({ kind: 'label', label: name })}
+                                        className={`px-2 py-0.5 rounded text-[10px] border transition-all ${
+                                          correction.label === name
+                                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                            : 'bg-white/5 border-white/10 text-gray-400 hover:text-white'
+                                        }`}
+                                      >
+                                        {name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                <input
+                                  value={correction.label}
+                                  onChange={(e) => setCorrection({ kind: 'label', label: e.target.value })}
+                                  placeholder={t('laboratoryPanel.testing.correctionLabelPlaceholder')}
+                                  className="w-full px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs placeholder-gray-600 focus:outline-none focus:border-white/30"
+                                />
+                              </div>
+                            )}
+
+                            {correction?.kind === 'text' && (
+                              <textarea
+                                value={correction.text}
+                                onChange={(e) => setCorrection({ kind: 'text', text: e.target.value })}
+                                rows={3}
+                                placeholder={t('laboratoryPanel.testing.correctionTextPlaceholder')}
+                                className="w-full px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-xs placeholder-gray-600 focus:outline-none focus:border-white/30 resize-none"
+                              />
+                            )}
+
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => { setCorrection(null); setCorrecting(false); }}
+                                className="flex-1 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs transition-all"
+                              >
+                                {t('laboratoryPanel.testing.correctionDiscard')}
+                              </button>
+                              <button
+                                onClick={() => setCorrecting(false)}
+                                className="flex-1 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs transition-all"
+                              >
+                                {t('laboratoryPanel.testing.correctionKeep')}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Top Predictions */}
                       {testResult.topPredictions && testResult.topPredictions.length > 1 && (

@@ -1,0 +1,198 @@
+# FrameTrain Dataset Studio – Systemplanung
+
+Stand: 2026-09-16 (Planung, noch kein Code)
+Ergaenzt `DATASET_ROADMAP.md`: dort geht es um *vorhandene* Datensaetze (erkennen,
+splitten, importieren), hier um das *Erzeugen* neuer Datensaetze.
+
+---
+
+## 1. Ziel in einem Satz
+
+Ein Werkzeug, mit dem aus Rohmaterial (Dateien, Aufnahmen, Web, eigenen Texten)
+ein trainierbarer Datensatz wird – manuell, regelbasiert, modellgestuetzt oder
+im aktiven Lernkreis, je nachdem was die Datenlage hergibt.
+
+Einstieg: Button **"Datensatz bauen"** im Dataset-Tab, rechts neben "Importieren".
+Neue View `studio` in `Dashboard.tsx` (`type View`), Sidebar-Eintrag erst sichtbar,
+wenn mindestens ein Projekt existiert – die Seitenleiste hat schon neun Punkte.
+
+---
+
+## 2. Was es schon gibt (und was der Studio davon erbt)
+
+| Vorhanden | Datei | Nutzung im Studio |
+|---|---|---|
+| Typ-Erkennung fuer 10 Dataset-Typen | `dataset_manager.rs::detect_dataset_type` | Export prueft sich selbst gegen die Erkennung |
+| `dataset.yaml`-Generator | `dataset_manager.rs::generate_dataset_yaml` | Export-Schritt fuer YOLO/Pascal |
+| Typ-aware Split | `dataset_manager.rs::split_dataset` | Split bleibt beim Export, nicht im Studio |
+| Box-Overlay in Bildkoordinaten (SVG) | `LaboratoryPanel.tsx::DetectionOverlay` | Basis der Bild-Werkbank (aus Ansicht wird Editor) |
+| YOLO-Label-Parser, Klassenfarben, `data.yaml`-Klassen | `labGroundTruth.ts` | Lesen *und* Schreiben von Labeldateien |
+| Persistenter Inferenz-Server (stdin/stdout JSON) | `laboratory_manager.rs`, `test_engine/model_server.py` | Vorschlags-Engine, gleiches Protokoll |
+| Plugin-Installer mit pip + Fortschritts-Events | `plugin_commands.rs` | Optionale Assist-Modelle (Whisper, SAM) nachinstallieren |
+| AI-Schicht mit eigenen Keys | `src/ai/aiClient.ts`, `ai_proxy.rs` | LLM-Labeling fuer Text, Klassenvorschlaege, Synthese |
+| Modell-Plugin-Erkennung | `registry.ts::detectPluginForModel` | Welches Modell darf welche Vorschlaege machen |
+| HTTP-Stack | `reqwest` in `Cargo.toml` | Web-Erfassung ohne neue Abhaengigkeit |
+| Leerer Haken | `laboratory_manager.rs::lab_export_as_dataset` ("Noch nicht implementiert") | Lab-Session -> Studio-Projekt |
+
+Neu zu bauen ist im Kern: die Projekt-Ablage, drei Editoren, die Vorschlags-Pipeline,
+die Qualitaetspruefung und die Export-Writer.
+
+---
+
+## 3. Zentrale Entscheidung: ein neutrales Zwischenformat
+
+Der Studio arbeitet **nie** direkt in YOLO- oder COCO-Struktur. Sonst muesste jeder
+Editor jedes Zielformat kennen, und ein Wechsel des Zielformats waere ein Neuanfang.
+
+Stattdessen ein Projektordner unter `<app_data>/datasets/<user_id>/_studio/<project_id>/`:
+
+```
+project.json        Name, Modalitaet, Aufgabe, Klassen-Schema, Zielformat, Quellen
+media/ab/cd/<sha256>.<ext>   inhaltsadressiert -> exakte Duplikate kosten nichts
+samples.jsonl       eine Zeile pro Sample (append-only, wird kompaktiert)
+events.jsonl        jede Annotationsaktion (Undo/Redo, absturzsicher, Audit)
+suggestions.jsonl   Maschinenvorschlaege, getrennt von bestaetigten Labels
+thumbs/             Vorschaubilder, Wellenform-Peaks
+exports/            erzeugte Datensaetze + Report
+```
+
+Eine Sample-Zeile:
+
+```json
+{"id":"s_00412","media":"ab/cd/9f3c….jpg","mime":"image/jpeg","status":"confirmed",
+ "ann":{"boxes":[{"cls":0,"x":0.51,"y":0.40,"w":0.22,"h":0.31}]},
+ "src":{"kind":"web","url":"https://…","license":"CC-BY-4.0","fetched":"2026-09-16"},
+ "meta":{"w":1920,"h":1080,"group":"video_07","near_dup_of":null},
+ "hist":[{"t":"suggest","by":"yolo:best.pt","conf":0.82},{"t":"confirm","by":"user"}]}
+```
+
+Drei Punkte daran sind bewusst so:
+
+1. **`status` statt "gelabelt ja/nein":** `new -> suggested -> confirmed -> rejected/skipped`.
+   Ein Maschinenvorschlag wird nie stillschweigend zur Wahrheit. Der Export nimmt
+   per Default nur `confirmed`; "Vorschlaege ab Konfidenz X mitnehmen" ist ein
+   bewusster Schalter und steht im Export-Report.
+2. **`src` ist Pflichtfeld.** Damit faellt beim Export automatisch eine
+   `PROVENANCE.csv` + `DATA_CARD.md` ab. Wer aus dem Netz sammelt, braucht das –
+   sonst ist der Datensatz spaeter nicht weitergebbar.
+3. **`meta.group`** (Video, Sprecher, Aufnahmesession, Quelldomain). Der Split beim
+   Export ist gruppenbewusst: Frames aus demselben Video landen nie gleichzeitig in
+   Train und Val. Das ist die haeufigste stille Ursache fuer zu gute Val-Werte.
+
+Kein SQLite. Phase 10 der bestehenden Roadmap empfiehlt ohnehin, JSON zur einzigen
+Quelle zu machen – ein neues Subsystem sollte den Fehler nicht wiederholen.
+
+---
+
+## 4. Schichten
+
+**Frontend** (`src/components/studio/`)
+- `StudioPanel.tsx` – Projektliste, Anlegen, Zielformat waehlen
+- `workbench/TextWorkbench.tsx` | `ImageWorkbench.tsx` | `AudioWorkbench.tsx`
+- geteilt: `SampleQueue.tsx` (virtualisiert), `LabelPalette.tsx`, `SuggestionBar.tsx`,
+  `QualityPanel.tsx`, `ExportDialog.tsx`, `studioShortcuts.ts`
+- reine Logik testbar ausgelagert (wie `labGroundTruth.ts`): `studioSample.ts`,
+  `studioExport.ts`, `studioDedup.ts`
+
+**Rust**
+- `studio_manager.rs` – Projekte, samples.jsonl lesen/anhaengen/kompaktieren, Undo-Log
+- `studio_sources.rs` – Ordner-Import, Web-Fetch, Hashing, Thumbnails anstossen
+- `studio_export.rs` – Writer je Zielformat + Registrierung als normales Dataset
+
+**Python** (`src-tauri/python/label_engine/`, neben `train_engine`/`test_engine`,
+gleiches stdin/stdout-Zeilenprotokoll wie `model_server.py`)
+- `predict_server.py` – Batch-Vorschlaege mit einem FrameTrain-Modell
+- `assist/` – optionale Modelle (Whisper, SAM, CLIP/Grounding-DINO), per Plugin-Installer
+- `media_ops.py` – Audio nach 16 kHz mono WAV, Bilder normalisieren, pHash, Embeddings
+- `augment.py` – Augmentierung beim Export (opt-in, nur Train-Split)
+
+**AI-Schicht** – unveraendert genutzt: `callAI` fuer Textlabels, Klassenvorschlaege,
+synthetische Beispiele. Keine neue Infrastruktur, keine neuen Keys.
+
+---
+
+## 5. Die vier Erfassungswege
+
+1. **Import** – Ordner/Dateien, inklusive "Ordnername = Klasse" als Regel
+2. **Aufnahme** – Mikrofon, Kamera, Bildschirmausschnitt
+3. **Erstellen** – Texteditor mit Schema (Klassifikation, Spans, Paare), LLM-Synthese
+4. **Web** – HuggingFace (vorhanden), URL-/Sitemap-Liste, Such-APIs
+
+---
+
+## 6. Die fuenf Automatisierungsgrade
+
+| Stufe | Was passiert | Kosten | Realistischer Anteil |
+|---|---|---|---|
+| 0 Manuell | Tastatur-first: 1–9 = Klasse, Enter = bestaetigen + weiter | – | immer noetig |
+| 1 Regeln | Ordner-/Dateiname, Regex, Metadaten -> Label | 0 | bei sortiertem Material 50–80 % |
+| 2 Modellvorschlag | vorhandenes FrameTrain-Modell schlaegt vor, Mensch bestaetigt | lokal | ab erstem Training |
+| 3 Assist-Modelle | Whisper -> Transkript, SAM -> Maske aus Klick, CLIP/DINO -> Zero-Shot | Download | modalitaetsabhaengig |
+| 4 Aktives Lernen | labeln -> kurz trainieren -> Rest vorhersagen -> nach Unsicherheit sortieren | Rechenzeit | ab ~200 bestaetigten Samples |
+
+Stufe 1 ist der unterschaetzte Hebel: deterministisch, sofort, ohne Modell. Stufe 4
+ist der, bei dem Werkzeuge gern mehr versprechen als sie halten – sie braucht einen
+schnellen Trainingsmodus (wenige Epochen, kleiner Kopf), sonst wartet man bei jeder
+Runde und benutzt es nicht.
+
+Zusatznutzen aus Stufe 2/4: der Filter **"Modell widerspricht dem Label"** findet
+Fehler in bereits gelabelten Daten – das ist oft wertvoller als neue Labels.
+
+---
+
+## 7. Qualitaet (vor dem Export, nicht danach)
+
+- Duplikate: exakt ueber sha256 gratis; nah ueber pHash (Bild), Shingles (Text),
+  Embedding-Cosinus (Audio/Text)
+- Klassenbalance live, Warnung unter N Beispielen pro Klasse
+- Zweifel-Queue: niedrige Konfidenz, Widerspruch, leere Annotation
+- Review-Durchgang nur ueber auto-gelabelte Samples
+- Export-Report: wie viele confirmed / suggested / uebersprungen, Balance, Duplikate,
+  Gruppen-Leckage-Pruefung
+
+---
+
+## 8. Export
+
+Zielformat waehlen -> Writer -> `generate_dataset_yaml` (vorhanden) -> gruppenbewusster
+Split -> Registrierung ueber den bestehenden Import-Pfad. Danach ist es ein ganz
+normales FrameTrain-Dataset mit korrekt erkanntem Typ.
+
+Writer: `yolo_bbox`, `coco_json`, `folder_class`, `flat_file` (jsonl/csv),
+`audio_transcript`, `pre_split`.
+
+---
+
+## 9. Risiken und offene Punkte
+
+1. **Mikrofon in der Tauri-Webview (macOS):** `getUserMedia` scheitert ohne
+   `NSMicrophoneUsageDescription` im Info.plist und passendes Entitlement – und zwar
+   still. Empfehlung: Webview-`MediaRecorder` (WebM/Opus) + Konvertierung in Python,
+   statt einer neuen Rust-Audio-Abhaengigkeit. Muss frueh an einer echten Release-
+   Installation geprueft werden, nicht im Dev-Server.
+2. **Web-Erfassung:** robots.txt beachten, Rate-Limit pro Domain, Domain-Allowlist,
+   Lizenz mitschreiben. Kein pauschaler "alles herunterladen"-Knopf – der Nutzen
+   liegt in URL-Listen, Sitemaps und APIs. Ohne Herkunftsdaten ist ein gesammelter
+   Datensatz spaeter unbrauchbar, sobald er das eigene Geraet verlassen soll.
+3. **Groesse:** ab ~100k Samples braucht es virtualisierte Listen, Thumbnail-Cache
+   und Kompaktierung der JSONL. Vorher nicht optimieren.
+4. **Umfang:** drei Modalitaeten gleichzeitig halb fertig ist schlechter als eine
+   ganz. Empfehlung fuer den ersten Schritt: **Bild/YOLO**, weil Overlay,
+   Labelparser, Klassenfarben und das YOLO-Plugin bereits stehen.
+   *Entschieden am 2026-09-16: S1 wird Bild/YOLO.*
+
+---
+
+## 10. Vorgeschlagene Phasen
+
+| Phase | Inhalt | Aufwand |
+|---|---|---|
+| S1 | Projekt-Ablage, Button, Shell, Import + manuelles Bild-Labeln (Boxen), YOLO-Export | gross |
+| S2 | Regeln (Stufe 1) + Modellvorschlaege (Stufe 2) + Zweifel-Queue | mittel |
+| S3 | Zweite/dritte Modalitaet (Text-Editor, Audio-Aufnahme) | mittel |
+| S4 | Assist-Modelle (Stufe 3) ueber den Plugin-Installer | mittel |
+| S5 | Aktives Lernen (Stufe 4) + `lab_export_as_dataset` anschliessen | mittel |
+| S6 | Web-Erfassung mit Herkunft und Ratenbegrenzung | mittel |
+
+Querschnitt in jeder Phase: de/en vollstaendig, keine Emojis in der UI, Tests
+(Frontend/Rust/Python) gruen, Pruefung an einer echten Release-Installation.

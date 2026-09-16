@@ -2670,7 +2670,21 @@
       "predictionLegend": "solid = detected",
       "detectionAllFound": "All expected classes detected",
       "detectionMissing": "Not detected: {labels}",
-      "detectionExtra": "additional: {labels}"
+      "detectionExtra": "additional: {labels}",
+      "confThreshold": "From {value}% confidence",
+      "boxesShown": "{shown} of {total} boxes",
+      "boxesHidden": "{count} boxes below the threshold hidden",
+      "correctionHint": "No correction recorded",
+      "correctionSaved": "Correction: {value}",
+      "correctionStart": "Record correction",
+      "correctionEdit": "Change correction",
+      "correctionTitle": "How it should have looked",
+      "correctionBoxHint": "Pick a class, then drag a rectangle on the image. Prefilled with the dataset's expected boxes, otherwise the detection.",
+      "correctionClassPlaceholder": "Class name",
+      "correctionLabelPlaceholder": "Correct class",
+      "correctionTextPlaceholder": "The text as it should have been",
+      "correctionDiscard": "Discard",
+      "correctionKeep": "Keep"
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -2714,7 +2728,15 @@
         "Confidence",
         "Rating",
         "Note"
-      ]
+      ],
+      "csvHeaderCorrection": "Correction",
+      "exportDatasetButton": "Corrections as dataset",
+      "exportDatasetEmpty": "No corrections",
+      "exportDatasetEmptyDetail": "This session has no correction recorded. While going through the samples, enter how the result should have looked.",
+      "exportDatasetDone": "Dataset created",
+      "exportDatasetDoneDetail": "{count} corrected samples are now available as a dataset for training.",
+      "exportDatasetDoneSkipped": "{count} samples exported, {skipped} skipped (missing file or image size).",
+      "exportDatasetError": "Export failed"
     }
   },
   "openLibrary": {

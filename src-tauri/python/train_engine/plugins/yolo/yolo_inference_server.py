@@ -183,7 +183,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="FrameTrain YOLO Inference Server")
     parser.add_argument("--model-dir", required=True,
                         help="Modell- oder Versionsordner mit den .pt-Gewichten")
-    parser.add_argument("--conf", type=float, default=0.25)
+    # Bewusst niedrig: das Labor filtert die Boxen ueber einen Regler, und was
+    # der Server wegwirft, kann der Regler nicht zurueckholen.
+    parser.add_argument("--conf", type=float, default=0.05)
     parser.add_argument("--iou", type=float, default=0.45)
     args = parser.parse_args()
 

@@ -2670,7 +2670,21 @@
       "predictionLegend": "durchgezogen = erkannt",
       "detectionAllFound": "Alle Soll-Klassen erkannt",
       "detectionMissing": "Nicht erkannt: {labels}",
-      "detectionExtra": "zusätzlich: {labels}"
+      "detectionExtra": "zusätzlich: {labels}",
+      "confThreshold": "Ab {value}% Konfidenz",
+      "boxesShown": "{shown} von {total} Boxen",
+      "boxesHidden": "{count} Boxen unterhalb der Schwelle ausgeblendet",
+      "correctionHint": "Keine Korrektur erfasst",
+      "correctionSaved": "Korrektur: {value}",
+      "correctionStart": "Korrektur erfassen",
+      "correctionEdit": "Korrektur ändern",
+      "correctionTitle": "So hätte es aussehen müssen",
+      "correctionBoxHint": "Klasse wählen, dann im Bild ein Rechteck ziehen. Vorbelegt ist das Soll aus dem Dataset, sonst die Erkennung.",
+      "correctionClassPlaceholder": "Klassenname",
+      "correctionLabelPlaceholder": "Richtige Klasse",
+      "correctionTextPlaceholder": "Der Text, wie er hätte sein müssen",
+      "correctionDiscard": "Verwerfen",
+      "correctionKeep": "Übernehmen"
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -2714,7 +2728,15 @@
         "Konfidenz",
         "Bewertung",
         "Notiz"
-      ]
+      ],
+      "csvHeaderCorrection": "Korrektur",
+      "exportDatasetButton": "Korrekturen als Dataset",
+      "exportDatasetEmpty": "Keine Korrekturen",
+      "exportDatasetEmptyDetail": "In dieser Session ist keine Korrektur erfasst. Trage beim Durchgehen ein, wie das Ergebnis hätte aussehen müssen.",
+      "exportDatasetDone": "Dataset angelegt",
+      "exportDatasetDoneDetail": "{count} korrigierte Samples stehen jetzt als Dataset zum Training bereit.",
+      "exportDatasetDoneSkipped": "{count} Samples exportiert, {skipped} übersprungen (fehlende Datei oder Bildmaße).",
+      "exportDatasetError": "Export fehlgeschlagen"
     }
   },
   "openLibrary": {

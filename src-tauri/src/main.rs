@@ -275,6 +275,7 @@ fn main() {
             laboratory_manager::lab_get_sessions,
             laboratory_manager::lab_delete_session,
             laboratory_manager::lab_export_as_dataset,
+            laboratory_manager::lab_export_corrections,
             laboratory_manager::lab_get_stats,
             laboratory_manager::lab_start_model_server,
             laboratory_manager::lab_infer_sample,
