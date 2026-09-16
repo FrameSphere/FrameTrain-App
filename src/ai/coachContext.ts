@@ -344,6 +344,7 @@ export const NAV_TARGETS: Record<AppView, Bilingual> = {
   versions: { de: 'Versions', en: 'Versions' },
   laboratory: { de: 'Laboratory', en: 'Laboratory' },
   synapse: { de: 'Synapse', en: 'Synapse' },
+  studio: { de: 'Datensatz-Werkstatt', en: 'Dataset studio' },
   settings: { de: 'Einstellungen', en: 'Settings' },
 };
 const NAV_KEYS = Object.keys(NAV_TARGETS) as AppView[];

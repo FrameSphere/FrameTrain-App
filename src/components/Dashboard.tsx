@@ -16,6 +16,7 @@ import AppContextMenu from './ui/AppContextMenu';
 import { onNavigate } from '../ui/navigationEvents';
 import TrainingDashboard from './TrainingDashboard';
 import SynapseBuilder from './synapse/SynapseBuilder';
+import StudioPanel from './studio/StudioPanel';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 
@@ -31,7 +32,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse';
+type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio';
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('home');
@@ -66,6 +67,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         );
       case 'dataset':
         return <DatasetUpload />;
+      case 'studio':
+        return <StudioPanel />;
       case 'analysis':
         return <AnalysisPanel initialVersionId={initialAnalysisVersionId} />;
       case 'tests':
@@ -107,7 +110,9 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
   return (
     <div className={`flex h-screen bg-gradient-to-br ${currentTheme.colors.background}`}>
       <Sidebar 
-        currentView={currentView} 
+        // Das Studio ist eine Unterseite der Datensaetze — in der Seitenleiste
+        // bleibt deshalb "Datensaetze" markiert statt gar nichts.
+        currentView={currentView === 'studio' ? 'dataset' : currentView} 
         onViewChange={setCurrentView}
         userEmail={userData.email}
         onLogout={onLogout}

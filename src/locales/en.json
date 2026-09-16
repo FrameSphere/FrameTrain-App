@@ -2271,7 +2271,9 @@
     },
     "header": {
       "refreshTooltip": "Refresh",
-      "addButton": "Add Dataset"
+      "addButton": "Add Dataset",
+      "buildButton": "Build dataset",
+      "buildTooltip": "Label images and turn them into a dataset"
     },
     "modelSelector": {
       "label": "Select Model",
@@ -3067,6 +3069,98 @@
       "imageLabel": "Single image",
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
       "detectedClass": "Detected class"
+    }
+  },
+  "studio": {
+    "title": "Dataset studio",
+    "subtitle": "Collect raw material, label it, export it as a trainable dataset",
+    "projects": {
+      "newButton": "New project",
+      "emptyTitle": "No project yet",
+      "emptyDetail": "A project keeps images, classes and boxes in one place. It only becomes a finished dataset on export.",
+      "cardMeta": "{samples} images · {confirmed} confirmed · {classes} classes",
+      "updated": "Last edited {date}",
+      "delete": "Delete",
+      "deleteTitle": "Delete project?",
+      "deleteDetail": "\"{name}\" will be removed with all imported images and boxes. Datasets already exported stay untouched.",
+      "deletedTitle": "Project deleted",
+      "deletedDetail": "\"{name}\" was removed",
+      "backToDatasets": "Back to datasets"
+    },
+    "create": {
+      "title": "New project",
+      "subtitle": "Label images with boxes, export as YOLO",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. Ski lift v2",
+      "classesLabel": "Classes",
+      "classesPlaceholder": "Lift, Sky, Pylon",
+      "classesHint": "Separated by comma or line break. Can be extended later — an import brings its own classes along.",
+      "formatNote": "Exports as YOLO: images/, labels/ and classes.txt. Splitting into train, val and test is done afterwards by the split in the dataset area, which keeps image and label together.",
+      "confirmButton": "Create"
+    },
+    "workbench": {
+      "back": "Back to project list",
+      "subtitle": "{confirmed} of {total} confirmed",
+      "importButton": "Import images",
+      "exportButton": "Export",
+      "emptyTitle": "No images yet",
+      "emptyDetail": "Import a folder — subfolders are included, duplicates only once. YOLO labels lying next to an image are taken over.",
+      "noBoxes": "no box",
+      "moreLoading": "{count} more load as you page through",
+      "classesTitle": "Classes",
+      "noClasses": "Without a class there is no box to draw. Add one below.",
+      "newClassPlaceholder": "New class",
+      "addClass": "Add class",
+      "confirm": "Confirm",
+      "skip": "Skip",
+      "deleteBox": "Delete box"
+    },
+    "filter": {
+      "all": "All",
+      "open": "Open",
+      "confirmed": "Done"
+    },
+    "stats": {
+      "title": "State",
+      "confirmed": "Confirmed",
+      "open": "Open",
+      "skipped": "Skipped",
+      "boxes": "Boxes",
+      "emptyConfirmed": "{count} confirmed images have no box. Correct as negative examples, rarely intended otherwise."
+    },
+    "shortcuts": {
+      "title": "Keyboard",
+      "classes": "1 to 9 — pick class",
+      "confirm": "Enter — confirm and continue",
+      "skip": "S — skip",
+      "back": "Arrow keys — page through",
+      "delete": "Del — delete selected box"
+    },
+    "import": {
+      "dialogTitle": "Choose image folder",
+      "progress": "{current} of {total}",
+      "doneTitle": "Import finished",
+      "doneDetail": "{added} new, {duplicates} duplicate, {labels} with existing labels, {unreadable} unreadable",
+      "classesTitle": "Classes taken from the folder",
+      "errorTitle": "Import failed"
+    },
+    "export": {
+      "title": "Export as dataset",
+      "subtitle": "Writes images/, labels/ and classes.txt and registers the result as an ordinary dataset.",
+      "nameLabel": "Dataset name",
+      "modelLabel": "For which model",
+      "noModels": "No model available",
+      "includeSuggested": "Include unreviewed suggestions ({count})",
+      "summary": "{confirmed} confirmed images will be exported.",
+      "needsConfirmed": "Confirm an image first, then export",
+      "confirmButton": "Export",
+      "doneTitle": "Dataset created",
+      "doneDetail": "\"{name}\" is now in the dataset area. Split it there.",
+      "errorTitle": "Export failed"
+    },
+    "notifications": {
+      "loadError": "Loading failed",
+      "saveError": "Saving failed"
     }
   }
 }

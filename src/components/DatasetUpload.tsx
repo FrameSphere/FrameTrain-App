@@ -10,7 +10,7 @@ import {
   HardDrive, Cloud, CheckCircle, Loader2, Database,
   Calendar, ExternalLink, X, RefreshCw, ChevronDown,
   Scissors, Layers, FileText, Filter, AlertTriangle, AlertCircle,
-  Zap, Heart, Info, Target, Folder, Mic, FolderTree,
+  Zap, Heart, Info, Target, Folder, Mic, FolderTree, Hammer,
 } from 'lucide-react';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { useTheme } from '../contexts/ThemeContext';
@@ -25,6 +25,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
 import { detectPluginForModel } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
+import { navigateTo } from '../ui/navigationEvents';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -883,6 +884,13 @@ export default function DatasetUpload() {
         <div className="flex items-center gap-2">
           <button onClick={loadDatasets} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 hover:text-white transition-all" title={t('datasetUpload.header.refreshTooltip')}>
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => navigateTo('studio')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm font-medium transition-all"
+            title={t('datasetUpload.header.buildTooltip')}
+          >
+            <Hammer className="w-4 h-4" /> {t('datasetUpload.header.buildButton')}
           </button>
           <button
             onClick={() => setShowImportModal(true)}

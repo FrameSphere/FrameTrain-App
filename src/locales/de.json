@@ -2271,7 +2271,9 @@
     },
     "header": {
       "refreshTooltip": "Aktualisieren",
-      "addButton": "Dataset hinzufügen"
+      "addButton": "Dataset hinzufügen",
+      "buildButton": "Datensatz bauen",
+      "buildTooltip": "Bilder labeln und daraus einen Datensatz erzeugen"
     },
     "modelSelector": {
       "label": "Modell auswählen",
@@ -3067,6 +3069,98 @@
       "imageLabel": "Einzelnes Bild",
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
       "detectedClass": "Erkannte Klasse"
+    }
+  },
+  "studio": {
+    "title": "Datensatz-Werkstatt",
+    "subtitle": "Rohmaterial sammeln, labeln und als trainierbaren Datensatz exportieren",
+    "projects": {
+      "newButton": "Neues Projekt",
+      "emptyTitle": "Noch kein Projekt",
+      "emptyDetail": "Ein Projekt haelt Bilder, Klassen und Boxen an einer Stelle zusammen. Ein fertiger Datensatz wird erst beim Export daraus.",
+      "cardMeta": "{samples} Bilder · {confirmed} bestätigt · {classes} Klassen",
+      "updated": "Zuletzt bearbeitet {date}",
+      "delete": "Löschen",
+      "deleteTitle": "Projekt löschen?",
+      "deleteDetail": "\"{name}\" wird mit allen importierten Bildern und Boxen entfernt. Bereits exportierte Datensätze bleiben bestehen.",
+      "deletedTitle": "Projekt gelöscht",
+      "deletedDetail": "\"{name}\" wurde entfernt",
+      "backToDatasets": "Zurück zu den Datensätzen"
+    },
+    "create": {
+      "title": "Neues Projekt",
+      "subtitle": "Bilder mit Boxen labeln, Export als YOLO",
+      "nameLabel": "Name",
+      "namePlaceholder": "z. B. Ski-Lift v2",
+      "classesLabel": "Klassen",
+      "classesPlaceholder": "Lift, Sky, Mast",
+      "classesHint": "Mit Komma oder Zeilenumbruch getrennt. Lässt sich später ergänzen — ein Import bringt vorhandene Klassen selbst mit.",
+      "formatNote": "Export als YOLO: images/, labels/ und classes.txt. Die Aufteilung in Train, Val und Test übernimmt danach der Split im Dataset-Bereich, der Bild und Label zusammenhält.",
+      "confirmButton": "Anlegen"
+    },
+    "workbench": {
+      "back": "Zurück zur Projektliste",
+      "subtitle": "{confirmed} von {total} bestätigt",
+      "importButton": "Bilder importieren",
+      "exportButton": "Exportieren",
+      "emptyTitle": "Noch keine Bilder",
+      "emptyDetail": "Einen Ordner importieren — Unterordner kommen mit, doppelte Bilder nur einmal. Liegen YOLO-Labels daneben, werden sie übernommen.",
+      "noBoxes": "ohne Box",
+      "moreLoading": "{count} weitere werden beim Blättern geladen",
+      "classesTitle": "Klassen",
+      "noClasses": "Ohne Klasse lässt sich keine Box setzen. Unten eine anlegen.",
+      "newClassPlaceholder": "Neue Klasse",
+      "addClass": "Klasse hinzufügen",
+      "confirm": "Bestätigen",
+      "skip": "Überspringen",
+      "deleteBox": "Box löschen"
+    },
+    "filter": {
+      "all": "Alle",
+      "open": "Offen",
+      "confirmed": "Fertig"
+    },
+    "stats": {
+      "title": "Stand",
+      "confirmed": "Bestätigt",
+      "open": "Offen",
+      "skipped": "Übersprungen",
+      "boxes": "Boxen",
+      "emptyConfirmed": "{count} bestätigte Bilder haben keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht."
+    },
+    "shortcuts": {
+      "title": "Tastatur",
+      "classes": "1 bis 9 — Klasse wählen",
+      "confirm": "Enter — bestätigen und weiter",
+      "skip": "S — überspringen",
+      "back": "Pfeiltasten — blättern",
+      "delete": "Entf — ausgewählte Box löschen"
+    },
+    "import": {
+      "dialogTitle": "Bildordner wählen",
+      "progress": "{current} von {total}",
+      "doneTitle": "Import abgeschlossen",
+      "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit vorhandenen Labels, {unreadable} unlesbar",
+      "classesTitle": "Klassen aus dem Ordner übernommen",
+      "errorTitle": "Import fehlgeschlagen"
+    },
+    "export": {
+      "title": "Als Datensatz exportieren",
+      "subtitle": "Schreibt images/, labels/ und classes.txt und legt das Ergebnis als ganz normalen Datensatz an.",
+      "nameLabel": "Name des Datensatzes",
+      "modelLabel": "Für welches Modell",
+      "noModels": "Kein Modell vorhanden",
+      "includeSuggested": "Ungeprüfte Vorschläge mitnehmen ({count})",
+      "summary": "{confirmed} bestätigte Bilder werden exportiert.",
+      "needsConfirmed": "Erst ein Bild bestätigen, dann exportieren",
+      "confirmButton": "Exportieren",
+      "doneTitle": "Datensatz angelegt",
+      "doneDetail": "\"{name}\" liegt jetzt im Dataset-Bereich. Aufteilen mit dem Split dort.",
+      "errorTitle": "Export fehlgeschlagen"
+    },
+    "notifications": {
+      "loadError": "Laden fehlgeschlagen",
+      "saveError": "Speichern fehlgeschlagen"
     }
   }
 }

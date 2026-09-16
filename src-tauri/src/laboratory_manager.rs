@@ -731,27 +731,14 @@ pub struct CorrectionItem {
     pub image_height: Option<f64>,
 }
 
-/// Eine Box in eine YOLO-Zeile "cls cx cy w h" (auf 0–1 normiert).
+/// Eine Korrektur-Box in eine normierte Box.
 ///
-/// Ausserhalb des Bildes gezogene Ecken werden beschnitten: beim Zeichnen
-/// rutscht die Maus schnell ueber den Rand, und Ultralytics verlangt Werte
-/// zwischen 0 und 1.
-pub fn yolo_label_line(class_id: usize, b: &CorrectionBox, width: f64, height: f64) -> Option<String> {
-    if width <= 0.0 || height <= 0.0 { return None; }
-    let x1 = b.x1.min(b.x2).max(0.0);
-    let x2 = b.x1.max(b.x2).min(width);
-    let y1 = b.y1.min(b.y2).max(0.0);
-    let y2 = b.y1.max(b.y2).min(height);
-    let (w, h) = (x2 - x1, y2 - y1);
-    if w <= 0.0 || h <= 0.0 { return None; }
-    Some(format!(
-        "{} {:.6} {:.6} {:.6} {:.6}",
-        class_id,
-        (x1 + w / 2.0) / width,
-        (y1 + h / 2.0) / height,
-        w / width,
-        h / height,
-    ))
+/// Das Beschneiden und Drehen liegt in `yolo_export` — dieselbe Rechnung
+/// benutzt das Dataset Studio.
+fn norm_box_of(class_id: usize, b: &CorrectionBox, width: f64, height: f64)
+    -> Option<crate::yolo_export::NormBox>
+{
+    crate::yolo_export::normalize_box(class_id, b.x1, b.y1, b.x2, b.y2, width, height)
 }
 
 /// CSV-Feld nach RFC 4180 — Anfuehrungszeichen verdoppeln, Feld einpacken.
@@ -806,11 +793,7 @@ pub async fn lab_export_corrections(
             let _ = std::fs::remove_dir_all(&tmp_root);
             return Err("Die Korrekturen enthalten keine Boxen.".to_string());
         }
-        let images_dir = tmp_root.join("images");
-        let labels_dir = tmp_root.join("labels");
-        std::fs::create_dir_all(&images_dir).map_err(|e| format!("images/: {}", e))?;
-        std::fs::create_dir_all(&labels_dir).map_err(|e| format!("labels/: {}", e))?;
-
+        let mut export_items: Vec<crate::yolo_export::ExportItem> = Vec::new();
         for (idx, item) in items.iter().enumerate() {
             let (Some(src), Some(w), Some(h)) = (item.file_path.as_deref(), item.image_width, item.image_height) else {
                 skipped.push(item.input_text.clone());
@@ -822,28 +805,23 @@ pub async fn lab_export_corrections(
             // Eindeutiger Name: zwei Datasets koennen "0001.jpg" heissen.
             let stem = src_path.file_stem().map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| format!("sample_{}", idx));
-            let ext = src_path.extension().map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_else(|| "jpg".to_string());
-            let base = format!("{:04}_{}", idx + 1, stem);
 
-            std::fs::copy(src_path, images_dir.join(format!("{}.{}", base, ext)))
-                .map_err(|e| format!("Bild kopieren: {}", e))?;
-
-            let lines: Vec<String> = item.boxes.iter().flatten()
-                .filter_map(|b| {
-                    let class_id = classes.iter().position(|c| c == &b.label)?;
-                    yolo_label_line(class_id, b, w, h)
-                })
-                .collect();
-            std::fs::write(labels_dir.join(format!("{}.txt", base)), lines.join("\n") + "\n")
-                .map_err(|e| format!("Label schreiben: {}", e))?;
-            written += 1;
+            export_items.push(crate::yolo_export::ExportItem {
+                source: src_path.to_path_buf(),
+                stem:   format!("{:04}_{}", idx + 1, stem),
+                boxes:  item.boxes.iter().flatten()
+                    .filter_map(|b| {
+                        let class_id = classes.iter().position(|c| c == &b.label)?;
+                        norm_box_of(class_id, b, w, h)
+                    })
+                    .collect(),
+            });
         }
 
+        // images/, labels/ und classes.txt schreibt der gemeinsame Exporter —
         // classes.txt wird beim Import gelesen und landet als names-Block in
-        // der dataset.yaml — sonst stuenden dort Platzhalter.
-        std::fs::write(tmp_root.join("classes.txt"), classes.join("\n") + "\n")
-            .map_err(|e| format!("classes.txt: {}", e))?;
+        // der dataset.yaml, sonst stuenden dort Platzhalter.
+        written = crate::yolo_export::write_yolo_layout(&tmp_root, &export_items, &classes)?.len();
     } else {
         let is_text = items.iter().any(|i| i.kind == "text");
         if is_text {
@@ -899,6 +877,11 @@ mod export_tests {
 
     fn boxed(label: &str, x1: f64, y1: f64, x2: f64, y2: f64) -> CorrectionBox {
         CorrectionBox { label: label.to_string(), x1, y1, x2, y2 }
+    }
+
+    /// Weg einer Korrektur-Box bis zur fertigen Labelzeile.
+    fn yolo_label_line(class_id: usize, b: &CorrectionBox, width: f64, height: f64) -> Option<String> {
+        norm_box_of(class_id, b, width, height).map(|n| crate::yolo_export::label_line(&n))
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # FrameTrain Dataset Studio – Systemplanung
 
-Stand: 2026-09-16 (Planung, noch kein Code)
+Stand: 2026-09-16 — Phase S1 gebaut, S2 bis S6 offen
 Ergaenzt `DATASET_ROADMAP.md`: dort geht es um *vorhandene* Datensaetze (erkennen,
 splitten, importieren), hier um das *Erzeugen* neuer Datensaetze.
 
@@ -12,9 +12,10 @@ Ein Werkzeug, mit dem aus Rohmaterial (Dateien, Aufnahmen, Web, eigenen Texten)
 ein trainierbarer Datensatz wird – manuell, regelbasiert, modellgestuetzt oder
 im aktiven Lernkreis, je nachdem was die Datenlage hergibt.
 
-Einstieg: Button **"Datensatz bauen"** im Dataset-Tab, rechts neben "Importieren".
-Neue View `studio` in `Dashboard.tsx` (`type View`), Sidebar-Eintrag erst sichtbar,
-wenn mindestens ein Projekt existiert – die Seitenleiste hat schon neun Punkte.
+Einstieg: Button **"Datensatz bauen"** im Kopf des Dataset-Bereichs, links neben
+"Dataset hinzufuegen". Neue View `studio` in `Dashboard.tsx` (`type View`); die
+Seitenleiste bekommt keinen eigenen Eintrag (sie hat schon neun) und behaelt
+waehrenddessen "Datasets" markiert, weil das Studio dessen Unterseite ist.
 
 ---
 
@@ -187,7 +188,7 @@ Writer: `yolo_bbox`, `coco_json`, `folder_class`, `flat_file` (jsonl/csv),
 
 | Phase | Inhalt | Aufwand |
 |---|---|---|
-| S1 | Projekt-Ablage, Button, Shell, Import + manuelles Bild-Labeln (Boxen), YOLO-Export | gross |
+| S1 | Projekt-Ablage, Button, Shell, Import + manuelles Bild-Labeln (Boxen), YOLO-Export | **fertig** |
 | S2 | Regeln (Stufe 1) + Modellvorschlaege (Stufe 2) + Zweifel-Queue | mittel |
 | S3 | Zweite/dritte Modalitaet (Text-Editor, Audio-Aufnahme) | mittel |
 | S4 | Assist-Modelle (Stufe 3) ueber den Plugin-Installer | mittel |
@@ -196,3 +197,51 @@ Writer: `yolo_bbox`, `coco_json`, `folder_class`, `flat_file` (jsonl/csv),
 
 Querschnitt in jeder Phase: de/en vollstaendig, keine Emojis in der UI, Tests
 (Frontend/Rust/Python) gruen, Pruefung an einer echten Release-Installation.
+
+---
+
+## 11. Was in S1 tatsaechlich steht
+
+**Backend** `src-tauri/src/studio_manager.rs` (neun Commands, in `main.rs` registriert)
+- Projekte anlegen, umbenennen, Klassen ergaenzen, loeschen, auflisten
+- Ordner-Import: rekursiv, inhaltsadressiert (sha256), exakte Duplikate werden
+  uebersprungen, Bildmasse aus dem Dateikopf (PNG, JPEG, GIF, BMP, WebP) ohne
+  Bildbibliothek, Fortschritt als Event
+- Vorhandene YOLO-Labels neben einem Bild werden uebernommen (auch Polygone,
+  als umschliessende Box), Klassennamen aus classes.txt / obj.names / data.yaml
+- Annotation als angehaengtes Ereignis (O(1) je Tastendruck), Kompaktierung ab
+  etwa 2000 Ereignissen, kaputte Zeilen werden uebersprungen statt zu blockieren
+- Export nach YOLO mit PROVENANCE.csv und DATA_CARD.md, anschliessend
+  Registrierung ueber `import_local_dataset` — danach ein ganz normales Dataset
+
+**Frontend** `src/components/studio/`
+- `StudioPanel.tsx` Projektliste, Anlegen, Loeschen
+- `ImageWorkbench.tsx` Box-Editor: zeichnen, auswaehlen, verschieben, Ecken
+  ziehen, Klasse per Taste 1-9, Enter bestaetigt und springt zum naechsten
+  offenen Bild, S ueberspringt, Entf loescht die Box. Automatisches Speichern
+  nach 400 ms, kein Speichern-Knopf.
+- `studioBoxes.ts` reine Umrechnung und Trefferpruefung, getrennt testbar
+- Einstieg: Knopf "Datensatz bauen" im Kopf des Dataset-Bereichs; in der
+  Seitenleiste bleibt dabei "Datasets" markiert.
+
+**Wiederverwendet statt nachgebaut:** `clientToImagePoint`, `boxFromPoints` aus
+`labCorrection.ts`, `classColor` aus `labGroundTruth.ts`, `import_local_dataset`
+und `detect_dataset_type` aus `dataset_manager.rs`.
+
+**Gemeinsamer YOLO-Schreiber** `src-tauri/src/yolo_export.rs`: `normalize_box`
+(Pixelkanten), `norm_box` (bereits normiert), `label_line` und
+`write_yolo_layout`. Das Labor (`lab_export_corrections`) und das Studio
+(`write_yolo_export`) benutzen ihn beide — vorher gab es zwei Schreiber mit
+demselben Format. Studio-eigen bleiben nur PROVENANCE.csv und DATA_CARD.md.
+
+**Tests:** 19 Rust-Tests (13 Studio, 6 gemeinsamer Exporter) (Bildkopf, YOLO lesen/schreiben, Ereignis-Faltung,
+Export wird von `detect_dataset_type` wieder als YOLO erkannt), 28 Frontend-Tests
+(Umrechnung, Auswahl, Bestaetigen-Weg, Knopf im Dataset-Bereich).
+
+**Bewusst noch nicht drin:** Vorschlaege (S2), zweite Modalitaet (S3),
+Assist-Modelle (S4), aktives Lernen (S5), Web-Erfassung (S6). Der Split beim
+Export bleibt Sache des Dataset-Bereichs; `meta.group` wird bereits
+mitgeschrieben, ausgewertet wird es erst mit dem gruppenbewussten Split.
+
+**Noch offen in S1:** eine Pruefung an einer echten Release-Installation mit
+grossen Ordnern (Hashing-Dauer, fluessiges Blaettern ab etwa 10 000 Bildern).

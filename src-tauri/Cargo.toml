@@ -1,6 +1,6 @@
 [package]
 name = "frametrain-desktop"
-version = "1.2.85"
+version = "1.2.86"
 description = "FrameTrain Desktop App"
 authors = ["FrameTrain Team"]
 edition = "2021"
@@ -33,6 +33,10 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 
 urlencoding = "2.1"
+
+# Inhaltsadressierte Ablage im Dataset Studio: gleiches Bild = gleicher Pfad.
+# Bereits als transitive Abhaengigkeit im Lockfile, kostet keinen neuen Download.
+sha2 = "0.10"
 
 # Sichere Ablage von API-Keys im OS-Schluesselbund (macOS Keychain / Windows Credential Manager).
 # Native Backends fuer die tatsaechlich ausgelieferten Plattformen.

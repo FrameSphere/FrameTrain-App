@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "frametrain-desktop"
-version = "1.2.84"
+version = "1.2.85"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -963,6 +963,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

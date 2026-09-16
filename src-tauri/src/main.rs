@@ -19,6 +19,8 @@ mod test_manager;
 mod plugin_commands;
 mod power_manager;
 mod laboratory_manager;
+mod studio_manager;
+mod yolo_export;
 mod python_env;
 mod secret_store;
 mod ai_proxy;
@@ -289,6 +291,15 @@ fn main() {
             secret_store::secret_get,
             secret_store::secret_delete,
             ai_proxy::ai_http_post,
+            studio_manager::studio_list_projects,
+            studio_manager::studio_create_project,
+            studio_manager::studio_update_project,
+            studio_manager::studio_delete_project,
+            studio_manager::studio_import_folder,
+            studio_manager::studio_list_samples,
+            studio_manager::studio_set_annotation,
+            studio_manager::studio_stats,
+            studio_manager::studio_export,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
