@@ -130,7 +130,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 const PLUGIN_OVERRIDE_FILE: &str = ".frametrain_plugin.json";
 
 /// Liest die manuelle Plugin-Zuordnung eines Modells, falls vorhanden.
-fn read_plugin_override(model_dir: &Path) -> Option<String> {
+pub fn read_plugin_override(model_dir: &Path) -> Option<String> {
     let content = fs::read_to_string(model_dir.join(PLUGIN_OVERRIDE_FILE)).ok()?;
     let value: serde_json::Value = serde_json::from_str(&content).ok()?;
     let id = value.get("plugin_id")?.as_str()?.trim().to_string();
@@ -144,7 +144,7 @@ fn read_plugin_override(model_dir: &Path) -> Option<String> {
 /// Modell als Zip, dessen `data.pkl` unkomprimiert am Anfang liegt und die
 /// Modulpfade (`ultralytics.nn.tasks`) im Klartext enthaelt. Ein Byte-Scan
 /// ueber den Dateikopf findet sie, ohne das Archiv zu entpacken.
-fn is_ultralytics_checkpoint(file: &Path) -> bool {
+pub fn is_ultralytics_checkpoint(file: &Path) -> bool {
     use std::io::Read;
     let Ok(mut f) = fs::File::open(file) else { return false };
     // data.pkl ist bei YOLO-Checkpoints rund 100 KB gross und steht als erster
@@ -154,6 +154,32 @@ fn is_ultralytics_checkpoint(file: &Path) -> bool {
     let Ok(read) = f.read(&mut head) else { return false };
     head.truncate(read);
     head.windows(b"ultralytics".len()).any(|w| w == b"ultralytics")
+}
+
+/// Liegt in diesem Ordner ein Ultralytics-Checkpoint?
+///
+/// Das Labor muss diese Frage ueber einen Versionsordner beantworten, in dem
+/// die Gewichte auch `best.pt` oder `weights/best.pt` heissen koennen.
+pub fn dir_has_ultralytics_checkpoint(dir: &Path) -> bool {
+    fn scan(dir: &Path, depth: usize) -> bool {
+        let Ok(entries) = fs::read_dir(dir) else { return false };
+        let mut subdirs = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if depth > 0 { subdirs.push(path); }
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if (name.ends_with(".pt") || name.ends_with(".pth"))
+                && is_ultralytics_checkpoint(&path) {
+                return true;
+            }
+        }
+        subdirs.iter().any(|d| scan(d, depth - 1))
+    }
+    // Zwei Ebenen reichen fuer versions/<id>/weights/best.pt.
+    scan(dir, 2)
 }
 
 fn detect_model_type(path: &Path) -> Option<String> {
@@ -1062,6 +1088,24 @@ mod model_type_tests {
         fs::write(dir.join("model.pt"), vec![b'x'; 10]).unwrap();
         assert_eq!(detect_model_type(&dir).as_deref(), Some("xlm-roberta"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Das Labor bekommt einen Versionsordner, in dem die Gewichte auch
+    /// weights/best.pt heissen koennen.
+    #[test]
+    fn ultralytics_wird_auch_im_unterordner_gefunden() {
+        let dir = tmp("nested");
+        fs::create_dir_all(dir.join("weights")).unwrap();
+        fs::write(dir.join("weights/best.pt"), b"PK\x03\x04cultralytics.nn.tasks".to_vec()).unwrap();
+        assert!(dir_has_ultralytics_checkpoint(&dir));
+
+        let plain = tmp("nested_plain");
+        fs::create_dir_all(plain.join("weights")).unwrap();
+        fs::write(plain.join("weights/model.pt"), vec![b'x'; 64]).unwrap();
+        assert!(!dir_has_ultralytics_checkpoint(&plain));
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&plain);
     }
 
     #[test]

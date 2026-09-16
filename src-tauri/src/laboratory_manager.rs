@@ -53,6 +53,14 @@ pub struct InferResult {
     pub confidence:       Option<f64>,
     pub top_predictions:  Option<Vec<serde_json::Value>>,
     pub inference_ms:     f64,
+    /// Objekterkennung: Boxen in Pixelkoordinaten des Originalbildes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boxes:            Option<Vec<serde_json::Value>>,
+    /// Bildmasse zu den Boxen – ohne sie laesst sich nichts massstabsgetreu zeichnen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width:      Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height:     Option<u32>,
 }
 
 // ============ Hilfsfunktionen ============
@@ -100,6 +108,26 @@ fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) -> Result<(
 }
 
 /// Script für Canvas-Modelle (gleiches stdin/stdout-Protokoll wie model_server.py)
+/// Pfad zum YOLO-Server – dritter Servertyp neben HuggingFace und Canvas.
+fn get_yolo_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let rel = std::path::Path::new("python").join("train_engine").join("plugins")
+        .join("yolo").join("yolo_inference_server.py");
+    let candidates = vec![
+        app_handle.path().resource_dir().ok().map(|p| p.join(&rel)),
+        Some(std::path::PathBuf::from("src-tauri").join(&rel)),
+        Some(std::path::PathBuf::from(
+            "/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app/src-tauri"
+        ).join(&rel)),
+    ];
+    for p in candidates.into_iter().flatten() {
+        if p.exists() {
+            println!("[LabServer] YOLO-Script gefunden: {:?}", p);
+            return Ok(p);
+        }
+    }
+    Err("yolo_inference_server.py nicht gefunden".to_string())
+}
+
 fn get_canvas_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let rel = std::path::Path::new("python").join("train_engine").join("plugins")
         .join("canvas").join("canvas_inference_server.py");
@@ -171,7 +199,24 @@ pub async fn lab_start_model_server(
         || vp.join("graph_metadata.json").exists()
         || canvas_model_dir.join("graph_metadata.json").exists();
 
-    let (model_path, is_canvas) = if is_canvas {
+    // YOLO: eigener Server. Erkannt wird es am Checkpoint selbst (Ultralytics
+    // schreibt seine Modulpfade in die .pt) oder an der Zuordnung, die der
+    // Nutzer beim Import getroffen hat — Dateinamen wie best.pt sagen nichts.
+    let is_yolo = !is_canvas && (
+        crate::model_manager::read_plugin_override(&canvas_model_dir).as_deref() == Some("yolo")
+            || crate::model_manager::dir_has_ultralytics_checkpoint(&vp)
+            || crate::model_manager::dir_has_ultralytics_checkpoint(&canvas_model_dir)
+    );
+
+    let (model_path, is_canvas) = if is_yolo {
+        // Die Version hat Vorrang: dort liegen die Gewichte des eigenen Laufs.
+        let dir = if crate::model_manager::dir_has_ultralytics_checkpoint(&vp) {
+            vp.clone()
+        } else {
+            canvas_model_dir.clone()
+        };
+        (dir.to_string_lossy().to_string(), false)
+    } else if is_canvas {
         // Canvas braucht graph_metadata.json + model.pt im selben Ordner.
         // Versions-Pfad bevorzugen, sonst der Modell-Ordner (dorthin kopiert
         // das Training die Gewichte für list_canvas_models_with_pt).
@@ -202,18 +247,6 @@ pub async fn lab_start_model_server(
             ));
         }
         if !vp.join("config.json").exists() {
-            // Ultralytics-Modelle sind keine kaputten HF-Modelle, sondern ein
-            // anderes Format. Die generische "keine config.json"-Meldung las
-            // sich wie ein Defekt.
-            let is_ultralytics = std::fs::read_to_string(vp.join("model.json")).ok()
-                .map(|c| c.contains("\"ultralytics\"")).unwrap_or(false);
-            if is_ultralytics {
-                return fail(
-                    "YOLO-Modelle werden im Labor noch nicht unterstützt — die Lab-Inferenz \
-                     arbeitet mit HuggingFace-Modellen. Einzelbild-Inferenz für dieses Modell \
-                     gibt es im Tests-Bereich.".to_string()
-                );
-            }
             let contents: Vec<String> = std::fs::read_dir(&vp).ok().into_iter().flatten().flatten()
                 .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
                 .filter(|n| !n.starts_with('.'))
@@ -231,7 +264,9 @@ pub async fn lab_start_model_server(
     };
 
     let python        = get_python_path();
-    let server_script = match if is_canvas {
+    let server_script = match if is_yolo {
+        get_yolo_server_path(&app_handle)
+    } else if is_canvas {
         get_canvas_server_path(&app_handle)
     } else {
         get_model_server_path(&app_handle)
@@ -252,11 +287,12 @@ pub async fn lab_start_model_server(
     let vid       = version_id.clone();
     let mp        = model_path.clone();
     let canvas    = is_canvas;
-    // Canvas-Server erwartet --model-dir, HF-Server --model-path
-    let path_arg  = if is_canvas { "--model-dir" } else { "--model-path" };
+    let yolo      = is_yolo;
+    // Canvas- und YOLO-Server erwarten --model-dir, der HF-Server --model-path
+    let path_arg  = if is_canvas || is_yolo { "--model-dir" } else { "--model-path" };
 
     std::thread::spawn(move || {
-        println!("[LabServer] Starte Python: {} {} {} (canvas={})", python, path_arg, mp, canvas);
+        println!("[LabServer] Starte Python: {} {} {} (canvas={}, yolo={})", python, path_arg, mp, canvas, yolo);
 
         let mut child = match Command::new(&python).no_window().python_utf8()
             .arg(server_script.to_string_lossy().to_string())
@@ -313,8 +349,15 @@ pub async fn lab_start_model_server(
         // Auf "ready" warten (max. 120 Sekunden – grosse Modelle auf CPU brauchen Zeit)
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut server_ready = false;
-        let mut input_kind   = if canvas { "tensor".to_string() } else { "text".to_string() };
-        let mut modality     = if canvas { "canvas".to_string() } else { "text".to_string() };
+        let mut input_kind   = if canvas { "tensor".to_string() }
+                               else if yolo { "image".to_string() }
+                               else { "text".to_string() };
+        let mut modality     = if canvas { "canvas".to_string() }
+                               else if yolo { "detect".to_string() }
+                               else { "text".to_string() };
+        // Klassennamen des Modells. Sie kommen aus dem Checkpoint, nicht aus
+        // einer Liste in FrameTrain — jedes Modell bringt seine eigenen mit.
+        let mut classes: Vec<String> = Vec::new();
 
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -338,6 +381,11 @@ pub async fn lab_start_model_server(
                                 }
                                 if let Some(m) = msg.get("modality").and_then(|v| v.as_str()) {
                                     modality = m.to_string();
+                                }
+                                if let Some(c) = msg.get("classes").and_then(|v| v.as_array()) {
+                                    classes = c.iter()
+                                        .filter_map(|v| v.as_str().map(str::to_string))
+                                        .collect();
                                 }
                                 server_ready = true;
                                 break;
@@ -387,6 +435,7 @@ pub async fn lab_start_model_server(
                 "version_id": vid,
                 "input_kind": input_kind,
                 "modality": modality,
+                "classes": classes,
             }));
             println!("[LabServer] Bereit fuer Inferenz.");
         }
@@ -465,6 +514,9 @@ pub fn lab_infer_sample(
                 confidence: resp["confidence"].as_f64(),
                 top_predictions: resp["top_predictions"].as_array().cloned(),
                 inference_ms: resp["inference_time"].as_f64().unwrap_or(0.0) * 1000.0,
+                boxes: resp["boxes"].as_array().cloned(),
+                image_width: resp["image_width"].as_u64().map(|v| v as u32),
+                image_height: resp["image_height"].as_u64().map(|v| v as u32),
             })
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {

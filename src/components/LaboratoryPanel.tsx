@@ -14,6 +14,10 @@ import {
   Check, Wand2, Copy, Maximize2, Minimize2, Zap,
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
+import {
+  labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes,
+  compareClassSets, type TruthBox,
+} from './labGroundTruth';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -55,6 +59,13 @@ interface VersionTreeItem { id: string; name: string; is_root: boolean; version_
 interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
 
 type LabInputKind = 'text' | 'image' | 'audio' | 'tensor';
+
+/** Eine Detektion in Pixelkoordinaten des Originalbildes (YOLO). */
+interface DetectionBox {
+  label: string;
+  confidence: number;
+  x1: number; y1: number; x2: number; y2: number;
+}
 
 /** Zeilen, die aus einer Parquet-Datei als Samples geladen werden (Backend deckelt bei 500). */
 const PARQUET_SAMPLE_ROWS = 200;
@@ -812,6 +823,67 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 
 type LabPhase = 'setup' | 'testing' | 'analysis';
 
+/**
+ * Zeichnet die Detektionen ueber das Vorschaubild.
+ *
+ * Ohne die Boxen sagt "Tree 0.80" nicht, *wo* das Modell den Baum sieht — und
+ * genau das will man beim Durchgehen einer Bilderserie sehen. Das SVG liegt
+ * deckungsgleich ueber dem Bild: gleiche Box, gleiches
+ * preserveAspectRatio wie object-contain, also passen die Koordinaten ohne
+ * Umrechnung auf die dargestellte Groesse.
+ */
+export function DetectionOverlay({ boxes, truthBoxes = [], width, height }: {
+  boxes: DetectionBox[];
+  /** Soll-Boxen aus der Labeldatei des Datasets, gestrichelt gezeichnet. */
+  truthBoxes?: TruthBox[];
+  width: number;
+  height: number;
+}) {
+  if ((!boxes.length && !truthBoxes.length) || width <= 0 || height <= 0) return null;
+  // Schrift und Linien in Bildpixeln — bei einem 4000px-Foto waere 12px unsichtbar.
+  const stroke = Math.max(1.5, width / 320);
+  const font   = Math.max(9, width / 40);
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid meet"
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      aria-hidden="true"
+    >
+      {truthBoxes.map((b, i) => (
+        <rect
+          key={`truth-${b.label}-${i}`}
+          x={b.x1} y={b.y1}
+          width={Math.max(0, b.x2 - b.x1)} height={Math.max(0, b.y2 - b.y1)}
+          fill="none" stroke="#34d399" strokeWidth={stroke}
+          strokeDasharray={`${stroke * 3} ${stroke * 2}`} rx={stroke}
+        />
+      ))}
+      {boxes.map((b, i) => {
+        const w = Math.max(0, b.x2 - b.x1);
+        const h = Math.max(0, b.y2 - b.y1);
+        // Sitzt die Box oben am Rand, wandert die Beschriftung nach innen.
+        const labelY = b.y1 > font * 1.4 ? b.y1 - font * 0.35 : b.y1 + font * 1.1;
+        return (
+          <g key={`${b.label}-${i}`}>
+            <rect
+              x={b.x1} y={b.y1} width={w} height={h}
+              fill="none" stroke="#f472b6" strokeWidth={stroke} rx={stroke}
+            />
+            <text
+              x={b.x1 + stroke} y={labelY}
+              fontSize={font} fill="#fbcfe8"
+              style={{ paintOrder: 'stroke', stroke: '#0f172a', strokeWidth: font / 4 }}
+            >
+              {b.label} {(b.confidence * 100).toFixed(0)}%
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const { success, error, warning } = useNotification();
   const { t, language } = useLanguage();
@@ -821,7 +893,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const [loadingModels, setLoadingModels] = useState(true);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsWithVersions, setModelsWithVersions] = useState<ModelWithVersionTree[]>([]);
-  const [datasets, setDatasets] = useState<{ id: string; name: string; model_id: string; status: string; file_count: number; size_bytes: number; storage_path?: string }[]>([]);
+  const [datasets, setDatasets] = useState<{ id: string; name: string; model_id: string; status: string; file_count: number; size_bytes: number; storage_path?: string; dataset_yaml_path?: string | null }[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
 
@@ -853,7 +925,17 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   // Testing state
   const [phase, setPhase] = useState<LabPhase>('setup');
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ predicted: string; confidence?: number; topPredictions?: TopPred[]; inferenceMs: number } | null>(null);
+  // Klassennamen des geladenen Modells (kommen aus dem Checkpoint) und die des
+  // Datasets (aus dessen data.yaml). Beides ist pro Modell/Dataset verschieden
+  // — deshalb Zustand und keine Konstante.
+  const [modelClasses, setModelClasses] = useState<string[]>([]);
+  const [datasetClasses, setDatasetClasses] = useState<Record<number, string>>({});
+  const [truthBoxes, setTruthBoxes] = useState<TruthBox[]>([]);
+  const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    predicted: string; confidence?: number; topPredictions?: TopPred[]; inferenceMs: number;
+    boxes?: DetectionBox[]; imageWidth?: number; imageHeight?: number;
+  } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [userNote, setUserNote] = useState('');
   const [showNote, setShowNote] = useState(false);
@@ -886,10 +968,6 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     return r.supported ? r.plugin : null;
   }, [selectedModel]);
 
-  // Die Lab-Inferenz spricht nur HuggingFace-Formate. Ein YOLO-Modell wurde
-  // trotzdem als Plugin gemeldet, liess Samples laden und scheiterte erst beim
-  // Modell-Laden an der fehlenden config.json — eine Sackgasse.
-  const pluginUnsupportedInLab = detectedPlugin?.id === 'yolo';
 
   const modelPath  = selectedModel?.local_path || selectedModel?.source_path || selectedModel?.name || '';
   const dsRefs     = datasets.map((d, i) => ({ key: i === 0 ? 'DATASET_PATH' : `DATASET_PATH_${i + 1}`, value: d.storage_path || '', name: d.name }));
@@ -965,10 +1043,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   ]);
 
   useEffect(() => {
-    const unlisten = listen<{ status: string; version_id?: string; message?: string; input_kind?: string; modality?: string }>(
+    const unlisten = listen<{ status: string; version_id?: string; message?: string; input_kind?: string; modality?: string; classes?: string[] }>(
       'lab-server-status',
       e => {
-        const { status, version_id, message, input_kind, modality } = e.payload;
+        const { status, version_id, message, input_kind, modality, classes } = e.payload;
         console.log('[Lab] Server-Status:', status, version_id, message, modality);
         setServerStatus(status as typeof serverStatus);
         serverStatusRef.current = status as typeof serverStatus;
@@ -976,6 +1054,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         if (status === 'ready') {
           setServerInputKind((input_kind as LabInputKind) ?? 'text');
           setServerModality(modality ?? 'text');
+          setModelClasses(classes ?? []);
         }
         if (status === 'loading') { setServerInputKind(null); setServerModality(null); }
         if (status === 'error') {
@@ -1180,6 +1259,47 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
 
   const currentSample = samples[currentSampleIdx] ?? null;
+
+  // Klassennamen des Datasets aus dessen data.yaml. Sie haben Vorrang vor den
+  // Namen im Modell: wer ein fremdes Modell gegen eigene Daten prueft, will
+  // die eigenen Klassennamen sehen.
+  useEffect(() => {
+    const ds = datasets.find(d => d.id === selectedSampleDatasetId);
+    const yamlPath = ds?.dataset_yaml_path;
+    if (!yamlPath) { setDatasetClasses({}); return; }
+    let aborted = false;
+    invoke<string>('read_dataset_samples_file', { filePath: yamlPath })
+      .then(text => { if (!aborted) setDatasetClasses(classNamesFromYaml(text)); })
+      .catch(() => { if (!aborted) setDatasetClasses({}); });
+    return () => { aborted = true; };
+  }, [datasets, selectedSampleDatasetId]);
+
+  // Soll-Boxen des aktuellen Bildes aus der Labeldatei daneben. Ohne Bildmasse
+  // laesst sich nichts umrechnen — die kommen aus dem geladenen Bild selbst,
+  // damit die Erwartung schon vor der ersten Inferenz dasteht.
+  useEffect(() => {
+    setTruthBoxes([]);
+    if (!currentSample?.filePath || currentSample.fileKind !== 'image' || !imageSize) return;
+    let aborted = false;
+    (async () => {
+      for (const candidate of labelPathsForImage(currentSample.filePath!)) {
+        try {
+          const text = await invoke<string>('read_dataset_samples_file', { filePath: candidate });
+          const boxes = parseYoloLabelFile(text, imageSize.w, imageSize.h, datasetClasses, modelClasses);
+          if (!aborted && boxes.length > 0) { setTruthBoxes(boxes); return; }
+        } catch {
+          // Datei gibt es nicht – naechster Kandidat, sonst gibt es eben
+          // keine Soll-Werte. Das ist kein Fehlerfall.
+        }
+      }
+    })();
+    return () => { aborted = true; };
+  }, [currentSample, imageSize, datasetClasses, modelClasses]);
+
+  /** Erwartung: bei Objekterkennung die Labeldatei, sonst der Ordnername. */
+  const expectedLabel = truthBoxes.length > 0
+    ? summarizeBoxes(truthBoxes)
+    : currentSample?.label;
   // Erwartet der geladene Server eine andere Eingabeart als das aktuelle Sample?
   const inputMismatch: 'inputMismatchImage' | 'inputMismatchAudio' | 'inputMismatchText' | null =
     !currentSample || !serverInputKind || serverInputKind === 'tensor'
@@ -1394,6 +1514,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           confidence?: number;
           top_predictions?: TopPred[];
           inference_ms: number;
+          boxes?: DetectionBox[];
+          image_width?: number;
+          image_height?: number;
         }>('lab_infer_sample', {
           text: currentSample.text,
           filePath: currentSample.fileKind ? currentSample.filePath ?? null : null,
@@ -1404,6 +1527,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           confidence:     result.confidence,
           topPredictions: result.top_predictions,
           inferenceMs:    result.inference_ms,
+          boxes:          result.boxes,
+          imageWidth:     result.image_width,
+          imageHeight:    result.image_height,
         });
         setTesting(false);
       } else {
@@ -1452,7 +1578,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       sampleId: currentSample.id,
       sampleIndex: currentSample.index,
       inputText: currentSample.text,
-      expectedLabel: currentSample.label,
+      expectedLabel,
       predicted: testResult.predicted,
       confidence: testResult.confidence,
       topPredictions: testResult.topPredictions,
@@ -1490,7 +1616,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       sampleId: currentSample.id,
       sampleIndex: currentSample.index,
       inputText: currentSample.text,
-      expectedLabel: currentSample.label,
+      expectedLabel,
       predicted: '–',
       inferenceMs: 0,
       userRating: 'skipped',
@@ -1630,15 +1756,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                           <span className="text-amber-300 text-xs">{t('laboratoryPanel.setup.engineNotSupported')}</span>
                         </div>
                       )}
-                      {engineMode === 'engine' && detectedPlugin && pluginUnsupportedInLab && (
-                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                          <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                          <span className="text-amber-300 text-xs">
-                            {t('laboratoryPanel.setup.pluginNotInLab', { name: detectedPlugin.name })}
-                          </span>
-                        </div>
-                      )}
-                      {engineMode === 'engine' && detectedPlugin && !pluginUnsupportedInLab && (
+                      {engineMode === 'engine' && detectedPlugin && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
                             <CheckCircle className="w-3.5 h-3.5 text-amber-400" />
@@ -1875,9 +1993,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                 <div className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-gray-400 text-[10px] tabular-nums font-medium">{t('laboratoryPanel.testing.sampleTitle', { index: currentSample.index + 1, total: samples.length })}</span>
-                    {currentSample.label && (
+                    {expectedLabel && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/15 border border-pink-500/20 text-pink-300">
-                        {currentSample.label}
+                        {expectedLabel}
                       </span>
                     )}
                   </div>
@@ -1915,11 +2033,31 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {currentSample.fileKind && currentSample.filePath ? (
                     <div className="rounded-xl bg-black/30 border border-white/10 p-3 flex flex-col items-center gap-2">
                       {currentSample.fileKind === 'image' ? (
-                        <img
-                          src={convertFileSrc(currentSample.filePath)}
-                          alt={currentSample.text}
-                          className="max-h-40 max-w-full rounded-lg object-contain"
-                        />
+                        <div className="relative inline-block">
+                          <img
+                            src={convertFileSrc(currentSample.filePath)}
+                            alt={currentSample.text}
+                            className="max-h-40 max-w-full rounded-lg object-contain block"
+                            onLoad={(e) => setImageSize({
+                              w: e.currentTarget.naturalWidth,
+                              h: e.currentTarget.naturalHeight,
+                            })}
+                          />
+                          {(() => {
+                            // Die Masse aus dem Ergebnis sind die des Originals;
+                            // solange es keins gibt, zaehlt das geladene Bild.
+                            const w = testResult?.imageWidth ?? imageSize?.w ?? 0;
+                            const h = testResult?.imageHeight ?? imageSize?.h ?? 0;
+                            return (
+                              <DetectionOverlay
+                                boxes={testResult?.boxes ?? []}
+                                truthBoxes={truthBoxes}
+                                width={w}
+                                height={h}
+                              />
+                            );
+                          })()}
+                        </div>
                       ) : (
                         <audio
                           controls
@@ -1928,6 +2066,20 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                         />
                       )}
                       <span className="text-gray-400 text-[10px] font-mono truncate max-w-full">{currentSample.text}</span>
+                      {truthBoxes.length > 0 && (
+                        <div className="flex items-center gap-3 text-[10px]">
+                          <span className="flex items-center gap-1 text-emerald-300">
+                            <span className="inline-block w-3 border-t border-dashed border-emerald-400" />
+                            {t('laboratoryPanel.testing.truthLegend')}
+                          </span>
+                          {(testResult?.boxes?.length ?? 0) > 0 && (
+                            <span className="flex items-center gap-1 text-pink-300">
+                              <span className="inline-block w-3 border-t border-pink-400" />
+                              {t('laboratoryPanel.testing.predictionLegend')}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-36 overflow-y-auto">
@@ -2009,8 +2161,26 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                         </div>
                       </div>
 
-                      {/* Korrektheits-Indikator falls Label bekannt */}
-                      {currentSample.label && (
+                      {/* Korrektheits-Indikator falls Soll bekannt.
+                          Bei Objekterkennung waere ein Textvergleich sinnlos —
+                          dort zaehlt, welche Klasse fehlt oder dazukam. */}
+                      {truthBoxes.length > 0 ? (() => {
+                        const { missing, extra } = compareClassSets(truthBoxes, testResult.boxes ?? []);
+                        const ok = missing.length === 0;
+                        return (
+                          <div className={`flex items-start gap-2 px-3 py-2 rounded-xl text-xs ${ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
+                            {ok ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> : <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />}
+                            <span>
+                              {ok
+                                ? t('laboratoryPanel.testing.detectionAllFound')
+                                : t('laboratoryPanel.testing.detectionMissing', { labels: missing.join(', ') })}
+                              {extra.length > 0 && (
+                                <span className="text-gray-400"> · {t('laboratoryPanel.testing.detectionExtra', { labels: extra.join(', ') })}</span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })() : currentSample.label && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs ${testResult.predicted === currentSample.label ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
                           {testResult.predicted === currentSample.label
                             ? <><CheckCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.matchLabel')}</>

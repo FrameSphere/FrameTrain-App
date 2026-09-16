@@ -2580,7 +2580,6 @@
       "engineDev": "Dev Script",
       "engineNotSupported": "Dieses Modell wird noch nicht von der Test Engine unterstützt. Nutze den Dev Script Modus.",
       "pluginDetected": "{name} – Plugin erkannt",
-      "pluginNotInLab": "{name} wird im Labor noch nicht unterstützt – die Lab-Inferenz arbeitet mit HuggingFace-Modellen. Einzelbild-Inferenz für dieses Modell gibt es im Tests-Bereich.",
       "serverLoading": "Modell wird geladen… Bitte warten.",
       "serverReady": "Modell geladen – bereit für Inferenz",
       "serverError": "Fehler beim Laden – Version wechseln oder neu starten",
@@ -2666,7 +2665,12 @@
       "openAnalysisButton": "Analyse öffnen",
       "allDoneTitle": "Alle Samples bewertet!",
       "noSamplesLoaded": "Keine Samples geladen — lade oben in der Konfiguration Samples aus einem Dataset.",
-      "toAnalysisButton": "Zur Auswertung"
+      "toAnalysisButton": "Zur Auswertung",
+      "truthLegend": "Soll (aus dem Dataset)",
+      "predictionLegend": "Erkannt",
+      "detectionAllFound": "Alle Soll-Klassen erkannt",
+      "detectionMissing": "Nicht erkannt: {labels}",
+      "detectionExtra": "zusätzlich: {labels}"
     },
     "analysis": {
       "exportButton": "Export CSV",
