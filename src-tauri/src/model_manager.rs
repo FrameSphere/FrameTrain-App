@@ -18,6 +18,14 @@ pub struct ModelInfo {
     pub file_count: usize,
     pub created_at: DateTime<Utc>,
     pub model_type: Option<String>,
+    /// Vom Nutzer beim Import zugeordnetes Plugin.
+    ///
+    /// Die automatische Erkennung kann nur, was sie am Pfad, an der
+    /// config.json oder am Checkpoint ablesen kann. Fuer alles andere waehlt
+    /// der Nutzer das Plugin beim Import selbst; die Wahl liegt als
+    /// `.frametrain_plugin.json` im Modellordner und hat Vorrang.
+    #[serde(default)]
+    pub plugin_override: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -118,6 +126,36 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Dateiname des vom Nutzer zugeordneten Plugins im Modellordner.
+const PLUGIN_OVERRIDE_FILE: &str = ".frametrain_plugin.json";
+
+/// Liest die manuelle Plugin-Zuordnung eines Modells, falls vorhanden.
+fn read_plugin_override(model_dir: &Path) -> Option<String> {
+    let content = fs::read_to_string(model_dir.join(PLUGIN_OVERRIDE_FILE)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let id = value.get("plugin_id")?.as_str()?.trim().to_string();
+    if id.is_empty() { None } else { Some(id) }
+}
+
+/// Erkennt einen Ultralytics-Checkpoint am Inhalt statt am Dateinamen.
+///
+/// Ein trainiertes YOLO heisst `best.pt` oder `last.pt` — der Name verraet die
+/// Architektur nicht, und eine config.json gibt es nicht. Torch speichert das
+/// Modell als Zip, dessen `data.pkl` unkomprimiert am Anfang liegt und die
+/// Modulpfade (`ultralytics.nn.tasks`) im Klartext enthaelt. Ein Byte-Scan
+/// ueber den Dateikopf findet sie, ohne das Archiv zu entpacken.
+fn is_ultralytics_checkpoint(file: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = fs::File::open(file) else { return false };
+    // data.pkl ist bei YOLO-Checkpoints rund 100 KB gross und steht als erster
+    // Eintrag im Archiv. 4 MB Vorschau decken auch groessere Varianten ab,
+    // ohne bei einem 500-MB-Checkpoint die ganze Datei zu lesen.
+    let mut head = vec![0u8; 4 * 1024 * 1024];
+    let Ok(read) = f.read(&mut head) else { return false };
+    head.truncate(read);
+    head.windows(b"ultralytics".len()).any(|w| w == b"ultralytics")
+}
+
 fn detect_model_type(path: &Path) -> Option<String> {
     // 0. Canvas-Modell erkennen (hat graph_metadata.json vom Synapse Builder)
     if path.join("graph_metadata.json").exists() {
@@ -137,15 +175,23 @@ fn detect_model_type(path: &Path) -> Option<String> {
     }
     // 2. Fallback: Datei-Erweiterungen
     let entries: Vec<_> = fs::read_dir(path).ok()?.filter_map(|e| e.ok()).collect();
+    // Ein .pt sagt fuer sich genommen nur "irgendein Torch-Modell". Erst wenn
+    // kein Checkpoint im Ordner ein YOLO ist, bleibt es bei "pytorch" — sonst
+    // entschiede die zufaellige Reihenfolge von read_dir ueber das Ergebnis.
+    let mut torch_fallback: Option<String> = None;
     for entry in &entries {
         let name = entry.file_name().to_string_lossy().to_lowercase();
         if name.contains("unet") || name.contains("vae") { return Some("diffusion".to_string()); }
         if name.ends_with(".gguf") || name.ends_with(".ggml") { return Some("gguf".to_string()); }
         if name.ends_with(".onnx") { return Some("onnx".to_string()); }
-        if name.ends_with(".pt") || name.ends_with(".pth") { return Some("pytorch".to_string()); }
+        if name.ends_with(".pt") || name.ends_with(".pth") {
+            if is_ultralytics_checkpoint(&entry.path()) { return Some("yolo".to_string()); }
+            torch_fallback = Some("pytorch".to_string());
+            continue;
+        }
         if name.contains("pytorch_model") || name.contains(".safetensors") { return Some("transformer".to_string()); }
     }
-    None
+    torch_fallback
 }
 
 fn save_metadata(models_dir: &Path, info: &ModelInfo) -> Result<(), String> {
@@ -218,6 +264,7 @@ pub fn list_models(
                 file_count: files,
                 created_at: Utc::now(),
                 model_type: mtype,
+                plugin_override: read_plugin_override(&model_path),
             }
         })
         .collect();
@@ -250,6 +297,7 @@ pub async fn import_local_model(
         source_path: Some(source_path.clone()), local_path: target.to_string_lossy().to_string(),
         size_bytes: size, file_count: files,
         created_at: Utc::now(), model_type: mtype,
+        plugin_override: read_plugin_override(&target),
     };
     save_metadata(&models_dir, &info)?;
 
@@ -270,6 +318,100 @@ pub async fn import_local_model(
     }
 
     Ok(info)
+}
+
+/// Ordnet einem Modell von Hand ein Plugin zu (oder entfernt die Zuordnung).
+///
+/// Erkennt FrameTrain ein Modell beim Import nicht, ist die Alternative sonst
+/// "gar nicht nutzbar". Die Zuordnung liegt im Modellordner und ueberlebt
+/// damit Umbenennen, Neustart und Datenbank-Migrationen.
+#[tauri::command]
+pub fn set_model_plugin(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+    plugin_id: Option<String>,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    if !is_safe_id(&model_id) { return Err("Ungültige Modell-ID".to_string()); }
+
+    // Der Pfad aus der Datenbank gilt; nur wenn dort keiner steht, greift der
+    // Standardort unter models/<id>.
+    let from_db = {
+        let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+        db.get_model(&model_id).ok().and_then(|m| m.model_path).map(PathBuf::from)
+    };
+    let model_dir = match from_db {
+        Some(p) => p,
+        None => get_models_dir(&app_handle)?.join(&model_id),
+    };
+
+    if !model_dir.is_dir() { return Err(format!("Modellordner nicht gefunden: {}", model_dir.display())); }
+    let file = model_dir.join(PLUGIN_OVERRIDE_FILE);
+
+    match plugin_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(id) => {
+            // Dieselbe Zeichenregel wie bei Modell-IDs: der Wert landet in
+            // einem Dateipfad-nahen Kontext und kommt aus dem Frontend.
+            if !is_safe_id(id) { return Err("Ungültige Plugin-ID".to_string()); }
+            let body = serde_json::json!({ "plugin_id": id, "set_at": Utc::now().to_rfc3339() });
+            fs::write(&file, serde_json::to_string_pretty(&body).unwrap_or_default())
+                .map_err(|e| format!("Plugin-Zuordnung schreiben: {}", e))?;
+        }
+        None => {
+            if file.exists() {
+                fs::remove_file(&file).map_err(|e| format!("Plugin-Zuordnung entfernen: {}", e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Ein Modell, fuer das es noch kein Plugin gibt — vom Nutzer gemeldet.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PluginRequest {
+    pub model_name: String,
+    pub model_type: Option<String>,
+    /// Was der Nutzer sich wuenscht (freier Text, darf leer sein).
+    pub note: String,
+    pub created_at: String,
+}
+
+fn plugin_requests_file(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?;
+    if !dir.exists() { fs::create_dir_all(&dir).map_err(|e| format!("AppDataDir erstellen: {}", e))?; }
+    Ok(dir.join("plugin_requests.json"))
+}
+
+/// Nimmt den Plugin-Wunsch zu einem nicht erkannten Modell entgegen.
+///
+/// Der Wunsch bleibt auf dem Geraet. Ohne diese Ablage waere die Frage
+/// "welches Plugin fehlt euch?" eine Frage ohne Antwortweg.
+#[tauri::command]
+pub fn record_plugin_request(
+    app_handle: tauri::AppHandle,
+    model_name: String,
+    model_type: Option<String>,
+    note: String,
+) -> Result<(), String> {
+    let file = plugin_requests_file(&app_handle)?;
+    let mut all: Vec<PluginRequest> = if file.exists() {
+        serde_json::from_str(&fs::read_to_string(&file).unwrap_or_default()).unwrap_or_default()
+    } else { vec![] };
+    all.push(PluginRequest {
+        model_name, model_type,
+        note: note.trim().to_string(),
+        created_at: Utc::now().to_rfc3339(),
+    });
+    fs::write(&file, serde_json::to_string_pretty(&all).map_err(|e| format!("JSON: {}", e))?)
+        .map_err(|e| format!("Plugin-Wunsch speichern: {}", e))
+}
+
+/// Listet die gemeldeten Plugin-Wuensche (Einstellungen / Diagnose).
+#[tauri::command]
+pub fn list_plugin_requests(app_handle: tauri::AppHandle) -> Result<Vec<PluginRequest>, String> {
+    let file = plugin_requests_file(&app_handle)?;
+    if !file.exists() { return Ok(vec![]); }
+    Ok(serde_json::from_str(&fs::read_to_string(&file).unwrap_or_default()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -788,6 +930,7 @@ pub async fn download_huggingface_model(
         source_path: Some(repo_id.clone()), local_path: target.to_string_lossy().to_string(),
         size_bytes: total, file_count: count,
         created_at: Utc::now(), model_type: mtype,
+        plugin_override: read_plugin_override(&target),
     };
     save_metadata(&models_dir, &info)?;
 
@@ -862,5 +1005,75 @@ mod dir_size_tests {
         assert_eq!(count, 2);
         assert_eq!(size, 100);
         let _ = fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod model_type_tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp(name: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!("ft_mtype_{}_{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    /// Der Auslöser: ein trainiertes YOLO heisst `best.pt` und wurde als
+    /// "pytorch" gemeldet — damit fand die Plugin-Erkennung im Labor und im
+    /// Tests-Bereich nichts.
+    #[test]
+    fn trainiertes_yolo_wird_am_inhalt_erkannt() {
+        let dir = tmp("yolo");
+        // Kopf eines Torch-Zip: data.pkl liegt unkomprimiert vorn und nennt die
+        // Ultralytics-Module im Klartext.
+        let mut bytes = b"PK\x03\x04best/data.pkl".to_vec();
+        bytes.extend_from_slice(b"cultralytics.nn.tasks\nDetectionModel\ntask\ndetect\n");
+        fs::write(dir.join("best.pt"), bytes).unwrap();
+
+        assert_eq!(detect_model_type(&dir).as_deref(), Some("yolo"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fremdes_pt_bleibt_pytorch() {
+        let dir = tmp("plain");
+        fs::write(dir.join("model.pt"), vec![b'x'; 2048]).unwrap();
+        assert_eq!(detect_model_type(&dir).as_deref(), Some("pytorch"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// read_dir liefert keine feste Reihenfolge. Lag ein fremdes .pt vorn,
+    /// entschied frueher der Zufall über das Ergebnis.
+    #[test]
+    fn yolo_gewinnt_gegen_fremdes_pt_im_selben_ordner() {
+        let dir = tmp("mixed");
+        fs::write(dir.join("aaa_other.pt"), vec![b'x'; 2048]).unwrap();
+        fs::write(dir.join("best.pt"), b"PK\x03\x04cultralytics.nn.tasks".to_vec()).unwrap();
+        assert_eq!(detect_model_type(&dir).as_deref(), Some("yolo"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_json_hat_weiter_vorrang() {
+        let dir = tmp("cfg");
+        fs::write(dir.join("config.json"), br#"{"model_type":"xlm-roberta"}"#).unwrap();
+        fs::write(dir.join("model.pt"), vec![b'x'; 10]).unwrap();
+        assert_eq!(detect_model_type(&dir).as_deref(), Some("xlm-roberta"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plugin_zuordnung_wird_gelesen_und_leerer_wert_ignoriert() {
+        let dir = tmp("override");
+        assert_eq!(read_plugin_override(&dir), None, "ohne Datei keine Zuordnung");
+
+        fs::write(dir.join(PLUGIN_OVERRIDE_FILE), br#"{"plugin_id":"yolo"}"#).unwrap();
+        assert_eq!(read_plugin_override(&dir).as_deref(), Some("yolo"));
+
+        fs::write(dir.join(PLUGIN_OVERRIDE_FILE), br#"{"plugin_id":"  "}"#).unwrap();
+        assert_eq!(read_plugin_override(&dir), None, "leere ID zaehlt nicht");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

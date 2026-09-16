@@ -630,7 +630,39 @@
       "deleteSuccess": "Deleted",
       "deleteSuccessDetail": "“{name}” was removed.",
       "deleteFailed": "Delete Failed"
-    }
+    },
+    "pluginAssignedManually": "Plugin assigned manually",
+    "unknownModel": {
+      "title": "I don't know this model",
+      "description": "\"{name}\" is imported, but I can't identify the architecture (detected type: {type}). Pick the plugin that fits — training, tests and the lab then work as usual.",
+      "unknownType": "unknown",
+      "assign": "Assign",
+      "later": "Later",
+      "noneFits": "None of these fit",
+      "assignedTitle": "Plugin assigned",
+      "assignedDetail": "\"{model}\" now uses {plugin}.",
+      "devHint": "Without a matching plugin you can still train and check this model through Dev Train and Dev Script mode in the Tests section and the Lab — there you write the Python script yourself and FrameTrain just runs it.",
+      "requestLabel": "Which plugin should we add?",
+      "requestPlaceholder": "e.g. \"Whisper for speech recognition\" or \"segmentation with SAM\"",
+      "sendRequest": "Save request",
+      "requestSentTitle": "Thanks — noted",
+      "requestSentDetail": "Your plugin request is saved and feeds into the roadmap.",
+      "pluginDesc": {
+        "yolo": "Object detection with bounding boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Also for trained best.pt files.",
+        "hf-image-classification": "Image classification with a downloaded HuggingFace vision model (ViT, DeiT, ConvNeXt, Swin, ResNet).",
+        "image-classification": "Image classification via transfer learning on torchvision backbones (ResNet, EfficientNet, MobileNet). One folder per class.",
+        "audio-classification": "Audio classification with Wav2Vec2, HuBERT, WavLM, AST or the Whisper encoder.",
+        "seq2seq": "Text to text: summarization, translation, rewriting (T5, BART, Pegasus, Marian).",
+        "xlm-roberta": "Text classification with XLM-RoBERTa base/large, multilingual.",
+        "hf-encoder": "Text classification with HuggingFace encoders (BERT, DistilBERT, RoBERTa, DeBERTa and relatives)."
+      },
+      "changeTitle": "Change plugin",
+      "changeDescription": "For \"{name}\" (detected type: {type}) you can set the plugin yourself — for instance when automatic detection gets it wrong.",
+      "clear": "Remove assignment",
+      "clearedTitle": "Assignment removed",
+      "clearedDetail": "\"{model}\" follows automatic detection again."
+    },
+    "changePlugin": "change"
   },
   "diffViewer": {
     "title": "Code Changes",

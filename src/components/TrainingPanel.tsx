@@ -27,7 +27,7 @@ import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { openAICoach } from '../ai/aiCoachEvents';
-import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
+import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import { checkDatasetCompat } from '../plugins/datasetCompat';
 import DatasetCompatBadge from './DatasetCompatBadge';
 import DevTrainPanel from './DevTrainPanel';
@@ -39,6 +39,8 @@ export interface ModelInfo {
   id: string; name: string; source: string;
   source_path: string | null; local_path: string;
   model_type: string | null; size_bytes?: number;
+  /** Beim Import von Hand zugeordnetes Plugin, falls die Erkennung nichts fand. */
+  plugin_override?: string | null;
 }
 
 interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
@@ -1314,7 +1316,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   }, []);
 
   const detectionKey    = selectedModel?.source_path ?? selectedModel?.name ?? '';
-  const detection       = detectionKey ? detectPlugin(detectionKey, selectedModel?.model_type ? { model_type: selectedModel.model_type } : undefined) : null;
+  const detection       = selectedModel ? detectPluginForModel(selectedModel) : null;
   // Beide Bild-Plugins: Sequenzlaenge ist dort ohne Bedeutung.
   const isImagePlugin   = detection?.supported === true
     && (detection.plugin.id === 'image-classification'

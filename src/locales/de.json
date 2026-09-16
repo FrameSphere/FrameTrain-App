@@ -630,7 +630,39 @@
       "deleteSuccess": "Gelöscht",
       "deleteSuccessDetail": "„{name}“ wurde entfernt.",
       "deleteFailed": "Löschen fehlgeschlagen"
-    }
+    },
+    "pluginAssignedManually": "Plugin von Hand zugeordnet",
+    "unknownModel": {
+      "title": "Dieses Modell kenne ich nicht",
+      "description": "\"{name}\" ist importiert, aber ich erkenne die Architektur nicht (erkannter Typ: {type}). Wähle das Plugin, das dazu passt — dann funktionieren Training, Tests und Labor wie gewohnt.",
+      "unknownType": "unbekannt",
+      "assign": "Zuordnen",
+      "later": "Später",
+      "noneFits": "Keins davon passt",
+      "assignedTitle": "Plugin zugeordnet",
+      "assignedDetail": "\"{model}\" nutzt ab jetzt {plugin}.",
+      "devHint": "Ohne passendes Plugin kannst du dieses Modell über Dev Train und den Dev-Script-Modus im Tests-Bereich und im Labor trainieren und prüfen — dort schreibst du das Python-Skript selbst, FrameTrain führt es nur aus.",
+      "requestLabel": "Welches Plugin sollen wir ergänzen?",
+      "requestPlaceholder": "z. B. \"Whisper für Spracherkennung\" oder \"Segmentierung mit SAM\"",
+      "sendRequest": "Wunsch speichern",
+      "requestSentTitle": "Danke — notiert",
+      "requestSentDetail": "Dein Plugin-Wunsch ist gespeichert und fließt in die Planung ein.",
+      "pluginDesc": {
+        "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Auch für trainierte best.pt-Dateien.",
+        "hf-image-classification": "Bildklassifikation mit einem heruntergeladenen HuggingFace-Bildmodell (ViT, DeiT, ConvNeXt, Swin, ResNet).",
+        "image-classification": "Bildklassifikation per Transfer Learning auf torchvision-Backbones (ResNet, EfficientNet, MobileNet). Ein Ordner pro Klasse.",
+        "audio-classification": "Audioklassifikation mit Wav2Vec2, HuBERT, WavLM, AST oder dem Whisper-Encoder.",
+        "seq2seq": "Text zu Text: Zusammenfassung, Übersetzung, Umformulierung (T5, BART, Pegasus, Marian).",
+        "xlm-roberta": "Textklassifikation mit XLM-RoBERTa base/large, mehrsprachig.",
+        "hf-encoder": "Textklassifikation mit HuggingFace-Encodern (BERT, DistilBERT, RoBERTa, DeBERTa und verwandte)."
+      },
+      "changeTitle": "Plugin ändern",
+      "changeDescription": "Für \"{name}\" (erkannter Typ: {type}) kannst du das Plugin selbst festlegen — etwa wenn die automatische Erkennung danebenliegt.",
+      "clear": "Zuordnung entfernen",
+      "clearedTitle": "Zuordnung entfernt",
+      "clearedDetail": "Für \"{model}\" zählt wieder die automatische Erkennung."
+    },
+    "changePlugin": "ändern"
   },
   "diffViewer": {
     "title": "Code Änderungen",

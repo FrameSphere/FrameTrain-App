@@ -13,7 +13,7 @@ import {
   ClipboardList, Save, FolderOpen, Bot, Send, Pencil,
   Check, Wand2, Copy, Maximize2, Minimize2, Zap,
 } from 'lucide-react';
-import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
+import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAISettings } from '../contexts/AISettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -47,6 +47,8 @@ interface ModelInfo {
   id: string; name: string; source: string;
   source_path: string | null; local_path: string;
   model_type: string | null; size_bytes?: number;
+  /** Beim Import von Hand zugeordnetes Plugin, falls die Erkennung nichts fand. */
+  plugin_override?: string | null;
 }
 
 interface VersionTreeItem { id: string; name: string; is_root: boolean; version_number: number; }
@@ -880,10 +882,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
   const detectedPlugin = useMemo(() => {
     if (!selectedModel) return null;
-    const r = detectPlugin(
-      selectedModel.source_path ?? selectedModel.name,
-      selectedModel.model_type ? { model_type: selectedModel.model_type } : undefined,
-    );
+    const r = detectPluginForModel(selectedModel);
     return r.supported ? r.plugin : null;
   }, [selectedModel]);
 

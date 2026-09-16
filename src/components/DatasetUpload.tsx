@@ -23,12 +23,15 @@ import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
 import DatasetTypeIcon from './DatasetTypeIcon';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
-import { detectPlugin } from '../plugins/registry';
+import { detectPluginForModel } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-interface ModelInfo { id: string; name: string; source: string; }
+interface ModelInfo {
+  id: string; name: string; source: string;
+  source_path?: string | null; model_type?: string | null; plugin_override?: string | null;
+}
 
 interface SplitInfo {
   train_count: number; val_count: number; test_count: number;
@@ -102,17 +105,17 @@ function formatDownloads(n: number | undefined): string {
 interface AnalysisPreviewProps {
   analysis: DatasetAnalysis;
   /** Falls gesetzt: Plugin-Kompatibilitätsprüfung anzeigen */
-  modelId?: string | null;
+  model?: ModelInfo | null;
 }
 
-function AnalysisPreview({ analysis, modelId }: AnalysisPreviewProps) {
+function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
   const { t } = useLanguage();
   const typeMeta = DATASET_TYPE_LABELS[analysis.detected_type] ?? DATASET_TYPE_LABELS['unknown'];
 
   // Plugin-Kompatibilität prüfen
   let pluginCompat: { ok: boolean; label: string; preferred: boolean } | null = null;
-  if (modelId) {
-    const result = detectPlugin(modelId);
+  if (model) {
+    const result = detectPluginForModel(model);
     if (result.supported) {
       const { plugin } = result;
       const supported = plugin.supportedDatasetTypes;
@@ -1171,8 +1174,8 @@ export default function DatasetUpload() {
               <DatasetStructureGuide />
 
               {/* Phase 7: Plugin-Empfehlung basierend auf ausgewähltem Modell */}
-              {selectedModelId && (() => {
-                const result = detectPlugin(selectedModelId);
+              {selectedModel && (() => {
+                const result = detectPluginForModel(selectedModel);
                 if (!result.supported) return null;
                 const { plugin } = result;
                 const preferred = plugin.preferredDatasetType;
@@ -1249,7 +1252,7 @@ export default function DatasetUpload() {
                     </div>
                   )}
                   {!analysisLoading && analysisResult && (
-                    <AnalysisPreview analysis={analysisResult} modelId={selectedModelId} />
+                    <AnalysisPreview analysis={analysisResult} model={selectedModel} />
                   )}
 
                   {selectedPath && (

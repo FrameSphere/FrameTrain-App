@@ -602,6 +602,7 @@ impl Database {
                 file_count: 0,
                 created_at,
                 model_type: None,
+                plugin_override: None,
             })
         }).map_err(|e| format!("Failed to query models: {}", e))?;
 

@@ -146,14 +146,67 @@ export interface ModelDetectionInfo {
   name: string;
   source_path?: string | null;
   model_type?: string | null;
+  /** Vom Nutzer beim Import zugeordnetes Plugin (siehe set_model_plugin). */
+  plugin_override?: string | null;
 }
 
-/** Prüft, ob für ein Modell ein Plugin existiert. */
-export function isModelSupported(model: ModelDetectionInfo): boolean {
+/** Liefert ein registriertes Plugin anhand seiner ID. */
+export function getPluginById(id: string | null | undefined): ModelPlugin | undefined {
+  if (!id) return undefined;
+  return PLUGINS.find((p) => p.id === id);
+}
+
+/**
+ * Erkennt das Plugin eines Modells aus allem, was über das Modell bekannt ist.
+ *
+ * `detectPlugin` allein reichte nicht: bei lokal importierten Modellen ist
+ * `source_path` der interne Speicherordner (`…/models/local_abc123`), in dem
+ * kein Architekturname mehr steckt. Ein als "yolo8n" importiertes YOLO galt
+ * deshalb überall als nicht unterstützt. Die Reihenfolge hier:
+ *   1. die Zuordnung, die der Nutzer beim Import getroffen hat,
+ *   2. der Pfad bzw. die HuggingFace-ID,
+ *   3. der Modellname, den der Nutzer vergeben hat.
+ */
+export function detectPluginForModel(model: ModelDetectionInfo): DetectionResult {
+  const manual = getPluginById(model.plugin_override);
+  if (manual) return { supported: true, plugin: manual };
+
+  // Sobald ein model_type gesetzt ist, entscheidet er in jedem Plugin allein —
+  // die Namensheuristik laeuft dann gar nicht mehr. Bei den Sammelwerten aus
+  // der Dateiendung ("pytorch" fuer jedes .pt) war das fatal: ein Ordner
+  // "resnet18-transfer" galt als nicht unterstuetzt, weil "pytorch" in keiner
+  // Liste steht. Diese Werte sagen nichts ueber die Architektur und bleiben
+  // deshalb bei der Erkennung aussen vor.
+  const rawType = model.model_type?.trim().toLowerCase();
+  const config = rawType && !GENERIC_MODEL_TYPES.has(rawType)
+    ? { model_type: model.model_type as string }
+    : undefined;
+
+  const byPath = detectPlugin(model.source_path ?? model.name, config);
+  if (byPath.supported) return byPath;
+
+  if (model.source_path && model.name.trim()) {
+    const byName = detectPlugin(model.name, config);
+    if (byName.supported) return byName;
+  }
+
+  // Fuer die Begruendung zaehlt der echte Typ wieder — "Architektur: pytorch"
+  // ist ein Hinweis, auch wenn er zur Erkennung nichts beitraegt.
   return detectPlugin(
     model.source_path ?? model.name,
     model.model_type ? { model_type: model.model_type } : undefined,
-  ).supported;
+  );
+}
+
+/**
+ * Modelltypen, die FrameTrain selbst aus der Dateiendung ableitet, wenn keine
+ * config.json vorliegt. Sie benennen das Dateiformat, nicht die Architektur.
+ */
+const GENERIC_MODEL_TYPES = new Set(['pytorch', 'transformer', 'onnx', 'gguf']);
+
+/** Prüft, ob für ein Modell ein Plugin existiert. */
+export function isModelSupported(model: ModelDetectionInfo): boolean {
+  return detectPluginForModel(model).supported;
 }
 
 /**

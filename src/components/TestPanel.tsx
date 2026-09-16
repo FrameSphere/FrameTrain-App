@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Loader2, CheckCircle, AlertTriangle, Layers, Play, Code2, Ban } from 'lucide-react';
-import { detectPlugin, pickPreferredModelId } from '../plugins/registry';
+import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import type { ModelPlugin, DatasetInfo } from '../plugins/types';
 import DevTestPanel from './DevTestPanel';
 import { usePageContext } from '../contexts/PageContext';
@@ -15,6 +15,8 @@ interface ModelInfo {
   id: string; name: string; source: string;
   source_path: string | null; local_path: string;
   model_type: string | null; size_bytes?: number;
+  /** Beim Import von Hand zugeordnetes Plugin, falls die Erkennung nichts fand. */
+  plugin_override?: string | null;
 }
 
 interface VersionTreeItem {
@@ -59,9 +61,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
     const selectedModel = models.find(m => m.id === selectedModelId);
     const selectedTree  = modelsWithVersions.find(m => m.id === selectedModelId);
     const selectedVer   = selectedTree?.versions.find(v => v.id === selectedVersionId);
-    const detectedPlugin = selectedModel
-      ? detectPlugin(selectedModel.source_path ?? selectedModel.name, selectedModel.model_type ? { model_type: selectedModel.model_type } : undefined)
-      : null;
+    const detectedPlugin = selectedModel ? detectPluginForModel(selectedModel) : null;
     const pluginName = detectedPlugin?.supported ? detectedPlugin.plugin.name : null;
 
     const lines: string[] = [
@@ -222,8 +222,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
 
   const detectedPlugin: ModelPlugin | null = (() => {
     if (!selectedModel) return null;
-    const key = selectedModel.source_path ?? selectedModel.name;
-    const r = detectPlugin(key, selectedModel.model_type ? { model_type: selectedModel.model_type } : undefined);
+    const r = detectPluginForModel(selectedModel);
     return r.supported ? r.plugin : null;
   })();
 

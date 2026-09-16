@@ -32,7 +32,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
-import { detectPlugin } from '../plugins/registry';
+import { detectPlugin, detectPluginForModel, PLUGINS, type ModelDetectionInfo } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
 import { dateLocale } from '../utils/dateLocale';
 
@@ -47,6 +47,8 @@ interface ModelInfo {
   file_count: number;
   created_at: string;
   model_type: string | null;
+  /** Beim Import von Hand zugeordnetes Plugin, falls die Erkennung nichts fand. */
+  plugin_override?: string | null;
 }
 
 interface HuggingFaceModel {
@@ -135,14 +137,30 @@ export function checkHfModelSupport(
   return { supported: false, reason: (result as { supported: false; reason: string }).reason };
 }
 
-function PluginBadge({ modelNameOrPath, configJson }: { modelNameOrPath: string; configJson?: ModelConfig }) {
-  const result = detectPlugin(modelNameOrPath, configJson);
+/**
+ * Zeigt das Plugin eines Modells — entweder fuer ein importiertes Modell
+ * (`model`, inklusive manueller Zuordnung) oder fuer eine reine
+ * HuggingFace-ID aus der Suche (`modelNameOrPath`).
+ */
+function PluginBadge({ model, modelNameOrPath, configJson }: {
+  model?: ModelDetectionInfo;
+  modelNameOrPath?: string;
+  configJson?: ModelConfig;
+}) {
+  const result = model
+    ? detectPluginForModel(model)
+    : detectPlugin(modelNameOrPath ?? '', configJson);
   const { t } = useLanguage();
   if (result.supported) {
+    const manual = Boolean(model?.plugin_override);
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+      <span
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 border border-emerald-500/30 text-emerald-400"
+        title={manual ? t('modelManager.pluginAssignedManually') : undefined}
+      >
         <Puzzle className="w-3 h-3" />
         {result.plugin.name}
+        {manual && <span className="text-emerald-500/70">·</span>}
       </span>
     );
   }
@@ -151,6 +169,205 @@ function PluginBadge({ modelNameOrPath, configJson }: { modelNameOrPath: string;
       <Ban className="w-3 h-3" />
       {t('modelManager.noPlugin')}
     </span>
+  );
+}
+
+// ============ Unbekanntes Modell: Plugin zuordnen ============
+
+/**
+ * Fragt direkt nach dem Import, welches Plugin zu einem nicht erkannten
+ * Modell gehoert.
+ *
+ * Vorher fiel das erst viel spaeter auf — im Labor oder im Tests-Bereich stand
+ * dann nur "wird noch nicht unterstuetzt", ohne Weg nach vorn. Hier gibt es
+ * drei Ausgaenge: Plugin zuordnen, ohne Plugin weiterarbeiten (Dev Train /
+ * Dev Test) oder sagen, welches Plugin fehlt.
+ */
+export function UnknownModelDialog({ model, mode = 'unknown', onClose, onAssigned }: {
+  model: ModelInfo;
+  /** 'unknown' direkt nach dem Import, 'change' beim Korrigieren einer Erkennung. */
+  mode?: 'unknown' | 'change';
+  onClose: () => void;
+  onAssigned: () => void;
+}) {
+  const { t } = useLanguage();
+  const { success, error } = useNotification();
+  const [step, setStep] = useState<'choose' | 'request'>('choose');
+  // Beim Korrigieren steht die aktuelle Zuordnung schon zur Wahl.
+  const detected = detectPluginForModel(model);
+  const [pluginId, setPluginId] = useState<string | null>(
+    mode === 'change' && detected.supported ? detected.plugin.id : null,
+  );
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEscapeKey(onClose);
+
+  // Canvas-Netze entstehen im Synapse Builder, nicht beim Import — als
+  // Auswahl waeren sie hier nur eine falsche Faehrte.
+  const choices = PLUGINS.filter((p) => p.id !== 'canvas');
+
+  const assign = async () => {
+    if (!pluginId) return;
+    setBusy(true);
+    try {
+      await invoke('set_model_plugin', { modelId: model.id, pluginId });
+      const name = choices.find((p) => p.id === pluginId)?.name ?? pluginId;
+      success(
+        t('modelManager.unknownModel.assignedTitle'),
+        t('modelManager.unknownModel.assignedDetail', { model: model.name, plugin: name }),
+      );
+      onAssigned();
+    } catch (err: unknown) {
+      error(t('common.error'), err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Nimmt eine von Hand gesetzte Zuordnung zurueck – danach zaehlt wieder die Erkennung. */
+  const clearAssignment = async () => {
+    setBusy(true);
+    try {
+      await invoke('set_model_plugin', { modelId: model.id, pluginId: null });
+      success(t('modelManager.unknownModel.clearedTitle'), t('modelManager.unknownModel.clearedDetail', { model: model.name }));
+      onAssigned();
+    } catch (err: unknown) {
+      error(t('common.error'), err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendRequest = async () => {
+    setBusy(true);
+    try {
+      await invoke('record_plugin_request', {
+        modelName: model.name, modelType: model.model_type ?? null, note,
+      });
+      success(t('modelManager.unknownModel.requestSentTitle'), t('modelManager.unknownModel.requestSentDetail'));
+      onClose();
+    } catch (err: unknown) {
+      error(t('common.error'), err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
+        <div className="p-6 pb-4 flex items-start gap-4">
+          <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center flex-shrink-0">
+            <Puzzle className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-white font-semibold text-lg">
+              {t(mode === 'change' ? 'modelManager.unknownModel.changeTitle' : 'modelManager.unknownModel.title')}
+            </h2>
+            <p className="text-gray-400 text-sm mt-1.5 leading-relaxed">
+              {t(mode === 'change' ? 'modelManager.unknownModel.changeDescription' : 'modelManager.unknownModel.description', {
+                name: model.name,
+                type: model.model_type ?? t('modelManager.unknownModel.unknownType'),
+              })}
+            </p>
+          </div>
+        </div>
+
+        {step === 'choose' ? (
+          <>
+            <div className="px-6 pb-2 overflow-y-auto flex-1 space-y-2">
+              {choices.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setPluginId(p.id)}
+                  className={`w-full text-left p-3 rounded-xl border transition-all ${
+                    pluginId === p.id
+                      ? 'bg-emerald-500/15 border-emerald-500/40'
+                      : 'bg-white/5 border-white/10 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-white text-sm font-medium">{p.name}</span>
+                    {pluginId === p.id && <CheckCircle className="w-4 h-4 text-emerald-400" />}
+                  </div>
+                  <p className="text-gray-400 text-xs mt-1 leading-relaxed">
+                    {t(`modelManager.unknownModel.pluginDesc.${p.id}`, p.description)}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <div className="p-6 pt-4 space-y-3 border-t border-white/10">
+              <div className="flex gap-3">
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-all"
+                >
+                  {t('modelManager.unknownModel.later')}
+                </button>
+                <button
+                  onClick={assign}
+                  disabled={!pluginId || busy}
+                  className="flex-1 py-2.5 px-4 bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-40 disabled:cursor-not-allowed border border-emerald-500/40 rounded-xl text-emerald-300 text-sm font-medium transition-all"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : t('modelManager.unknownModel.assign')}
+                </button>
+              </div>
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  onClick={() => setStep('request')}
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  {t('modelManager.unknownModel.noneFits')}
+                </button>
+                {model.plugin_override && (
+                  <button
+                    onClick={clearAssignment}
+                    disabled={busy}
+                    className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                  >
+                    {t('modelManager.unknownModel.clear')}
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="px-6 pb-2 overflow-y-auto flex-1 space-y-4">
+              <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                <p className="text-gray-300 text-sm leading-relaxed">{t('modelManager.unknownModel.devHint')}</p>
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs mb-1.5">{t('modelManager.unknownModel.requestLabel')}</label>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  rows={3}
+                  placeholder={t('modelManager.unknownModel.requestPlaceholder')}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/30 transition-colors resize-none"
+                />
+              </div>
+            </div>
+            <div className="p-6 pt-4 flex gap-3 border-t border-white/10">
+              <button
+                onClick={() => setStep('choose')}
+                className="flex-1 py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-all"
+              >
+                {t('common.back')}
+              </button>
+              <button
+                onClick={sendRequest}
+                disabled={busy || !note.trim()}
+                className="flex-1 py-2.5 px-4 bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed border border-amber-500/40 rounded-xl text-amber-300 text-sm font-medium transition-all"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : t('modelManager.unknownModel.sendRequest')}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -209,6 +426,9 @@ export default function ModelManager() {
 
   // Delete dialog
   const [deleteTarget, setDeleteTarget] = useState<ModelInfo | null>(null);
+  // Modell, das gerade importiert wurde und keinem Plugin zuzuordnen war.
+  const [unknownModel, setUnknownModel] = useState<ModelInfo | null>(null);
+  const [pluginDialogMode, setPluginDialogMode] = useState<'unknown' | 'change'>('unknown');
 
   // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
@@ -270,10 +490,7 @@ export default function ModelManager() {
       lines.push(`Status: ${models.length} Modell${models.length !== 1 ? 'e' : ''} verfügbar`);
       lines.push('');
       models.forEach(m => {
-        const plugin = detectPlugin(
-          m.source === 'huggingface' && m.source_path ? m.source_path : m.name,
-          m.model_type ? { model_type: m.model_type } : undefined
-        );
+        const plugin = detectPluginForModel(m);
         const pluginInfo = plugin.supported ? `[✓ ${plugin.plugin.name}]` : '[⚠ Kein Plugin]';
         lines.push(
           `• **${m.name}** (${m.source === 'huggingface' ? '☁️ HF' : '💾 Lokal'}) · ${pluginInfo}`
@@ -533,6 +750,15 @@ export default function ModelManager() {
     }
   };
 
+  /**
+   * Fragt direkt nach dem Import nach dem Plugin, wenn die Erkennung nichts
+   * gefunden hat. Frueher lief man damit erst im Training, im Tests-Bereich
+   * oder im Labor auf — dort, wo es nicht mehr weitergeht.
+   */
+  const askForPluginIfUnknown = (newModel: ModelInfo) => {
+    if (!detectPluginForModel(newModel).supported) { setPluginDialogMode('unknown'); setUnknownModel(newModel); }
+  };
+
   const handleLocalImport = async () => {
     if (!selectedPath || !modelName.trim()) { warning(t('modelManager.notifications.missingFields'), t('modelManager.notifications.missingFieldsLocal')); return; }
     setImporting(true);
@@ -544,6 +770,7 @@ export default function ModelManager() {
       resetLocalImport();
       setShowImportModal(false);
       await loadModels();
+      askForPluginIfUnknown(newModel);
     } catch (err: unknown) {
       error(t('modelManager.notifications.importError'), err instanceof Error ? err.message : String(err));
     } finally {
@@ -591,6 +818,7 @@ export default function ModelManager() {
       setShowImportModal(false);
       setDownloadProgress(null);
       await loadModels();
+      askForPluginIfUnknown(newModel);
     } catch (err: unknown) {
       error(t('modelManager.notifications.downloadError'), String(err));
     } finally {
@@ -692,6 +920,7 @@ export default function ModelManager() {
               key={model.id}
               model={model}
               onDelete={() => setDeleteTarget(model)}
+              onChangePlugin={() => { setPluginDialogMode('change'); setUnknownModel(model); }}
               gradientClass={currentTheme.colors.gradient}
             />
           ))}
@@ -704,6 +933,16 @@ export default function ModelManager() {
           modelName={deleteTarget.name}
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {/* ── Unbekanntes Modell: Plugin zuordnen ── */}
+      {unknownModel && (
+        <UnknownModelDialog
+          model={unknownModel}
+          mode={pluginDialogMode}
+          onClose={() => setUnknownModel(null)}
+          onAssigned={() => { setUnknownModel(null); void loadModels(); }}
         />
       )}
 
@@ -790,15 +1029,12 @@ export default function ModelManager() {
 interface ModelCardProps {
   model: ModelInfo;
   onDelete: () => void;
+  onChangePlugin: () => void;
   gradientClass: string;
 }
 
-function ModelCard({ model, onDelete, gradientClass }: ModelCardProps) {
+function ModelCard({ model, onDelete, onChangePlugin, gradientClass }: ModelCardProps) {
   const { t, language } = useLanguage();
-  // Determine the identifier to use for plugin detection
-  const detectionKey = model.source === 'huggingface' && model.source_path
-    ? model.source_path
-    : model.name;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/[0.07] transition-all group flex flex-col gap-4">
@@ -834,11 +1070,15 @@ function ModelCard({ model, onDelete, gradientClass }: ModelCardProps) {
       </div>
 
       {/* Plugin Badge */}
-      <div>
-        <PluginBadge
-          modelNameOrPath={detectionKey}
-          configJson={model.model_type ? { model_type: model.model_type } : undefined}
-        />
+      <div className="flex items-center gap-2">
+        <PluginBadge model={model} />
+        <button
+          onClick={onChangePlugin}
+          className="text-[11px] text-gray-600 hover:text-gray-300 transition-colors"
+          title={t('modelManager.unknownModel.changeTitle')}
+        >
+          {t('modelManager.changePlugin')}
+        </button>
       </div>
 
       {/* Meta */}
