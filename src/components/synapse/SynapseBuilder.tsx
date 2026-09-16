@@ -57,7 +57,7 @@ import { runSynapseAgent, stripToolCallTags } from "./ai/synapseAgent";
 import type { AgentStep, AgentResumeState } from "./ai/synapseAgent";
 import { createToolExecutor, type GraphMutationEvent } from "./ai/synapseAgentTools";
 import { buildSynapseGraphContext } from "./ai/synapseGraphContext";
-import { autoLayoutNodes } from "./synapseLayout";
+import { autoLayoutNodes, hasNodeOverlap } from "./synapseLayout";
 import { SynapseAIPanel } from "./ai/SynapseAIPanel";
 import "./ai/synapseAIPanel.css";
 import { useAISettings } from "../../contexts/AISettingsContext";
@@ -835,14 +835,14 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   // ── Auto-Layout: Fluss-Layout links→rechts, lange Netze in Bahnen ─────────
   // Die Canvas-Größe bestimmt, in wie viele Bahnen umgebrochen wird. Knoten
   // gleiten animiert an ihren Platz, danach wird auf den Graphen gezoomt.
-  const handleAutoLayout = useCallback(() => {
-    if (nodes.length === 0) return;
+  const runAutoLayout = useCallback((srcNodes: Node[], srcEdges: Edge[]) => {
+    if (srcNodes.length === 0) return;
     const rect = canvasWrapRef.current?.getBoundingClientRect();
-    const target = autoLayoutNodes(nodes, edges, {
+    const target = autoLayoutNodes(srcNodes, srcEdges, {
       viewport: rect ? { width: rect.width, height: rect.height } : undefined,
     });
     const to = new Map(target.map((nd) => [nd.id, nd.position] as const));
-    const from = new Map(nodes.map((nd) => [nd.id, nd.position] as const));
+    const from = new Map(srcNodes.map((nd) => [nd.id, nd.position] as const));
     const fit = () => rfRef.current?.fitView({ duration: 400, padding: 0.18, maxZoom: 1.1 });
 
     if (layoutAnimRef.current !== null) cancelAnimationFrame(layoutAnimRef.current);
@@ -874,7 +874,11 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       }
     };
     layoutAnimRef.current = requestAnimationFrame(frame);
-  }, [nodes, edges, setNodes]);
+  }, [setNodes]);
+
+  const handleAutoLayout = useCallback(() => {
+    runAutoLayout(nodes, edges);
+  }, [nodes, edges, runAutoLayout]);
 
   useEffect(() => () => {
     if (layoutAnimRef.current !== null) cancelAnimationFrame(layoutAnimRef.current);
@@ -1110,6 +1114,15 @@ Keine Floskeln, nur Fakten.`;
       setNodes([...finalState.nodes]);
       setEdges([...finalState.edges]);
 
+      // Die KI setzt Knoten oft übereinander oder eng auf einen Haufen. Hat sie
+      // die Struktur verändert UND liegen Knoten aufeinander, ordnet der Canvas
+      // sich anschließend selbst — ein von Hand aufgeräumtes Layout bleibt.
+      const structureChanged =
+        finalState.nodes.length !== nodes.length || finalState.edges.length !== edges.length;
+      if (structureChanged && hasNodeOverlap(finalState.nodes, 12)) {
+        setTimeout(() => runAutoLayout([...finalState.nodes], [...finalState.edges]), 80);
+      }
+
       const cleanSummary = stripToolCallTags(result.summary || "");
       const assistantContent = result.steps.length > 0
         ? `${t('synapseBuilder.aiSummary.executed').replace('{count}', String(result.steps.length))}${cleanSummary ? "\n" + cleanSummary : ""}`
@@ -1159,6 +1172,7 @@ Keine Floskeln, nur Fakten.`;
     shapeIssueSource,
     shapeExtraContext,
     maybeUpdateChatSummary,
+    runAutoLayout,
   ]);
 
   // ── Fehlgeschlagene AI-Anfrage erneut senden ──────────────────────────────

@@ -154,6 +154,23 @@ function adjustParamsFix(
 }
 
 /**
+ * Platz für eine Bridge-Node: mittig zwischen dem Zielknoten und seinem
+ * Vorgänger, sonst eine Knotenbreite links vom Zielknoten.
+ */
+function bridgePosition(nodes: Node[], edges: Edge[], beforeNodeId: string): { x: number; y: number } {
+  const target = nodes.find((n) => n.id === beforeNodeId);
+  if (!target) return { x: 0, y: 0 };
+  const sources = edges
+    .filter((e) => e.target === beforeNodeId)
+    .map((e) => nodes.find((n) => n.id === e.source))
+    .filter((n): n is Node => !!n);
+  if (sources.length === 0) return { x: target.position.x - 260, y: target.position.y };
+  const avgX = sources.reduce((acc, n) => acc + n.position.x, 0) / sources.length;
+  const avgY = sources.reduce((acc, n) => acc + n.position.y, 0) / sources.length;
+  return { x: Math.round((avgX + target.position.x) / 2), y: Math.round((avgY + target.position.y) / 2) };
+}
+
+/**
  * Fügt eine Bridge-Layer ein um Shape-Mismatch zu beheben
  */
 function insertBridgeFix(
@@ -180,10 +197,8 @@ function insertBridgeFix(
         initializer: "xavier_uniform",
       },
     },
-    position: {
-      x: Math.random() * 500 - 250,
-      y: Math.random() * 500 - 250,
-    },
+    // Zwischen Vorgänger und Zielknoten legen statt zufällig irgendwohin
+    position: bridgePosition(nodes, edges, beforeNodeId),
   };
 
   // Finde Incoming Edges

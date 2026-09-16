@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Node, Edge } from '@xyflow/react';
-import { autoLayoutNodes } from '../synapseLayout';
+import { autoLayoutNodes, hasNodeOverlap } from '../synapseLayout';
 
 type G = { nodes: Node[]; edges: Edge[] };
 
@@ -107,6 +107,10 @@ describe('autoLayoutNodes', () => {
 
   it('bricht lange Netze automatisch in Bahnen um', () => {
     const g = bigGraph();
+    let plan: { lanes: number; ranks: number } | null = null;
+    autoLayoutNodes(g.nodes, g.edges, { viewport: { width: 900, height: 820 }, onPlan: (p) => { plan = p; } });
+    expect(plan!.lanes).toBeGreaterThan(1);
+    expect(plan!.ranks / plan!.lanes).toBeGreaterThanOrEqual(12);
     const single = autoLayoutNodes(g.nodes, g.edges, { lanes: 1 });
     const auto = autoLayoutNodes(g.nodes, g.edges, { viewport: { width: 1200, height: 800 } });
     expect(aspect(single)).toBeGreaterThan(8);
@@ -116,6 +120,9 @@ describe('autoLayoutNodes', () => {
   it('lässt kleine Netze einzeilig', () => {
     const g = builder();
     g.chain(null, 5);
+    let plan: { lanes: number } | null = null;
+    autoLayoutNodes(g.nodes, g.edges, { viewport: { width: 1200, height: 800 }, onPlan: (p) => { plan = p; } });
+    expect(plan!.lanes).toBe(1);
     const out = autoLayoutNodes(g.nodes, g.edges, { viewport: { width: 1200, height: 800 } });
     const xs = out.map((n) => n.position.x);
     for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThan(xs[i - 1]);
@@ -130,5 +137,27 @@ describe('autoLayoutNodes', () => {
     expect(out).toHaveLength(5);
     expect(overlapCount(out)).toBe(0);
     for (const n of out) expect(Number.isFinite(n.position.x) && Number.isFinite(n.position.y)).toBe(true);
+  });
+
+  it('erkennt aufeinanderliegende Knoten (für das Anordnen nach einem KI-Lauf)', () => {
+    const pile: Node[] = [
+      { id: 'a', position: { x: 100, y: 100 }, data: {}, measured: { width: 195, height: 90 } },
+      { id: 'b', position: { x: 110, y: 105 }, data: {}, measured: { width: 195, height: 90 } },
+    ];
+    expect(hasNodeOverlap(pile)).toBe(true);
+    const tidy = autoLayoutNodes(pile, [{ id: 'e', source: 'a', target: 'b' }]);
+    expect(hasNodeOverlap(tidy)).toBe(false);
+    expect(hasNodeOverlap(tidy, 12)).toBe(false);
+  });
+
+  it('sieht das Raster der KI-Platzierung als frei an', () => {
+    // synapseAgentTools legt Knoten ohne Position auf 300 x 220 ab
+    const grid: Node[] = Array.from({ length: 12 }, (_, i) => ({
+      id: 'g' + i,
+      position: { x: 160 + (i % 4) * 300, y: 120 + Math.floor(i / 4) * 220 },
+      data: {},
+      measured: { width: 195, height: 130 },
+    }));
+    expect(hasNodeOverlap(grid, 12)).toBe(false);
   });
 });

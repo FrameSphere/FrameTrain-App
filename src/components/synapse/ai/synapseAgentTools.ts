@@ -121,9 +121,12 @@ export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle
             return { success: true, data: { nodeId, skipped: true } };
           }
 
+          // Ohne Positionsangabe: locker links→rechts ablegen (Knoten sind ~195
+          // breit und bis ~130 hoch) statt eng auf einen Haufen. Nach dem Lauf
+          // ordnet der Builder ohnehin sauber an.
           const pos = parsePosition(rawPos) ?? {
-            x: 150 + (_nodes.length % 5) * 220,
-            y: 120 + Math.floor(_nodes.length / 5) * 160,
+            x: 160 + (_nodes.length % 4) * 300,
+            y: 120 + Math.floor(_nodes.length / 4) * 220,
           };
 
           const params: Record<string, unknown> = {};

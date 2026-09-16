@@ -41,12 +41,29 @@ export interface AutoLayoutOptions {
   viewport?: { width: number; height: number };
   /** Bahnenzahl erzwingen (Tests); sonst automatisch. */
   lanes?: number;
+  /** Meldet, wie angeordnet wurde (Bahnen, Spalten) — für Tests und Diagnose. */
+  onPlan?: (plan: { lanes: number; ranks: number }) => void;
 }
 
 function sizeOf(nd: Node): { w: number; h: number } {
   const w = nd.measured?.width ?? nd.width ?? DEFAULT_W;
   const h = nd.measured?.height ?? nd.height ?? DEFAULT_H;
   return { w: w > 0 ? w : DEFAULT_W, h: h > 0 ? h : DEFAULT_H };
+}
+
+/**
+ * Liegen Knoten aufeinander (bzw. enger als der Mindestabstand)? Wird genutzt,
+ * um nach einem KI-Lauf zu entscheiden, ob der Canvas neu angeordnet wird.
+ */
+export function hasNodeOverlap(nodes: Node[], gap = 0): boolean {
+  const boxes = nodes.map((nd) => ({ ...sizeOf(nd), x: nd.position?.x ?? 0, y: nd.position?.y ?? 0 }));
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      if (Math.abs(a.x - b.x) < (a.w + b.w) / 2 + gap && Math.abs(a.y - b.y) < (a.h + b.h) / 2 + gap) return true;
+    }
+  }
+  return false;
 }
 
 export function autoLayoutNodes<N extends Node>(
@@ -266,19 +283,43 @@ export function autoLayoutNodes<N extends Node>(
       }
       return moved;
     };
+
+    // Nur senkrecht entzerren — x (und damit der Fluss) bleibt unangetastet.
+    const separateY = (): boolean => {
+      let moved = false;
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const dy = cy[j] - cy[i];
+          const oy = (sizes[i].h + sizes[j].h) / 2 + MIN_GAP_Y - Math.abs(dy);
+          if (oy <= 0) continue;
+          if ((sizes[i].w + sizes[j].w) / 2 + MIN_GAP_X - Math.abs(cx[j] - cx[i]) <= 0) continue;
+          moved = true;
+          const s = dy !== 0 ? Math.sign(dy) : 1;
+          cy[i] -= (s * oy) / 2; cy[j] += (s * oy) / 2;
+        }
+      }
+      return moved;
+    };
     for (let round = 0; round < 6; round++) {
       let clean = true;
       for (let pass = 0; pass < 200 && separate(); pass++) clean = false;
       if (clean) break;
       pushForward();
     }
+    // Zum Schluss den Fluss erzwingen und nur noch senkrecht entzerren: so ist
+    // garantiert jede Kante vorwärts gerichtet UND nichts überlappt.
+    pushForward();
+    for (let pass = 0; pass < 400 && separateY(); pass++) { /* bis überlappungsfrei */ }
 
     return { cx, cy };
   };
 
   let result: { cx: number[]; cy: number[] };
+  let lanes = 1;
   if (options.lanes && options.lanes > 0) {
-    result = arrange(cutsFor(Math.min(options.lanes, Math.max(1, Math.floor((R + 1) / 2)))));
+    const starts = cutsFor(Math.min(options.lanes, Math.max(1, Math.floor((R + 1) / 2))));
+    lanes = starts.length;
+    result = arrange(starts);
   } else {
     // Jede Bahnenzahl wirklich durchrechnen und die wählen, bei der der Graph
     // am größten in die Canvas passt — aber jede Bahn bleibt eine erkennbare
@@ -302,11 +343,12 @@ export function autoLayoutNodes<N extends Node>(
       if (starts.length !== l) break;
       const cand = arrange(starts);
       const fit = fitOf(cand);
-      if (fit > bestFit * LANE_MIN_GAIN) { bestFit = fit; result = cand; }
+      if (fit > bestFit * LANE_MIN_GAIN) { bestFit = fit; result = cand; lanes = l; }
       if (fit < prevFit) break; // ab hier wird es nur noch zu hoch
       prevFit = fit;
     }
   }
+  options.onPlan?.({ lanes, ranks: R + 1 });
   const { cx, cy } = result;
 
   let minX = Infinity, minY = Infinity;
