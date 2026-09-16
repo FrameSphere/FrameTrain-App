@@ -35,6 +35,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { detectPlugin, detectPluginForModel, PLUGINS, type ModelDetectionInfo } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
 import { dateLocale } from '../utils/dateLocale';
+import { submitSupportTicket } from '../utils/supportTicket';
 
 // ============ Types ============
 
@@ -183,15 +184,18 @@ function PluginBadge({ model, modelNameOrPath, configJson }: {
  * drei Ausgaenge: Plugin zuordnen, ohne Plugin weiterarbeiten (Dev Train /
  * Dev Test) oder sagen, welches Plugin fehlt.
  */
-export function UnknownModelDialog({ model, mode = 'unknown', onClose, onAssigned }: {
+export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail, onClose, onAssigned }: {
   model: ModelInfo;
   /** 'unknown' direkt nach dem Import, 'change' beim Korrigieren einer Erkennung. */
   mode?: 'unknown' | 'change';
+  /** Fuer das Support-Ticket, in dem der Plugin-Wunsch beim Manager landet. */
+  userId?: string;
+  userEmail?: string;
   onClose: () => void;
   onAssigned: () => void;
 }) {
   const { t } = useLanguage();
-  const { success, error } = useNotification();
+  const { success, error, warning } = useNotification();
   const [step, setStep] = useState<'choose' | 'request'>('choose');
   // Beim Korrigieren steht die aktuelle Zuordnung schon zur Wahl.
   const detected = detectPluginForModel(model);
@@ -238,18 +242,43 @@ export function UnknownModelDialog({ model, mode = 'unknown', onClose, onAssigne
     }
   };
 
+  /**
+   * Speichert den Wunsch lokal und schickt ihn als Support-Ticket an den
+   * Manager. Die lokale Ablage kommt zuerst: ohne Netz waere der Wunsch sonst
+   * verloren, und der Nutzer hat ihn schon getippt.
+   */
   const sendRequest = async () => {
     setBusy(true);
     try {
       await invoke('record_plugin_request', {
         modelName: model.name, modelType: model.model_type ?? null, note,
       });
-      success(t('modelManager.unknownModel.requestSentTitle'), t('modelManager.unknownModel.requestSentDetail'));
-      onClose();
     } catch (err: unknown) {
       error(t('common.error'), err instanceof Error ? err.message : String(err));
+      setBusy(false);
+      return;
+    }
+
+    try {
+      await submitSupportTicket({
+        userId: userId ?? '',
+        email: userEmail,
+        subject: t('modelManager.unknownModel.ticketSubject', { name: model.name }),
+        message: t('modelManager.unknownModel.ticketBody', {
+          name: model.name,
+          type: model.model_type ?? t('modelManager.unknownModel.unknownType'),
+          note,
+        }),
+      });
+      success(t('modelManager.unknownModel.requestSentTitle'), t('modelManager.unknownModel.requestSentDetail'));
+    } catch {
+      // Kein Netz oder Manager nicht erreichbar: der Wunsch liegt lokal, und
+      // der Nutzer erfaehrt genau das — statt einer Erfolgsmeldung, die nicht
+      // stimmt.
+      warning(t('modelManager.unknownModel.requestOfflineTitle'), t('modelManager.unknownModel.requestOfflineDetail'));
     } finally {
       setBusy(false);
+      onClose();
     }
   };
 
@@ -349,7 +378,12 @@ export function UnknownModelDialog({ model, mode = 'unknown', onClose, onAssigne
                 />
               </div>
             </div>
-            <div className="p-6 pt-4 flex gap-3 border-t border-white/10">
+            <div className="px-6 pb-1">
+              <p className="text-gray-500 text-[11px] leading-relaxed">
+                {t('modelManager.unknownModel.sendNotice')}
+              </p>
+            </div>
+            <div className="p-6 pt-3 flex gap-3 border-t border-white/10">
               <button
                 onClick={() => setStep('choose')}
                 className="flex-1 py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-sm font-medium transition-all"
@@ -414,7 +448,7 @@ function DeleteConfirmDialog({ modelName, onConfirm, onCancel }: DeleteDialogPro
 
 // ============ Main Component ============
 
-export default function ModelManager() {
+export default function ModelManager({ userId, userEmail }: { userId?: string; userEmail?: string } = {}) {
   const { currentTheme } = useTheme();
   const { success, error, warning, info } = useNotification();
   const { setCurrentPageContent } = usePageContext();
@@ -941,6 +975,8 @@ export default function ModelManager() {
         <UnknownModelDialog
           model={unknownModel}
           mode={pluginDialogMode}
+          userId={userId}
+          userEmail={userEmail}
           onClose={() => setUnknownModel(null)}
           onAssigned={() => { setUnknownModel(null); void loadModels(); }}
         />

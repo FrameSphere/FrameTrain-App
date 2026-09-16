@@ -13,14 +13,20 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: (...a: unknown[]) => invokeMock
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 const success = vi.fn();
+const warning = vi.fn();
 vi.mock('../../contexts/NotificationContext', () => ({
-  useNotification: () => ({ success, error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+  useNotification: () => ({ success, error: vi.fn(), warning, info: vi.fn() }),
 }));
 vi.mock('../../contexts/ThemeContext', () => ({
   useTheme: () => ({ currentTheme: { colors: { gradient: 'from-purple-600 to-pink-600' } } }),
 }));
 vi.mock('../../contexts/PageContext', () => ({
   usePageContext: () => ({ setCurrentPageContent: vi.fn() }),
+}));
+
+const submitTicket = vi.fn();
+vi.mock('../../utils/supportTicket', () => ({
+  submitSupportTicket: (...a: unknown[]) => submitTicket(...a),
 }));
 
 import { UnknownModelDialog } from '../ModelManager';
@@ -32,7 +38,11 @@ const MODEL = {
 };
 
 describe('UnknownModelDialog', () => {
-  beforeEach(() => { invokeMock.mockReset(); invokeMock.mockResolvedValue(undefined); success.mockReset(); });
+  beforeEach(() => {
+    invokeMock.mockReset(); invokeMock.mockResolvedValue(undefined);
+    success.mockReset(); warning.mockReset();
+    submitTicket.mockReset(); submitTicket.mockResolvedValue({ ticket_id: 7, user_token: 't', subject: 's' });
+  });
 
   it('bietet die unterstuetzten Plugins an – ohne Canvas', () => {
     render(<UnknownModelDialog model={MODEL} onClose={vi.fn()} onAssigned={vi.fn()} />);
@@ -75,7 +85,33 @@ describe('UnknownModelDialog', () => {
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('record_plugin_request', {
       modelName: 'mein-experiment', modelType: 'pytorch', note: 'Whisper fuer Spracherkennung',
     }));
+    // Der Wunsch geht als Support-Ticket an den Manager – lokal allein haette
+    // ihn nie jemand gesehen.
+    await waitFor(() => expect(submitTicket).toHaveBeenCalled());
+    const arg = submitTicket.mock.calls[0][0] as Record<string, string>;
+    expect(arg.subject).toContain('mein-experiment');
+    expect(arg.message).toContain('Whisper fuer Spracherkennung');
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('sagt es, wenn der Manager nicht erreichbar ist – statt Erfolg zu melden', async () => {
+    submitTicket.mockRejectedValue(new Error('offline'));
+    render(<UnknownModelDialog model={MODEL} onClose={vi.fn()} onAssigned={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('Keins davon passt'));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Segmentierung mit SAM' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Wunsch speichern' }));
+
+    // Lokal gespeichert ist er trotzdem.
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('record_plugin_request', expect.anything()));
+    await waitFor(() => expect(warning).toHaveBeenCalled());
+    expect(success).not.toHaveBeenCalled();
+  });
+
+  it('nennt vor dem Senden, was rausgeht', () => {
+    render(<UnknownModelDialog model={MODEL} onClose={vi.fn()} onAssigned={vi.fn()} />);
+    fireEvent.click(screen.getByText('Keins davon passt'));
+    expect(screen.getByText(/Gesendet werden der Modellname/)).toBeTruthy();
   });
 
   it('laesst eine falsche Erkennung korrigieren und wieder zuruecknehmen', async () => {

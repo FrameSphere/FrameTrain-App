@@ -53,7 +53,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
       case 'home':
         return <HomePanel userEmail={userData.email} userId={userData.userId} />;
       case 'models':
-        return <ModelManager />;
+        return <ModelManager userId={userData.userId} userEmail={userData.email} />;
       case 'training':
         return (
           <TrainingPanel

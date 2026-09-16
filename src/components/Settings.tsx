@@ -31,11 +31,7 @@ interface SupportMessage {
   created_at: string;
 }
 
-interface StoredTicket {
-  ticket_id: number;
-  user_token: string;
-  subject: string;
-}
+
 
 interface SupportTicket {
   id: number;
@@ -68,26 +64,15 @@ const STATUS_COLOR: Record<string, string> = {
 
 // PROVIDER_META ist zentral definiert in src/ai/providerMeta.ts
 
-const MANAGER_API = 'https://webcontrol-hq-api.karol-paschek.workers.dev';
+import {
+  MANAGER_API, readStoredTickets, submitSupportTicket, type StoredTicket,
+} from '../utils/supportTicket';
 
 // Support hook – persists ticket list in localStorage
 function useStoredTickets(userId: string) {
-  const key = `ft_tickets_${userId || 'anon'}`;
-
-  const getAll = useCallback((): StoredTicket[] => {
-    try {
-      return JSON.parse(localStorage.getItem(key) || '[]');
-    } catch {
-      return [];
-    }
-  }, [key]);
-
-  const add = useCallback((t: StoredTicket) => {
-    const list = getAll().filter(x => x.ticket_id !== t.ticket_id);
-    localStorage.setItem(key, JSON.stringify([t, ...list]));
-  }, [key, getAll]);
-
-  return { getAll, add };
+  // Das Ablegen uebernimmt submitSupportTicket selbst; hier wird nur gelesen.
+  const getAll = useCallback((): StoredTicket[] => readStoredTickets(userId), [userId]);
+  return { getAll };
 }
 
 // ── Duplicate Community Name Error Modal ──────────────────────────────────
@@ -231,7 +216,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [systemInstallProgress, setSystemInstallProgress] = useState<Map<string, InstallProgress>>(new Map());
   const [systemInstallError, setSystemInstallError] = useState<string>('');
 
-  const { getAll, add } = useStoredTickets(userData.userId);
+  const { getAll } = useStoredTickets(userData.userId);
 
   const loadSystemInfo = useCallback(async () => {
     setSystemLoading(true);
@@ -526,26 +511,12 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(`${MANAGER_API}/api/support/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userData.userId,
-          name: userData.email?.split('@')[0] || 'FrameTrain User',
-          email: userData.email || '',
-          subject: newSubject.trim(),
-          message: newMessage.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error();
-
-      const stored: StoredTicket = {
-        ticket_id: data.ticket_id,
-        user_token: data.user_token,
+      const stored = await submitSupportTicket({
+        userId: userData.userId,
+        email: userData.email,
         subject: newSubject.trim(),
-      };
-      add(stored);
+        message: newMessage.trim(),
+      });
       setStoredTickets(getAll());
       setNewSubject('');
       setNewMessage('');

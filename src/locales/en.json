@@ -646,7 +646,7 @@
       "requestPlaceholder": "e.g. \"Whisper for speech recognition\" or \"segmentation with SAM\"",
       "sendRequest": "Save request",
       "requestSentTitle": "Thanks — noted",
-      "requestSentDetail": "Your plugin request is saved and feeds into the roadmap.",
+      "requestSentDetail": "Your plugin request reached the FrameTrain team as a support ticket. You'll find the reply under Settings > Support.",
       "pluginDesc": {
         "yolo": "Object detection with bounding boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Also for trained best.pt files.",
         "hf-image-classification": "Image classification with a downloaded HuggingFace vision model (ViT, DeiT, ConvNeXt, Swin, ResNet).",
@@ -660,7 +660,12 @@
       "changeDescription": "For \"{name}\" (detected type: {type}) you can set the plugin yourself — for instance when automatic detection gets it wrong.",
       "clear": "Remove assignment",
       "clearedTitle": "Assignment removed",
-      "clearedDetail": "\"{model}\" follows automatic detection again."
+      "clearedDetail": "\"{model}\" follows automatic detection again.",
+      "requestOfflineTitle": "Saved locally only",
+      "requestOfflineDetail": "The manager couldn't be reached. Your request is stored on this machine; send it later via Settings > Support.",
+      "sendNotice": "What gets sent: the model name, the detected type and your text — as a support ticket to the FrameTrain team, with your account address for the reply.",
+      "ticketSubject": "Plugin request: {name}",
+      "ticketBody": "Model: {name}\nDetected type: {type}\n\nRequested plugin:\n{note}"
     },
     "changePlugin": "change"
   },

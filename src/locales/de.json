@@ -646,7 +646,7 @@
       "requestPlaceholder": "z. B. \"Whisper für Spracherkennung\" oder \"Segmentierung mit SAM\"",
       "sendRequest": "Wunsch speichern",
       "requestSentTitle": "Danke — notiert",
-      "requestSentDetail": "Dein Plugin-Wunsch ist gespeichert und fließt in die Planung ein.",
+      "requestSentDetail": "Dein Plugin-Wunsch ist als Support-Ticket beim FrameTrain-Team angekommen. Die Antwort findest du in den Einstellungen unter Support.",
       "pluginDesc": {
         "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Auch für trainierte best.pt-Dateien.",
         "hf-image-classification": "Bildklassifikation mit einem heruntergeladenen HuggingFace-Bildmodell (ViT, DeiT, ConvNeXt, Swin, ResNet).",
@@ -660,7 +660,12 @@
       "changeDescription": "Für \"{name}\" (erkannter Typ: {type}) kannst du das Plugin selbst festlegen — etwa wenn die automatische Erkennung danebenliegt.",
       "clear": "Zuordnung entfernen",
       "clearedTitle": "Zuordnung entfernt",
-      "clearedDetail": "Für \"{model}\" zählt wieder die automatische Erkennung."
+      "clearedDetail": "Für \"{model}\" zählt wieder die automatische Erkennung.",
+      "requestOfflineTitle": "Nur lokal gespeichert",
+      "requestOfflineDetail": "Der Manager war nicht erreichbar. Dein Wunsch liegt auf diesem Rechner; schick ihn bei Gelegenheit über Einstellungen > Support.",
+      "sendNotice": "Gesendet werden der Modellname, der erkannte Typ und dein Text — als Support-Ticket an das FrameTrain-Team, mit deiner Kontoadresse für die Antwort.",
+      "ticketSubject": "Plugin-Wunsch: {name}",
+      "ticketBody": "Modell: {name}\nErkannter Typ: {type}\n\nGewünschtes Plugin:\n{note}"
     },
     "changePlugin": "ändern"
   },
