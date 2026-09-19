@@ -3077,7 +3077,7 @@
     "projects": {
       "newButton": "Neues Projekt",
       "emptyTitle": "Noch kein Projekt",
-      "emptyDetail": "Ein Projekt haelt Bilder, Klassen und Boxen an einer Stelle zusammen. Ein fertiger Datensatz wird erst beim Export daraus.",
+      "emptyDetail": "Ein Projekt hält Bilder, Klassen und Boxen an einer Stelle zusammen. Ein fertiger Datensatz wird erst beim Export daraus.",
       "cardMeta": "{samples} Bilder · {confirmed} bestätigt · {classes} Klassen",
       "updated": "Zuletzt bearbeitet {date}",
       "delete": "Löschen",
@@ -3113,12 +3113,19 @@
       "addClass": "Klasse hinzufügen",
       "confirm": "Bestätigen",
       "skip": "Überspringen",
-      "deleteBox": "Box löschen"
+      "deleteBox": "Box löschen",
+      "suggestButton": "Vorschlagen",
+      "reviewButton": "Prüfen",
+      "undo": "Rückgängig",
+      "copyPrevious": "Vom vorigen Bild",
+      "copyPreviousHint": "Boxen des vorigen Bildes übernehmen (V)",
+      "videoButton": "Video"
     },
     "filter": {
       "all": "Alle",
       "open": "Offen",
-      "confirmed": "Fertig"
+      "confirmed": "Fertig",
+      "doubt": "Zweifel"
     },
     "stats": {
       "title": "Stand",
@@ -3126,7 +3133,8 @@
       "open": "Offen",
       "skipped": "Übersprungen",
       "boxes": "Boxen",
-      "emptyConfirmed": "{count} bestätigte Bilder haben keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht."
+      "emptyConfirmed": "{count} bestätigte Bilder haben keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
+      "doubts": "Widersprüche"
     },
     "shortcuts": {
       "title": "Tastatur",
@@ -3134,7 +3142,10 @@
       "confirm": "Enter — bestätigen und weiter",
       "skip": "S — überspringen",
       "back": "Pfeiltasten — blättern",
-      "delete": "Entf — ausgewählte Box löschen"
+      "delete": "Entf — ausgewählte Box löschen",
+      "undo": "Cmd+Z — Rückgängig",
+      "copy": "V — Boxen vom vorigen Bild",
+      "zoom": "+ und − — Zoom, 0 setzt zurück"
     },
     "import": {
       "dialogTitle": "Bildordner wählen",
@@ -3142,7 +3153,25 @@
       "doneTitle": "Import abgeschlossen",
       "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit vorhandenen Labels, {unreadable} unlesbar",
       "classesTitle": "Klassen aus dem Ordner übernommen",
-      "errorTitle": "Import fehlgeschlagen"
+      "errorTitle": "Import fehlgeschlagen",
+      "classDialogTitle": "Zu welcher Klassenliste gehören diese Labels?",
+      "classDialogSummary": "{images} Bilder, davon {labels} mit Labeldatei. Die Labels verwenden {ids} Klassen-IDs.",
+      "classDialogWhy": "In einer Labeldatei steht nur eine Zahl. Ohne die Liste, zu der sie gehört, wird aus einem Baum der Quelle schnell ein Ski im Projekt — und das fällt erst im Training auf.",
+      "optionFolder": "Liste aus dem Ordner ({count} Namen)",
+      "optionFolderMissing": "Der Ordner enthält keine classes.txt, obj.names oder data.yaml",
+      "optionModel": "Namen aus einem trainierten Modell",
+      "optionModelHint": "Das Modell, mit dem der Datensatz entstanden ist, kennt die Reihenfolge",
+      "optionManual": "Selbst eingeben",
+      "optionManualHint": "Ein Name je Zeile oder mit Komma getrennt, in der Reihenfolge der IDs",
+      "manualPlaceholder": "Tree, Stone, Person, …",
+      "optionIgnore": "Labels weglassen, nur die Bilder übernehmen",
+      "optionIgnoreHint": "Die Bilder kommen unbeschriftet an und werden hier neu gelabelt",
+      "loadClasses": "Laden",
+      "classesFromModelError": "Klassen des Modells konnten nicht gelesen werden",
+      "tooShort": "Die Liste hat {have} Namen, die Labels brauchen {need}. Die fehlenden bekommen einen Platzhalter.",
+      "startButton": "Importieren",
+      "unknownIdsTitle": "Klassen-IDs ohne Namen",
+      "unknownIdsDetail": "Für diese IDs war die Liste zu kurz: {ids}. Sie heißen jetzt „Klasse <ID>“ und lassen sich umbenennen."
     },
     "export": {
       "title": "Als Datensatz exportieren",
@@ -3156,11 +3185,65 @@
       "confirmButton": "Exportieren",
       "doneTitle": "Datensatz angelegt",
       "doneDetail": "\"{name}\" liegt jetzt im Dataset-Bereich. Aufteilen mit dem Split dort.",
-      "errorTitle": "Export fehlgeschlagen"
+      "errorTitle": "Export fehlgeschlagen",
+      "splitLabel": "Beim Export in train, val und test aufteilen",
+      "ratios": "{train} % Training, {val} % Validierung, {test} % Test",
+      "splitGroupNote": "Bilder derselben Gruppe (etwa eines Videos) bleiben zusammen."
     },
     "notifications": {
       "loadError": "Laden fehlgeschlagen",
       "saveError": "Speichern fehlgeschlagen"
+    },
+    "suggest": {
+      "title": "Vorschlagen lassen",
+      "subtitle": "Ein trainiertes Modell läuft über die offenen Bilder und legt Boxen hin. Bestätigen ist schneller als zeichnen.",
+      "modelLabel": "Modell-Version",
+      "noVersions": "Keine trainierte Version vorhanden",
+      "confidenceLabel": "Ab welcher Konfidenz übernehmen: {value} Prozent",
+      "addUnknown": "Klassen, die das Modell kennt und das Projekt nicht, neu anlegen",
+      "safetyNote": "Bestätigte Bilder werden nicht angefasst. Vorschläge gelten als ungeprüft, bis du sie mit Enter bestätigst.",
+      "runButton": "Starten",
+      "progress": "{current} von {total}",
+      "hint": "Vorschlag des Modells — Enter übernimmt, Boxen lassen sich vorher ändern",
+      "errorTitle": "Vorschlagen fehlgeschlagen",
+      "report": {
+        "withBoxes": "Bilder mit Vorschlag",
+        "boxes": "Vorgeschlagene Boxen",
+        "withoutBoxes": "Ohne Fund, bleiben offen",
+        "leftConfirmed": "Bestätigt, nicht angefasst",
+        "failed": "Fehlgeschlagen",
+        "unmappedTitle": "Klassen ohne Entsprechung im Projekt",
+        "unmappedHint": "Diese Boxen wurden weggelassen. Lege die Klasse im Projekt an oder starte erneut mit der Option oben.",
+        "classesAdded": "Neu angelegt",
+        "close": "Fertig"
+      }
+    },
+    "review": {
+      "title": "Labels prüfen lassen",
+      "subtitle": "Das Modell sieht sich die bestätigten Bilder an. Wo es widerspricht, steckt oft ein Fehler im Label.",
+      "safetyNote": "Es wird nichts geändert, nur markiert. Die markierten Bilder findest du danach im Filter „Zweifel“.",
+      "needsConfirmed": "Erst Bilder bestätigen, dann prüfen",
+      "errorTitle": "Prüfen fehlgeschlagen",
+      "missing": "Modell sieht zusätzlich: {classes}",
+      "extra": "im Label, aber nicht gefunden: {classes}",
+      "report": {
+        "checked": "Geprüfte Bilder",
+        "doubts": "Widersprüche",
+        "agree": "Einig",
+        "hint": "Die Bilder mit Widerspruch stehen jetzt im Filter „Zweifel“ in der Warteschlange."
+      }
+    },
+    "video": {
+      "title": "Einzelbilder aus Video",
+      "dialogTitle": "Video wählen",
+      "everyNLabel": "Jedes {n}. Bild übernehmen",
+      "everyNHint": "Aufeinanderfolgende Bilder sind sich zu ähnlich, um einzeln etwas beizutragen. Bei 30 Bildern je Sekunde ist 15 etwa ein halbsekündlicher Abstand.",
+      "maxLabel": "Höchstens so viele Bilder",
+      "groupNote": "Alle Bilder dieses Videos gehören zusammen. Beim Export landen sie im selben Teil, damit die Validierung aussagekräftig bleibt.",
+      "runButton": "Bilder holen",
+      "doneTitle": "Bilder aus Video übernommen",
+      "doneDetail": "{added} neu, {duplicates} doppelt",
+      "errorTitle": "Video konnte nicht gelesen werden"
     }
   }
 }

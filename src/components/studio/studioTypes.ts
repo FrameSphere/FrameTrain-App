@@ -26,17 +26,22 @@ export interface StudioSample {
   src:      { kind: string; origin?: string | null; license?: string | null; at: string };
   meta:     { w: number; h: number; group?: string | null };
   abs_path: string;
+  doubt?:   Doubt | null;
 }
 
 export interface SamplePage { total: number; items: StudioSample[]; }
 
 export interface ImportReport {
-  added:         number;
-  duplicates:    number;
-  unreadable:    number;
-  with_labels:   number;
-  classes_added: string[];
+  added:          number;
+  duplicates:     number;
+  unreadable:     number;
+  with_labels:    number;
+  classes_added:  string[];
+  unknown_ids:    number[];
+  labels_ignored: number;
 }
+
+export interface Doubt { missing: string[]; extra: string[]; at: string; }
 
 export interface StudioStats {
   total:           number;
@@ -47,4 +52,5 @@ export interface StudioStats {
   boxes_total:     number;
   per_class:       number[];
   empty_confirmed: number;
+  doubts:          number;
 }

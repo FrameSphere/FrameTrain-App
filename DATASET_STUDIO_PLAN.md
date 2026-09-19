@@ -1,6 +1,6 @@
 # FrameTrain Dataset Studio – Systemplanung
 
-Stand: 2026-09-16 — Phase S1 gebaut, S2 bis S6 offen
+Stand: 2026-09-20 — Beta: S1, S2, Qualitaetspruefung und Video-Erfassung gebaut
 Ergaenzt `DATASET_ROADMAP.md`: dort geht es um *vorhandene* Datensaetze (erkennen,
 splitten, importieren), hier um das *Erzeugen* neuer Datensaetze.
 
@@ -189,7 +189,7 @@ Writer: `yolo_bbox`, `coco_json`, `folder_class`, `flat_file` (jsonl/csv),
 | Phase | Inhalt | Aufwand |
 |---|---|---|
 | S1 | Projekt-Ablage, Button, Shell, Import + manuelles Bild-Labeln (Boxen), YOLO-Export | **fertig** |
-| S2 | Regeln (Stufe 1) + Modellvorschlaege (Stufe 2) + Zweifel-Queue | mittel |
+| S2 | Modellvorschlaege (Stufe 2) — **fertig**; Regeln (Stufe 1) und Zweifel-Queue offen | mittel |
 | S3 | Zweite/dritte Modalitaet (Text-Editor, Audio-Aufnahme) | mittel |
 | S4 | Assist-Modelle (Stufe 3) ueber den Plugin-Installer | mittel |
 | S5 | Aktives Lernen (Stufe 4) + `lab_export_as_dataset` anschliessen | mittel |
@@ -245,3 +245,74 @@ mitgeschrieben, ausgewertet wird es erst mit dem gruppenbewussten Split.
 
 **Noch offen in S1:** eine Pruefung an einer echten Release-Installation mit
 grossen Ordnern (Hashing-Dauer, fluessiges Blaettern ab etwa 10 000 Bildern).
+
+---
+
+## 12. Was in S2 dazugekommen ist
+
+`studio_suggest` laesst eine trainierte Version ueber alle noch offenen Bilder
+laufen. Benutzt wird derselbe Inferenz-Server wie im Labor
+(`yolo_inference_server.py`, stdin/stdout) — ein zweiter Weg zum Modell waere
+ein zweiter Weg, auf dem etwas anderes herauskommen kann.
+
+- Bestaetigte Bilder werden nie angefasst; der Bericht sagt, wie viele das waren.
+- Ein Treffer unterhalb der eingestellten Konfidenz wird verworfen (Regler 5 bis
+  95 Prozent, Standard 25).
+- Findet das Modell nichts, bleibt das Bild offen statt als "nichts drauf"
+  vorgeschlagen zu werden — sonst drueckt man ein uebersehenes Objekt weg.
+- Vorschlaege bekommen den Status `suggested` und werden gestrichelt gezeichnet;
+  Enter macht daraus eine Bestaetigung.
+- Klassenzuordnung ueber die Namen, ohne Ruecksicht auf Gross- und
+  Kleinschreibung (`class_index_for`). Am echten Ski-Modell gepruft: es meldet
+  Tree, Person, Generallobstacle, im Projekt stehen tree, person,
+  generallobstacle — bei genauem Vergleich haette von sechs Projektklassen genau
+  eine getroffen. Klassen ohne Entsprechung werden im Bericht genannt und ihre
+  Boxen weggelassen, oder auf Wunsch neu angelegt.
+
+Gegen den echten Checkpoint gemessen (13 Modellklassen, 512x512): Sky 0.94,
+Tree 0.83, Tree 0.67 werden uebernommen, Offroad 0.72 faellt als unbekannte
+Klasse heraus und steht im Bericht.
+
+**Noch offen in S2:** Regeln (Ordner-/Dateiname, Regex) als Stufe 1 und die
+Zweifel-Queue ("Modell widerspricht dem bestaetigten Label").
+
+---
+
+## 13. Beta-Stand (1.2.87)
+
+Nach dem ersten echten Einsatz mit dem Ski-Projekt kamen vier Dinge dazu, in
+dieser Reihenfolge:
+
+**Klassenliste beim Import.** Labeldateien enthalten nur Zahlen. Lagen im
+Quellordner keine Namen (kein classes.txt, keine data.yaml), legte der Import
+die IDs stillschweigend auf die Klassenliste des Projekts — aus "Tree" der
+Quelle wurde "Ski" im Projekt. Jetzt sieht `studio_inspect_folder` erst nach,
+und bringt der Ordner Labels ohne Liste, fragt die App: Liste aus dem Ordner,
+Namen aus einem trainierten Modell (`studio_model_classes` liest sie aus dem
+Checkpoint), selbst eingeben, oder Labels weglassen. Abgebildet wird ueber
+`remap_boxes` immer ueber **Namen**, nie ueber Zahlen. Ohne Liste verweigert
+das Backend den Import, statt zu raten.
+
+**Zweifel-Queue.** `studio_review` laesst ein Modell ueber die bereits
+bestaetigten Bilder laufen und vergleicht Klassenmengen (`compare_class_sets`:
+drei Baeume statt zwei sind kein Widerspruch, ein fehlender Lift schon). Die
+Treffer stehen in doubts.json und sind ueber den Filter "Zweifel" erreichbar.
+Geaendert wird nichts, nur markiert. Bei uebernommenen Fremdlabels findet das
+mehr als jedes neue Label.
+
+**Durchsatz im Editor.** Rueckgaengig (Cmd+Z) ueber einen Stapel je Bild,
+"Boxen vom vorigen Bild uebernehmen" (V) fuer aufeinanderfolgende Aufnahmen,
+Zoom (+ / − / 0) fuer kleine Objekte.
+
+**Video.** `extract_frames.py` (OpenCV) schreibt jedes n-te Bild eines Videos;
+`studio_import_video` nimmt sie mit dem Videonamen als `meta.group` auf. Damit
+verdient sich die Gruppe ihren Platz: `assign_splits` teilt beim Export
+gruppenbewusst auf, eine Gruppe landet nie in Train und Val gleichzeitig. Der
+Export schreibt dann images/<split>/ + labels/<split>/ — das Layout, das der
+Dataset-Import als fertig aufgeteilt erkennt.
+
+**Zahlen:** 96 Rust-Tests, 620 Frontend-Tests, 4 Python-Testdateien gruen.
+
+**Was fuer den echten Test noch fehlt:** ein Lauf mit den 463 Bildern (Dauer
+des Imports, Fluessigkeit der Warteschlange) und ein Vorschlags-Lauf ueber
+mehr als eine Handvoll Bilder.

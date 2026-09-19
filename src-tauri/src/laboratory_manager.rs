@@ -94,7 +94,7 @@ fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) -> Result<S
 
 /// Liefert (Versions-Pfad, model_id) — model_id wird für Canvas-Modelle gebraucht,
 /// deren Inferenz-Dateien im Modell-Ordner liegen (nicht zwingend im Versions-Pfad).
-fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) -> Result<(String, String), String> {
+pub(crate) fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) -> Result<(String, String), String> {
     let db_path = app_handle.path().app_data_dir()
         .map_err(|e| format!("AppDataDir: {}", e))?
         .join("frametrain.db");
@@ -109,7 +109,7 @@ fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) -> Result<(
 
 /// Script für Canvas-Modelle (gleiches stdin/stdout-Protokoll wie model_server.py)
 /// Pfad zum YOLO-Server – dritter Servertyp neben HuggingFace und Canvas.
-fn get_yolo_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn get_yolo_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let rel = std::path::Path::new("python").join("train_engine").join("plugins")
         .join("yolo").join("yolo_inference_server.py");
     let candidates = vec![
@@ -815,6 +815,8 @@ pub async fn lab_export_corrections(
                         norm_box_of(class_id, b, w, h)
                     })
                     .collect(),
+                // Korrekturen sind zu wenige, um sie sinnvoll aufzuteilen.
+                split: None,
             });
         }
 

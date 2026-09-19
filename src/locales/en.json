@@ -3113,12 +3113,19 @@
       "addClass": "Add class",
       "confirm": "Confirm",
       "skip": "Skip",
-      "deleteBox": "Delete box"
+      "deleteBox": "Delete box",
+      "suggestButton": "Suggest",
+      "reviewButton": "Check",
+      "undo": "Undo",
+      "copyPrevious": "From previous",
+      "copyPreviousHint": "Take the boxes from the previous image (V)",
+      "videoButton": "Video"
     },
     "filter": {
       "all": "All",
       "open": "Open",
-      "confirmed": "Done"
+      "confirmed": "Done",
+      "doubt": "Doubt"
     },
     "stats": {
       "title": "State",
@@ -3126,7 +3133,8 @@
       "open": "Open",
       "skipped": "Skipped",
       "boxes": "Boxes",
-      "emptyConfirmed": "{count} confirmed images have no box. Correct as negative examples, rarely intended otherwise."
+      "emptyConfirmed": "{count} confirmed images have no box. Correct as negative examples, rarely intended otherwise.",
+      "doubts": "Disagreements"
     },
     "shortcuts": {
       "title": "Keyboard",
@@ -3134,7 +3142,10 @@
       "confirm": "Enter — confirm and continue",
       "skip": "S — skip",
       "back": "Arrow keys — page through",
-      "delete": "Del — delete selected box"
+      "delete": "Del — delete selected box",
+      "undo": "Cmd+Z — undo",
+      "copy": "V — boxes from the previous image",
+      "zoom": "+ and − — zoom, 0 resets"
     },
     "import": {
       "dialogTitle": "Choose image folder",
@@ -3142,7 +3153,25 @@
       "doneTitle": "Import finished",
       "doneDetail": "{added} new, {duplicates} duplicate, {labels} with existing labels, {unreadable} unreadable",
       "classesTitle": "Classes taken from the folder",
-      "errorTitle": "Import failed"
+      "errorTitle": "Import failed",
+      "classDialogTitle": "Which class list do these labels belong to?",
+      "classDialogSummary": "{images} images, {labels} of them with a label file. The labels use {ids} class IDs.",
+      "classDialogWhy": "A label file holds nothing but a number. Without the list it belongs to, a tree in the source quietly becomes a ski in the project — and that only shows up during training.",
+      "optionFolder": "List from the folder ({count} names)",
+      "optionFolderMissing": "The folder has no classes.txt, obj.names or data.yaml",
+      "optionModel": "Names from a trained model",
+      "optionModelHint": "The model the dataset was built with knows the order",
+      "optionManual": "Enter them yourself",
+      "optionManualHint": "One name per line or comma separated, in ID order",
+      "manualPlaceholder": "Tree, Stone, Person, …",
+      "optionIgnore": "Leave the labels out, take only the images",
+      "optionIgnoreHint": "The images arrive unlabelled and get labelled here",
+      "loadClasses": "Load",
+      "classesFromModelError": "Could not read the model's classes",
+      "tooShort": "The list has {have} names, the labels need {need}. The missing ones get a placeholder.",
+      "startButton": "Import",
+      "unknownIdsTitle": "Class IDs without a name",
+      "unknownIdsDetail": "The list was too short for these IDs: {ids}. They are named after their ID now and can be renamed."
     },
     "export": {
       "title": "Export as dataset",
@@ -3156,11 +3185,65 @@
       "confirmButton": "Export",
       "doneTitle": "Dataset created",
       "doneDetail": "\"{name}\" is now in the dataset area. Split it there.",
-      "errorTitle": "Export failed"
+      "errorTitle": "Export failed",
+      "splitLabel": "Split into train, val and test on export",
+      "ratios": "{train} % training, {val} % validation, {test} % test",
+      "splitGroupNote": "Images of the same group (a video, for instance) stay together."
     },
     "notifications": {
       "loadError": "Loading failed",
       "saveError": "Saving failed"
+    },
+    "suggest": {
+      "title": "Let the model suggest",
+      "subtitle": "A trained model runs over the open images and places boxes. Confirming is faster than drawing.",
+      "modelLabel": "Model version",
+      "noVersions": "No trained version available",
+      "confidenceLabel": "Take boxes from this confidence: {value} percent",
+      "addUnknown": "Create classes the model knows and the project does not",
+      "safetyNote": "Confirmed images are left untouched. Suggestions count as unreviewed until you confirm them with Enter.",
+      "runButton": "Start",
+      "progress": "{current} of {total}",
+      "hint": "Model suggestion — Enter accepts it, boxes can be adjusted first",
+      "errorTitle": "Suggesting failed",
+      "report": {
+        "withBoxes": "Images with a suggestion",
+        "boxes": "Suggested boxes",
+        "withoutBoxes": "Nothing found, still open",
+        "leftConfirmed": "Confirmed, left untouched",
+        "failed": "Failed",
+        "unmappedTitle": "Classes with no match in the project",
+        "unmappedHint": "Those boxes were left out. Add the class to the project, or run again with the option above.",
+        "classesAdded": "Newly created",
+        "close": "Done"
+      }
+    },
+    "review": {
+      "title": "Have the labels checked",
+      "subtitle": "The model looks at the confirmed images. Where it disagrees, the label is often wrong.",
+      "safetyNote": "Nothing is changed, only marked. You will find the marked images under the „Doubt“ filter.",
+      "needsConfirmed": "Confirm images first, then check",
+      "errorTitle": "Check failed",
+      "missing": "model also sees: {classes}",
+      "extra": "in the label but not found: {classes}",
+      "report": {
+        "checked": "Images checked",
+        "doubts": "Disagreements",
+        "agree": "In agreement",
+        "hint": "The images with a disagreement are now under the „Doubt“ filter in the queue."
+      }
+    },
+    "video": {
+      "title": "Frames from video",
+      "dialogTitle": "Choose video",
+      "everyNLabel": "Take every {n}th frame",
+      "everyNHint": "Consecutive frames are too alike to each add something. At 30 frames per second, 15 is roughly half a second apart.",
+      "maxLabel": "At most this many frames",
+      "groupNote": "All frames of this video belong together. On export they land in the same part, so validation stays meaningful.",
+      "runButton": "Extract frames",
+      "doneTitle": "Frames taken from video",
+      "doneDetail": "{added} new, {duplicates} duplicate",
+      "errorTitle": "The video could not be read"
     }
   }
 }

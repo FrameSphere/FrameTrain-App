@@ -295,10 +295,15 @@ fn main() {
             studio_manager::studio_create_project,
             studio_manager::studio_update_project,
             studio_manager::studio_delete_project,
+            studio_manager::studio_inspect_folder,
+            studio_manager::studio_model_classes,
             studio_manager::studio_import_folder,
+            studio_manager::studio_import_video,
             studio_manager::studio_list_samples,
             studio_manager::studio_set_annotation,
             studio_manager::studio_stats,
+            studio_manager::studio_suggest,
+            studio_manager::studio_review,
             studio_manager::studio_export,
         ])
         .on_window_event(|window, event| {

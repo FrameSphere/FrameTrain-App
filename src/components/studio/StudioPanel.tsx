@@ -46,7 +46,10 @@ export default function StudioPanel() {
       <ImageWorkbench
         project={openProject}
         onBack={() => { setOpenId(null); void load(); }}
-        onProjectChanged={p => setProjects(prev => prev.map(x => (x.id === p.id ? p : x)))}
+        // Zusammenfuehren statt ersetzen: studio_update_project liefert das
+        // Projekt ohne die live gezaehlten Staende, ein Ersetzen wuerde die
+        // Karte auf 0 zuruecksetzen.
+        onProjectChanged={p => setProjects(prev => prev.map(x => (x.id === p.id ? { ...x, ...p } : x)))}
       />
     );
   }

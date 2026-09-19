@@ -22,6 +22,11 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{channel, Receiver};
+use std::time::Duration;
+
+use crate::command_ext::{NoWindow, PythonUtf8};
 
 use chrono::Utc;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -47,11 +52,21 @@ pub struct StudioProject {
     pub classes:       Vec<String>,
     pub created_at:    String,
     pub updated_at:    String,
-    /// Live beim Auflisten gezaehlt, nie gespeichert — gespeicherte Zaehler
-    /// laufen frueher oder spaeter aus dem Tritt mit dem echten Inhalt.
-    #[serde(default, skip_serializing)]
+}
+
+/// Projekt plus die live gezaehlten Stände, wie die Liste sie zeigt.
+///
+/// Warum ein eigener Typ: die Zaehler gehoeren nicht in project.json —
+/// gespeicherte Zaehler laufen frueher oder spaeter aus dem Tritt mit dem
+/// echten Inhalt. Sie per `skip_serializing` aus dem Projekt-Typ zu nehmen
+/// hat sie auch aus der Antwort an die Oberflaeche entfernt: die Karte zeigte
+/// "0 Bilder", obwohl elf auf der Platte lagen. Ablage und Antwort sind
+/// deshalb zwei Typen.
+#[derive(Debug, Clone, Serialize)]
+pub struct StudioProjectView {
+    #[serde(flatten)]
+    pub project:         StudioProject,
     pub sample_count:    usize,
-    #[serde(default, skip_serializing)]
     pub confirmed_count: usize,
 }
 
@@ -113,6 +128,28 @@ pub struct StudioSample {
     /// Absoluter Pfad — nur fuer das Frontend, nicht gespeichert.
     #[serde(default, skip_deserializing)]
     pub abs_path: String,
+    /// Widerspruch zwischen Modell und bestaetigtem Label, falls geprueft.
+    /// Liegt in doubts.json, nicht in samples.jsonl.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub doubt: Option<Doubt>,
+}
+
+/// Was das Modell anders sieht als das bestaetigte Label.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Doubt {
+    /// Klassen, die das Modell findet und das Label nicht hat.
+    pub missing: Vec<String>,
+    /// Klassen im Label, die das Modell nicht bestaetigt.
+    pub extra:   Vec<String>,
+    pub at:      String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReviewReport {
+    pub checked: usize,
+    pub doubts:  usize,
+    pub agree:   usize,
+    pub failed:  usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +167,28 @@ pub struct ImportReport {
     pub unreadable:       usize,
     pub with_labels:      usize,
     pub classes_added:    Vec<String>,
+    /// Klassen-IDs in den Labeldateien, fuer die die Namensliste zu kurz war.
+    pub unknown_ids:      Vec<usize>,
+    /// Labels lagen da, wurden aber auf Wunsch nicht uebernommen.
+    pub labels_ignored:   usize,
+}
+
+/// Was ein Ordner mitbringt — abgefragt, bevor importiert wird.
+///
+/// Der Grund: Labeldateien enthalten nur Zahlen. Ohne die Liste, zu der diese
+/// Zahlen gehoeren, ist eine 0 bedeutungslos. Sie stillschweigend auf die
+/// Klassenliste des Projekts zu legen, macht aus einem "Tree" der Quelle ein
+/// "Ski" im Projekt — und das faellt erst im Training auf.
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderInspection {
+    pub images:            usize,
+    pub with_labels:       usize,
+    /// Aus classes.txt, obj.names oder data.yaml des Ordners.
+    pub source_classes:    Vec<String>,
+    /// Hoechste Klassen-ID, die in den gefundenen Labels vorkommt.
+    pub max_class_id:      Option<usize>,
+    /// Labels vorhanden, aber keine Liste dazu — hier muss gefragt werden.
+    pub needs_class_list:  bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -149,6 +208,8 @@ pub struct StudioStats {
     /// Boxen je Klasse, gleiche Reihenfolge wie project.classes.
     pub per_class:   Vec<usize>,
     pub empty_confirmed: usize,
+    /// Bilder, bei denen das Modell dem bestaetigten Label widerspricht.
+    pub doubts:      usize,
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -178,7 +239,7 @@ fn studio_dir(app_handle: &tauri::AppHandle, user_id: &str) -> Result<PathBuf, S
 
 fn project_dir(app_handle: &tauri::AppHandle, user_id: &str, project_id: &str) -> Result<PathBuf, String> {
     if !crate::model_manager::is_safe_id(project_id) {
-        return Err("Ungueltige Projekt-ID".to_string());
+        return Err("Ungültige Projekt-ID".to_string());
     }
     let dir = studio_dir(app_handle, user_id)?.join(project_id);
     if !dir.exists() { return Err(format!("Projekt nicht gefunden: {}", project_id)); }
@@ -220,6 +281,37 @@ fn write_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<(), String> {
 }
 
 fn samples_path(dir: &Path) -> PathBuf { dir.join("samples.jsonl") }
+fn doubts_path(dir: &Path)  -> PathBuf { dir.join("doubts.json") }
+
+/// Zweifel sind eine Momentaufnahme eines Durchlaufs, kein Verlauf — deshalb
+/// eine Datei, die jeder Lauf ersetzt, und kein angehaengtes Ereignis.
+fn load_doubts(dir: &Path) -> HashMap<String, Doubt> {
+    fs::read_to_string(doubts_path(dir)).ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn save_doubts(dir: &Path, doubts: &HashMap<String, Doubt>) -> Result<(), String> {
+    fs::write(doubts_path(dir), serde_json::to_string_pretty(doubts)
+        .map_err(|e| format!("JSON: {}", e))?)
+        .map_err(|e| format!("doubts.json: {}", e))
+}
+
+/// Mengenvergleich zweier Klassenlisten.
+///
+/// Verglichen werden Mengen, keine Reihenfolgen und keine Anzahlen: drei Baeume
+/// statt zwei sind kein Widerspruch, ein fehlender Lift schon.
+pub fn compare_class_sets(label: &[String], modell: &[String]) -> (Vec<String>, Vec<String>) {
+    let norm = |v: &[String]| -> Vec<String> {
+        let mut out: Vec<String> = v.iter().map(|s| s.trim().to_lowercase()).collect();
+        out.sort(); out.dedup(); out
+    };
+    let l = norm(label);
+    let m = norm(modell);
+    let missing = m.iter().filter(|c| !l.contains(c)).cloned().collect();
+    let extra   = l.iter().filter(|c| !m.contains(c)).cloned().collect();
+    (missing, extra)
+}
 fn events_path(dir: &Path)  -> PathBuf { dir.join("events.jsonl") }
 
 /// Basiszustand plus alle angehaengten Aenderungen.
@@ -372,6 +464,41 @@ pub fn label_paths_for_image(image: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Schreibt die Klassen-IDs einer Labeldatei auf die Klassen des Projekts um.
+///
+/// Abgebildet wird ueber den **Namen**, nie ueber die Zahl: die 0 der Quelle
+/// und die 0 des Projekts meinen im Regelfall verschiedene Dinge. Namen, die
+/// das Projekt noch nicht kennt, werden angehaengt.
+///
+/// IDs jenseits der Namensliste bekommen einen Platzhalter und werden gemeldet
+/// — stillschweigend verschwinden darf keine Box.
+pub fn remap_boxes(
+    boxes: &[BoxAnn], source_names: &[String], project_classes: &mut Vec<String>,
+) -> (Vec<BoxAnn>, Vec<String>, Vec<usize>) {
+    let mut out = Vec::with_capacity(boxes.len());
+    let mut added = Vec::new();
+    let mut unknown = Vec::new();
+    for b in boxes {
+        let name = match source_names.get(b.cls) {
+            Some(n) => n.clone(),
+            None => {
+                if !unknown.contains(&b.cls) { unknown.push(b.cls); }
+                format!("Klasse {}", b.cls)
+            }
+        };
+        let cls = match class_index_for(&name, project_classes) {
+            Some(i) => i,
+            None => {
+                project_classes.push(name.clone());
+                added.push(name);
+                project_classes.len() - 1
+            }
+        };
+        out.push(BoxAnn { cls, ..*b });
+    }
+    (out, added, unknown)
+}
+
 /// Klassennamen aus classes.txt / obj.names / data.yaml des Quellordners.
 /// FrameTrain haelt keine Klassenliste vor — sie kommt immer aus den Daten.
 pub fn read_source_classes(dir: &Path) -> Vec<String> {
@@ -453,21 +580,23 @@ fn save_project(dir: &Path, p: &StudioProject) -> Result<(), String> {
 #[tauri::command]
 pub async fn studio_list_projects(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
-) -> Result<Vec<StudioProject>, String> {
+) -> Result<Vec<StudioProjectView>, String> {
     let user_id = get_user_id(&state)?;
     let root = studio_dir(&app_handle, &user_id)?;
-    let mut out = Vec::new();
+    let mut out: Vec<StudioProjectView> = Vec::new();
     let Ok(entries) = fs::read_dir(&root) else { return Ok(out); };
     for entry in entries.flatten() {
         let dir = entry.path();
         if !dir.is_dir() { continue; }
-        let Ok(mut project) = load_project(&dir) else { continue; };
+        let Ok(project) = load_project(&dir) else { continue; };
         let samples = load_samples(&dir);
-        project.sample_count = samples.len();
-        project.confirmed_count = samples.iter().filter(|s| s.status == "confirmed").count();
-        out.push(project);
+        out.push(StudioProjectView {
+            sample_count:    samples.len(),
+            confirmed_count: samples.iter().filter(|s| s.status == "confirmed").count(),
+            project,
+        });
     }
-    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    out.sort_by(|a, b| b.project.updated_at.cmp(&a.project.updated_at));
     Ok(out)
 }
 
@@ -489,7 +618,6 @@ pub async fn studio_create_project(
         id, name, modality, task: "bbox".to_string(), target_format,
         classes: classes.into_iter().map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect(),
         created_at: now.clone(), updated_at: now,
-        sample_count: 0, confirmed_count: 0,
     };
     save_project(&dir, &project)?;
     Ok(project)
@@ -514,7 +642,7 @@ pub async fn studio_update_project(
         // Klasse schieben, weil YOLO ueber den Index geht. Daher nur anhaengen
         // und umbenennen, nie kuerzen.
         if cleaned.len() < project.classes.len() {
-            return Err("Klassen koennen umbenannt und ergaenzt, aber nicht entfernt werden".to_string());
+            return Err("Klassen können umbenannt und ergänzt, aber nicht entfernt werden".to_string());
         }
         project.classes = cleaned;
     }
@@ -577,10 +705,59 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Was liegt in dem Ordner? Wird vor dem Import gefragt, damit die Klassenfrage
+/// geklaert ist, bevor 463 Bilder falsch beschriftet im Projekt landen.
+#[tauri::command]
+pub async fn studio_inspect_folder(source_path: String) -> Result<FolderInspection, String> {
+    let src = Path::new(&source_path);
+    if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", source_path)); }
+    let files = collect_images(src);
+    if files.is_empty() { return Err("Keine Bilder in diesem Ordner gefunden".to_string()); }
+
+    let source_classes = read_source_classes(src);
+    let mut with_labels = 0usize;
+    let mut max_class_id: Option<usize> = None;
+    // Eine Stichprobe reicht, um die Frage zu beantworten; bei 50 000 Bildern
+    // soll der Dialog nicht eine Minute auf sich warten lassen.
+    for file in files.iter().take(500) {
+        for lp in label_paths_for_image(file) {
+            let Ok(text) = fs::read_to_string(&lp) else { continue; };
+            let boxes = parse_yolo_label(&text);
+            if boxes.is_empty() { break; }
+            with_labels += 1;
+            let hoechste = boxes.iter().map(|b| b.cls).max().unwrap_or(0);
+            max_class_id = Some(max_class_id.map_or(hoechste, |m: usize| m.max(hoechste)));
+            break;
+        }
+    }
+
+    Ok(FolderInspection {
+        images: files.len(),
+        with_labels,
+        needs_class_list: with_labels > 0 && source_classes.is_empty(),
+        source_classes,
+        max_class_id,
+    })
+}
+
+/// Klassennamen eines trainierten Modells, in der Reihenfolge seiner IDs.
+///
+/// Der einzige verlaessliche Weg zu den Namen eines fremden Label-Ordners:
+/// das Modell, mit dem er entstanden ist, traegt sie im Checkpoint.
+#[tauri::command]
+pub async fn studio_model_classes(
+    app_handle: tauri::AppHandle, version_id: String,
+) -> Result<Vec<String>, String> {
+    let (server, classes) = start_yolo_server(&app_handle, &version_id)?;
+    server.shutdown();
+    Ok(classes)
+}
+
 #[tauri::command]
 pub async fn studio_import_folder(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, source_path: String,
+    label_classes: Option<Vec<String>>, ignore_labels: bool,
 ) -> Result<ImportReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
@@ -595,16 +772,37 @@ pub async fn studio_import_folder(
     let mut known: std::collections::HashSet<String> =
         existing.iter().map(|s| s.media.clone()).collect();
 
-    // Klassennamen aus dem Quellordner uebernehmen, solange das Projekt noch
-    // keine hat — sonst stehen im Editor Zahlen statt Namen.
-    let source_classes = read_source_classes(src);
+    // Zu welcher Liste gehoeren die Zahlen in den Labeldateien? Vorrang hat,
+    // was der Aufrufer mitgibt (aus einem Modell oder von Hand), sonst die
+    // Liste im Ordner selbst.
+    let source_classes: Vec<String> = label_classes
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| read_source_classes(src));
+
+    // Labels ohne Namensliste: nicht raten. Eine 0 in der Labeldatei ist eine
+    // Aussage ueber eine fremde Klassenliste — fehlt sie, fehlt die Bedeutung.
+    if !ignore_labels && source_classes.is_empty() {
+        let hat_labels = files.iter().take(200).any(|f| {
+            label_paths_for_image(f).iter().any(|lp| {
+                fs::read_to_string(lp).map(|t| !parse_yolo_label(&t).is_empty()).unwrap_or(false)
+            })
+        });
+        if hat_labels {
+            return Err("Der Ordner bringt Labeldateien mit, aber keine Klassenliste. \
+                Die Zahlen darin sagen allein nicht, welche Klasse gemeint ist. \
+                Bitte die Liste angeben — aus einem trainierten Modell oder von Hand — \
+                oder die Labels beim Import weglassen.".to_string());
+        }
+    }
+
     let mut classes_added: Vec<String> = Vec::new();
     if project.classes.is_empty() && !source_classes.is_empty() {
         project.classes = source_classes.clone();
         classes_added = source_classes.clone();
     }
 
-    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0, classes_added: vec![] };
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
     let now = Utc::now().to_rfc3339();
     let total = files.len();
 
@@ -630,26 +828,28 @@ pub async fn studio_import_folder(
         // Liegt eine YOLO-Labeldatei daneben, ist das Bild bereits gelabelt.
         // Ein halb fertiges Dataset laesst sich damit weiterbearbeiten, statt
         // bei null anzufangen.
-        let mut boxes: Vec<BoxAnn> = Vec::new();
+        let mut roh: Vec<BoxAnn> = Vec::new();
         for lp in label_paths_for_image(file) {
             if let Ok(text) = fs::read_to_string(&lp) {
-                boxes = parse_yolo_label(&text);
+                roh = parse_yolo_label(&text);
                 break;
             }
         }
+        if ignore_labels && !roh.is_empty() {
+            report.labels_ignored += 1;
+            roh.clear();
+        }
+
+        // Umschreiben ueber die Namen. Ohne Namensliste waere die Zahl in der
+        // Labeldatei eine Behauptung ueber eine fremde Klassenliste.
+        let (boxes, neu, unbekannt) = remap_boxes(&roh, &source_classes, &mut project.classes);
+        classes_added.extend(neu);
+        for id in unbekannt {
+            if !report.unknown_ids.contains(&id) { report.unknown_ids.push(id); }
+        }
+
         let has_labels = !boxes.is_empty();
         if has_labels { report.with_labels += 1; }
-
-        // Klassen-IDs, fuer die es noch keinen Namen gibt, bekommen einen
-        // Platzhalter — sonst zeigt der Editor eine Box ohne Klasse.
-        if let Some(max_cls) = boxes.iter().map(|b| b.cls).max() {
-            while project.classes.len() <= max_cls {
-                let name = source_classes.get(project.classes.len()).cloned()
-                    .unwrap_or_else(|| format!("Klasse {}", project.classes.len()));
-                classes_added.push(name.clone());
-                project.classes.push(name);
-            }
-        }
 
         let sample = StudioSample {
             id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
@@ -665,6 +865,7 @@ pub async fn studio_import_folder(
             },
             meta: SampleMeta { w, h, group: None },
             abs_path: String::new(),
+            doubt: None,
         };
         append_jsonl(&samples_path(&dir), &sample)?;
         known.insert(rel);
@@ -676,6 +877,142 @@ pub async fn studio_import_folder(
     save_project(&dir, &project)?;
     let _ = app_handle.emit("studio-import-progress", serde_json::json!({
         "project_id": project_id, "current": total, "total": total, "done": true,
+    }));
+    Ok(report)
+}
+
+/// Pfad zum Skript, das Einzelbilder aus einem Video schreibt.
+fn frames_script(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let rel = Path::new("python").join("studio").join("extract_frames.py");
+    let kandidaten = [
+        app_handle.path().resource_dir().ok().map(|p| p.join(&rel)),
+        Some(PathBuf::from("src-tauri").join(&rel)),
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&rel)),
+    ];
+    for p in kandidaten.into_iter().flatten() {
+        if p.exists() { return Ok(p); }
+    }
+    Err("extract_frames.py nicht gefunden".to_string())
+}
+
+/// Einzelbilder aus einem Video ins Projekt holen.
+///
+/// Jedes Bild bekommt das Video als Gruppe. Beim Export bleibt eine Gruppe
+/// zusammen — sonst pruefte das Training gegen fast dieselben Bilder, mit
+/// denen es gelernt hat.
+#[tauri::command]
+pub async fn studio_import_video(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, video_path: String, every_n: usize, max_frames: usize,
+) -> Result<ImportReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let mut project = load_project(&dir)?;
+    let video = PathBuf::from(&video_path);
+    if !video.is_file() { return Err(format!("Video nicht gefunden: {}", video_path)); }
+
+    let gruppe = video.file_stem().map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "video".to_string());
+    let tmp = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?
+        .join("tmp").join(format!("frames_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]));
+    fs::create_dir_all(&tmp).map_err(|e| format!("Zwischenordner: {}", e))?;
+
+    let script = frames_script(&app_handle)?;
+    let python = crate::python_env::resolve_python();
+    let mut child = Command::new(&python).no_window().python_utf8()
+        .arg(script.to_string_lossy().to_string())
+        .arg("--video").arg(&video_path)
+        .arg("--out-dir").arg(tmp.to_string_lossy().to_string())
+        .arg("--every-n").arg(every_n.max(1).to_string())
+        .arg("--max-frames").arg(max_frames.clamp(1, 20000).to_string())
+        .stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Bildextraktion ließ sich nicht starten: {}", e))?;
+
+    if let Some(err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            for line in BufReader::new(err).lines().map_while(Result::ok) {
+                eprintln!("[StudioFrames] {}", line);
+            }
+        });
+    }
+
+    let mut fehler: Option<String> = None;
+    if let Some(out) = child.stdout.take() {
+        for line in BufReader::new(out).lines().map_while(Result::ok) {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
+            match v.get("type").and_then(|t| t.as_str()) {
+                Some("progress") => {
+                    let _ = app_handle.emit("studio-import-progress", serde_json::json!({
+                        "project_id": project_id,
+                        "current": v.get("current").and_then(|x| x.as_u64()).unwrap_or(0),
+                        "total": v.get("total").and_then(|x| x.as_u64()).unwrap_or(0),
+                    }));
+                }
+                Some("error") => {
+                    fehler = Some(v.get("message").and_then(|m| m.as_str())
+                        .unwrap_or("Bildextraktion fehlgeschlagen").to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    let _ = child.wait();
+    if let Some(msg) = fehler {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err(msg);
+    }
+
+    // Die geschriebenen Bilder wie einen Ordnerimport aufnehmen, nur ohne
+    // Labelsuche — frische Einzelbilder bringen keine mit.
+    let files = collect_images(&tmp);
+    let existing = load_samples(&dir);
+    let mut known: std::collections::HashSet<String> =
+        existing.iter().map(|s| s.media.clone()).collect();
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
+    let now = Utc::now().to_rfc3339();
+
+    for file in &files {
+        let Ok(bytes) = fs::read(file) else { report.unreadable += 1; continue; };
+        let Some((w, h)) = image_dimensions(&bytes) else { report.unreadable += 1; continue; };
+        let hash = sha256_hex(&bytes);
+        let rel = format!("{}/{}.jpg", &hash[..2], &hash);
+        if known.contains(&rel) { report.duplicates += 1; continue; }
+
+        let target = dir.join("media").join(&rel);
+        if let Some(parent) = target.parent() { fs::create_dir_all(parent).ok(); }
+        if !target.exists() {
+            fs::write(&target, &bytes).map_err(|e| format!("Kopieren: {}", e))?;
+        }
+
+        append_jsonl(&samples_path(&dir), &StudioSample {
+            id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+            media: rel.clone(),
+            mime: "image/jpeg".to_string(),
+            status: "new".to_string(),
+            ann: Annotation::default(),
+            src: SampleSource {
+                kind: "video".to_string(),
+                origin: Some(format!("{} ({})", video_path,
+                    file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())),
+                license: None,
+                at: now.clone(),
+            },
+            meta: SampleMeta { w, h, group: Some(gruppe.clone()) },
+            abs_path: String::new(),
+            doubt: None,
+        })?;
+        known.insert(rel);
+        report.added += 1;
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)?;
+    let _ = app_handle.emit("studio-import-progress", serde_json::json!({
+        "project_id": project_id, "current": files.len(), "total": files.len(), "done": true,
     }));
     Ok(report)
 }
@@ -693,9 +1030,11 @@ pub async fn studio_list_samples(
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let media_dir = dir.join("media");
     let all = load_samples(&dir);
+    let doubts = load_doubts(&dir);
     let filtered: Vec<&StudioSample> = match status.as_deref() {
         None | Some("") | Some("all") => all.iter().collect(),
         Some("open") => all.iter().filter(|s| s.status == "new" || s.status == "suggested").collect(),
+        Some("doubt") => all.iter().filter(|s| doubts.contains_key(&s.id)).collect(),
         Some(st) => all.iter().filter(|s| s.status == st).collect(),
     };
     let total = filtered.len();
@@ -703,6 +1042,7 @@ pub async fn studio_list_samples(
         .map(|s| {
             let mut c = s.clone();
             c.abs_path = media_dir.join(&s.media).to_string_lossy().to_string();
+            c.doubt = doubts.get(&s.id).cloned();
             c
         })
         .collect();
@@ -743,6 +1083,7 @@ pub async fn studio_stats(
     let mut stats = StudioStats {
         total: samples.len(), new: 0, suggested: 0, confirmed: 0, skipped: 0,
         boxes_total: 0, per_class: vec![0; project.classes.len()], empty_confirmed: 0,
+        doubts: load_doubts(&dir).len(),
     };
     for s in &samples {
         match s.status.as_str() {
@@ -759,6 +1100,346 @@ pub async fn studio_stats(
         }
     }
     Ok(stats)
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VORSCHLAEGE (Stufe 2)
+//
+// Ein bereits trainiertes Modell laeuft ueber die noch offenen Bilder und
+// legt Boxen als Vorschlag hin. Bestaetigen ist schneller als zeichnen —
+// aber der Vorschlag wird nie von allein zur Wahrheit: er bekommt den Status
+// "suggested", und der Export nimmt ihn nur auf ausdruecklichen Wunsch mit.
+//
+// Benutzt wird derselbe Inferenz-Server wie im Labor (yolo_inference_server.py,
+// stdin/stdout, gemessene 45-57 ms je Bild). Ein zweiter Weg zum Modell waere
+// ein zweiter Weg, auf dem etwas anderes herauskommen kann.
+// ══════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SuggestReport {
+    /// Bilder, die der Server gesehen hat.
+    pub processed:         usize,
+    /// Davon mit mindestens einer uebernommenen Box.
+    pub with_boxes:        usize,
+    pub boxes_total:       usize,
+    /// Bestaetigte Bilder werden nie angefasst.
+    pub left_confirmed:    usize,
+    /// Bilder, bei denen das Modell nichts gefunden hat — sie bleiben offen,
+    /// statt als "nichts drauf" bestaetigt zu werden.
+    pub without_boxes:     usize,
+    /// Klassen des Modells, fuer die es im Projekt keine Entsprechung gibt.
+    pub unmapped_classes:  Vec<String>,
+    pub classes_added:     Vec<String>,
+    pub model_classes:     Vec<String>,
+    pub failed:            usize,
+}
+
+/// Klassenindex im Projekt zu einem Label des Modells.
+///
+/// Verglichen wird ohne Ruecksicht auf Gross- und Kleinschreibung: das
+/// Ski-Modell meldet "Tree", "Person", "Generallobstacle", im Projekt stehen
+/// "tree", "person", "generallobstacle". Bei genauem Vergleich waere von
+/// sechs Projektklassen genau eine getroffen worden.
+///
+/// to_lowercase statt eq_ignore_ascii_case, damit "Bäume" und "bäume"
+/// ebenfalls zusammenfinden — deutsche Klassennamen sind der Normalfall.
+pub fn class_index_for(label: &str, classes: &[String]) -> Option<usize> {
+    let needle = label.trim().to_lowercase();
+    classes.iter().position(|c| c.trim().to_lowercase() == needle)
+}
+
+struct InferenceServer {
+    child: std::process::Child,
+    stdin: std::io::BufWriter<std::process::ChildStdin>,
+    rx:    Receiver<String>,
+}
+
+impl InferenceServer {
+    /// Eine Zeile mit JSON-Objekt abwarten; alles andere (Ladeausgaben von
+    /// Ultralytics) wird uebersprungen.
+    fn next_json(&self, timeout: Duration) -> Result<serde_json::Value, String> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let rest = deadline.saturating_duration_since(std::time::Instant::now());
+            if rest.is_zero() { return Err("Zeitüberschreitung beim Warten auf den Modell-Server".to_string()); }
+            let line = self.rx.recv_timeout(rest)
+                .map_err(|_| "Zeitüberschreitung beim Warten auf den Modell-Server".to_string())?;
+            let trimmed = line.trim();
+            if !trimmed.starts_with('{') { continue; }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) { return Ok(v); }
+        }
+    }
+
+    fn send(&mut self, payload: &serde_json::Value) -> Result<(), String> {
+        writeln!(self.stdin, "{}", payload).map_err(|e| format!("Schreiben an den Server: {}", e))?;
+        self.stdin.flush().map_err(|e| format!("Flush: {}", e))
+    }
+
+    fn shutdown(mut self) {
+        let _ = self.send(&serde_json::json!({ "cmd": "shutdown" }));
+        std::thread::sleep(Duration::from_millis(120));
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Startet den YOLO-Server zu einer trainierten Version.
+fn start_yolo_server(
+    app_handle: &tauri::AppHandle, version_id: &str,
+) -> Result<(InferenceServer, Vec<String>), String> {
+    let (version_path, model_id) = crate::laboratory_manager::get_version_info(app_handle, version_id)?;
+    let vp = PathBuf::from(&version_path);
+    let model_dir_of_model = app_handle.path().app_data_dir()
+        .map_err(|e| format!("AppDataDir: {}", e))?
+        .join("models").join(&model_id);
+
+    // Die Gewichte des eigenen Laufs haben Vorrang vor dem Ausgangsmodell.
+    let model_dir = if crate::model_manager::dir_has_ultralytics_checkpoint(&vp) {
+        vp
+    } else if crate::model_manager::dir_has_ultralytics_checkpoint(&model_dir_of_model) {
+        model_dir_of_model
+    } else {
+        return Err("Diese Version ist kein YOLO-Modell. Vorschläge gibt es bisher nur für Objekterkennung.".to_string());
+    };
+
+    let script = crate::laboratory_manager::get_yolo_server_path(app_handle)?;
+    let python = crate::python_env::resolve_python();
+
+    let mut child = Command::new(&python).no_window().python_utf8()
+        .arg(script.to_string_lossy().to_string())
+        .arg("--model-dir").arg(model_dir.to_string_lossy().to_string())
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Modell-Server ließ sich nicht starten: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("Kein stdout des Modell-Servers")?;
+    let (tx, rx) = channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() { break; }
+        }
+    });
+    // stderr muss gelesen werden, sonst blockiert der Server, sobald die Pipe voll ist.
+    if let Some(err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            for line in BufReader::new(err).lines().map_while(Result::ok) {
+                eprintln!("[StudioSuggest] {}", line);
+            }
+        });
+    }
+
+    let stdin = std::io::BufWriter::new(child.stdin.take().ok_or("Kein stdin des Modell-Servers")?);
+    let server = InferenceServer { child, stdin, rx };
+
+    // Das Laden der Gewichte dauert; drei Minuten sind grosszuegig, aber ein
+    // haengender Start soll nicht ewig blockieren.
+    let ready = server.next_json(Duration::from_secs(180))?;
+    match ready.get("type").and_then(|t| t.as_str()) {
+        Some("ready") => {
+            let classes = ready.get("classes").and_then(|c| c.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            Ok((server, classes))
+        }
+        _ => {
+            let msg = ready.get("message").and_then(|m| m.as_str())
+                .unwrap_or("Der Modell-Server meldete einen Fehler").to_string();
+            server.shutdown();
+            Err(msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn studio_suggest(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, version_id: String,
+    min_confidence: f64, add_unknown_classes: bool,
+) -> Result<SuggestReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let mut project = load_project(&dir)?;
+    let samples = load_samples(&dir);
+    let media_dir = dir.join("media");
+
+    // Bestaetigte Arbeit wird nie ueberschrieben.
+    let offen: Vec<&StudioSample> = samples.iter().filter(|s| s.status != "confirmed").collect();
+    let left_confirmed = samples.len() - offen.len();
+    if offen.is_empty() {
+        return Err("Alle Bilder sind bereits bestätigt — es gibt nichts vorzuschlagen.".to_string());
+    }
+
+    let (mut server, model_classes) = start_yolo_server(&app_handle, &version_id)?;
+
+    let mut report = SuggestReport {
+        processed: 0, with_boxes: 0, boxes_total: 0, left_confirmed,
+        without_boxes: 0, unmapped_classes: vec![], classes_added: vec![],
+        model_classes: model_classes.clone(), failed: 0,
+    };
+    let total = offen.len();
+
+    for (i, sample) in offen.iter().enumerate() {
+        let _ = app_handle.emit("studio-suggest-progress", serde_json::json!({
+            "project_id": project_id, "current": i, "total": total,
+        }));
+
+        let path = media_dir.join(&sample.media);
+        if server.send(&serde_json::json!({ "file_path": path.to_string_lossy() })).is_err() {
+            report.failed += 1;
+            continue;
+        }
+        let answer = match server.next_json(Duration::from_secs(120)) {
+            Ok(v) => v,
+            Err(_) => { report.failed += 1; continue; }
+        };
+        if answer.get("type").and_then(|t| t.as_str()) == Some("error") {
+            report.failed += 1;
+            continue;
+        }
+        report.processed += 1;
+
+        // Die Masse des Servers zaehlen; kennt er sie nicht, die aus dem Import.
+        let width  = answer.get("image_width").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
+            .unwrap_or(sample.meta.w as f64);
+        let height = answer.get("image_height").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
+            .unwrap_or(sample.meta.h as f64);
+
+        let mut boxes: Vec<BoxAnn> = Vec::new();
+        for b in answer.get("boxes").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+            let conf = b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            if conf < min_confidence { continue; }
+            let Some(label) = b.get("label").and_then(|v| v.as_str()) else { continue; };
+
+            let cls = match class_index_for(label, &project.classes) {
+                Some(idx) => idx,
+                None if add_unknown_classes => {
+                    project.classes.push(label.to_string());
+                    report.classes_added.push(label.to_string());
+                    project.classes.len() - 1
+                }
+                None => {
+                    if !report.unmapped_classes.iter().any(|c| c == label) {
+                        report.unmapped_classes.push(label.to_string());
+                    }
+                    continue;
+                }
+            };
+
+            let (x1, y1, x2, y2) = (
+                b.get("x1").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                b.get("y1").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                b.get("x2").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                b.get("y2").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            );
+            if let Some(n) = crate::yolo_export::normalize_box(cls, x1, y1, x2, y2, width, height) {
+                boxes.push(BoxAnn { cls: n.cls, x: n.x, y: n.y, w: n.w, h: n.h });
+            }
+        }
+
+        // Ohne Fund bleibt das Bild offen. Es als "Vorschlag: nichts drauf" zu
+        // markieren wuerde dazu einladen, ein uebersehenes Objekt wegzudruecken.
+        if boxes.is_empty() { report.without_boxes += 1; continue; }
+
+        report.with_boxes += 1;
+        report.boxes_total += boxes.len();
+        append_jsonl(&events_path(&dir), &AnnEvent {
+            sample_id: sample.id.clone(),
+            status:    "suggested".to_string(),
+            boxes,
+            at:        Utc::now().to_rfc3339(),
+        })?;
+    }
+
+    server.shutdown();
+    maybe_compact(&dir)?;
+    if !report.classes_added.is_empty() {
+        project.updated_at = Utc::now().to_rfc3339();
+        save_project(&dir, &project)?;
+    }
+    let _ = app_handle.emit("studio-suggest-progress", serde_json::json!({
+        "project_id": project_id, "current": total, "total": total, "done": true,
+    }));
+    Ok(report)
+}
+
+/// Prueft die bestaetigten Labels gegen das Modell.
+///
+/// Bei uebernommenen Fremdlabels ist das oft wertvoller als neue Labels: wo
+/// Modell und Label sich widersprechen, steckt haeufig ein Fehler im Label.
+/// Geaendert wird dabei nichts — nur markiert.
+#[tauri::command]
+pub async fn studio_review(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, version_id: String, min_confidence: f64,
+) -> Result<ReviewReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let project = load_project(&dir)?;
+    let samples = load_samples(&dir);
+    let media_dir = dir.join("media");
+
+    let bestaetigt: Vec<&StudioSample> = samples.iter().filter(|s| s.status == "confirmed").collect();
+    if bestaetigt.is_empty() {
+        return Err("Es gibt noch keine bestätigten Bilder zum Prüfen.".to_string());
+    }
+
+    let (mut server, _model_classes) = start_yolo_server(&app_handle, &version_id)?;
+    let mut doubts: HashMap<String, Doubt> = HashMap::new();
+    let mut report = ReviewReport { checked: 0, doubts: 0, agree: 0, failed: 0 };
+    let total = bestaetigt.len();
+    let now = Utc::now().to_rfc3339();
+
+    for (i, sample) in bestaetigt.iter().enumerate() {
+        let _ = app_handle.emit("studio-review-progress", serde_json::json!({
+            "project_id": project_id, "current": i, "total": total,
+        }));
+
+        let path = media_dir.join(&sample.media);
+        if server.send(&serde_json::json!({ "file_path": path.to_string_lossy() })).is_err() {
+            report.failed += 1;
+            continue;
+        }
+        let answer = match server.next_json(Duration::from_secs(120)) {
+            Ok(v) => v,
+            Err(_) => { report.failed += 1; continue; }
+        };
+        if answer.get("type").and_then(|t| t.as_str()) == Some("error") {
+            report.failed += 1;
+            continue;
+        }
+        report.checked += 1;
+
+        // Was das Modell sieht — nur Klassen, die das Projekt ueberhaupt kennt.
+        // Sonst stuende bei jedem Bild "Offroad fehlt", obwohl das Projekt die
+        // Klasse gar nicht fuehrt.
+        let mut gesehen: Vec<String> = Vec::new();
+        for b in answer.get("boxes").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+            if b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0) < min_confidence { continue; }
+            let Some(label) = b.get("label").and_then(|v| v.as_str()) else { continue; };
+            if let Some(idx) = class_index_for(label, &project.classes) {
+                gesehen.push(project.classes[idx].clone());
+            }
+        }
+
+        let im_label: Vec<String> = sample.ann.boxes.iter()
+            .filter_map(|b| project.classes.get(b.cls).cloned())
+            .collect();
+
+        let (missing, extra) = compare_class_sets(&im_label, &gesehen);
+        if missing.is_empty() && extra.is_empty() {
+            report.agree += 1;
+        } else {
+            report.doubts += 1;
+            doubts.insert(sample.id.clone(), Doubt { missing, extra, at: now.clone() });
+        }
+    }
+
+    server.shutdown();
+    save_doubts(&dir, &doubts)?;
+    let _ = app_handle.emit("studio-review-progress", serde_json::json!({
+        "project_id": project_id, "current": total, "total": total, "done": true,
+    }));
+    Ok(report)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -783,14 +1464,29 @@ fn csv_field(v: &str) -> String {
 /// beiden Beipackzettel darunter.
 fn write_yolo_export(
     project: &StudioProject, samples: &[&StudioSample], media_dir: &Path, out: &Path,
+    train_ratio: f64, val_ratio: f64,
 ) -> Result<(), String> {
-    let items: Vec<crate::yolo_export::ExportItem> = samples.iter()
-        .map(|s| crate::yolo_export::ExportItem {
+    // Gruppenbewusst aufteilen: Einzelbilder eines Videos duerfen nicht
+    // gleichzeitig in Train und Val landen. Ohne Gruppe steht jedes Bild fuer
+    // sich, dann ist es ein gewoehnlicher Zufallssplit.
+    let splits: Vec<Option<String>> = if train_ratio > 0.0 && train_ratio < 1.0 {
+        let gruppen: Vec<String> = samples.iter()
+            .map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
+            .collect();
+        crate::yolo_export::assign_splits(&gruppen, train_ratio, val_ratio)
+            .into_iter().map(Some).collect()
+    } else {
+        vec![None; samples.len()]
+    };
+
+    let items: Vec<crate::yolo_export::ExportItem> = samples.iter().zip(splits)
+        .map(|(s, split)| crate::yolo_export::ExportItem {
             source: media_dir.join(&s.media),
             stem:   s.id.clone(),
             boxes:  s.ann.boxes.iter()
                 .filter_map(|b| crate::yolo_export::norm_box(b.cls, b.x, b.y, b.w, b.h))
                 .collect(),
+            split,
         })
         .collect();
     let file_names = crate::yolo_export::write_yolo_layout(out, &items, &project.classes)?;
@@ -824,8 +1520,7 @@ Erzeugt vom FrameTrain Dataset Studio am {date}.
 - Boxen insgesamt: {boxes}
 - Klassen: {classes}
 
-Aufteilung in train/val/test ist noch nicht erfolgt — dafuer den Split im
-Dataset-Bereich nutzen, er haelt Bild- und Labelpaare zusammen.
+{split_hinweis}
 
 Herkunft je Bild steht in PROVENANCE.csv.
 ",
@@ -835,7 +1530,12 @@ Herkunft je Bild steht in PROVENANCE.csv.
         confirmed = confirmed,
         suggested = suggested,
         boxes = boxes,
-        classes = project.classes.join(", "));
+        classes = project.classes.join(", "),
+        split_hinweis = if train_ratio > 0.0 && train_ratio < 1.0 {
+            "Aufgeteilt in train/val/test. Bilder derselben Gruppe (z. B. eines Videos)\nliegen immer im selben Teil, damit die Validierung aussagekräftig bleibt."
+        } else {
+            "Aufteilung in train/val/test ist noch nicht erfolgt — dafür den Split im\nDataset-Bereich nutzen, er hält Bild- und Labelpaare zusammen."
+        });
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
     Ok(())
 }
@@ -844,6 +1544,7 @@ Herkunft je Bild steht in PROVENANCE.csv.
 pub async fn studio_export(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, model_id: String, dataset_name: String, include_suggested: bool,
+    train_ratio: f64, val_ratio: f64,
 ) -> Result<crate::dataset_manager::DatasetInfo, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
@@ -855,13 +1556,13 @@ pub async fn studio_export(
         .filter(|s| s.status == "confirmed" || (include_suggested && s.status == "suggested"))
         .collect();
     if selected.is_empty() {
-        return Err("Keine bestaetigten Samples — es gibt nichts zu exportieren".to_string());
+        return Err("Keine bestätigten Samples — es gibt nichts zu exportieren".to_string());
     }
 
     let stamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let out = dir.join("exports").join(&stamp);
     fs::create_dir_all(&out).map_err(|e| format!("mkdir export: {}", e))?;
-    write_yolo_export(&project, &selected, &dir.join("media"), &out)?;
+    write_yolo_export(&project, &selected, &dir.join("media"), &out, train_ratio, val_ratio)?;
 
     let name = if dataset_name.trim().is_empty() { project.name.clone() } else { dataset_name };
     crate::dataset_manager::import_local_dataset(
@@ -971,7 +1672,7 @@ mod tests {
             src: SampleSource { kind: "import".to_string(), origin: Some(format!("/daten/{}.jpg", id)),
                 license: None, at: "2026-09-16T08:00:00Z".to_string() },
             meta: SampleMeta { w: 1000, h: 500, group: None },
-            abs_path: String::new(),
+            abs_path: String::new(), doubt: None,
         }
     }
 
@@ -1048,11 +1749,10 @@ mod tests {
             task: "bbox".to_string(), target_format: "yolo_bbox".to_string(),
             classes: vec!["Lift".to_string(), "Sky".to_string()],
             created_at: "x".to_string(), updated_at: "x".to_string(),
-            sample_count: 0, confirmed_count: 0,
         };
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        write_yolo_export(&project, &[&s1, &s2], &dir.path().join("media"), &out).unwrap();
+        write_yolo_export(&project, &[&s1, &s2], &dir.path().join("media"), &out, 0.0, 0.0).unwrap();
 
         let analysis = crate::dataset_manager::detect_dataset_type(&out);
         assert!(matches!(analysis.detected_type, crate::dataset_manager::DatasetType::YoloBbox),
@@ -1068,6 +1768,131 @@ mod tests {
         let prov = fs::read_to_string(out.join("PROVENANCE.csv")).unwrap();
         assert!(prov.contains("\"/daten/mit,komma.png\""), "Herkunft fehlt oder ist unquotiert: {}", prov);
         assert!(out.join("DATA_CARD.md").exists());
+    }
+
+    #[test]
+    fn mengenvergleich_meldet_nur_echte_widersprueche() {
+        let v = |xs: &[&str]| -> Vec<String> { xs.iter().map(|s| s.to_string()).collect() };
+
+        // Drei Baeume statt zwei sind kein Widerspruch — verglichen werden
+        // Mengen, nicht Anzahlen.
+        let (missing, extra) = compare_class_sets(&v(&["tree", "tree"]), &v(&["Tree", "Tree", "Tree"]));
+        assert!(missing.is_empty() && extra.is_empty(), "missing {:?}, extra {:?}", missing, extra);
+
+        // Das Modell sieht einen Lift, im Label steht keiner.
+        let (missing, _) = compare_class_sets(&v(&["tree"]), &v(&["Tree", "Lift"]));
+        assert_eq!(missing, vec!["lift"]);
+
+        // Im Label steht Ski, das Modell sieht keinen.
+        let (_, extra) = compare_class_sets(&v(&["Ski", "tree"]), &v(&["tree"]));
+        assert_eq!(extra, vec!["ski"]);
+    }
+
+    #[test]
+    fn labels_werden_ueber_namen_umgeschrieben_nicht_ueber_zahlen() {
+        // Der echte Fall: die Labeldateien in yolo8n_data stammen aus einem
+        // Datensatz mit 13 Klassen, das Projekt hat sechs in anderer Reihenfolge.
+        // Eine 0 heisst dort "Tree" und hier "Ski" — wer die Zahl uebernimmt,
+        // beschriftet 463 Bilder falsch und merkt es erst im Training.
+        let quelle: Vec<String> = ["Tree", "Stone", "Person", "Hole", "Building", "Stick",
+            "Emptyspace", "Lift", "Slopesign", "Slopeborder", "Sky", "Generallobstacle", "Offroad"]
+            .iter().map(|s| s.to_string()).collect();
+        let mut projekt: Vec<String> = ["Ski", "Emptyspace", "generallobstacle", "tree", "person", "sky"]
+            .iter().map(|s| s.to_string()).collect();
+
+        let b = |cls: usize| BoxAnn { cls, x: 0.5, y: 0.5, w: 0.2, h: 0.2 };
+        let (boxen, neu, unbekannt) = remap_boxes(&[b(0), b(2), b(10), b(1)], &quelle, &mut projekt);
+
+        // Tree -> "tree" (Index 3), Person -> "person" (4), Sky -> "sky" (5).
+        assert_eq!(boxen[0].cls, 3, "Tree landete auf {}", projekt[boxen[0].cls]);
+        assert_eq!(boxen[1].cls, 4);
+        assert_eq!(boxen[2].cls, 5);
+        // Stone kennt das Projekt nicht und bekommt einen eigenen Platz.
+        assert_eq!(projekt[boxen[3].cls], "Stone");
+        assert_eq!(neu, vec!["Stone"]);
+        assert!(unbekannt.is_empty());
+
+        // Und das Entscheidende: keine Box ist auf "Ski" gelandet.
+        assert!(boxen.iter().all(|x| x.cls != 0), "eine Box wurde zu Ski");
+    }
+
+    #[test]
+    fn geometrie_bleibt_beim_umschreiben_unangetastet() {
+        let mut projekt = vec!["a".to_string()];
+        let quelle = vec!["b".to_string()];
+        let (boxen, _, _) = remap_boxes(
+            &[BoxAnn { cls: 0, x: 0.25, y: 0.75, w: 0.1, h: 0.2 }], &quelle, &mut projekt);
+        assert_eq!(boxen[0].x, 0.25);
+        assert_eq!(boxen[0].y, 0.75);
+        assert_eq!(boxen[0].w, 0.1);
+        assert_eq!(boxen[0].h, 0.2);
+    }
+
+    #[test]
+    fn id_jenseits_der_namensliste_wird_gemeldet_statt_verschluckt() {
+        let mut projekt: Vec<String> = vec![];
+        let quelle = vec!["Tree".to_string()];
+        let (boxen, neu, unbekannt) = remap_boxes(
+            &[BoxAnn { cls: 4, x: 0.5, y: 0.5, w: 0.2, h: 0.2 }], &quelle, &mut projekt);
+        assert_eq!(boxen.len(), 1, "die Box darf nicht verschwinden");
+        assert_eq!(projekt[boxen[0].cls], "Klasse 4");
+        assert_eq!(neu, vec!["Klasse 4"]);
+        assert_eq!(unbekannt, vec![4]);
+    }
+
+    #[test]
+    fn modellklassen_finden_die_projektklassen_trotz_schreibweise() {
+        // Die echten Namen: links was das Ski-Modell meldet, rechts was im
+        // Projekt steht. Ohne den Vergleich ohne Gross-/Kleinschreibung haette
+        // von sechs Klassen nur "Emptyspace" gepasst.
+        let projekt: Vec<String> = ["Ski", "Emptyspace", "generallobstacle", "tree", "person", "sky"]
+            .iter().map(|s| s.to_string()).collect();
+
+        assert_eq!(class_index_for("Tree", &projekt), Some(3));
+        assert_eq!(class_index_for("Person", &projekt), Some(4));
+        assert_eq!(class_index_for("Sky", &projekt), Some(5));
+        assert_eq!(class_index_for("Emptyspace", &projekt), Some(1));
+        assert_eq!(class_index_for("Generallobstacle", &projekt), Some(2));
+
+        // Was das Modell kennt und das Projekt nicht, darf nicht auf gut Glueck
+        // irgendeiner Klasse zugeschlagen werden.
+        assert_eq!(class_index_for("Offroad", &projekt), None);
+        assert_eq!(class_index_for("Slopeborder", &projekt), None);
+    }
+
+    #[test]
+    fn zuordnung_kommt_mit_umlauten_und_leerzeichen_klar() {
+        let projekt = vec!["Bäume".to_string(), "Piste".to_string()];
+        assert_eq!(class_index_for("BÄUME", &projekt), Some(0));
+        assert_eq!(class_index_for("  piste  ", &projekt), Some(1));
+        assert_eq!(class_index_for("Baeume", &projekt), None);
+    }
+
+    #[test]
+    fn die_liste_liefert_die_zaehler_mit() {
+        // Genau das fehlte: project.json soll die Zaehler nicht enthalten,
+        // die Antwort an die Oberflaeche aber sehr wohl. Ein serde-Attribut
+        // am Projekt-Typ trifft beides — deshalb zwei Typen, und deshalb
+        // dieser Test.
+        let project = StudioProject {
+            id: "sp_1".to_string(), name: "Ski".to_string(), modality: "image".to_string(),
+            task: "bbox".to_string(), target_format: "yolo_bbox".to_string(),
+            classes: vec!["Ski".to_string()],
+            created_at: "x".to_string(), updated_at: "y".to_string(),
+        };
+
+        let gespeichert = serde_json::to_value(&project).unwrap();
+        assert!(gespeichert.get("sample_count").is_none(),
+            "Zaehler haben in project.json nichts verloren: {}", gespeichert);
+
+        let antwort = serde_json::to_value(StudioProjectView {
+            project, sample_count: 11, confirmed_count: 10,
+        }).unwrap();
+        assert_eq!(antwort["sample_count"], 11);
+        assert_eq!(antwort["confirmed_count"], 10);
+        // flatten darf die Projektfelder nicht verschlucken.
+        assert_eq!(antwort["name"], "Ski");
+        assert_eq!(antwort["classes"][0], "Ski");
     }
 
     #[test]

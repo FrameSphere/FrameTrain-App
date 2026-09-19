@@ -72,6 +72,10 @@ pub struct ExportItem {
     /// muss nur innerhalb eines Exports eindeutig sein.
     pub stem: String,
     pub boxes: Vec<NormBox>,
+    /// "train" | "val" | "test", oder None fuer ein ungeteiltes Dataset.
+    /// Mit Split landet das Bild in images/<split>/ statt in images/ —
+    /// das Layout, das der Dataset-Import als fertig aufgeteilt erkennt.
+    pub split: Option<String>,
 }
 
 /// Schreibt images/, labels/ und classes.txt.
@@ -98,7 +102,17 @@ pub fn write_yolo_layout(
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_else(|| "jpg".to_string());
         let file_name = format!("{}.{}", item.stem, ext);
-        fs::copy(&item.source, images_dir.join(&file_name))
+        let (img_ziel, lbl_ziel) = match &item.split {
+            Some(split) => {
+                let i = images_dir.join(split);
+                let l = labels_dir.join(split);
+                fs::create_dir_all(&i).map_err(|e| format!("images/{}: {}", split, e))?;
+                fs::create_dir_all(&l).map_err(|e| format!("labels/{}: {}", split, e))?;
+                (i, l)
+            }
+            None => (images_dir.clone(), labels_dir.clone()),
+        };
+        fs::copy(&item.source, img_ziel.join(&file_name))
             .map_err(|e| format!("Bild kopieren: {}", e))?;
 
         // Ein Bild ohne Box bekommt eine leere Labeldatei, keine fehlende:
@@ -107,7 +121,7 @@ pub fn write_yolo_layout(
         let text: String = item.boxes.iter()
             .map(|b| label_line(b) + "\n")
             .collect();
-        fs::write(labels_dir.join(format!("{}.txt", item.stem)), text)
+        fs::write(lbl_ziel.join(format!("{}.txt", item.stem)), text)
             .map_err(|e| format!("Label schreiben: {}", e))?;
         written.push(file_name);
     }
@@ -115,6 +129,64 @@ pub fn write_yolo_layout(
     fs::write(dir.join("classes.txt"), classes.join("\n") + "\n")
         .map_err(|e| format!("classes.txt: {}", e))?;
     Ok(written)
+}
+
+/// Teilt Samples auf train, val und test auf, ohne eine Gruppe zu zerreissen.
+///
+/// Eine Gruppe ist, was zusammengehoert: Einzelbilder eines Videos, Aufnahmen
+/// einer Session, Bilder derselben Quelle. Landen Bilder einer Gruppe in Train
+/// und gleichzeitig in Val, prueft das Training gegen fast dieselben Bilder,
+/// mit denen es gelernt hat — die Validierung sieht grossartig aus und sagt
+/// nichts. Das ist die haeufigste stille Ursache fuer zu gute Werte.
+///
+/// Die Reihenfolge ist deterministisch: derselbe Datenbestand ergibt dieselbe
+/// Aufteilung, sonst waeren zwei Exporte nicht vergleichbar.
+pub fn assign_splits(group_of: &[String], train_ratio: f64, val_ratio: f64) -> Vec<String> {
+    use std::collections::HashMap;
+
+    // Gruppen in stabiler, aber nicht alphabetischer Reihenfolge: nach Namen
+    // sortiert landeten sonst alle "video_01"-Bilder immer im selben Split.
+    let mut reihenfolge: Vec<(u64, &String)> = Vec::new();
+    let mut gesehen: HashMap<&String, usize> = HashMap::new();
+    for g in group_of {
+        if let Some(n) = gesehen.get_mut(g) { *n += 1; continue; }
+        gesehen.insert(g, 1);
+        reihenfolge.push((stabiler_hash(g), g));
+    }
+    reihenfolge.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)));
+
+    let gesamt = group_of.len() as f64;
+    let ziel_train = gesamt * train_ratio;
+    let ziel_val = gesamt * (train_ratio + val_ratio);
+
+    let mut split_der_gruppe: HashMap<&String, &str> = HashMap::new();
+    let mut vergeben = 0f64;
+    for (_, g) in &reihenfolge {
+        let n = *gesehen.get(g).unwrap_or(&0) as f64;
+        // Die Gruppe geht dorthin, wo ihre Mitte landet — so kippt eine grosse
+        // Gruppe die Quote nicht komplett in den naechsten Split.
+        let mitte = vergeben + n / 2.0;
+        let split = if mitte < ziel_train { "train" }
+            else if mitte < ziel_val { "val" }
+            else { "test" };
+        split_der_gruppe.insert(g, split);
+        vergeben += n;
+    }
+
+    group_of.iter()
+        .map(|g| split_der_gruppe.get(g).copied().unwrap_or("train").to_string())
+        .collect()
+}
+
+/// FNV-1a. Nicht kryptographisch, aber ueber Laeufe und Plattformen gleich —
+/// anders als DefaultHasher, dessen Ergebnis nicht garantiert stabil ist.
+fn stabiler_hash(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 #[cfg(test)]
@@ -159,6 +231,66 @@ mod tests {
     }
 
     #[test]
+    fn eine_gruppe_landet_nie_in_zwei_splits() {
+        // Einzelbilder aus drei Videos. Wuerden sie einzeln verteilt, saehe die
+        // Validierung fast dieselben Bilder wie das Training.
+        let mut gruppen: Vec<String> = Vec::new();
+        for video in ["video_a", "video_b", "video_c"] {
+            for _ in 0..30 { gruppen.push(video.to_string()); }
+        }
+        let splits = assign_splits(&gruppen, 0.7, 0.2);
+
+        use std::collections::{HashMap, HashSet};
+        let mut je_gruppe: HashMap<&str, HashSet<&str>> = HashMap::new();
+        for (g, sp) in gruppen.iter().zip(splits.iter()) {
+            je_gruppe.entry(g).or_default().insert(sp);
+        }
+        for (g, s) in &je_gruppe {
+            assert_eq!(s.len(), 1, "Gruppe {} verteilt auf {:?}", g, s);
+        }
+    }
+
+    #[test]
+    fn aufteilung_haelt_die_quote_ungefaehr_ein() {
+        // Ohne Gruppen ist jede Aufnahme fuer sich — dann muss die Quote passen.
+        let gruppen: Vec<String> = (0..100).map(|i| format!("s_{}", i)).collect();
+        let splits = assign_splits(&gruppen, 0.7, 0.2);
+        let zaehle = |name: &str| splits.iter().filter(|s| s.as_str() == name).count();
+        assert!((zaehle("train") as i32 - 70).abs() <= 2, "train: {}", zaehle("train"));
+        assert!((zaehle("val") as i32 - 20).abs() <= 2, "val: {}", zaehle("val"));
+        assert!((zaehle("test") as i32 - 10).abs() <= 2, "test: {}", zaehle("test"));
+    }
+
+    #[test]
+    fn aufteilung_ist_bei_gleichen_daten_gleich() {
+        let gruppen: Vec<String> = (0..40).map(|i| format!("g_{}", i % 7)).collect();
+        assert_eq!(assign_splits(&gruppen, 0.7, 0.2), assign_splits(&gruppen, 0.7, 0.2));
+    }
+
+    #[test]
+    fn split_schreibt_in_unterordner() {
+        let dir = std::env::temp_dir().join(format!("ft_yolo_split_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let quelle = dir.join("q.png");
+        fs::write(&quelle, vec![0u8; 8]).unwrap();
+        let items = vec![
+            ExportItem { source: quelle.clone(), stem: "a".into(), boxes: vec![], split: Some("train".into()) },
+            ExportItem { source: quelle.clone(), stem: "b".into(), boxes: vec![], split: Some("val".into()) },
+        ];
+        let out = dir.join("out");
+        write_yolo_layout(&out, &items, &["Lift".to_string()]).unwrap();
+
+        assert!(out.join("images/train/a.png").exists());
+        assert!(out.join("labels/train/a.txt").exists());
+        assert!(out.join("images/val/b.png").exists());
+
+        // Das Layout muss als fertig aufgeteiltes YOLO durchgehen.
+        let analysis = crate::dataset_manager::detect_dataset_type(&out);
+        assert_eq!(analysis.detected_type.as_str(), "yolo_bbox");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn layout_schreibt_bild_label_und_klassen() {
         let dir = std::env::temp_dir().join(format!("ft_yolo_export_{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
@@ -168,9 +300,9 @@ mod tests {
         let items = vec![
             ExportItem {
                 source: quelle.clone(), stem: "a".to_string(),
-                boxes: vec![norm_box(0, 0.5, 0.5, 0.2, 0.2).unwrap()],
+                boxes: vec![norm_box(0, 0.5, 0.5, 0.2, 0.2).unwrap()], split: None,
             },
-            ExportItem { source: quelle.clone(), stem: "b".to_string(), boxes: vec![] },
+            ExportItem { source: quelle.clone(), stem: "b".to_string(), boxes: vec![], split: None },
         ];
         let out = dir.join("out");
         let names = write_yolo_layout(&out, &items, &["Lift".to_string(), "Sky".to_string()]).unwrap();

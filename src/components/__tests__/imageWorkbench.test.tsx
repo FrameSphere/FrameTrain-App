@@ -144,6 +144,53 @@ describe('ImageWorkbench', () => {
     }, { timeout: 2000 });
   });
 
+  it('macht die zuletzt gezeichnete Box rueckgaengig', async () => {
+    render(<ImageWorkbench {...props} />);
+    const img = await screen.findByRole('presentation');
+    vi.spyOn(img, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 500, right: 1000, bottom: 500, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerDown(img, { clientX: 600, clientY: 50 });
+    fireEvent.pointerMove(img, { clientX: 800, clientY: 250 });
+    fireEvent.pointerUp(img, { clientX: 800, clientY: 250 });
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation');
+      expect((call![1] as { boxes: unknown[] }).boxes).toHaveLength(2);
+    }, { timeout: 2000 });
+
+    invokeMock.mockClear();
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation');
+      expect(call, 'der Stand davor wurde nicht gespeichert').toBeTruthy();
+      // Zurueck auf die eine Box, mit der das Bild geladen wurde.
+      expect((call![1] as { boxes: unknown[] }).boxes).toHaveLength(1);
+    }, { timeout: 2000 });
+  });
+
+  it('uebernimmt auf Tastendruck die Boxen des vorigen Bildes', async () => {
+    render(<ImageWorkbench {...props} />);
+    await screen.findByText('1 / 2');
+    // Auf das zweite Bild, das keine Boxen hat.
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    await screen.findByText('2 / 2');
+
+    invokeMock.mockClear();
+    fireEvent.keyDown(window, { key: 'v' });
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation');
+      expect(call).toBeTruthy();
+      expect((call![1] as { sampleId: string }).sampleId).toBe('s_2');
+      const boxes = (call![1] as { boxes: { cls: number }[] }).boxes;
+      expect(boxes).toHaveLength(1);
+      expect(boxes[0].cls).toBe(0);
+    }, { timeout: 2000 });
+  });
+
   it('bietet den Export erst an, wenn etwas bestaetigt ist', async () => {
     render(<ImageWorkbench {...props} />);
     const button = await screen.findByRole('button', { name: /Exportieren/ });
