@@ -3105,10 +3105,16 @@
       "kindHint": {
         "image": "Boxen ins Bild ziehen, Export als YOLO",
         "text": "Jeder Zeile eine Klasse geben, Export als CSV",
-        "pairs": "Zu jedem Text die gewünschte Antwort schreiben, Export als JSONL"
+        "pairs": "Zu jedem Text die gewünschte Antwort schreiben, Export als JSONL",
+        "audio": "Jeder Aufnahme eine Klasse geben, Export als Klassenordner",
+        "transcript": "Zu jeder Aufnahme den Wortlaut schreiben, Export als Audio mit .txt"
       },
       "formatNote_text": "Export als daten.csv mit den Spalten text und label — das Format, das die Klassifikation liest.",
-      "formatNote_pairs": "Export als daten.jsonl mit source und target — das Format, das Seq2Seq liest."
+      "formatNote_pairs": "Export als daten.jsonl mit source und target — das Format, das Seq2Seq liest.",
+      "kindAudio": "Audio",
+      "kindTranscript": "Transkript",
+      "formatNote_audio": "Export als ein Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
+      "formatNote_transcript": "Export als Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription."
     },
     "workbench": {
       "back": "Zurück zur Projektliste",
@@ -3303,6 +3309,49 @@
       "exportPairs": "Schreibt daten.jsonl mit source und target — genau das, was Seq2Seq liest.",
       "suggestedHint": "Vorschlag des Modells — Enter übernimmt ihn, eine Zahl wählt eine andere Klasse",
       "doubtHint": "Modell sagt „{model}“, im Label steht „{label}“"
+    },
+    "write": {
+      "button": "Schreiben",
+      "title": "Texte selbst anlegen",
+      "subtitle": "Was nirgends liegt, schreibt man hier — einzeln oder als Liste.",
+      "textLabel": "Text",
+      "textPlaceholder": "Ein Text je Zeile…",
+      "perLine": "Jede Zeile ist ein eigener Text",
+      "classLabel": "Klasse (optional — ohne Klasse landet der Text als offen in der Warteschlange)",
+      "noClass": "keine",
+      "count": "{count} Texte werden angelegt",
+      "empty": "Noch nichts eingegeben",
+      "confirmButton": "Anlegen",
+      "doneTitle": "Angelegt",
+      "doneDetail": "{added} neu, {duplicates} doppelt",
+      "errorTitle": "Anlegen fehlgeschlagen",
+      "pasteHint": "Ein Bild in der Zwischenablage? Cmd+V legt es direkt hier ab.",
+      "pasteDoneTitle": "Bild eingefügt",
+      "pasteDuplicate": "Dieses Bild liegt schon im Projekt."
+    },
+    "audio": {
+      "record": "Aufnehmen",
+      "stop": "Stoppen {time}",
+      "importFolder": "Ordner",
+      "pickFolder": "Ordner mit Aufnahmen wählen",
+      "noLabel": "ohne Zuordnung",
+      "emptyProjectTitle": "Noch keine Aufnahmen",
+      "emptyProjectDetail": "Direkt aufnehmen, oder einen Ordner einlesen — Unterordner gelten als Klasse, eine .txt neben der Datei als Transkript.",
+      "transcriptLabel": "Was gesagt wird",
+      "transcriptPlaceholder": "Wortlaut der Aufnahme…",
+      "needsTextTitle": "Kein Transkript",
+      "needsTextDetail": "Ohne Wortlaut gibt es nichts zu lernen — schreib ihn auf oder überspring die Aufnahme.",
+      "recordedTitle": "Aufnahme übernommen",
+      "duplicate": "Diese Aufnahme liegt schon im Projekt.",
+      "emptyTitle": "Aufnahme leer",
+      "emptyDetail": "Es kam kein Ton an. Ist das richtige Mikrofon ausgewählt?",
+      "errorTitle": "Aufnahme fehlgeschlagen",
+      "micErrorTitle": "Kein Zugriff auf das Mikrofon",
+      "micErrorDetail": "macOS muss FrameTrain das Mikrofon erlauben: Systemeinstellungen > Datenschutz & Sicherheit > Mikrofon. ({detail})",
+      "doneTitle": "Aufnahmen übernommen",
+      "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit Zuordnung",
+      "exportClasses": "Schreibt einen Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
+      "exportTranscript": "Schreibt jede Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription."
     }
   }
 }

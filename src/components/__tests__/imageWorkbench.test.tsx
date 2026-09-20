@@ -270,6 +270,31 @@ describe('ImageWorkbench', () => {
     expect(screen.getByRole('button', { name: /Rückgängig/ })).toBeDisabled();
   });
 
+  it('nimmt ein Bild aus der Zwischenablage an', async () => {
+    // Ein Screenshot soll nicht erst als Datei gespeichert und dann als Ordner
+    // importiert werden muessen.
+    render(<ImageWorkbench {...props} />);
+    await screen.findByText('1 / 2');
+
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const datei = new File([png], 'ausschnitt.png', { type: 'image/png' });
+    const ereignis = new Event('paste') as Event & { clipboardData: unknown };
+    ereignis.clipboardData = {
+      items: [{ type: 'image/png', getAsFile: () => datei }],
+    };
+
+    invokeMock.mockClear();
+    window.dispatchEvent(ereignis);
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_add_image');
+      expect(call, 'das eingefuegte Bild kam nicht an').toBeTruthy();
+      const args = call![1] as { projectId: string; bytes: number[] };
+      expect(args.projectId).toBe('sp_test');
+      expect(args.bytes.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    }, { timeout: 2000 });
+  });
+
   it('bietet den Export erst an, wenn etwas bestaetigt ist', async () => {
     render(<ImageWorkbench {...props} />);
     const button = await screen.findByRole('button', { name: /Exportieren/ });

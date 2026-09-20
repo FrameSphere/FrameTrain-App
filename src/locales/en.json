@@ -3105,10 +3105,16 @@
       "kindHint": {
         "image": "Drag boxes onto the image, export as YOLO",
         "text": "Give each row a class, export as CSV",
-        "pairs": "Write the wanted answer for each text, export as JSONL"
+        "pairs": "Write the wanted answer for each text, export as JSONL",
+        "audio": "Give each recording a class, export as class folders",
+        "transcript": "Write the wording for each recording, export as audio with .txt"
       },
       "formatNote_text": "Exports daten.csv with the columns text and label — the format classification reads.",
-      "formatNote_pairs": "Exports daten.jsonl with source and target — the format seq2seq reads."
+      "formatNote_pairs": "Exports daten.jsonl with source and target — the format seq2seq reads.",
+      "kindAudio": "Audio",
+      "kindTranscript": "Transcript",
+      "formatNote_audio": "Exports one folder per class — the layout the app recognises as classification.",
+      "formatNote_transcript": "Exports the recording with a matching .txt next to it — the layout for transcription."
     },
     "workbench": {
       "back": "Back to project list",
@@ -3303,6 +3309,49 @@
       "exportPairs": "Writes daten.jsonl with source and target — exactly what seq2seq reads.",
       "suggestedHint": "Model suggestion — Enter accepts it, a number picks another class",
       "doubtHint": "Model says “{model}”, the label says “{label}”"
+    },
+    "write": {
+      "button": "Write",
+      "title": "Create texts yourself",
+      "subtitle": "What exists nowhere you write here — one at a time or as a list.",
+      "textLabel": "Text",
+      "textPlaceholder": "One text per line…",
+      "perLine": "Every line is its own text",
+      "classLabel": "Class (optional — without one the text lands in the queue as open)",
+      "noClass": "none",
+      "count": "{count} texts will be created",
+      "empty": "Nothing entered yet",
+      "confirmButton": "Create",
+      "doneTitle": "Created",
+      "doneDetail": "{added} new, {duplicates} duplicate",
+      "errorTitle": "Creating failed",
+      "pasteHint": "An image in the clipboard? Cmd+V drops it right here.",
+      "pasteDoneTitle": "Image pasted",
+      "pasteDuplicate": "This image is already in the project."
+    },
+    "audio": {
+      "record": "Record",
+      "stop": "Stop {time}",
+      "importFolder": "Folder",
+      "pickFolder": "Choose folder with recordings",
+      "noLabel": "unassigned",
+      "emptyProjectTitle": "No recordings yet",
+      "emptyProjectDetail": "Record straight away, or read a folder — subfolders count as the class, a .txt next to the file as its transcript.",
+      "transcriptLabel": "What is said",
+      "transcriptPlaceholder": "Wording of the recording…",
+      "needsTextTitle": "No transcript",
+      "needsTextDetail": "Without the wording there is nothing to learn — write it down or skip the recording.",
+      "recordedTitle": "Recording taken",
+      "duplicate": "This recording is already in the project.",
+      "emptyTitle": "Recording empty",
+      "emptyDetail": "No sound arrived. Is the right microphone selected?",
+      "errorTitle": "Recording failed",
+      "micErrorTitle": "No access to the microphone",
+      "micErrorDetail": "macOS has to allow FrameTrain the microphone: System Settings > Privacy & Security > Microphone. ({detail})",
+      "doneTitle": "Recordings imported",
+      "doneDetail": "{added} new, {duplicates} duplicate, {labels} with an assignment",
+      "exportClasses": "Writes one folder per class — the layout the app recognises as classification.",
+      "exportTranscript": "Writes each recording with a matching .txt next to it — the layout for transcription."
     }
   }
 }

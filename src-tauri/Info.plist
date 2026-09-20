@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Ohne diesen Eintrag scheitert getUserMedia auf macOS stumm: das
+       Mikrofon wird nie angefragt, die Aufnahme bleibt einfach leer.
+       tauri-bundler mischt diese Datei in die Info.plist der App. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>FrameTrain nimmt Sprache auf, um daraus Trainingsdaten in der Datensatz-Werkstatt zu machen. Die Aufnahmen bleiben auf diesem Gerät.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>FrameTrain nimmt Bilder auf, um daraus Trainingsdaten in der Datensatz-Werkstatt zu machen. Die Aufnahmen bleiben auf diesem Gerät.</string>
+</dict>
+</plist>

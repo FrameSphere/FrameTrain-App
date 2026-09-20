@@ -1427,6 +1427,363 @@ pub async fn studio_import_text(
 }
 
 // ══════════════════════════════════════════════════════════════════
+// AUDIO
+//
+// Dieselbe Ablage wie Bilder: die Datei liegt inhaltsadressiert in media/,
+// das Label in der Annotation. Unterschiedlich ist nur, was in der Mitte der
+// Werkbank steht — ein Abspieler statt eines Bildes.
+// ══════════════════════════════════════════════════════════════════
+
+const AUDIO_EXTS: &[&str] = &["wav", "mp3", "flac", "ogg", "m4a", "aac", "webm", "aiff", "aif"];
+
+fn audio_mime(ext: &str) -> String {
+    match ext {
+        "wav"          => "audio/wav",
+        "mp3"          => "audio/mpeg",
+        "flac"         => "audio/flac",
+        "ogg"          => "audio/ogg",
+        "m4a" | "aac"  => "audio/mp4",
+        "webm"         => "audio/webm",
+        "aiff" | "aif" => "audio/aiff",
+        _              => "application/octet-stream",
+    }.to_string()
+}
+
+fn collect_audio(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if !p.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.') {
+                    stack.push(p);
+                }
+                continue;
+            }
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if AUDIO_EXTS.contains(&ext.as_str()) { out.push(p); }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Findet den Transkript-Text zu einer Audiodatei: gleicher Name, .txt daneben.
+fn transcript_for(audio: &Path) -> Option<String> {
+    for ext in ["txt", "TXT"] {
+        let p = audio.with_extension(ext);
+        if let Ok(text) = fs::read_to_string(&p) {
+            let text = text.trim().to_string();
+            if !text.is_empty() { return Some(text); }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub async fn studio_import_audio(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, source_path: String, ignore_labels: bool,
+) -> Result<ImportReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let mut project = load_project(&dir)?;
+    let src = Path::new(&source_path);
+    if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", source_path)); }
+
+    let dateien = collect_audio(src);
+    if dateien.is_empty() { return Err("Keine Audiodateien in diesem Ordner gefunden".to_string()); }
+
+    let existing = load_samples(&dir);
+    let mut known: std::collections::HashSet<String> =
+        existing.iter().map(|s| s.media.clone()).collect();
+    let transkript = project.task == "transcript";
+
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
+    let now = Utc::now().to_rfc3339();
+    let total = dateien.len();
+
+    for (i, datei) in dateien.iter().enumerate() {
+        if i % 20 == 0 {
+            let _ = app_handle.emit("studio-import-progress", serde_json::json!({
+                "project_id": project_id, "current": i, "total": total,
+            }));
+        }
+        let Ok(bytes) = fs::read(datei) else { report.unreadable += 1; continue; };
+        if bytes.is_empty() { report.unreadable += 1; continue; }
+        let ext = datei.extension().and_then(|e| e.to_str()).unwrap_or("wav").to_lowercase();
+        let hash = sha256_hex(&bytes);
+        let rel = format!("{}/{}.{}", &hash[..2], &hash, ext);
+        if known.contains(&rel) { report.duplicates += 1; continue; }
+
+        let ziel = dir.join("media").join(&rel);
+        if let Some(parent) = ziel.parent() { fs::create_dir_all(parent).ok(); }
+        if !ziel.exists() {
+            fs::write(&ziel, &bytes).map_err(|e| format!("Kopieren: {}", e))?;
+        }
+
+        // Bei Transkription zaehlt die .txt daneben, bei Klassifikation der
+        // Ordnername — dieselben Konventionen wie bei Bild und Text.
+        let (mut label, mut target) = if transkript {
+            (None, transcript_for(datei))
+        } else {
+            let klasse = datei.parent()
+                .filter(|parent| *parent != src)
+                .and_then(|parent| parent.file_name())
+                .map(|n| n.to_string_lossy().to_string());
+            (klasse, None)
+        };
+        if ignore_labels { label = None; target = None; }
+
+        if let Some(l) = &label {
+            match class_index_for(l, &project.classes) {
+                Some(idx) => label = Some(project.classes[idx].clone()),
+                None => {
+                    project.classes.push(l.clone());
+                    report.classes_added.push(l.clone());
+                }
+            }
+        }
+        let fertig = label.is_some() || target.is_some();
+        if fertig { report.with_labels += 1; }
+
+        append_jsonl(&samples_path(&dir), &StudioSample {
+            id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+            media: rel.clone(),
+            mime: audio_mime(&ext),
+            content: None,
+            status: if fertig { "confirmed".to_string() } else { "new".to_string() },
+            ann: Annotation { boxes: vec![], label, target },
+            src: SampleSource {
+                kind: "import".to_string(),
+                origin: Some(datei.to_string_lossy().to_string()),
+                license: None,
+                at: now.clone(),
+            },
+            meta: SampleMeta::default(),
+            abs_path: String::new(),
+            doubt: None,
+        })?;
+        known.insert(rel);
+        report.added += 1;
+    }
+
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)?;
+    let _ = app_handle.emit("studio-import-progress", serde_json::json!({
+        "project_id": project_id, "current": total, "total": total, "done": true,
+    }));
+    Ok(report)
+}
+
+/// Eine Aufnahme aus der App ablegen.
+#[tauri::command]
+pub async fn studio_add_audio(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, bytes: Vec<u8>, ext: String, label: Option<String>,
+) -> Result<ImportReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let mut project = load_project(&dir)?;
+    if bytes.is_empty() { return Err("Die Aufnahme ist leer".to_string()); }
+
+    let ext = ext.trim().trim_start_matches('.').to_lowercase();
+    let ext = if AUDIO_EXTS.contains(&ext.as_str()) { ext } else { "webm".to_string() };
+    let hash = sha256_hex(&bytes);
+    let rel = format!("{}/{}.{}", &hash[..2], &hash, ext);
+
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
+    if load_samples(&dir).iter().any(|s| s.media == rel) {
+        report.duplicates = 1;
+        return Ok(report);
+    }
+
+    let ziel = dir.join("media").join(&rel);
+    if let Some(parent) = ziel.parent() { fs::create_dir_all(parent).ok(); }
+    fs::write(&ziel, &bytes).map_err(|e| format!("Speichern: {}", e))?;
+
+    let label = match label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        Some(l) => match class_index_for(l, &project.classes) {
+            Some(i) => Some(project.classes[i].clone()),
+            None => {
+                project.classes.push(l.to_string());
+                report.classes_added.push(l.to_string());
+                Some(l.to_string())
+            }
+        },
+        None => None,
+    };
+    if label.is_some() { report.with_labels += 1; }
+
+    append_jsonl(&samples_path(&dir), &StudioSample {
+        id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+        media: rel,
+        mime: audio_mime(&ext),
+        content: None,
+        status: if label.is_some() { "confirmed".to_string() } else { "new".to_string() },
+        ann: Annotation { boxes: vec![], label, target: None },
+        src: SampleSource {
+            kind: "record".to_string(),
+            origin: Some("Aufnahme".to_string()),
+            license: None,
+            at: Utc::now().to_rfc3339(),
+        },
+        meta: SampleMeta::default(),
+        abs_path: String::new(),
+        doubt: None,
+    })?;
+    report.added = 1;
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)?;
+    Ok(report)
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SELBST ERSTELLEN
+//
+// Nicht jeder Datensatz liegt schon irgendwo. Wer eine Klasse mit zwei
+// Beispielen hat, braucht einen Weg, das dritte zu schreiben — ohne den Umweg
+// ueber eine CSV in einem anderen Programm.
+// ══════════════════════════════════════════════════════════════════
+
+/// Texte von Hand anlegen. Mehrere auf einmal, weil man beim Schreiben selten
+/// bei einem bleibt und eine eingefuegte Liste sonst Zeile fuer Zeile muesste.
+#[tauri::command]
+pub async fn studio_add_texts(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, texts: Vec<String>, label: Option<String>, target: Option<String>,
+) -> Result<ImportReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let mut project = load_project(&dir)?;
+
+    let sauber: Vec<String> = texts.into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if sauber.is_empty() { return Err("Kein Text eingegeben".to_string()); }
+
+    let existing = load_samples(&dir);
+    let mut known: std::collections::HashSet<String> = existing.iter()
+        .filter_map(|s| s.content.as_ref().map(|c| sha256_hex(c.as_bytes())))
+        .collect();
+
+    // Die Klasse muss es im Projekt geben — sonst steht im Export ein Name,
+    // den die Klassenliste nicht kennt.
+    let label = match label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        Some(l) => {
+            match class_index_for(l, &project.classes) {
+                Some(i) => Some(project.classes[i].clone()),
+                None => {
+                    project.classes.push(l.to_string());
+                    save_project(&dir, &project)?;
+                    Some(l.to_string())
+                }
+            }
+        }
+        None => None,
+    };
+    let target = target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
+    let now = Utc::now().to_rfc3339();
+
+    for text in sauber {
+        let hash = sha256_hex(text.as_bytes());
+        if known.contains(&hash) { report.duplicates += 1; continue; }
+        let fertig = label.is_some() || target.is_some();
+        if fertig { report.with_labels += 1; }
+
+        append_jsonl(&samples_path(&dir), &StudioSample {
+            id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+            media: String::new(),
+            mime: "text/plain".to_string(),
+            content: Some(text),
+            status: if fertig { "confirmed".to_string() } else { "new".to_string() },
+            ann: Annotation { boxes: vec![], label: label.clone(), target: target.clone() },
+            src: SampleSource {
+                kind: "create".to_string(),
+                origin: Some("von Hand angelegt".to_string()),
+                license: None,
+                at: now.clone(),
+            },
+            meta: SampleMeta::default(),
+            abs_path: String::new(),
+            doubt: None,
+        })?;
+        known.insert(hash);
+        report.added += 1;
+    }
+
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)?;
+    Ok(report)
+}
+
+/// Ein Bild aus der Zwischenablage oder von einem Drop ins Projekt legen.
+///
+/// Derselbe Weg wie beim Ordnerimport: inhaltsadressiert, Masse aus dem
+/// Dateikopf, Duplikate kosten nichts.
+#[tauri::command]
+pub async fn studio_add_image(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, bytes: Vec<u8>, origin: Option<String>,
+) -> Result<ImportReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+
+    let Some((w, h)) = image_dimensions(&bytes) else {
+        return Err("Das ist kein lesbares Bild (PNG, JPEG, GIF, BMP oder WebP).".to_string());
+    };
+    let ext = match &bytes[..4] {
+        [0x89, b'P', b'N', b'G'] => "png",
+        [0xFF, 0xD8, _, _]       => "jpg",
+        [b'G', b'I', b'F', _]    => "gif",
+        [b'B', b'M', _, _]       => "bmp",
+        _                        => "webp",
+    };
+
+    let existing = load_samples(&dir);
+    let hash = sha256_hex(&bytes);
+    let rel = format!("{}/{}.{}", &hash[..2], &hash, ext);
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
+    if existing.iter().any(|s| s.media == rel) {
+        report.duplicates = 1;
+        return Ok(report);
+    }
+
+    let target = dir.join("media").join(&rel);
+    if let Some(parent) = target.parent() { fs::create_dir_all(parent).ok(); }
+    fs::write(&target, &bytes).map_err(|e| format!("Speichern: {}", e))?;
+
+    append_jsonl(&samples_path(&dir), &StudioSample {
+        id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+        media: rel,
+        mime: mime_for(ext),
+        content: None,
+        status: "new".to_string(),
+        ann: Annotation::default(),
+        src: SampleSource {
+            kind: "create".to_string(),
+            origin: origin.or_else(|| Some("Zwischenablage".to_string())),
+            license: None,
+            at: Utc::now().to_rfc3339(),
+        },
+        meta: SampleMeta { w, h, group: None },
+        abs_path: String::new(),
+        doubt: None,
+    })?;
+    report.added = 1;
+    Ok(report)
+}
+
+// ══════════════════════════════════════════════════════════════════
 // VORSCHLAEGE (Stufe 2)
 //
 // Ein bereits trainiertes Modell laeuft ueber die noch offenen Bilder und
@@ -2009,6 +2366,77 @@ Herkunft je Text steht in PROVENANCE.csv.
     Ok(())
 }
 
+/// Schreibt das Projekt als Audiodatensatz.
+///
+/// Zwei Formen, beide erkennt der Dataset-Import von selbst: Klassifikation
+/// als Ordner je Klasse (FolderClass), Transkription als Audiodatei mit
+/// gleichnamiger .txt daneben (AudioTranscript).
+fn write_audio_export(
+    project: &StudioProject, samples: &[&StudioSample], media_dir: &Path, out: &Path,
+) -> Result<PathBuf, String> {
+    let transkript = project.task == "transcript";
+    let mut provenance = String::from("sample_id,datei,herkunft,lizenz,status,label\n");
+
+    // Klassenordner werden nur erkannt, wenn im Wurzelordner keine Dateien
+    // liegen — PROVENANCE.csv und DATA_CARD.md dort wuerden die Erkennung auf
+    // "flat_file" kippen und das Training blockieren. Deshalb liegen die
+    // Klassen eine Ebene tiefer, die Beipackzettel bleiben darueber.
+    let daten = if transkript { out.to_path_buf() } else { out.join("dataset") };
+    fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
+
+    for s in samples {
+        let ext = Path::new(&s.media).extension().and_then(|e| e.to_str()).unwrap_or("wav");
+        let quelle = media_dir.join(&s.media);
+
+        let (ordner, name) = if transkript {
+            (daten.clone(), format!("{}.{}", s.id, ext))
+        } else {
+            // Ohne Klasse waere der Ordnername leer — solche Samples gehoeren
+            // nicht in einen Klassifikations-Export.
+            let Some(klasse) = s.ann.label.as_ref() else { continue };
+            (daten.join(klasse.replace('/', "_")), format!("{}.{}", s.id, ext))
+        };
+        fs::create_dir_all(&ordner).map_err(|e| format!("mkdir: {}", e))?;
+        fs::copy(&quelle, ordner.join(&name)).map_err(|e| format!("Audio kopieren: {}", e))?;
+
+        if transkript {
+            let Some(text) = s.ann.target.as_ref() else { continue };
+            fs::write(ordner.join(format!("{}.txt", s.id)), text)
+                .map_err(|e| format!("Transkript schreiben: {}", e))?;
+        }
+
+        provenance.push_str(&format!("{},{},{},{},{},{}\n",
+            csv_field(&s.id), csv_field(&name),
+            csv_field(s.src.origin.as_deref().unwrap_or("")),
+            csv_field(s.src.license.as_deref().unwrap_or("")),
+            csv_field(&s.status),
+            csv_field(s.ann.label.as_deref().unwrap_or(""))));
+    }
+
+    fs::write(out.join("PROVENANCE.csv"), provenance)
+        .map_err(|e| format!("PROVENANCE.csv: {}", e))?;
+
+    let card = format!(
+"# {name}
+
+Erzeugt vom FrameTrain Dataset Studio am {date}.
+
+- Aufnahmen: {count}
+- Form: {form}
+{klassen}
+Herkunft je Aufnahme steht in PROVENANCE.csv.
+",
+        name = project.name,
+        date = Utc::now().format("%Y-%m-%d"),
+        count = samples.len(),
+        form = if transkript { "Audiodatei mit gleichnamiger .txt daneben" }
+               else { "ein Ordner je Klasse" },
+        klassen = if transkript { String::new() }
+                  else { format!("- Klassen: {}\n", project.classes.join(", ")) });
+    fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
+    Ok(daten)
+}
+
 #[tauri::command]
 pub async fn studio_export(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
@@ -2018,7 +2446,7 @@ pub async fn studio_export(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let project = load_project(&dir)?;
-    if project.classes.is_empty() && project.task != "pairs" {
+    if project.classes.is_empty() && project.task != "pairs" && project.task != "transcript" {
         return Err("Das Projekt hat noch keine Klassen".to_string());
     }
 
@@ -2029,20 +2457,28 @@ pub async fn studio_export(
     if selected.is_empty() {
         return Err("Keine bestätigten Samples — es gibt nichts zu exportieren".to_string());
     }
-    let ist_text = project.modality == "text";
+    let ist_text  = project.modality == "text";
+    let ist_audio = project.modality == "audio";
 
     let stamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let out = dir.join("exports").join(&stamp);
     fs::create_dir_all(&out).map_err(|e| format!("mkdir export: {}", e))?;
-    if ist_text {
+    // Welcher Ordner am Ende registriert wird, entscheidet der Writer: bei
+    // Klassenordnern muss die Wurzel dateifrei bleiben, sonst wird der Typ
+    // falsch erkannt.
+    let zu_registrieren = if ist_text {
         write_text_export(&project, &selected, &out)?;
+        out.clone()
+    } else if ist_audio {
+        write_audio_export(&project, &selected, &dir.join("media"), &out)?
     } else {
         write_yolo_export(&project, &selected, &dir.join("media"), &out, train_ratio, val_ratio)?;
-    }
+        out.clone()
+    };
 
     let name = if dataset_name.trim().is_empty() { project.name.clone() } else { dataset_name };
     crate::dataset_manager::import_local_dataset(
-        app_handle, state, out.to_string_lossy().to_string(), name, model_id,
+        app_handle, state, zu_registrieren.to_string_lossy().to_string(), name, model_id,
     ).await
 }
 
@@ -2209,6 +2645,79 @@ mod tests {
                 license: None, at: "2026-09-20T08:00:00Z".to_string() },
             meta: SampleMeta::default(), abs_path: String::new(), doubt: None,
         }
+    }
+
+    fn audiosample(id: &str, label: Option<&str>, ziel: Option<&str>) -> StudioSample {
+        StudioSample {
+            id: id.to_string(), media: format!("ab/{}.wav", id), mime: "audio/wav".to_string(),
+            content: None, status: "confirmed".to_string(),
+            ann: Annotation { boxes: vec![], label: label.map(str::to_string),
+                target: ziel.map(str::to_string) },
+            src: SampleSource { kind: "record".to_string(), origin: Some("Aufnahme".to_string()),
+                license: None, at: "2026-09-20T08:00:00Z".to_string() },
+            meta: SampleMeta::default(), abs_path: String::new(), doubt: None,
+        }
+    }
+
+    #[test]
+    fn audioexport_klassifikation_wird_als_klassenordner_erkannt() {
+        let dir = TempDir::new("audioklassen");
+        let media = dir.path().join("media/ab");
+        fs::create_dir_all(&media).unwrap();
+        for id in ["s_1", "s_2"] {
+            fs::write(media.join(format!("{}.wav", id)), vec![0u8; 32]).unwrap();
+        }
+        let project = StudioProject {
+            id: "sp_a".to_string(), name: "Ansagen".to_string(), modality: "audio".to_string(),
+            task: "classification".to_string(), target_format: "folder_class".to_string(),
+            classes: vec!["ansage".to_string(), "stoerung".to_string()],
+            created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let s1 = audiosample("s_1", Some("ansage"), None);
+        let s2 = audiosample("s_2", Some("stoerung"), None);
+        // Ohne Klasse gehoert die Aufnahme nicht in einen Klassifikations-Export.
+        let s3 = audiosample("s_3", None, None);
+        let out = dir.path().join("out");
+        fs::create_dir_all(&out).unwrap();
+        let daten = write_audio_export(&project, &[&s1, &s2, &s3], &dir.path().join("media"), &out).unwrap();
+
+        assert!(daten.join("ansage/s_1.wav").exists());
+        assert!(daten.join("stoerung/s_2.wav").exists());
+        assert!(!daten.join("s_3.wav").exists(), "Aufnahme ohne Klasse darf nicht mit");
+        // Die Beipackzettel liegen ueber dem registrierten Ordner, damit dessen
+        // Wurzel dateifrei bleibt.
+        assert!(out.join("PROVENANCE.csv").exists());
+        assert!(!daten.join("PROVENANCE.csv").exists());
+
+        let analysis = crate::dataset_manager::detect_dataset_type(&daten);
+        assert_eq!(analysis.detected_type.as_str(), "folder_class",
+            "erkannt als {:?}", analysis.detected_type);
+    }
+
+    #[test]
+    fn audioexport_transkript_legt_die_txt_daneben() {
+        let dir = TempDir::new("audiotext");
+        let media = dir.path().join("media/ab");
+        fs::create_dir_all(&media).unwrap();
+        fs::write(media.join("s_1.wav"), vec![0u8; 32]).unwrap();
+        let project = StudioProject {
+            id: "sp_t".to_string(), name: "Durchsagen".to_string(), modality: "audio".to_string(),
+            task: "transcript".to_string(), target_format: "audio_transcript".to_string(),
+            classes: vec![], created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let s1 = audiosample("s_1", None, Some("Der Lift faehrt gleich weiter"));
+        let out = dir.path().join("out");
+        fs::create_dir_all(&out).unwrap();
+        let daten = write_audio_export(&project, &[&s1], &dir.path().join("media"), &out).unwrap();
+
+        assert_eq!(daten, out, "Transkripte brauchen keinen Unterordner");
+        assert!(out.join("s_1.wav").exists());
+        assert_eq!(fs::read_to_string(out.join("s_1.txt")).unwrap(),
+            "Der Lift faehrt gleich weiter");
+
+        let analysis = crate::dataset_manager::detect_dataset_type(&out);
+        assert_eq!(analysis.detected_type.as_str(), "audio_transcript",
+            "erkannt als {:?}", analysis.detected_type);
     }
 
     #[test]

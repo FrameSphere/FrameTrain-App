@@ -30,6 +30,9 @@ const PROJEKTE = [
   { id: 'sp_pair', name: 'Umformulieren', modality: 'text', task: 'pairs',
     target_format: 'flat_file', classes: [], created_at: '', updated_at: '2026-09-20T08:00:00Z',
     sample_count: 0, confirmed_count: 0 },
+  { id: 'sp_aud', name: 'Durchsagen', modality: 'audio', task: 'classification',
+    target_format: 'folder_class', classes: ['ansage'], created_at: '', updated_at: '2026-09-20T07:00:00Z',
+    sample_count: 0, confirmed_count: 0 },
 ];
 
 describe('StudioPanel', () => {
@@ -54,6 +57,13 @@ describe('StudioPanel', () => {
     render(<StudioPanel />);
     fireEvent.click(await screen.findByText('Rückmeldungen'));
     expect(await screen.findByText('Noch keine Texte')).toBeInTheDocument();
+    expect(screen.queryByText('Noch keine Bilder')).not.toBeInTheDocument();
+  });
+
+  it('oeffnet ein Audioprojekt in der Audio-Werkbank', async () => {
+    render(<StudioPanel />);
+    fireEvent.click(await screen.findByText('Durchsagen'));
+    expect(await screen.findByText('Noch keine Aufnahmen')).toBeInTheDocument();
     expect(screen.queryByText('Noch keine Bilder')).not.toBeInTheDocument();
   });
 

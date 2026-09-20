@@ -15,6 +15,7 @@ import { navigateTo } from '../../ui/navigationEvents';
 import { dateLocale } from '../../utils/dateLocale';
 import ImageWorkbench from './ImageWorkbench';
 import TextWorkbench from './TextWorkbench';
+import AudioWorkbench from './AudioWorkbench';
 import type { StudioProject } from './studioTypes';
 
 export default function StudioPanel() {
@@ -46,7 +47,9 @@ export default function StudioPanel() {
     // Die Werkbank richtet sich nach der Modalitaet des Projekts. Fehlt diese
     // Weiche, landet auch ein Textprojekt im Bild-Editor und meldet "Noch
     // keine Bilder" — ohne dass irgendetwas fehlschlaegt.
-    const Werkbank = openProject.modality === 'text' ? TextWorkbench : ImageWorkbench;
+    const Werkbank = openProject.modality === 'text' ? TextWorkbench
+      : openProject.modality === 'audio' ? AudioWorkbench
+        : ImageWorkbench;
     return (
       <Werkbank
         project={openProject}
@@ -187,7 +190,7 @@ function CreateDialog({ onClose, onCreated }: {
   const { error } = useNotification();
   const [name, setName] = useState('');
   const [classText, setClassText] = useState('');
-  const [kind, setKind] = useState<'image' | 'text' | 'pairs'>('image');
+  const [kind, setKind] = useState<'image' | 'text' | 'pairs' | 'audio' | 'transcript'>('image');
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
@@ -196,10 +199,16 @@ function CreateDialog({ onClose, onCreated }: {
     try {
       const project = await invoke<StudioProject>('studio_create_project', {
         name: name.trim(),
-        modality: kind === 'image' ? 'image' : 'text',
-        task: kind === 'image' ? 'bbox' : kind === 'pairs' ? 'pairs' : 'classification',
-        targetFormat: kind === 'image' ? 'yolo_bbox' : 'flat_file',
-        classes: kind === 'pairs' ? [] : classText.split(/[,\n]/).map(c => c.trim()).filter(Boolean),
+        modality: kind === 'image' ? 'image'
+          : kind === 'audio' || kind === 'transcript' ? 'audio' : 'text',
+        task: kind === 'image' ? 'bbox'
+          : kind === 'pairs' ? 'pairs'
+            : kind === 'transcript' ? 'transcript' : 'classification',
+        targetFormat: kind === 'image' ? 'yolo_bbox'
+          : kind === 'audio' ? 'folder_class'
+            : kind === 'transcript' ? 'audio_transcript' : 'flat_file',
+        classes: kind === 'pairs' || kind === 'transcript'
+          ? [] : classText.split(/[,\n]/).map(c => c.trim()).filter(Boolean),
       });
       onCreated(project);
     } catch (err: unknown) {
@@ -231,6 +240,8 @@ function CreateDialog({ onClose, onCreated }: {
               ['image', t('studio.create.kindImage')],
               ['text', t('studio.create.kindText')],
               ['pairs', t('studio.create.kindPairs')],
+              ['audio', t('studio.create.kindAudio')],
+              ['transcript', t('studio.create.kindTranscript')],
             ] as const).map(([val, label]) => (
               <button key={val} onClick={() => setKind(val)}
                 className={`px-2 py-2 rounded-lg border text-xs transition-all ${kind === val ? 'bg-white/10 border-white/25 text-white' : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]'}`}>
@@ -247,7 +258,7 @@ function CreateDialog({ onClose, onCreated }: {
             className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/25" />
         </label>
 
-        {kind !== 'pairs' && <label className="block">
+        {kind !== 'pairs' && kind !== 'transcript' && <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.create.classesLabel')}</span>
           <textarea value={classText} onChange={e => setClassText(e.target.value)} rows={3}
             placeholder={t('studio.create.classesPlaceholder')}

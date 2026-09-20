@@ -131,6 +131,47 @@ describe('TextWorkbench', () => {
     });
   });
 
+  it('legt selbst geschriebene Texte an, eine Zeile je Text', async () => {
+    // Was nirgends liegt, muss man schreiben koennen — ohne Umweg ueber eine
+    // CSV in einem anderen Programm.
+    render(<TextWorkbench {...props()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Schreiben/ }));
+
+    const feld = await screen.findByPlaceholderText('Ein Text je Zeile…');
+    fireEvent.change(feld, { target: { value: 'Lift kaputt\nPiste top\n\n  Kasse zu  ' } });
+
+    // Leere Zeilen zaehlen nicht, Leerzeichen werden abgeschnitten.
+    expect(await screen.findByText('3 Texte werden angelegt')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Anlegen$/ }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_add_texts', expect.objectContaining({
+        projectId: 'sp_text',
+        texts: ['Lift kaputt', 'Piste top', 'Kasse zu'],
+        label: null,
+      }));
+    });
+  });
+
+  it('gibt den geschriebenen Texten auf Wunsch gleich eine Klasse', async () => {
+    render(<TextWorkbench {...props()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Schreiben/ }));
+    fireEvent.change(await screen.findByPlaceholderText('Ein Text je Zeile…'),
+      { target: { value: 'Lift kaputt' } });
+
+    // Im Dialog steht die Klassenliste des Projekts.
+    const knoepfe = screen.getAllByRole('button', { name: 'beschwerde' });
+    fireEvent.click(knoepfe[knoepfe.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /^Anlegen$/ }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_add_texts', expect.objectContaining({
+        texts: ['Lift kaputt'], label: 'beschwerde',
+      }));
+    });
+  });
+
   it('bestaetigt ein Paar nicht ohne Zieltext', async () => {
     render(<TextWorkbench {...props('pairs')} />);
     const feld = await screen.findByPlaceholderText('Zieltext…');

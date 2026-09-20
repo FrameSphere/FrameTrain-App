@@ -423,6 +423,40 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     return () => { abos.forEach(a => { void a.then(f => f()); }); };
   }, [project.id]);
 
+  /// Bild aus der Zwischenablage annehmen.
+  ///
+  /// Ein Ausschnitt, ein Screenshot, ein Bild aus dem Browser: der kuerzeste
+  /// Weg ins Projekt ist Cmd+V. Der Umweg ueber "erst als Datei speichern,
+  /// dann den Ordner importieren" ist bei einem einzelnen Bild absurd.
+  useEffect(() => {
+    const onPaste = async (e: ClipboardEvent) => {
+      const eintrag = Array.from(e.clipboardData?.items ?? [])
+        .find(i => i.type.startsWith('image/'));
+      if (!eintrag) return;
+      const datei = eintrag.getAsFile();
+      if (!datei) return;
+      e.preventDefault();
+      try {
+        const puffer = new Uint8Array(await datei.arrayBuffer());
+        const report = await invoke<ImportReport>('studio_add_image', {
+          projectId: project.id, bytes: Array.from(puffer), origin: null,
+        });
+        if (report.duplicates > 0) {
+          info(t('studio.write.pasteDoneTitle'), t('studio.write.pasteDuplicate'));
+          return;
+        }
+        success(t('studio.write.pasteDoneTitle'),
+          t('studio.write.doneDetail', { added: report.added, duplicates: report.duplicates }));
+        await reloadFromDisk();
+      } catch (err: unknown) {
+        error(t('studio.write.errorTitle'), String(err));
+      }
+    };
+    window.addEventListener('paste', onPaste as EventListener);
+    return () => window.removeEventListener('paste', onPaste as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, reloadFromDisk]);
+
   const handlePickVideo = async () => {
     try {
       const sel = await open({
@@ -533,7 +567,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-12 text-center">
           <ImageOff className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t('studio.workbench.emptyTitle')}</p>
-          <p className="text-gray-500 text-sm mt-1 mb-5">{t('studio.workbench.emptyDetail')}</p>
+          <p className="text-gray-500 text-sm mt-1 mb-1">{t('studio.workbench.emptyDetail')}</p>
+          <p className="text-gray-600 text-xs mb-5">{t('studio.write.pasteHint')}</p>
           <button onClick={() => setShowSource(true)}
             className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
             <FolderOpen className="w-4 h-4" /> {t('studio.workbench.importButton')}
