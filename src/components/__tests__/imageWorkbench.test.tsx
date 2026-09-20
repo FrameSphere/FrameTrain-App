@@ -221,6 +221,55 @@ describe('ImageWorkbench', () => {
     expect(img.className).toContain('max-w-full');
   });
 
+  it('laesst die Klasse einer Box direkt an der Box aendern', async () => {
+    // Die Tastenkuerzel gab es schon, sichtbar war davon nichts. Wer die Box
+    // anklickt, muss dort die Klassen finden, die in der Seitenliste stehen.
+    render(<ImageWorkbench {...props} />);
+    const img = await screen.findByRole('presentation');
+    vi.spyOn(img, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 500, right: 1000, bottom: 500, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    // Die vorhandene Box liegt mittig (0.5/0.5, 0.2x0.4) — also bei 500/250.
+    fireEvent.pointerDown(img, { clientX: 500, clientY: 250 });
+    fireEvent.pointerUp(img, { clientX: 500, clientY: 250 });
+
+    const auswahl = await screen.findByRole('button', { name: /Box löschen/ });
+    expect(auswahl).toBeInTheDocument();
+
+    invokeMock.mockClear();
+    // "Sky" steht in der Seitenliste und muss auch am Bild waehlbar sein.
+    const skyKnoepfe = screen.getAllByRole('button', { name: 'Sky' });
+    fireEvent.click(skyKnoepfe[skyKnoepfe.length - 1]);
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation');
+      expect(call).toBeTruthy();
+      expect((call![1] as { boxes: { cls: number }[] }).boxes[0].cls).toBe(1);
+    }, { timeout: 2000 });
+  });
+
+  it('speichert nichts, wenn eine Box nur ausgewaehlt wird', async () => {
+    // Auswaehlen ist keine Aenderung. Frueher legte jeder Klick einen
+    // Undo-Schritt an und schrieb die unveraenderte Box zurueck.
+    render(<ImageWorkbench {...props} />);
+    const img = await screen.findByRole('presentation');
+    vi.spyOn(img, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 500, right: 1000, bottom: 500, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    invokeMock.mockClear();
+    fireEvent.pointerDown(img, { clientX: 500, clientY: 250 });
+    fireEvent.pointerUp(img, { clientX: 500, clientY: 250 });
+
+    await screen.findByRole('button', { name: /Box löschen/ });
+    await new Promise(r => setTimeout(r, 600));
+    expect(invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation')).toBeUndefined();
+    expect(screen.getByRole('button', { name: /Rückgängig/ })).toBeDisabled();
+  });
+
   it('bietet den Export erst an, wenn etwas bestaetigt ist', async () => {
     render(<ImageWorkbench {...props} />);
     const button = await screen.findByRole('button', { name: /Exportieren/ });

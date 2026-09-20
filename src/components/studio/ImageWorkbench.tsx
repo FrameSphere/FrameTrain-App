@@ -14,7 +14,8 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
-  Trash2, Plus, AlertTriangle, ImageOff, Info, Wand2, ShieldQuestion, Copy, Undo2, Film,
+  Trash2, Plus, AlertTriangle, ImageOff, Info, Wand2, ShieldQuestion, Copy, Undo2, Film, Database,
+  ChevronDown,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -45,6 +46,15 @@ interface Props {
 interface ModelInfo { id: string; name: string; }
 interface VersionTreeItem { id: string; name: string; version_number: number; }
 interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
+
+interface DatasetChoice {
+  id:           string;
+  name:         string;
+  storage_path: string;
+  file_count:   number;
+  size_bytes:   number;
+  dataset_type?: string;
+}
 
 interface FolderInspection {
   images:           number;
@@ -93,6 +103,10 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   const [modelRun, setModelRun] = useState<'suggest' | 'review' | null>(null);
   const [importPlan, setImportPlan] = useState<{ path: string; inspection: FolderInspection } | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
+  // Die Tastaturhilfe hat man nach dem zweiten Bild verinnerlicht; zugeklappt
+  // bleibt die Spalte kurz genug, dass die Seite gar nicht erst scrollt.
+  const [showKeys, setShowKeys] = useState(false);
   const [running, setRunning] = useState<{ cur: number; total: number } | null>(null);
 
   const [zoom, setZoom] = useState(1);
@@ -296,7 +310,13 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
         setSelected(boxes.length);
       }
     } else {
-      commitBoxes(boxes);
+      // Nur speichern, wenn sich wirklich etwas bewegt hat. Ein blosser Klick
+      // auf eine Box, um sie auszuwaehlen, legte sonst einen Undo-Schritt an
+      // und schrieb eine unveraenderte Box auf die Platte.
+      const jetzt = boxes[drag.idx];
+      const bewegt = jetzt && (jetzt.x1 !== drag.start.x1 || jetzt.y1 !== drag.start.y1
+        || jetzt.x2 !== drag.start.x2 || jetzt.y2 !== drag.start.y2);
+      if (bewegt) commitBoxes(boxes);
     }
     setDrag(null);
   };
@@ -306,7 +326,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-      if (!current || showExport || modelRun || importPlan) return;
+      if (!current || showExport || modelRun || importPlan || showSource || videoPath) return;
 
       if (e.key >= '1' && e.key <= '9') {
         const cls = Number(e.key) - 1;
@@ -343,7 +363,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, boxes, selected, index, samples, classes.length, showExport, modelRun, importPlan]);
+  }, [current, boxes, selected, index, samples, classes.length, showExport, modelRun, importPlan, showSource, videoPath]);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -362,15 +382,21 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     await loadStats();
   }, [loadSamples, loadStats]);
 
+  /// Ein Pfad, egal ob selbst gewaehlt oder aus einem vorhandenen Datensatz:
+  /// ab hier ist der Weg derselbe, inklusive der Frage nach der Klassenliste.
+  const inspectAndImport = async (path: string) => {
+    const inspection = await invoke<FolderInspection>('studio_inspect_folder', { sourcePath: path });
+    if (inspection.with_labels > 0) { setImportPlan({ path, inspection }); return; }
+    await runImport(path, null, false);
+  };
+
   const handleImport = async () => {
     try {
       const sel = await open({ directory: true, multiple: false, title: t('studio.import.dialogTitle') });
       if (!sel || typeof sel !== 'string') return;
       // Bringt der Ordner Labels mit, muss vorher geklaert sein, zu welcher
       // Klassenliste deren Zahlen gehoeren.
-      const inspection = await invoke<FolderInspection>('studio_inspect_folder', { sourcePath: sel });
-      if (inspection.with_labels > 0) { setImportPlan({ path: sel, inspection }); return; }
-      await runImport(sel, null, false);
+      await inspectAndImport(sel);
     } catch (err: unknown) {
       error(t('studio.import.errorTitle'), String(err));
     }
@@ -490,16 +516,12 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={handleImport} disabled={!!importing}
+          <button onClick={() => setShowSource(true)} disabled={!!importing}
             className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
             {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
             {importing && importing.total > 0
               ? t('studio.import.progress', { current: importing.cur, total: importing.total })
               : t('studio.workbench.importButton')}
-          </button>
-          <button onClick={handlePickVideo} disabled={!!importing}
-            className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
-            <Film className="w-4 h-4" /> {t('studio.workbench.videoButton')}
           </button>
           <button onClick={() => setModelRun('suggest')} disabled={!!running || total === 0}
             className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
@@ -532,7 +554,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           <ImageOff className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t('studio.workbench.emptyTitle')}</p>
           <p className="text-gray-500 text-sm mt-1 mb-5">{t('studio.workbench.emptyDetail')}</p>
-          <button onClick={handleImport}
+          <button onClick={() => setShowSource(true)}
             className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
             <FolderOpen className="w-4 h-4" /> {t('studio.workbench.importButton')}
           </button>
@@ -637,6 +659,43 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                       )}
                     </svg>
                   )}
+
+                  {/* Klassenwahl direkt an der ausgewaehlten Box.
+                      Die Tastenkuerzel gab es schon, sichtbar war davon nichts —
+                      wer die Box anklickt, erwartet hier die Klassen, die links
+                      in der Liste stehen. Angesetzt wird in Prozent der
+                      Bildmasse, damit es bei jedem Zoom sitzt. */}
+                  {selected >= 0 && boxes[selected] && imgW > 0 && imgH > 0 && classes.length > 0 && (() => {
+                    const b = boxes[selected];
+                    const untenNah = b.y2 > imgH * 0.78;
+                    return (
+                      <div
+                        className="absolute z-10 flex flex-wrap items-center gap-1 p-1.5 rounded-lg bg-[#101218]/95 border border-white/15 backdrop-blur-sm max-w-[280px]"
+                        style={untenNah
+                          ? { left: `${(b.x1 / imgW) * 100}%`, bottom: `${(1 - b.y1 / imgH) * 100}%`, marginBottom: 6 }
+                          : { left: `${(b.x1 / imgW) * 100}%`, top: `${(b.y2 / imgH) * 100}%`, marginTop: 6 }}
+                        onPointerDown={e => e.stopPropagation()}
+                      >
+                        {classes.map((name, i) => (
+                          <button key={i}
+                            onClick={() => commitBoxes(boxes.map((x, k) => (k === selected ? { ...x, cls: i } : x)))}
+                            title={i < 9 ? t('studio.workbench.classHotkey', { key: i + 1, name }) : name}
+                            className={`px-2 py-1 rounded text-[11px] transition-all inline-flex items-center gap-1.5 ${b.cls === i ? 'bg-white/15 text-white' : 'text-gray-300 hover:bg-white/10'}`}>
+                            <span className="w-2 h-2 rounded-sm flex-shrink-0"
+                              style={{ background: classColor(name, classes) }} />
+                            {name}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => { commitBoxes(boxes.filter((_, i) => i !== selected)); setSelected(-1); }}
+                          title={t('studio.workbench.deleteBox')}
+                          aria-label={t('studio.workbench.deleteBox')}
+                          className="px-1.5 py-1 rounded text-red-300/80 hover:text-red-300 hover:bg-red-500/15 transition-all">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
                 </div>
                 {current.doubt && (
@@ -650,6 +709,9 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                         t('studio.review.extra', { classes: current.doubt.extra.join(', ') })}
                     </span>
                   </div>
+                )}
+                {selected < 0 && boxes.length > 0 && (
+                  <p className="text-gray-600 text-[11px]">{t('studio.workbench.selectHint')}</p>
                 )}
                 {current.status === 'suggested' && (
                   <div className="flex items-center gap-2 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-1.5">
@@ -681,19 +743,14 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2 disabled:opacity-30">
                     <Undo2 className="w-4 h-4" /> {t('studio.workbench.undo')}
                   </button>
-                  {selected >= 0 && (
-                    <button onClick={() => { commitBoxes(boxes.filter((_, i) => i !== selected)); setSelected(-1); }}
-                      className="px-4 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 text-sm inline-flex items-center gap-2">
-                      <Trash2 className="w-4 h-4" /> {t('studio.workbench.deleteBox')}
-                    </button>
-                  )}
                 </div>
               </>
             )}
           </div>
 
-          {/* Klassen */}
-          <div className="space-y-3">
+          {/* Klassen. Unten Luft: der schwebende KI-Knopf sitzt fest in der
+              Ecke, und ohne diesen Abstand lag er genau auf den Zahlen. */}
+          <div className="space-y-3 pb-20">
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
               <p className="text-gray-500 text-xs mb-2">{t('studio.workbench.classesTitle')}</p>
               {classes.length === 0 && (
@@ -702,7 +759,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                   {t('studio.workbench.noClasses')}
                 </p>
               )}
-              <div className="space-y-1">
+              <div className="space-y-1 max-h-56 overflow-y-auto">
                 {classes.map((name, i) => (
                   <button key={i}
                     onClick={() => {
@@ -757,16 +814,31 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
               </div>
             )}
 
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-gray-500 text-xs mb-2">{t('studio.shortcuts.title')}</p>
-              <div className="space-y-1 text-[11px] text-gray-400">
-                {['classes', 'confirm', 'skip', 'back', 'delete', 'undo', 'copy', 'zoom'].map(k => (
-                  <p key={k}>{t(`studio.shortcuts.${k}`)}</p>
-                ))}
-              </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03]">
+              <button onClick={() => setShowKeys(v => !v)}
+                className="w-full flex items-center gap-2 p-3 text-left">
+                <span className="text-gray-500 text-xs flex-1">{t('studio.shortcuts.title')}</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showKeys ? 'rotate-180' : ''}`} />
+              </button>
+              {showKeys && (
+                <div className="space-y-1 text-[11px] text-gray-400 px-3 pb-3">
+                  {['classes', 'confirm', 'skip', 'back', 'delete', 'undo', 'copy', 'zoom'].map(k => (
+                    <p key={k}>{t(`studio.shortcuts.${k}`)}</p>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
+      )}
+
+      {showSource && (
+        <SourceDialog
+          onClose={() => setShowSource(false)}
+          onFolder={() => { setShowSource(false); void handleImport(); }}
+          onVideo={() => { setShowSource(false); void handlePickVideo(); }}
+          onDataset={path => { setShowSource(false); void inspectAndImport(path).catch(err => error(t('studio.import.errorTitle'), String(err))); }}
+        />
       )}
 
       {videoPath && (
@@ -1313,6 +1385,95 @@ function VideoDialog({ path, onCancel, onRun }: {
             <Film className="w-4 h-4" /> {t('studio.video.runButton')}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Woher kommen die Bilder ───────────────────────────────────────────────
+
+function SourceDialog({ onClose, onFolder, onVideo, onDataset }: {
+  onClose: () => void;
+  onFolder: () => void;
+  onVideo: () => void;
+  onDataset: (path: string) => void;
+}) {
+  const { t } = useLanguage();
+  const [datasets, setDatasets] = useState<DatasetChoice[] | null>(null);
+  const [showList, setShowList] = useState(false);
+
+  useEffect(() => {
+    invoke<DatasetChoice[]>('list_all_datasets')
+      .then(list => setDatasets(list.filter(d => d.storage_path)))
+      .catch(() => setDatasets([]));
+  }, []);
+
+  const tile = (icon: React.ReactNode, title: string, hint: string, onClick: () => void, disabled = false) => (
+    <button onClick={onClick} disabled={disabled}
+      className="w-full flex items-start gap-3 p-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all disabled:opacity-40 disabled:hover:bg-white/[0.04]">
+      <span className="p-2 rounded-lg bg-white/5 border border-white/10 text-gray-300 flex-shrink-0">{icon}</span>
+      <span className="min-w-0">
+        <span className="text-white text-sm block">{title}</span>
+        <span className="text-gray-500 text-xs block mt-0.5">{hint}</span>
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+      onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+        <div>
+          <h3 className="text-white font-semibold">{t('studio.source.title')}</h3>
+          <p className="text-gray-500 text-xs mt-1">{t('studio.source.subtitle')}</p>
+        </div>
+
+        {showList ? (
+          <>
+            <button onClick={() => setShowList(false)}
+              className="text-gray-400 hover:text-white text-xs inline-flex items-center gap-1.5">
+              <ArrowLeft className="w-3.5 h-3.5" /> {t('studio.source.back')}
+            </button>
+            <div className="space-y-1.5">
+              {datasets === null && (
+                <p className="text-gray-500 text-xs flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('common.loading', 'Lädt…')}
+                </p>
+              )}
+              {datasets?.length === 0 && (
+                <p className="text-gray-500 text-xs">{t('studio.source.noDatasets')}</p>
+              )}
+              {datasets?.map(d => (
+                <button key={d.id} onClick={() => onDataset(d.storage_path)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all">
+                  <Database className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="text-gray-200 text-xs block truncate">{d.name}</span>
+                    <span className="text-gray-500 text-[11px] block">
+                      {t('studio.source.datasetMeta', { files: d.file_count, type: d.dataset_type ?? '' })}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2">
+            {tile(<FolderOpen className="w-4 h-4" />, t('studio.source.folder'), t('studio.source.folderHint'), onFolder)}
+            {tile(<Database className="w-4 h-4" />, t('studio.source.dataset'),
+              datasets === null ? t('common.loading', 'Lädt…')
+                : datasets.length === 0 ? t('studio.source.noDatasets')
+                  : t('studio.source.datasetHint', { count: datasets.length }),
+              () => setShowList(true), datasets !== null && datasets.length === 0)}
+            {tile(<Film className="w-4 h-4" />, t('studio.source.video'), t('studio.source.videoHint'), onVideo)}
+          </div>
+        )}
+
+        <button onClick={onClose}
+          className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm">
+          {t('common.cancel', 'Abbrechen')}
+        </button>
       </div>
     </div>
   );

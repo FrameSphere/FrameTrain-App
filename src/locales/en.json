@@ -3120,7 +3120,9 @@
       "copyPrevious": "From previous",
       "copyPreviousHint": "Take the boxes from the previous image (V)",
       "videoButton": "Video",
-      "zoomLevel": "Zoom {factor}x"
+      "zoomLevel": "Zoom {factor}x",
+      "classHotkey": "{name} — key {key}",
+      "selectHint": "Click a box to change its class"
     },
     "filter": {
       "all": "All",
@@ -3245,6 +3247,19 @@
       "doneTitle": "Frames taken from video",
       "doneDetail": "{added} new, {duplicates} duplicate",
       "errorTitle": "The video could not be read"
+    },
+    "source": {
+      "title": "Where do the images come from?",
+      "subtitle": "All three ways end up in the same project.",
+      "folder": "Folder on disk",
+      "folderHint": "Subfolders included, duplicates only once",
+      "dataset": "Existing dataset",
+      "datasetHint": "{count} datasets in FrameTrain",
+      "datasetMeta": "{files} files · {type}",
+      "noDatasets": "No dataset in FrameTrain yet",
+      "video": "Video",
+      "videoHint": "Every nth frame is taken",
+      "back": "Back"
     }
   }
 }

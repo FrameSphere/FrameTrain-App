@@ -3120,7 +3120,9 @@
       "copyPrevious": "Vom vorigen Bild",
       "copyPreviousHint": "Boxen des vorigen Bildes übernehmen (V)",
       "videoButton": "Video",
-      "zoomLevel": "Zoom {factor}-fach"
+      "zoomLevel": "Zoom {factor}-fach",
+      "classHotkey": "{name} — Taste {key}",
+      "selectHint": "Box anklicken, um ihre Klasse zu ändern"
     },
     "filter": {
       "all": "Alle",
@@ -3245,6 +3247,19 @@
       "doneTitle": "Bilder aus Video übernommen",
       "doneDetail": "{added} neu, {duplicates} doppelt",
       "errorTitle": "Video konnte nicht gelesen werden"
+    },
+    "source": {
+      "title": "Woher kommen die Bilder?",
+      "subtitle": "Alle drei Wege landen im selben Projekt.",
+      "folder": "Ordner auf der Festplatte",
+      "folderHint": "Unterordner kommen mit, doppelte Bilder nur einmal",
+      "dataset": "Vorhandener Datensatz",
+      "datasetHint": "{count} Datensätze in FrameTrain",
+      "datasetMeta": "{files} Dateien · {type}",
+      "noDatasets": "Noch kein Datensatz in FrameTrain",
+      "video": "Video",
+      "videoHint": "Jedes n-te Bild wird übernommen",
+      "back": "Zurück"
     }
   }
 }
