@@ -69,6 +69,10 @@ describe('ImageWorkbench', () => {
   });
 
   it('speichert bei Enter als bestaetigt und springt zum naechsten offenen Bild', async () => {
+    // Enter faellt hier bewusst so frueh wie moeglich: die Boxen des Bildes
+    // muessen schon stehen, sobald es zu sehen ist. Wurden sie erst in einem
+    // Effekt nachgereicht, bestaetigte ein schneller Tastendruck ein leeres
+    // Bild und die Labels waren weg.
     render(<ImageWorkbench {...props} />);
     await screen.findByText('1 / 2');
 
@@ -189,6 +193,32 @@ describe('ImageWorkbench', () => {
       expect(boxes).toHaveLength(1);
       expect(boxes[0].cls).toBe(0);
     }, { timeout: 2000 });
+  });
+
+  it('haelt ein breites Bild in seiner Spalte', async () => {
+    // Ein 16:9-Videobild wurde bei 520 Pixel Hoehe 924 breit und schob sich
+    // ueber Warteschlange und Klassenliste. Ohne Zoom muss die Breite begrenzt
+    // bleiben; erst der Zoom darf darueber hinaus.
+    render(<ImageWorkbench {...props} />);
+    const img = await screen.findByRole('presentation');
+    expect(img.className).toContain('max-w-full');
+    expect(img.className).not.toContain('max-w-none');
+  });
+
+  it('vergroessert beim Zoom wirklich', async () => {
+    // maxHeight deckelt nur: ein Bild, das kleiner ist als der Deckel, blieb
+    // bei jeder Zoomstufe gleich gross. Im Zoom muss die Hoehe gesetzt werden.
+    render(<ImageWorkbench {...props} />);
+    const img = await screen.findByRole('presentation') as HTMLImageElement;
+    expect(img.style.height).toBe('');
+
+    fireEvent.keyDown(window, { key: '+' });
+    expect(img.style.height).toBe('780px');
+    expect(img.className).toContain('max-w-none');
+
+    fireEvent.keyDown(window, { key: '0' });
+    expect(img.style.height).toBe('');
+    expect(img.className).toContain('max-w-full');
   });
 
   it('bietet den Export erst an, wenn etwas bestaetigt ist', async () => {

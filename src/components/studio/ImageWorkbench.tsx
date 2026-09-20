@@ -141,20 +141,28 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
 
   // Beim Bildwechsel die gespeicherten Boxen in Bildpixel umrechnen.
   //
+  // Waehrend des Renderns, nicht in einem Effekt: ein Effekt laeuft erst nach
+  // dem Zeichnen, und in diesem Fenster war `boxes` noch leer. Wer Enter
+  // gedrueckt haelt, um durch die Bilder zu rauschen, konnte genau dort landen
+  // und ein Bild mit leeren Boxen bestaetigen — die Labels waeren weg gewesen.
+  //
   // Nur beim echten Wechsel: nach jedem Speichern kommt dasselbe Sample als
   // neues Objekt zurueck. Wuerde hier auch dann zurueckgesetzt, verliert die
   // gerade gezeichnete Box 400 ms spaeter ihre Auswahl — und die Klassentaste
   // greift ins Leere.
-  const shownId = useRef<string | null>(null);
-  useEffect(() => {
-    if (!current) { shownId.current = null; setBoxes([]); setSelected(-1); return; }
-    if (shownId.current === current.id) return;
-    shownId.current = current.id;
+  const [shownId, setShownId] = useState<string | null>(null);
+  if (!current && shownId !== null) {
+    setShownId(null);
+    setBoxes([]);
+    setSelected(-1);
+  }
+  if (current && shownId !== current.id) {
+    setShownId(current.id);
     setBoxes(current.ann.boxes.map(b => toPixel(b, current.meta.w, current.meta.h)));
     setSelected(-1);
     setDrag(null);
     undoStack.current = [];
-  }, [current]);
+  }
 
   // ── Speichern ───────────────────────────────────────────────────────────
   const applyDelta = (from: SampleStatus, to: SampleStatus) => {
@@ -349,7 +357,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
 
   /// Von der Platte neu einlesen und den gezeigten Bildzustand erzwingen.
   const reloadFromDisk = useCallback(async () => {
-    shownId.current = null;
+    setShownId(null);
     await loadSamples(0, true);
     await loadStats();
   }, [loadSamples, loadStats]);
@@ -569,7 +577,10 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           <div className="rounded-xl border border-white/10 bg-black/30 p-4 flex flex-col items-center gap-3">
             {current && (
               <>
-                <div className={`w-full flex justify-center ${zoom > 1 ? 'overflow-auto max-h-[520px]' : ''}`}>
+                {/* Zentriert nur ohne Zoom: ein zentriertes Kind, das ueberlaeuft,
+                    laesst seinen linken Teil nicht erreichen — der Bildlauf
+                    beginnt erst am sichtbaren Rand. */}
+                <div className={`w-full flex ${zoom > 1 ? 'overflow-auto max-h-[520px] justify-start' : 'justify-center'}`}>
                 <div className="relative inline-block">
                   <img
                     ref={imgRef}
@@ -577,8 +588,17 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     alt=""
                     role="presentation"
                     draggable={false}
-                    style={{ maxHeight: 520 * zoom }}
-                    className="max-w-none object-contain block rounded-lg select-none cursor-crosshair"
+                    // Ohne Zoom passt sich das Bild ein: maxHeight deckelt die
+                    // Hoehe, max-w-full die Breite. Fehlte die Breite, schob
+                    // sich ein 16:9-Videobild (bei 520 Hoehe 924 breit) ueber
+                    // die Nachbarspalten.
+                    //
+                    // Im Zoom wird die Hoehe fest gesetzt statt nur gedeckelt:
+                    // ein Deckel vergroessert nichts, ein 512er Bild waere bei
+                    // jeder Zoomstufe gleich gross geblieben. Der Rahmen darum
+                    // faengt das Ueberstehende mit Bildlauf auf.
+                    style={zoom > 1 ? { height: 520 * zoom } : { maxHeight: 520 }}
+                    className={`object-contain block rounded-lg select-none cursor-crosshair ${zoom > 1 ? 'max-w-none w-auto' : 'max-w-full'}`}
                     onPointerDown={onPointerDown}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
@@ -641,7 +661,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                   <span className="tabular-nums">{index + 1} / {total}</span>
                   <span>{imgW} x {imgH}</span>
                   <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
-                  {zoom > 1 && <span className="tabular-nums">{Math.round(zoom * 100)} %</span>}
+                  {zoom > 1 && <span className="tabular-nums">{t('studio.workbench.zoomLevel', { factor: zoom.toFixed(1).replace('.', ',') })}</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => void confirmAndNext()}

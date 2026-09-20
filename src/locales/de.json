@@ -3119,7 +3119,8 @@
       "undo": "Rückgängig",
       "copyPrevious": "Vom vorigen Bild",
       "copyPreviousHint": "Boxen des vorigen Bildes übernehmen (V)",
-      "videoButton": "Video"
+      "videoButton": "Video",
+      "zoomLevel": "Zoom {factor}-fach"
     },
     "filter": {
       "all": "Alle",
