@@ -14,6 +14,7 @@ import { useNotification } from '../../contexts/NotificationContext';
 import { navigateTo } from '../../ui/navigationEvents';
 import { dateLocale } from '../../utils/dateLocale';
 import ImageWorkbench from './ImageWorkbench';
+import TextWorkbench from './TextWorkbench';
 import type { StudioProject } from './studioTypes';
 
 export default function StudioPanel() {
@@ -180,6 +181,7 @@ function CreateDialog({ onClose, onCreated }: {
   const { error } = useNotification();
   const [name, setName] = useState('');
   const [classText, setClassText] = useState('');
+  const [kind, setKind] = useState<'image' | 'text' | 'pairs'>('image');
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
@@ -188,9 +190,10 @@ function CreateDialog({ onClose, onCreated }: {
     try {
       const project = await invoke<StudioProject>('studio_create_project', {
         name: name.trim(),
-        modality: 'image',
-        targetFormat: 'yolo_bbox',
-        classes: classText.split(/[,\n]/).map(c => c.trim()).filter(Boolean),
+        modality: kind === 'image' ? 'image' : 'text',
+        task: kind === 'image' ? 'bbox' : kind === 'pairs' ? 'pairs' : 'classification',
+        targetFormat: kind === 'image' ? 'yolo_bbox' : 'flat_file',
+        classes: kind === 'pairs' ? [] : classText.split(/[,\n]/).map(c => c.trim()).filter(Boolean),
       });
       onCreated(project);
     } catch (err: unknown) {
@@ -215,6 +218,23 @@ function CreateDialog({ onClose, onCreated }: {
           </button>
         </div>
 
+        <div>
+          <span className="text-gray-400 text-xs">{t('studio.create.kindLabel')}</span>
+          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+            {([
+              ['image', t('studio.create.kindImage')],
+              ['text', t('studio.create.kindText')],
+              ['pairs', t('studio.create.kindPairs')],
+            ] as const).map(([val, label]) => (
+              <button key={val} onClick={() => setKind(val)}
+                className={`px-2 py-2 rounded-lg border text-xs transition-all ${kind === val ? 'bg-white/10 border-white/25 text-white' : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-gray-600 text-[11px] mt-1.5">{t(`studio.create.kindHint.${kind}`)}</p>
+        </div>
+
         <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.create.nameLabel')}</span>
           <input value={name} onChange={e => setName(e.target.value)} autoFocus
@@ -222,16 +242,18 @@ function CreateDialog({ onClose, onCreated }: {
             className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/25" />
         </label>
 
-        <label className="block">
+        {kind !== 'pairs' && <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.create.classesLabel')}</span>
           <textarea value={classText} onChange={e => setClassText(e.target.value)} rows={3}
             placeholder={t('studio.create.classesPlaceholder')}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/25 resize-none" />
           <span className="text-gray-600 text-[11px]">{t('studio.create.classesHint')}</span>
-        </label>
+        </label>}
 
         <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3">
-          <p className="text-gray-400 text-xs">{t('studio.create.formatNote')}</p>
+          <p className="text-gray-400 text-xs">
+            {t(kind === 'image' ? 'studio.create.formatNote' : `studio.create.formatNote_${kind}`)}
+          </p>
         </div>
 
         <div className="flex gap-2">

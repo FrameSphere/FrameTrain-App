@@ -1,0 +1,659 @@
+// Text-Werkbank des Dataset Studio: Klassifikation und Paare.
+//
+// Dieselbe Ablage, dieselben Befehle, dieselbe Bedienung wie bei Bildern —
+// nur steht in der Mitte Text statt eines Bildes. Wer 2000 Zeilen einsortiert,
+// greift genauso wenig zur Maus wie beim Boxenziehen: Zahl waehlt die Klasse,
+// Enter bestaetigt und springt weiter.
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-dialog';
+import {
+  ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
+  Plus, AlertTriangle, FileText, ChevronDown, Info,
+} from 'lucide-react';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { useNotification } from '../../contexts/NotificationContext';
+import { classColor } from '../labGroundTruth';
+import { nextOpenIndex } from './studioBoxes';
+import type {
+  StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
+} from './studioTypes';
+
+const PAGE = 200;
+
+interface TextInspection {
+  kind:         string;
+  rows:         number;
+  columns:      string[];
+  text_column:  string | null;
+  label_column: string | null;
+  preview:      string[];
+  labels:       string[];
+}
+
+interface Props {
+  project: StudioProject;
+  onBack: () => void;
+  onProjectChanged: (p: StudioProject) => void;
+}
+
+interface ModelInfo { id: string; name: string; }
+
+export default function TextWorkbench({ project, onBack, onProjectChanged }: Props) {
+  const { t } = useLanguage();
+  const { success, error, warning } = useNotification();
+
+  const [samples, setSamples] = useState<StudioSample[]>([]);
+  const [total, setTotal]     = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [index, setIndex]     = useState(0);
+  const [filter, setFilter]   = useState<'all' | 'open' | 'confirmed'>('all');
+  const [stats, setStats]     = useState<StudioStats | null>(null);
+  const [newClass, setNewClass] = useState('');
+  const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
+  const [plan, setPlan] = useState<{ path: string; inspection: TextInspection } | null>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [target, setTarget] = useState('');
+  const [showKeys, setShowKeys] = useState(false);
+
+  const classes = project.classes;
+  const current = samples[index];
+  const paare   = project.task === 'pairs';
+  const saveTimer = useRef<number | null>(null);
+
+  // ── Laden ───────────────────────────────────────────────────────────────
+  const loadSamples = useCallback(async (offset: number, replace: boolean) => {
+    const page = await invoke<SamplePage>('studio_list_samples', {
+      projectId: project.id, status: filter, offset, limit: PAGE,
+    });
+    setTotal(page.total);
+    setSamples(prev => (replace ? page.items : [...prev, ...page.items]));
+  }, [project.id, filter]);
+
+  const loadStats = useCallback(async () => {
+    try { setStats(await invoke<StudioStats>('studio_stats', { projectId: project.id })); }
+    catch { /* Zahlen sind Beiwerk */ }
+  }, [project.id]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setIndex(0);
+    loadSamples(0, true)
+      .catch(err => { if (active) error(t('studio.notifications.loadError'), String(err)); })
+      .finally(() => { if (active) setLoading(false); });
+    void loadStats();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadSamples, loadStats]);
+
+  useEffect(() => {
+    if (samples.length >= total) return;
+    if (index < samples.length - 20) return;
+    void loadSamples(samples.length, false).catch(() => { /* still */ });
+  }, [index, samples.length, total, loadSamples]);
+
+  // Zieltext des aktuellen Samples — waehrend des Renderns, damit ein
+  // schneller Tastendruck nicht auf dem Text des vorigen Samples landet.
+  const [shownId, setShownId] = useState<string | null>(null);
+  if (current && shownId !== current.id) {
+    setShownId(current.id);
+    setTarget(current.ann.target ?? '');
+  }
+
+  // ── Speichern ───────────────────────────────────────────────────────────
+  const persist = useCallback(async (
+    status: SampleStatus, sample: StudioSample, label: string | null, ziel: string | null,
+  ) => {
+    try {
+      await invoke('studio_set_annotation', {
+        projectId: project.id, sampleId: sample.id, boxes: [], status,
+        label, target: ziel,
+      });
+      setStats(prev => prev && sample.status !== status
+        ? { ...prev, [sample.status]: Math.max(0, prev[sample.status] - 1), [status]: prev[status] + 1 }
+        : prev);
+      setSamples(prev => prev.map(s => s.id === sample.id
+        ? { ...s, status, ann: { ...s.ann, label: label ?? undefined, target: ziel ?? undefined } } : s));
+    } catch (err: unknown) {
+      error(t('studio.notifications.saveError'), String(err));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, t]);
+
+  useEffect(() => () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); }, []);
+
+  const goTo = (i: number) => {
+    if (samples.length === 0) return;
+    setIndex(Math.min(Math.max(i, 0), samples.length - 1));
+  };
+
+  const advance = (statusOfCurrent: SampleStatus) => {
+    const statuses = samples.map((s, i) => (i === index ? statusOfCurrent : s.status));
+    const next = nextOpenIndex(statuses, index);
+    goTo(next >= 0 ? next : index + 1);
+  };
+
+  /** Klasse zuweisen und weiter — der Griff, der bei 2000 Zeilen zaehlt. */
+  const assign = async (label: string) => {
+    if (!current) return;
+    await persist('confirmed', current, label, null);
+    advance('confirmed');
+  };
+
+  const confirmPair = async () => {
+    if (!current) return;
+    if (!target.trim()) {
+      warning(t('studio.text.needsTargetTitle'), t('studio.text.needsTargetDetail'));
+      return;
+    }
+    await persist('confirmed', current, null, target.trim());
+    advance('confirmed');
+  };
+
+  const skip = async () => {
+    if (!current) return;
+    await persist('skipped', current, current.ann.label ?? null, current.ann.target ?? null);
+    advance('skipped');
+  };
+
+  // ── Tastatur ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      if (!current || showExport || plan) return;
+
+      // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
+      if (imFeld) {
+        if (paare && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault(); void confirmPair();
+        }
+        return;
+      }
+      if (e.key >= '1' && e.key <= '9' && !paare) {
+        const i = Number(e.key) - 1;
+        if (i >= classes.length) return;
+        e.preventDefault();
+        void assign(classes[i]);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (paare) void confirmPair();
+        else if (current.ann.label) void assign(current.ann.label);
+        return;
+      }
+      if (e.key === 's' || e.key === 'S') { e.preventDefault(); void skip(); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
+      if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); goTo(index - 1); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, index, samples, classes, paare, target, showExport, plan]);
+
+  // ── Import ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const un = listen<{ project_id: string; current: number; total: number; done?: boolean }>(
+      'studio-import-progress', ev => {
+        if (ev.payload.project_id !== project.id) return;
+        setImporting(ev.payload.done ? null : { cur: ev.payload.current, total: ev.payload.total });
+      });
+    return () => { void un.then(f => f()); };
+  }, [project.id]);
+
+  const pickSource = async (ordner: boolean) => {
+    try {
+      const sel = await open(ordner
+        ? { directory: true, multiple: false, title: t('studio.text.pickFolder') }
+        : { multiple: false, title: t('studio.text.pickFile'),
+            filters: [{ name: 'Text', extensions: ['csv', 'tsv', 'jsonl', 'ndjson', 'txt'] }] });
+      if (!sel || typeof sel !== 'string') return;
+      const inspection = await invoke<TextInspection>('studio_inspect_text', { sourcePath: sel });
+      setPlan({ path: sel, inspection });
+    } catch (err: unknown) {
+      error(t('studio.import.errorTitle'), String(err));
+    }
+  };
+
+  const runImport = async (textColumn: string | null, labelColumn: string | null, ignore: boolean) => {
+    const p = plan;
+    setPlan(null);
+    if (!p) return;
+    try {
+      setImporting({ cur: 0, total: 0 });
+      const report = await invoke<ImportReport>('studio_import_text', {
+        projectId: project.id, sourcePath: p.path,
+        textColumn, labelColumn, ignoreLabels: ignore,
+      });
+      success(t('studio.text.doneTitle'), t('studio.text.doneDetail', {
+        added: report.added, duplicates: report.duplicates, labels: report.with_labels,
+      }));
+      if (report.classes_added.length > 0) {
+        const list = await invoke<StudioProject[]>('studio_list_projects');
+        const fresh = list.find(x => x.id === project.id);
+        if (fresh) onProjectChanged(fresh);
+      }
+      setShownId(null);
+      await loadSamples(0, true);
+      await loadStats();
+    } catch (err: unknown) {
+      error(t('studio.import.errorTitle'), String(err));
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const addClass = async () => {
+    const name = newClass.trim();
+    if (!name) return;
+    try {
+      onProjectChanged(await invoke<StudioProject>('studio_update_project', {
+        projectId: project.id, classes: [...classes, name],
+      }));
+      setNewClass('');
+    } catch (err: unknown) {
+      error(t('studio.notifications.saveError'), String(err));
+    }
+  };
+
+  const confirmed = stats?.confirmed ?? 0;
+  const statusDot = (s: SampleStatus) =>
+    s === 'confirmed' ? 'bg-emerald-400' : s === 'skipped' ? 'bg-gray-500'
+      : s === 'suggested' ? 'bg-amber-400' : 'bg-white/20';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <button onClick={onBack}
+          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition-all"
+          aria-label={t('studio.workbench.back')}>
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+        <div className="min-w-0">
+          <h2 className="text-white font-semibold text-lg truncate">{project.name}</h2>
+          <p className="text-gray-500 text-xs">
+            {t('studio.workbench.subtitle', { confirmed, total: stats?.total ?? total })}
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => void pickSource(false)} disabled={!!importing}
+            className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
+            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            {importing && importing.total > 0
+              ? t('studio.import.progress', { current: importing.cur, total: importing.total })
+              : t('studio.text.importFile')}
+          </button>
+          <button onClick={() => void pickSource(true)} disabled={!!importing}
+            className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
+            <FolderOpen className="w-4 h-4" /> {t('studio.text.importFolder')}
+          </button>
+          <button onClick={() => setShowExport(true)} disabled={confirmed === 0}
+            className="px-3 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-40">
+            <Download className="w-4 h-4" /> {t('studio.workbench.exportButton')}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-gray-500 gap-2">
+          <Loader2 className="w-5 h-5 animate-spin" /> {t('common.loading', 'Lädt…')}
+        </div>
+      ) : samples.length === 0 ? (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-12 text-center">
+          <FileText className="w-10 h-10 text-gray-600 mx-auto mb-3" />
+          <p className="text-white font-medium">{t('studio.text.emptyTitle')}</p>
+          <p className="text-gray-500 text-sm mt-1 mb-5 max-w-md mx-auto">{t('studio.text.emptyDetail')}</p>
+          <div className="flex items-center justify-center gap-2">
+            <button onClick={() => void pickSource(false)}
+              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
+              <FileText className="w-4 h-4" /> {t('studio.text.importFile')}
+            </button>
+            <button onClick={() => void pickSource(true)}
+              className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm inline-flex items-center gap-2">
+              <FolderOpen className="w-4 h-4" /> {t('studio.text.importFolder')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden flex flex-col">
+            <div className="flex text-[11px] border-b border-white/10">
+              {([['all', t('studio.filter.all')], ['open', t('studio.filter.open')],
+                 ['confirmed', t('studio.filter.confirmed')]] as const).map(([val, label]) => (
+                <button key={val} onClick={() => setFilter(val)}
+                  className={`flex-1 py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="overflow-y-auto max-h-[520px]">
+              {samples.map((s, i) => (
+                <button key={s.id} onClick={() => goTo(i)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all ${i === index ? 'bg-white/10' : 'hover:bg-white/[0.04]'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s.status)}`} />
+                  <span className="text-gray-300 text-xs truncate">
+                    {s.ann.label ?? ((s.content ?? '').slice(0, 30) || t('studio.text.noLabel'))}
+                  </span>
+                </button>
+              ))}
+              {samples.length < total && (
+                <p className="text-gray-600 text-[11px] text-center py-2">
+                  {t('studio.workbench.moreLoading', { count: total - samples.length })}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 flex flex-col gap-4">
+            {current && (
+              <>
+                <div className="rounded-lg bg-black/30 border border-white/10 p-4 max-h-64 overflow-y-auto">
+                  <p className="text-gray-100 text-sm whitespace-pre-wrap leading-relaxed">
+                    {current.content}
+                  </p>
+                </div>
+
+                {paare ? (
+                  <label className="block">
+                    <span className="text-gray-400 text-xs">{t('studio.text.targetLabel')}</span>
+                    <textarea value={target} onChange={e => setTarget(e.target.value)} rows={4}
+                      placeholder={t('studio.text.targetPlaceholder')}
+                      className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/25 resize-none" />
+                    <span className="text-gray-600 text-[11px]">{t('studio.text.targetHint')}</span>
+                  </label>
+                ) : classes.length === 0 ? (
+                  <p className="text-amber-300/80 text-xs flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    {t('studio.text.noClasses')}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {classes.map((name, i) => (
+                      <button key={i} onClick={() => void assign(name)}
+                        className={`px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-2 transition-all ${current.ann.label === name ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}>
+                        <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                          style={{ background: classColor(name, classes) }} />
+                        {name}
+                        {i < 9 && (
+                          <span className="text-[10px] font-mono text-gray-500 border border-white/10 rounded px-1">{i + 1}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                  <span className="tabular-nums">{index + 1} / {total}</span>
+                  <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {paare && (
+                    <button onClick={() => void confirmPair()}
+                      className="px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm inline-flex items-center gap-2">
+                      <Check className="w-4 h-4" /> {t('studio.workbench.confirm')}
+                    </button>
+                  )}
+                  <button onClick={() => void skip()}
+                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2">
+                    <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="space-y-3 pb-20">
+            {!paare && (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-gray-500 text-xs mb-2">{t('studio.workbench.classesTitle')}</p>
+                <div className="space-y-1 max-h-56 overflow-y-auto">
+                  {classes.map((name, i) => (
+                    <div key={i} className="flex items-center gap-2 px-2 py-1.5">
+                      <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                        style={{ background: classColor(name, classes) }} />
+                      {i < 9 && (
+                        <span className="text-[10px] font-mono text-gray-500 border border-white/10 rounded px-1">{i + 1}</span>
+                      )}
+                      <span className="text-gray-200 text-xs truncate">{name}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-1.5 mt-2">
+                  <input value={newClass} onChange={e => setNewClass(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') void addClass(); }}
+                    placeholder={t('studio.workbench.newClassPlaceholder')}
+                    className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-white/25" />
+                  <button onClick={() => void addClass()}
+                    className="px-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300"
+                    aria-label={t('studio.workbench.addClass')}>
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {stats && (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-1.5">
+                <p className="text-gray-500 text-xs mb-1">{t('studio.stats.title')}</p>
+                {([['confirmed', stats.confirmed], ['open', stats.new + stats.suggested],
+                   ['skipped', stats.skipped]] as const).map(([key, val]) => (
+                  <div key={key} className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400">{t(`studio.stats.${key}`)}</span>
+                    <span className="text-gray-200 tabular-nums">{val}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03]">
+              <button onClick={() => setShowKeys(v => !v)}
+                className="w-full flex items-center gap-2 p-3 text-left">
+                <span className="text-gray-500 text-xs flex-1">{t('studio.shortcuts.title')}</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showKeys ? 'rotate-180' : ''}`} />
+              </button>
+              {showKeys && (
+                <div className="space-y-1 text-[11px] text-gray-400 px-3 pb-3">
+                  <p>{t(paare ? 'studio.text.shortcutPair' : 'studio.shortcuts.classes')}</p>
+                  <p>{t('studio.shortcuts.skip')}</p>
+                  <p>{t('studio.shortcuts.back')}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {plan && (
+        <TextImportDialog
+          inspection={plan.inspection}
+          paare={paare}
+          onCancel={() => setPlan(null)}
+          onRun={(tc, lc, ig) => void runImport(tc, lc, ig)}
+        />
+      )}
+
+      {showExport && (
+        <TextExportDialog
+          project={project}
+          confirmed={confirmed}
+          onClose={() => setShowExport(false)}
+          onDone={() => { setShowExport(false); void loadStats(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Import ────────────────────────────────────────────────────────────────
+
+function TextImportDialog({ inspection, paare, onCancel, onRun }: {
+  inspection: TextInspection; paare: boolean;
+  onCancel: () => void;
+  onRun: (textColumn: string | null, labelColumn: string | null, ignore: boolean) => void;
+}) {
+  const { t } = useLanguage();
+  const [textColumn, setTextColumn] = useState(inspection.text_column ?? '');
+  const [labelColumn, setLabelColumn] = useState(inspection.label_column ?? '');
+  const [ignore, setIgnore] = useState(false);
+  const hatSpalten = inspection.columns.length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+      onClick={onCancel}>
+      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+        <div>
+          <h3 className="text-white font-semibold">{t('studio.text.importTitle')}</h3>
+          <p className="text-gray-400 text-xs mt-1">
+            {t('studio.text.importSummary', { rows: inspection.rows, kind: inspection.kind })}
+          </p>
+        </div>
+
+        {inspection.preview.length > 0 && (
+          <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3 space-y-1">
+            {inspection.preview.map((p, i) => (
+              <p key={i} className="text-gray-400 text-[11px] truncate">{p}</p>
+            ))}
+          </div>
+        )}
+
+        {hatSpalten && (
+          <>
+            <label className="block">
+              <span className="text-gray-400 text-xs">{t('studio.text.textColumn')}</span>
+              <select value={textColumn} onChange={e => setTextColumn(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
+                {inspection.columns.map(c => <option key={c} value={c} className="bg-[#101218]">{c}</option>)}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-gray-400 text-xs">
+                {t(paare ? 'studio.text.targetColumn' : 'studio.text.labelColumn')}
+              </span>
+              <select value={labelColumn} onChange={e => setLabelColumn(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
+                <option value="" className="bg-[#101218]">{t('studio.text.noColumn')}</option>
+                {inspection.columns.map(c => <option key={c} value={c} className="bg-[#101218]">{c}</option>)}
+              </select>
+            </label>
+          </>
+        )}
+
+        {inspection.labels.length > 0 && (
+          <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3">
+            <p className="text-gray-400 text-xs">
+              {t('studio.text.foundLabels', { count: inspection.labels.length })}
+            </p>
+            <p className="text-gray-500 text-[11px] mt-1">{inspection.labels.slice(0, 12).join(', ')}</p>
+            <label className="flex items-start gap-2 cursor-pointer mt-2">
+              <input type="checkbox" checked={ignore} onChange={e => setIgnore(e.target.checked)} className="mt-0.5" />
+              <span className="text-gray-400 text-[11px]">{t('studio.text.ignoreLabels')}</span>
+            </label>
+          </div>
+        )}
+
+        <p className="text-gray-500 text-xs flex items-start gap-1.5">
+          <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          {t('studio.text.duplicateNote')}
+        </p>
+
+        <div className="flex gap-2">
+          <button onClick={onCancel}
+            className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm">
+            {t('common.cancel', 'Abbrechen')}
+          </button>
+          <button onClick={() => onRun(textColumn || null, labelColumn || null, ignore)}
+            className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center justify-center gap-2">
+            <FileText className="w-4 h-4" /> {t('studio.import.startButton')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Export ────────────────────────────────────────────────────────────────
+
+function TextExportDialog({ project, confirmed, onClose, onDone }: {
+  project: StudioProject; confirmed: number; onClose: () => void; onDone: () => void;
+}) {
+  const { t } = useLanguage();
+  const { success, error } = useNotification();
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelId, setModelId] = useState('');
+  const [name, setName] = useState(project.name);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    invoke<ModelInfo[]>('list_models')
+      .then(list => { setModels(list); if (list.length > 0) setModelId(list[0].id); })
+      .catch(() => { /* Auswahl bleibt leer */ });
+  }, []);
+
+  const run = async () => {
+    if (!modelId) return;
+    setBusy(true);
+    try {
+      await invoke('studio_export', {
+        projectId: project.id, modelId, datasetName: name,
+        includeSuggested: false, trainRatio: 0, valRatio: 0,
+      });
+      success(t('studio.export.doneTitle'), t('studio.export.doneDetail', { name }));
+      onDone();
+    } catch (err: unknown) {
+      error(t('studio.export.errorTitle'), String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+      onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
+        onClick={e => e.stopPropagation()}>
+        <div>
+          <h3 className="text-white font-semibold">{t('studio.export.title')}</h3>
+          <p className="text-gray-500 text-xs mt-1">
+            {t(project.task === 'pairs' ? 'studio.text.exportPairs' : 'studio.text.exportClasses')}
+          </p>
+        </div>
+
+        <label className="block">
+          <span className="text-gray-400 text-xs">{t('studio.export.nameLabel')}</span>
+          <input value={name} onChange={e => setName(e.target.value)}
+            className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25" />
+        </label>
+
+        <label className="block">
+          <span className="text-gray-400 text-xs">{t('studio.export.modelLabel')}</span>
+          <select value={modelId} onChange={e => setModelId(e.target.value)}
+            className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
+            {models.length === 0 && <option value="">{t('studio.export.noModels')}</option>}
+            {models.map(m => <option key={m.id} value={m.id} className="bg-[#101218]">{m.name}</option>)}
+          </select>
+        </label>
+
+        <p className="text-gray-500 text-xs">{t('studio.export.summary', { confirmed })}</p>
+
+        <div className="flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm">
+            {t('common.cancel', 'Abbrechen')}
+          </button>
+          <button onClick={() => void run()} disabled={busy || !modelId}
+            className="flex-1 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-sm inline-flex items-center justify-center gap-2 disabled:opacity-40">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {t('studio.export.confirmButton')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

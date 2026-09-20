@@ -299,6 +299,8 @@ fn main() {
             studio_manager::studio_model_classes,
             studio_manager::studio_import_folder,
             studio_manager::studio_import_video,
+            studio_manager::studio_inspect_text,
+            studio_manager::studio_import_text,
             studio_manager::studio_list_samples,
             studio_manager::studio_set_annotation,
             studio_manager::studio_stats,

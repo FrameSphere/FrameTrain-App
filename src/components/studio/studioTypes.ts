@@ -21,8 +21,10 @@ export interface StudioSample {
   id:       string;
   media:    string;
   mime:     string;
+  /** Bei Text steht der Inhalt hier statt in einer Datei. */
+  content?: string | null;
   status:   SampleStatus;
-  ann:      { boxes: StudioBox[] };
+  ann:      { boxes: StudioBox[]; label?: string | null; target?: string | null };
   src:      { kind: string; origin?: string | null; license?: string | null; at: string };
   meta:     { w: number; h: number; group?: string | null };
   abs_path: string;

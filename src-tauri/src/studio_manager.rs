@@ -82,8 +82,15 @@ pub struct BoxAnn {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Annotation {
+    /// Objekterkennung.
     #[serde(default)]
     pub boxes: Vec<BoxAnn>,
+    /// Klassifikation: die zugewiesene Klasse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Seq2Seq: der Zieltext.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,9 +122,14 @@ pub struct SampleMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StudioSample {
     pub id:     String,
-    /// Pfad relativ zu media/, z.B. "ab/ab3f….jpg".
+    /// Pfad relativ zu media/, z.B. "ab/ab3f….jpg". Bei Text leer.
     pub media:  String,
     pub mime:   String,
+    /// Der Text selbst. Fuer jede Textzeile eine Datei anzulegen waere bei
+    /// zehntausend Zeilen zehntausend Dateien — der Inhalt steht deshalb in
+    /// der Zeile, so wie er aus der Quelle kam.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
     /// "new" | "suggested" | "confirmed" | "skipped"
     pub status: String,
     #[serde(default)]
@@ -152,11 +164,22 @@ pub struct ReviewReport {
     pub failed:  usize,
 }
 
+/// Eine Aenderung an einem Sample.
+///
+/// Welche Felder gesetzt sind, haengt an der Modalitaet: Bilder schicken
+/// Boxen, Klassifikation ein Label, Seq2Seq einen Zieltext. Beim Falten wird
+/// uebernommen, was das Ereignis traegt — auch ein leeres Feld, denn das ist
+/// die Art, eine Zuweisung wieder zu entfernen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AnnEvent {
     sample_id: String,
     status:    String,
+    #[serde(default)]
     boxes:     Vec<BoxAnn>,
+    #[serde(default)]
+    label:     Option<String>,
+    #[serde(default)]
+    target:    Option<String>,
     at:        String,
 }
 
@@ -325,6 +348,8 @@ fn load_samples(dir: &Path) -> Vec<StudioSample> {
         if let Some(&i) = index.get(&ev.sample_id) {
             samples[i].status = ev.status;
             samples[i].ann.boxes = ev.boxes;
+            samples[i].ann.label = ev.label;
+            samples[i].ann.target = ev.target;
         }
     }
     samples
@@ -603,7 +628,8 @@ pub async fn studio_list_projects(
 #[tauri::command]
 pub async fn studio_create_project(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
-    name: String, modality: String, target_format: String, classes: Vec<String>,
+    name: String, modality: String, task: Option<String>, target_format: String,
+    classes: Vec<String>,
 ) -> Result<StudioProject, String> {
     let name = name.trim().to_string();
     if name.is_empty() { return Err("Name fehlt".to_string()); }
@@ -615,7 +641,10 @@ pub async fn studio_create_project(
     fs::create_dir_all(dir.join("exports")).map_err(|e| format!("mkdir: {}", e))?;
     let now = Utc::now().to_rfc3339();
     let project = StudioProject {
-        id, name, modality, task: "bbox".to_string(), target_format,
+        id, name, modality, target_format,
+        // Ohne Angabe bleibt es bei Boxen — so verhalten sich Projekte aus
+        // der Zeit vor den Textmodalitaeten unveraendert.
+        task: task.unwrap_or_else(|| "bbox".to_string()),
         classes: classes.into_iter().map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect(),
         created_at: now.clone(), updated_at: now,
     };
@@ -855,8 +884,9 @@ pub async fn studio_import_folder(
             id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
             media: rel.clone(),
             mime: mime_for(&ext),
+            content: None,
             status: if has_labels { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { boxes },
+            ann: Annotation { boxes, label: None, target: None },
             src: SampleSource {
                 kind: "import".to_string(),
                 origin: Some(file.to_string_lossy().to_string()),
@@ -991,6 +1021,7 @@ pub async fn studio_import_video(
             id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
             media: rel.clone(),
             mime: "image/jpeg".to_string(),
+            content: None,
             status: "new".to_string(),
             ann: Annotation::default(),
             src: SampleSource {
@@ -1053,6 +1084,7 @@ pub async fn studio_list_samples(
 pub async fn studio_set_annotation(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, sample_id: String, boxes: Vec<BoxAnn>, status: String,
+    label: Option<String>, target: Option<String>,
 ) -> Result<(), String> {
     if !matches!(status.as_str(), "new" | "suggested" | "confirmed" | "skipped") {
         return Err(format!("Unbekannter Status: {}", status));
@@ -1060,7 +1092,7 @@ pub async fn studio_set_annotation(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let event = AnnEvent {
-        sample_id, status,
+        sample_id, status, label, target,
         boxes: boxes.into_iter()
             .map(|b| BoxAnn { cls: b.cls, x: clamp01(b.x), y: clamp01(b.y), w: clamp01(b.w), h: clamp01(b.h) })
             .filter(|b| b.w > 0.0005 && b.h > 0.0005)
@@ -1100,6 +1132,298 @@ pub async fn studio_stats(
         }
     }
     Ok(stats)
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TEXT
+//
+// Texte liegen nicht als Datei je Sample in media/, sondern in der Zeile
+// selbst: eine CSV mit 20 000 Zeilen wuerde sonst 20 000 Dateien anlegen.
+// Alles andere — Ereignisse, Status, Export, Statistik — ist dasselbe.
+// ══════════════════════════════════════════════════════════════════
+
+/// Zerlegt CSV-Text nach RFC 4180.
+///
+/// Selbst geschrieben, weil die Alternative eine weitere Abhaengigkeit waere
+/// und der Fall klar umrissen ist: Anfuehrungszeichen schuetzen Kommas,
+/// Zeilenumbrueche und verdoppelte Anfuehrungszeichen. Genau das produziert
+/// auch der Export des Labors.
+pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut zeilen = Vec::new();
+    let mut feld = String::new();
+    let mut zeile: Vec<String> = Vec::new();
+    let mut in_quotes = false;
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                if chars.peek() == Some(&'"') { chars.next(); feld.push('"'); }
+                else { in_quotes = false; }
+            } else {
+                feld.push(c);
+            }
+            continue;
+        }
+        match c {
+            '"' if feld.is_empty() => in_quotes = true,
+            ',' => zeile.push(std::mem::take(&mut feld)),
+            '\r' => { if chars.peek() == Some(&'\n') { chars.next(); }
+                      zeile.push(std::mem::take(&mut feld));
+                      zeilen.push(std::mem::take(&mut zeile)); }
+            '\n' => { zeile.push(std::mem::take(&mut feld));
+                      zeilen.push(std::mem::take(&mut zeile)); }
+            _ => feld.push(c),
+        }
+    }
+    if !feld.is_empty() || !zeile.is_empty() {
+        zeile.push(feld);
+        zeilen.push(zeile);
+    }
+    // Leerzeilen am Ende sind kein Datensatz.
+    zeilen.retain(|z| !(z.len() == 1 && z[0].trim().is_empty()));
+    zeilen
+}
+
+/// Eine Textzeile aus der Quelle, noch ohne Projektbezug.
+#[derive(Debug, Clone)]
+pub struct TextRow {
+    pub text:  String,
+    pub label: Option<String>,
+    pub origin: String,
+}
+
+/// Was eine Textquelle hergibt.
+#[derive(Debug, Clone, Serialize)]
+pub struct TextInspection {
+    /// "csv" | "jsonl" | "folder"
+    pub kind:       String,
+    pub rows:       usize,
+    /// Spaltennamen einer CSV, Schluessel einer JSONL — leer bei Ordnern.
+    pub columns:    Vec<String>,
+    /// Vorschlag, welche Spalte der Text ist.
+    pub text_column:  Option<String>,
+    /// Vorschlag, welche Spalte das Label ist.
+    pub label_column: Option<String>,
+    /// Die ersten Zeilen, damit man sieht, was ankommt.
+    pub preview:    Vec<String>,
+    /// Klassen, die in der Quelle vorkommen.
+    pub labels:     Vec<String>,
+}
+
+const TEXT_EXTS: &[&str] = &["txt", "md"];
+
+fn spalte_finden(spalten: &[String], kandidaten: &[&str]) -> Option<String> {
+    spalten.iter()
+        .find(|s| kandidaten.iter().any(|k| s.trim().eq_ignore_ascii_case(k)))
+        .cloned()
+}
+
+/// Liest eine Textquelle: CSV, JSONL oder ein Ordner mit .txt-Dateien.
+fn read_text_source(
+    path: &Path, text_column: Option<&str>, label_column: Option<&str>,
+) -> Result<(String, Vec<String>, Vec<TextRow>), String> {
+    if path.is_dir() {
+        // Ordner: jede .txt ist ein Sample. Liegt sie in einem Unterordner,
+        // ist dessen Name das Label — dieselbe Konvention wie bei Bildern.
+        let mut rows = Vec::new();
+        let mut stack = vec![path.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    if !p.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.') {
+                        stack.push(p);
+                    }
+                    continue;
+                }
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if !TEXT_EXTS.contains(&ext.as_str()) { continue; }
+                let Ok(text) = fs::read_to_string(&p) else { continue };
+                if text.trim().is_empty() { continue; }
+                let label = p.parent()
+                    .filter(|parent| *parent != path)
+                    .and_then(|parent| parent.file_name())
+                    .map(|n| n.to_string_lossy().to_string());
+                rows.push(TextRow { text, label, origin: p.to_string_lossy().to_string() });
+            }
+        }
+        rows.sort_by(|a, b| a.origin.cmp(&b.origin));
+        return Ok(("folder".to_string(), vec![], rows));
+    }
+
+    let inhalt = fs::read_to_string(path).map_err(|e| format!("Datei lesen: {}", e))?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let quelle = path.to_string_lossy().to_string();
+
+    if ext == "jsonl" || ext == "ndjson" {
+        let mut spalten: Vec<String> = Vec::new();
+        let mut werte: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
+        for line in inhalt.lines().filter(|l| !l.trim().is_empty()) {
+            let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(line) else { continue };
+            for k in obj.keys() {
+                if !spalten.contains(k) { spalten.push(k.clone()); }
+            }
+            werte.push(obj);
+        }
+        let tcol = text_column.map(str::to_string)
+            .or_else(|| spalte_finden(&spalten, &["text", "source", "input", "sentence"]))
+            .or_else(|| spalten.first().cloned())
+            .ok_or("Die Datei enthaelt keine lesbaren Felder")?;
+        let lcol = label_column.map(str::to_string)
+            .or_else(|| spalte_finden(&spalten, &["label", "target", "class", "klasse"]));
+        let rows = werte.into_iter().filter_map(|obj| {
+            let text = obj.get(&tcol).and_then(|v| v.as_str())?.to_string();
+            if text.trim().is_empty() { return None; }
+            let label = lcol.as_ref().and_then(|c| obj.get(c))
+                .and_then(|v| v.as_str().map(str::to_string));
+            Some(TextRow { text, label, origin: quelle.clone() })
+        }).collect();
+        return Ok(("jsonl".to_string(), spalten, rows));
+    }
+
+    // Alles andere als CSV lesen. Eine .txt ohne Kommas ergibt dabei eine
+    // einspaltige Tabelle — jede Zeile ein Sample, was genau richtig ist.
+    let tabelle = parse_csv(&inhalt);
+    if tabelle.is_empty() { return Err("Die Datei ist leer".to_string()); }
+
+    let kopf = &tabelle[0];
+    // Kopfzeile nur annehmen, wenn sie nach Spaltennamen aussieht.
+    let hat_kopf = kopf.iter().any(|f| {
+        let f = f.trim().to_lowercase();
+        ["text", "label", "source", "target", "class", "klasse", "input", "sentence"].contains(&f.as_str())
+    });
+    let spalten: Vec<String> = if hat_kopf {
+        kopf.clone()
+    } else {
+        (0..kopf.len()).map(|i| format!("Spalte {}", i + 1)).collect()
+    };
+    let tcol = text_column.map(str::to_string)
+        .or_else(|| spalte_finden(&spalten, &["text", "source", "input", "sentence"]))
+        .or_else(|| spalten.first().cloned())
+        .ok_or("Keine Spalte gefunden")?;
+    let lcol = label_column.map(str::to_string)
+        .or_else(|| spalte_finden(&spalten, &["label", "target", "class", "klasse"]));
+    let ti = spalten.iter().position(|s| *s == tcol).unwrap_or(0);
+    let li = lcol.as_ref().and_then(|c| spalten.iter().position(|s| s == c));
+
+    let daten = if hat_kopf { &tabelle[1..] } else { &tabelle[..] };
+    let rows = daten.iter().filter_map(|z| {
+        let text = z.get(ti)?.trim().to_string();
+        if text.is_empty() { return None; }
+        let label = li.and_then(|i| z.get(i)).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        Some(TextRow { text, label, origin: quelle.clone() })
+    }).collect();
+    Ok(("csv".to_string(), spalten, rows))
+}
+
+#[tauri::command]
+pub async fn studio_inspect_text(
+    source_path: String, text_column: Option<String>, label_column: Option<String>,
+) -> Result<TextInspection, String> {
+    let path = Path::new(&source_path);
+    if !path.exists() { return Err(format!("Nicht gefunden: {}", source_path)); }
+    let (kind, spalten, rows) = read_text_source(path, text_column.as_deref(), label_column.as_deref())?;
+    if rows.is_empty() { return Err("Keine verwertbaren Texte gefunden".to_string()); }
+
+    let mut labels: Vec<String> = Vec::new();
+    for r in &rows {
+        if let Some(l) = &r.label {
+            if !labels.iter().any(|x| x.eq_ignore_ascii_case(l)) { labels.push(l.clone()); }
+        }
+    }
+    labels.sort();
+
+    Ok(TextInspection {
+        text_column: spalte_finden(&spalten, &["text", "source", "input", "sentence"])
+            .or_else(|| spalten.first().cloned()),
+        label_column: spalte_finden(&spalten, &["label", "target", "class", "klasse"]),
+        preview: rows.iter().take(3)
+            .map(|r| r.text.chars().take(140).collect::<String>()).collect(),
+        rows: rows.len(),
+        kind, columns: spalten, labels,
+    })
+}
+
+#[tauri::command]
+pub async fn studio_import_text(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, source_path: String,
+    text_column: Option<String>, label_column: Option<String>, ignore_labels: bool,
+) -> Result<ImportReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let mut project = load_project(&dir)?;
+    let path = Path::new(&source_path);
+    if !path.exists() { return Err(format!("Nicht gefunden: {}", source_path)); }
+
+    let (_kind, _spalten, rows) = read_text_source(path, text_column.as_deref(), label_column.as_deref())?;
+    if rows.is_empty() { return Err("Keine verwertbaren Texte gefunden".to_string()); }
+
+    let existing = load_samples(&dir);
+    // Gleicher Text zweimal ist auch hier ein Duplikat.
+    let mut known: std::collections::HashSet<String> = existing.iter()
+        .filter_map(|s| s.content.as_ref().map(|c| sha256_hex(c.as_bytes())))
+        .collect();
+
+    let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
+        classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
+    let now = Utc::now().to_rfc3339();
+    let total = rows.len();
+
+    for (i, row) in rows.iter().enumerate() {
+        if i % 100 == 0 {
+            let _ = app_handle.emit("studio-import-progress", serde_json::json!({
+                "project_id": project_id, "current": i, "total": total,
+            }));
+        }
+        let hash = sha256_hex(row.text.as_bytes());
+        if known.contains(&hash) { report.duplicates += 1; continue; }
+
+        let mut label = row.label.clone();
+        if ignore_labels && label.is_some() { report.labels_ignored += 1; label = None; }
+
+        // Klassen aus der Quelle uebernehmen — unter dem Namen, den das
+        // Projekt schon fuehrt, damit "Spam" und "spam" nicht zweimal stehen.
+        if let Some(l) = &label {
+            match class_index_for(l, &project.classes) {
+                Some(idx) => label = Some(project.classes[idx].clone()),
+                None => {
+                    project.classes.push(l.clone());
+                    report.classes_added.push(l.clone());
+                }
+            }
+        }
+        if label.is_some() { report.with_labels += 1; }
+
+        append_jsonl(&samples_path(&dir), &StudioSample {
+            id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+            media: String::new(),
+            mime: "text/plain".to_string(),
+            content: Some(row.text.clone()),
+            status: if label.is_some() { "confirmed".to_string() } else { "new".to_string() },
+            ann: Annotation { boxes: vec![], label, target: None },
+            src: SampleSource {
+                kind: "import".to_string(),
+                origin: Some(row.origin.clone()),
+                license: None,
+                at: now.clone(),
+            },
+            meta: SampleMeta { w: 0, h: 0, group: None },
+            abs_path: String::new(),
+            doubt: None,
+        })?;
+        known.insert(hash);
+        report.added += 1;
+    }
+
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)?;
+    let _ = app_handle.emit("studio-import-progress", serde_json::json!({
+        "project_id": project_id, "current": total, "total": total, "done": true,
+    }));
+    Ok(report)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1346,6 +1670,8 @@ pub async fn studio_suggest(
             sample_id: sample.id.clone(),
             status:    "suggested".to_string(),
             boxes,
+            label:     None,
+            target:    None,
             at:        Utc::now().to_rfc3339(),
         })?;
     }
@@ -1540,6 +1866,65 @@ Herkunft je Bild steht in PROVENANCE.csv.
     Ok(())
 }
 
+/// Schreibt das Projekt als Textdatensatz.
+///
+/// Die Spalten sind nicht frei gewaehlt: die Train Engine liest bei
+/// Klassifikation text/label aus einer CSV und bei Seq2Seq source/target aus
+/// einer JSONL. Was hier entsteht, muss dort ohne Zwischenschritt passen.
+fn write_text_export(
+    project: &StudioProject, samples: &[&StudioSample], out: &Path,
+) -> Result<(), String> {
+    let seq2seq = project.task == "pairs";
+    let mut provenance = String::from("sample_id,herkunft,lizenz,status\n");
+
+    if seq2seq {
+        let mut zeilen = String::new();
+        for s in samples {
+            let (Some(quelle), Some(ziel)) = (s.content.as_ref(), s.ann.target.as_ref()) else { continue };
+            zeilen.push_str(&serde_json::json!({ "source": quelle, "target": ziel }).to_string());
+            zeilen.push('\n');
+            provenance.push_str(&format!("{},{},{},{}\n", csv_field(&s.id),
+                csv_field(s.src.origin.as_deref().unwrap_or("")),
+                csv_field(s.src.license.as_deref().unwrap_or("")),
+                csv_field(&s.status)));
+        }
+        fs::write(out.join("daten.jsonl"), zeilen).map_err(|e| format!("JSONL: {}", e))?;
+    } else {
+        let mut zeilen = String::from("text,label\n");
+        for s in samples {
+            let (Some(text), Some(label)) = (s.content.as_ref(), s.ann.label.as_ref()) else { continue };
+            zeilen.push_str(&format!("{},{}\n", csv_field(text), csv_field(label)));
+            provenance.push_str(&format!("{},{},{},{}\n", csv_field(&s.id),
+                csv_field(s.src.origin.as_deref().unwrap_or("")),
+                csv_field(s.src.license.as_deref().unwrap_or("")),
+                csv_field(&s.status)));
+        }
+        fs::write(out.join("daten.csv"), zeilen).map_err(|e| format!("CSV: {}", e))?;
+    }
+
+    fs::write(out.join("PROVENANCE.csv"), provenance)
+        .map_err(|e| format!("PROVENANCE.csv: {}", e))?;
+
+    let card = format!(
+"# {name}
+
+Erzeugt vom FrameTrain Dataset Studio am {date}.
+
+- Texte: {count}
+- Klassen: {classes}
+- Format: {format}
+
+Herkunft je Text steht in PROVENANCE.csv.
+",
+        name = project.name,
+        date = Utc::now().format("%Y-%m-%d"),
+        count = samples.len(),
+        classes = if project.classes.is_empty() { "—".to_string() } else { project.classes.join(", ") },
+        format = if seq2seq { "daten.jsonl mit source und target" } else { "daten.csv mit text und label" });
+    fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn studio_export(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
@@ -1549,7 +1934,9 @@ pub async fn studio_export(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let project = load_project(&dir)?;
-    if project.classes.is_empty() { return Err("Das Projekt hat noch keine Klassen".to_string()); }
+    if project.classes.is_empty() && project.task != "pairs" {
+        return Err("Das Projekt hat noch keine Klassen".to_string());
+    }
 
     let samples = load_samples(&dir);
     let selected: Vec<&StudioSample> = samples.iter()
@@ -1558,11 +1945,16 @@ pub async fn studio_export(
     if selected.is_empty() {
         return Err("Keine bestätigten Samples — es gibt nichts zu exportieren".to_string());
     }
+    let ist_text = project.modality == "text";
 
     let stamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let out = dir.join("exports").join(&stamp);
     fs::create_dir_all(&out).map_err(|e| format!("mkdir export: {}", e))?;
-    write_yolo_export(&project, &selected, &dir.join("media"), &out, train_ratio, val_ratio)?;
+    if ist_text {
+        write_text_export(&project, &selected, &out)?;
+    } else {
+        write_yolo_export(&project, &selected, &dir.join("media"), &out, train_ratio, val_ratio)?;
+    }
 
     let name = if dataset_name.trim().is_empty() { project.name.clone() } else { dataset_name };
     crate::dataset_manager::import_local_dataset(
@@ -1668,7 +2060,7 @@ mod tests {
     fn sample(id: &str, status: &str) -> StudioSample {
         StudioSample {
             id: id.to_string(), media: format!("ab/{}.jpg", id), mime: "image/jpeg".to_string(),
-            status: status.to_string(), ann: Annotation::default(),
+            content: None, status: status.to_string(), ann: Annotation::default(),
             src: SampleSource { kind: "import".to_string(), origin: Some(format!("/daten/{}.jpg", id)),
                 license: None, at: "2026-09-16T08:00:00Z".to_string() },
             meta: SampleMeta { w: 1000, h: 500, group: None },
@@ -1687,6 +2079,7 @@ mod tests {
         append_jsonl(&events_path(dir.path()), &AnnEvent {
             sample_id: "s_2".to_string(), status: "confirmed".to_string(),
             boxes: vec![BoxAnn { cls: 1, x: 0.5, y: 0.5, w: 0.2, h: 0.2 }],
+            label: None, target: None,
             at: "2026-09-16T09:00:00Z".to_string(),
         }).unwrap();
 
@@ -1704,7 +2097,8 @@ mod tests {
         for status in ["confirmed", "skipped"] {
             append_jsonl(&events_path(dir.path()), &AnnEvent {
                 sample_id: "s_1".to_string(), status: status.to_string(),
-                boxes: vec![], at: "2026-09-16T09:00:00Z".to_string(),
+                boxes: vec![], label: None, target: None,
+                at: "2026-09-16T09:00:00Z".to_string(),
             }).unwrap();
         }
         assert_eq!(load_samples(dir.path())[0].status, "skipped");
@@ -1720,6 +2114,69 @@ mod tests {
         write!(f, "{{\"id\":\"s_2\",\"med").unwrap();
         drop(f);
         assert_eq!(load_samples(dir.path()).len(), 1);
+    }
+
+    fn textsample(id: &str, text: &str, label: Option<&str>) -> StudioSample {
+        StudioSample {
+            id: id.to_string(), media: String::new(), mime: "text/plain".to_string(),
+            content: Some(text.to_string()), status: "confirmed".to_string(),
+            ann: Annotation { boxes: vec![], label: label.map(str::to_string), target: None },
+            src: SampleSource { kind: "import".to_string(), origin: Some("/daten/x.csv".to_string()),
+                license: None, at: "2026-09-20T08:00:00Z".to_string() },
+            meta: SampleMeta::default(), abs_path: String::new(), doubt: None,
+        }
+    }
+
+    #[test]
+    fn textexport_schreibt_die_spalten_der_train_engine() {
+        // text,label ist nicht frei gewaehlt — seq_classification liest genau
+        // diese Spalten. Und ein Komma im Text darf die Datei nicht zerreissen.
+        let dir = TempDir::new("textexport");
+        let project = StudioProject {
+            id: "sp_t".to_string(), name: "Rueckmeldungen".to_string(),
+            modality: "text".to_string(), task: "classification".to_string(),
+            target_format: "flat_file".to_string(),
+            classes: vec!["beschwerde".to_string(), "lob".to_string()],
+            created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let s1 = textsample("s_1", "Der Lift stand still, zweimal", Some("beschwerde"));
+        let s2 = textsample("s_2", "Tolle Piste", Some("lob"));
+        let out = dir.path().join("out");
+        fs::create_dir_all(&out).unwrap();
+        write_text_export(&project, &[&s1, &s2], &out).unwrap();
+
+        let csv = fs::read_to_string(out.join("daten.csv")).unwrap();
+        let tabelle = parse_csv(&csv);
+        assert_eq!(tabelle[0], vec!["text", "label"]);
+        assert_eq!(tabelle[1], vec!["Der Lift stand still, zweimal", "beschwerde"]);
+        assert_eq!(tabelle[2], vec!["Tolle Piste", "lob"]);
+        assert!(out.join("PROVENANCE.csv").exists());
+        assert!(out.join("DATA_CARD.md").exists());
+    }
+
+    #[test]
+    fn textexport_schreibt_paare_als_jsonl() {
+        let dir = TempDir::new("paare");
+        let project = StudioProject {
+            id: "sp_p".to_string(), name: "Umformulieren".to_string(),
+            modality: "text".to_string(), task: "pairs".to_string(),
+            target_format: "flat_file".to_string(), classes: vec![],
+            created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let mut s1 = textsample("s_1", "Der Lift steht", None);
+        s1.ann.target = Some("Die Bahn ist ausser Betrieb".to_string());
+        // Ohne Zieltext gehoert die Zeile nicht in den Export.
+        let s2 = textsample("s_2", "Ohne Ziel", None);
+        let out = dir.path().join("out");
+        fs::create_dir_all(&out).unwrap();
+        write_text_export(&project, &[&s1, &s2], &out).unwrap();
+
+        let jsonl = fs::read_to_string(out.join("daten.jsonl")).unwrap();
+        let zeilen: Vec<&str> = jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(zeilen.len(), 1, "die Zeile ohne Ziel darf nicht mit");
+        let v: serde_json::Value = serde_json::from_str(zeilen[0]).unwrap();
+        assert_eq!(v["source"], "Der Lift steht");
+        assert_eq!(v["target"], "Die Bahn ist ausser Betrieb");
     }
 
     #[test]
@@ -1768,6 +2225,91 @@ mod tests {
         let prov = fs::read_to_string(out.join("PROVENANCE.csv")).unwrap();
         assert!(prov.contains("\"/daten/mit,komma.png\""), "Herkunft fehlt oder ist unquotiert: {}", prov);
         assert!(out.join("DATA_CARD.md").exists());
+    }
+
+    #[test]
+    fn csv_lesen_haelt_kommas_und_anfuehrungszeichen_zusammen() {
+        let t = "text,label\n\"Hallo, Welt\",gruss\n\"er sagte \"\"hi\"\"\",zitat\n";
+        let tabelle = parse_csv(t);
+        assert_eq!(tabelle.len(), 3);
+        assert_eq!(tabelle[1], vec!["Hallo, Welt", "gruss"]);
+        assert_eq!(tabelle[2], vec!["er sagte \"hi\"", "zitat"]);
+    }
+
+    #[test]
+    fn csv_lesen_kommt_mit_zeilenumbruch_im_feld_klar() {
+        // Ein Textfeld darf einen Absatz enthalten — das zerriss frueher jede
+        // selbstgebaute Zerlegung an \n.
+        let tabelle = parse_csv("text,label\n\"Zeile eins\nZeile zwei\",lang\n");
+        assert_eq!(tabelle.len(), 2);
+        assert_eq!(tabelle[1][0], "Zeile eins\nZeile zwei");
+        assert_eq!(tabelle[1][1], "lang");
+    }
+
+    #[test]
+    fn csv_lesen_versteht_windows_zeilenenden() {
+        let tabelle = parse_csv("a,b\r\n1,2\r\n");
+        assert_eq!(tabelle, vec![vec!["a", "b"], vec!["1", "2"]]);
+    }
+
+    #[test]
+    fn textquelle_csv_erkennt_spalten_und_labels() {
+        let dir = TempDir::new("csv");
+        let datei = dir.path().join("daten.csv");
+        fs::write(&datei, "text,label\nDer Lift steht,defekt\nSchoene Piste,ok\n").unwrap();
+
+        let (kind, spalten, rows) = read_text_source(&datei, None, None).unwrap();
+        assert_eq!(kind, "csv");
+        assert_eq!(spalten, vec!["text", "label"]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].text, "Der Lift steht");
+        assert_eq!(rows[0].label.as_deref(), Some("defekt"));
+    }
+
+    #[test]
+    fn textquelle_ohne_kopfzeile_nimmt_die_erste_spalte() {
+        let dir = TempDir::new("nokopf");
+        let datei = dir.path().join("roh.csv");
+        fs::write(&datei, "Der Lift steht\nSchoene Piste\n").unwrap();
+
+        let (_, spalten, rows) = read_text_source(&datei, None, None).unwrap();
+        assert_eq!(spalten, vec!["Spalte 1"]);
+        assert_eq!(rows.len(), 2, "beide Zeilen sind Daten, keine davon ist ein Kopf");
+        assert_eq!(rows[0].text, "Der Lift steht");
+        assert!(rows[0].label.is_none());
+    }
+
+    #[test]
+    fn textquelle_ordner_nimmt_den_unterordner_als_klasse() {
+        let dir = TempDir::new("ordner");
+        fs::create_dir_all(dir.path().join("beschwerde")).unwrap();
+        fs::create_dir_all(dir.path().join("lob")).unwrap();
+        fs::write(dir.path().join("beschwerde/a.txt"), "Der Lift stand still").unwrap();
+        fs::write(dir.path().join("lob/b.txt"), "Tolle Piste").unwrap();
+        // Direkt im Wurzelordner: kein Unterordner, also kein Label.
+        fs::write(dir.path().join("c.txt"), "Ohne Zuordnung").unwrap();
+
+        let (kind, _, rows) = read_text_source(dir.path(), None, None).unwrap();
+        assert_eq!(kind, "folder");
+        assert_eq!(rows.len(), 3);
+        let label_von = |t: &str| rows.iter().find(|r| r.text.contains(t))
+            .and_then(|r| r.label.clone());
+        assert_eq!(label_von("Lift").as_deref(), Some("beschwerde"));
+        assert_eq!(label_von("Piste").as_deref(), Some("lob"));
+        assert_eq!(label_von("Zuordnung"), None);
+    }
+
+    #[test]
+    fn textquelle_jsonl_liest_source_und_target() {
+        let dir = TempDir::new("jsonl");
+        let datei = dir.path().join("paare.jsonl");
+        fs::write(&datei, "{\"source\":\"Hallo\",\"target\":\"Moin\"}\n{\"source\":\"Tschuess\",\"target\":\"Ciao\"}\n").unwrap();
+
+        let (kind, spalten, rows) = read_text_source(&datei, None, None).unwrap();
+        assert_eq!(kind, "jsonl");
+        assert!(spalten.contains(&"source".to_string()));
+        assert_eq!(rows[0].text, "Hallo");
+        assert_eq!(rows[0].label.as_deref(), Some("Moin"));
     }
 
     #[test]

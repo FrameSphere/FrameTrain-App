@@ -3096,7 +3096,18 @@
       "classesPlaceholder": "Lift, Sky, Mast",
       "classesHint": "Mit Komma oder Zeilenumbruch getrennt. Lässt sich später ergänzen — ein Import bringt vorhandene Klassen selbst mit.",
       "formatNote": "Export als YOLO: images/, labels/ und classes.txt. Die Aufteilung in Train, Val und Test übernimmt danach der Split im Dataset-Bereich, der Bild und Label zusammenhält.",
-      "confirmButton": "Anlegen"
+      "confirmButton": "Anlegen",
+      "kindLabel": "Was soll gelabelt werden?",
+      "kindImage": "Bilder",
+      "kindText": "Texte",
+      "kindPairs": "Textpaare",
+      "kindHint": {
+        "image": "Boxen ins Bild ziehen, Export als YOLO",
+        "text": "Jeder Zeile eine Klasse geben, Export als CSV",
+        "pairs": "Zu jedem Text die gewünschte Antwort schreiben, Export als JSONL"
+      },
+      "formatNote_text": "Export als daten.csv mit den Spalten text und label — das Format, das die Klassifikation liest.",
+      "formatNote_pairs": "Export als daten.jsonl mit source und target — das Format, das Seq2Seq liest."
     },
     "workbench": {
       "back": "Zurück zur Projektliste",
@@ -3260,6 +3271,35 @@
       "video": "Video",
       "videoHint": "Jedes n-te Bild wird übernommen",
       "back": "Zurück"
+    },
+    "text": {
+      "importFile": "Datei",
+      "importFolder": "Ordner",
+      "pickFile": "Textdatei wählen (CSV, JSONL, TXT)",
+      "pickFolder": "Ordner mit Textdateien wählen",
+      "emptyTitle": "Noch keine Texte",
+      "emptyDetail": "Eine CSV oder JSONL einlesen, oder einen Ordner mit .txt-Dateien — Unterordner gelten dabei als Klasse.",
+      "noLabel": "ohne Klasse",
+      "importTitle": "Texte einlesen",
+      "importSummary": "{rows} Zeilen gefunden ({kind}).",
+      "textColumn": "Welche Spalte ist der Text?",
+      "labelColumn": "Welche Spalte ist die Klasse?",
+      "targetColumn": "Welche Spalte ist der Zieltext?",
+      "noColumn": "keine",
+      "foundLabels": "{count} Klassen in der Quelle",
+      "ignoreLabels": "Vorhandene Zuordnung weglassen und selbst neu vergeben",
+      "duplicateNote": "Gleicher Text zweimal wird nur einmal übernommen.",
+      "targetLabel": "So soll es heißen",
+      "targetPlaceholder": "Zieltext…",
+      "targetHint": "Cmd+Enter bestätigt und springt weiter",
+      "needsTargetTitle": "Kein Zieltext",
+      "needsTargetDetail": "Ohne Zieltext gibt es nichts zu lernen — schreib etwas hinein oder überspring die Zeile.",
+      "noClasses": "Ohne Klasse lässt sich nichts zuordnen. Rechts eine anlegen.",
+      "shortcutPair": "Cmd+Enter — bestätigen und weiter",
+      "doneTitle": "Texte übernommen",
+      "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit Klasse",
+      "exportClasses": "Schreibt daten.csv mit den Spalten text und label — genau das, was die Train Engine liest.",
+      "exportPairs": "Schreibt daten.jsonl mit source und target — genau das, was Seq2Seq liest."
     }
   }
 }

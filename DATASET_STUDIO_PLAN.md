@@ -1,6 +1,6 @@
 # FrameTrain Dataset Studio – Systemplanung
 
-Stand: 2026-09-20 — Beta: S1, S2, Qualitaetspruefung und Video-Erfassung gebaut
+Stand: 2026-09-20 — Beta: Bilder vollstaendig, Text (Klassifikation und Paare) dazu
 Ergaenzt `DATASET_ROADMAP.md`: dort geht es um *vorhandene* Datensaetze (erkennen,
 splitten, importieren), hier um das *Erzeugen* neuer Datensaetze.
 
@@ -316,3 +316,37 @@ Dataset-Import als fertig aufgeteilt erkennt.
 **Was fuer den echten Test noch fehlt:** ein Lauf mit den 463 Bildern (Dauer
 des Imports, Fluessigkeit der Warteschlange) und ein Vorschlags-Lauf ueber
 mehr als eine Handvoll Bilder.
+
+---
+
+## 14. Text als zweite Modalitaet (1.2.90)
+
+Der Studio war auf Bilder gebaut, das Format darunter aber nie: Projekt,
+Ereignisse, Status, Export und Statistik sind modalitaetsfrei. Text brauchte
+deshalb kein zweites System, sondern drei Ergaenzungen:
+
+- `StudioSample.content` traegt den Text direkt. Fuer jede Zeile einer CSV eine
+  Datei in media/ anzulegen hiesse bei 20 000 Zeilen 20 000 Dateien.
+- `Annotation` hat neben `boxes` jetzt `label` (Klassifikation) und `target`
+  (Seq2Seq). Das Ereignis traegt, was die Modalitaet braucht.
+- `TextWorkbench.tsx` neben `ImageWorkbench.tsx`; `StudioPanel` waehlt anhand
+  von `project.modality`.
+
+**Import:** CSV, JSONL und Ordner mit .txt. Der CSV-Leser ist selbst
+geschrieben (RFC 4180: Anfuehrungszeichen schuetzen Kommas, Zeilenumbrueche und
+verdoppelte Anfuehrungszeichen) — eine Abhaengigkeit mehr waere fuer diesen
+klar umrissenen Fall zu teuer. Spalten werden vorgeschlagen (text/source/input,
+label/target/class) und lassen sich im Dialog umstellen; bei Ordnern gilt der
+Unterordner als Klasse, wie bei Bildern. Gleicher Text zweimal ist ein Duplikat.
+
+**Export:** `daten.csv` mit text,label bei Klassifikation, `daten.jsonl` mit
+source,target bei Paaren. Die Spalten sind nicht frei gewaehlt — genau die
+liest die Train Engine (seq_classification, ft_data/seq2seq.py).
+
+**Bedienung:** wie bei Bildern auf Tastatur ausgelegt. Zahl waehlt die Klasse,
+speichert und springt zur naechsten offenen Zeile. Bei Paaren gilt Cmd+Enter,
+damit eine 1 im Zieltext eine 1 bleibt.
+
+**Noch offen fuer Text:** Vorschlaege (ein vorhandenes Klassifikationsmodell
+oder die KI-Schicht koennte vorsortieren) und die Zweifel-Queue. Beides ist
+Stufe 2 und 3 des Plans, fuer Bilder bereits gebaut.

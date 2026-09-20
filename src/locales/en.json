@@ -3096,7 +3096,18 @@
       "classesPlaceholder": "Lift, Sky, Pylon",
       "classesHint": "Separated by comma or line break. Can be extended later — an import brings its own classes along.",
       "formatNote": "Exports as YOLO: images/, labels/ and classes.txt. Splitting into train, val and test is done afterwards by the split in the dataset area, which keeps image and label together.",
-      "confirmButton": "Create"
+      "confirmButton": "Create",
+      "kindLabel": "What will be labelled?",
+      "kindImage": "Images",
+      "kindText": "Texts",
+      "kindPairs": "Text pairs",
+      "kindHint": {
+        "image": "Drag boxes onto the image, export as YOLO",
+        "text": "Give each row a class, export as CSV",
+        "pairs": "Write the wanted answer for each text, export as JSONL"
+      },
+      "formatNote_text": "Exports daten.csv with the columns text and label — the format classification reads.",
+      "formatNote_pairs": "Exports daten.jsonl with source and target — the format seq2seq reads."
     },
     "workbench": {
       "back": "Back to project list",
@@ -3260,6 +3271,35 @@
       "video": "Video",
       "videoHint": "Every nth frame is taken",
       "back": "Back"
+    },
+    "text": {
+      "importFile": "File",
+      "importFolder": "Folder",
+      "pickFile": "Choose text file (CSV, JSONL, TXT)",
+      "pickFolder": "Choose folder with text files",
+      "emptyTitle": "No texts yet",
+      "emptyDetail": "Read a CSV or JSONL, or a folder of .txt files — subfolders count as the class.",
+      "noLabel": "no class",
+      "importTitle": "Read texts",
+      "importSummary": "{rows} rows found ({kind}).",
+      "textColumn": "Which column is the text?",
+      "labelColumn": "Which column is the class?",
+      "targetColumn": "Which column is the target text?",
+      "noColumn": "none",
+      "foundLabels": "{count} classes in the source",
+      "ignoreLabels": "Leave the existing assignment out and assign anew",
+      "duplicateNote": "The same text twice is taken only once.",
+      "targetLabel": "What it should say",
+      "targetPlaceholder": "Target text…",
+      "targetHint": "Cmd+Enter confirms and moves on",
+      "needsTargetTitle": "No target text",
+      "needsTargetDetail": "Without a target there is nothing to learn — write something or skip the row.",
+      "noClasses": "Without a class there is nothing to assign. Add one on the right.",
+      "shortcutPair": "Cmd+Enter — confirm and continue",
+      "doneTitle": "Texts imported",
+      "doneDetail": "{added} new, {duplicates} duplicate, {labels} with a class",
+      "exportClasses": "Writes daten.csv with the columns text and label — exactly what the train engine reads.",
+      "exportPairs": "Writes daten.jsonl with source and target — exactly what seq2seq reads."
     }
   }
 }
