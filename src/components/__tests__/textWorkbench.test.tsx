@@ -100,6 +100,37 @@ describe('TextWorkbench', () => {
     });
   });
 
+  it('bietet Vorschlagen und Pruefen an, Pruefen erst mit bestaetigten Zeilen', async () => {
+    // Textprojekte hatten die beiden Knoepfe zuerst gar nicht — sie sind der
+    // Unterschied zwischen "kann man benutzen" und "muss man alles tippen".
+    render(<TextWorkbench {...props()} />);
+    expect(await screen.findByRole('button', { name: /Vorschlagen/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Prüfen/ })).toBeDisabled();
+  });
+
+  it('zeigt einen Vorschlag als solchen, bis er bestaetigt ist', async () => {
+    const mitVorschlag = [{
+      ...TEXTE[0], status: 'suggested' as const,
+      ann: { boxes: [], label: 'lob' },
+    }, TEXTE[1]];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_samples') return { total: 2, items: mitVorschlag };
+      if (cmd === 'studio_stats') return { ...STATS, suggested: 1, new: 1 };
+      return null;
+    });
+
+    render(<TextWorkbench {...props()} />);
+    expect(await screen.findByText(/Vorschlag des Modells/)).toBeInTheDocument();
+
+    // Enter uebernimmt den vorgeschlagenen Wert unveraendert.
+    fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_set_annotation', expect.objectContaining({
+        sampleId: 's_1', status: 'confirmed', label: 'lob',
+      }));
+    });
+  });
+
   it('bestaetigt ein Paar nicht ohne Zieltext', async () => {
     render(<TextWorkbench {...props('pairs')} />);
     const feld = await screen.findByPlaceholderText('Zieltext…');

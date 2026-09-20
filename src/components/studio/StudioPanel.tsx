@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X,
+  ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X, FileText,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -43,8 +43,12 @@ export default function StudioPanel() {
   const openProject = projects.find(p => p.id === openId) ?? null;
 
   if (openProject) {
+    // Die Werkbank richtet sich nach der Modalitaet des Projekts. Fehlt diese
+    // Weiche, landet auch ein Textprojekt im Bild-Editor und meldet "Noch
+    // keine Bilder" — ohne dass irgendetwas fehlschlaegt.
+    const Werkbank = openProject.modality === 'text' ? TextWorkbench : ImageWorkbench;
     return (
-      <ImageWorkbench
+      <Werkbank
         project={openProject}
         onBack={() => { setOpenId(null); void load(); }}
         // Zusammenfuehren statt ersetzen: studio_update_project liefert das
@@ -106,12 +110,14 @@ export default function StudioPanel() {
               <button onClick={() => setOpenId(p.id)} className="w-full text-left p-5">
                 <div className="flex items-start gap-3">
                   <span className="p-2 rounded-lg bg-white/5 border border-white/10">
-                    <ImageIcon className="w-4 h-4 text-gray-300" />
+                    {p.modality === 'text'
+                      ? <FileText className="w-4 h-4 text-gray-300" />
+                      : <ImageIcon className="w-4 h-4 text-gray-300" />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-white font-medium truncate">{p.name}</p>
                     <p className="text-gray-500 text-xs mt-0.5">
-                      {t('studio.projects.cardMeta', {
+                      {t(p.modality === 'text' ? 'studio.projects.cardMetaText' : 'studio.projects.cardMeta', {
                         samples: p.sample_count ?? 0,
                         confirmed: p.confirmed_count ?? 0,
                         classes: p.classes.length,
@@ -211,7 +217,7 @@ function CreateDialog({ onClose, onCreated }: {
         <div className="flex items-start justify-between">
           <div>
             <h3 className="text-white font-semibold">{t('studio.create.title')}</h3>
-            <p className="text-gray-500 text-xs mt-1">{t('studio.create.subtitle')}</p>
+            <p className="text-gray-500 text-xs mt-1">{t(`studio.create.kindHint.${kind}`)}</p>
           </div>
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-white" aria-label={t('common.cancel', 'Abbrechen')}>
             <X className="w-4 h-4" />
@@ -232,7 +238,6 @@ function CreateDialog({ onClose, onCreated }: {
               </button>
             ))}
           </div>
-          <p className="text-gray-600 text-[11px] mt-1.5">{t(`studio.create.kindHint.${kind}`)}</p>
         </div>
 
         <label className="block">

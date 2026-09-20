@@ -11,12 +11,13 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
-  Plus, AlertTriangle, FileText, ChevronDown, Info,
+  Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { classColor } from '../labGroundTruth';
 import { nextOpenIndex } from './studioBoxes';
+import ModelRunDialog from './ModelRunDialog';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
@@ -55,6 +56,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
   const [plan, setPlan] = useState<{ path: string; inspection: TextInspection } | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [modelRun, setModelRun] = useState<'suggest' | 'review' | null>(null);
+  const [running, setRunning] = useState<{ cur: number; total: number } | null>(null);
   const [target, setTarget] = useState('');
   const [showKeys, setShowKeys] = useState(false);
 
@@ -164,7 +167,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (!current || showExport || plan) return;
+      if (!current || showExport || plan || modelRun) return;
 
       // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
       if (imFeld) {
@@ -193,7 +196,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, samples, classes, paare, target, showExport, plan]);
+  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun]);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -203,6 +206,15 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         setImporting(ev.payload.done ? null : { cur: ev.payload.current, total: ev.payload.total });
       });
     return () => { void un.then(f => f()); };
+  }, [project.id]);
+
+  useEffect(() => {
+    const abos = ['studio-suggest-progress', 'studio-review-progress'].map(name =>
+      listen<{ project_id: string; current: number; total: number; done?: boolean }>(name, ev => {
+        if (ev.payload.project_id !== project.id) return;
+        setRunning(ev.payload.done ? null : { cur: ev.payload.current, total: ev.payload.total });
+      }));
+    return () => { abos.forEach(a => { void a.then(f => f()); }); };
   }, [project.id]);
 
   const pickSource = async (ordner: boolean) => {
@@ -291,6 +303,22 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
             className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
             <FolderOpen className="w-4 h-4" /> {t('studio.text.importFolder')}
           </button>
+          {!paare && (
+            <>
+              <button onClick={() => setModelRun('suggest')} disabled={!!running || total === 0}
+                className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
+                {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                {running && running.total > 0
+                  ? t('studio.suggest.progress', { current: running.cur, total: running.total })
+                  : t('studio.workbench.suggestButton')}
+              </button>
+              <button onClick={() => setModelRun('review')} disabled={!!running || confirmed === 0}
+                className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50"
+                title={confirmed === 0 ? t('studio.review.needsConfirmed') : undefined}>
+                <ShieldQuestion className="w-4 h-4" /> {t('studio.workbench.reviewButton')}
+              </button>
+            </>
+          )}
           <button onClick={() => setShowExport(true)} disabled={confirmed === 0}
             className="px-3 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-40">
             <Download className="w-4 h-4" /> {t('studio.workbench.exportButton')}
@@ -374,7 +402,11 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                   <div className="flex flex-wrap gap-2">
                     {classes.map((name, i) => (
                       <button key={i} onClick={() => void assign(name)}
-                        className={`px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-2 transition-all ${current.ann.label === name ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}>
+                        className={`px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-2 transition-all ${current.ann.label === name
+                          ? (current.status === 'suggested'
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-100'
+                            : 'bg-white/15 border-white/25 text-white')
+                          : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'}`}>
                         <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
                           style={{ background: classColor(name, classes) }} />
                         {name}
@@ -386,6 +418,20 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                   </div>
                 )}
 
+                {current.status === 'suggested' && (
+                  <p className="text-amber-300/90 text-[11px] inline-flex items-center gap-1.5">
+                    <Wand2 className="w-3.5 h-3.5 flex-shrink-0" /> {t('studio.text.suggestedHint')}
+                  </p>
+                )}
+                {current.doubt && (
+                  <p className="text-orange-200/90 text-[11px] inline-flex items-center gap-1.5">
+                    <ShieldQuestion className="w-3.5 h-3.5 flex-shrink-0" />
+                    {t('studio.text.doubtHint', {
+                      model: current.doubt.missing.join(', '),
+                      label: current.doubt.extra.join(', '),
+                    })}
+                  </p>
+                )}
                 <div className="flex items-center gap-3 text-[11px] text-gray-500">
                   <span className="tabular-nums">{index + 1} / {total}</span>
                   <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
@@ -474,6 +520,23 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           paare={paare}
           onCancel={() => setPlan(null)}
           onRun={(tc, lc, ig) => void runImport(tc, lc, ig)}
+        />
+      )}
+
+      {modelRun && (
+        <ModelRunDialog
+          mode={modelRun}
+          project={project}
+          onClose={() => setModelRun(null)}
+          onDone={async () => {
+            setModelRun(null);
+            const list = await invoke<StudioProject[]>('studio_list_projects');
+            const fresh = list.find(x => x.id === project.id);
+            if (fresh) onProjectChanged(fresh);
+            setShownId(null);
+            await loadSamples(0, true);
+            await loadStats();
+          }}
         />
       )}
 

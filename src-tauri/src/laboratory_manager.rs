@@ -70,7 +70,7 @@ fn get_python_path() -> String {
     crate::python_env::resolve_python()
 }
 
-fn get_model_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn get_model_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let candidates = vec![
         app_handle.path().resource_dir().ok()
             .map(|p| p.join("python").join("test_engine").join("model_server.py")),

@@ -350,3 +350,28 @@ damit eine 1 im Zieltext eine 1 bleibt.
 **Noch offen fuer Text:** Vorschlaege (ein vorhandenes Klassifikationsmodell
 oder die KI-Schicht koennte vorsortieren) und die Zweifel-Queue. Beides ist
 Stufe 2 und 3 des Plans, fuer Bilder bereits gebaut.
+
+---
+
+## 15. Nachtrag zu 1.2.90 (1.2.91)
+
+**Die Weiche fehlte.** Jedes Projekt oeffnete die Bild-Werkbank, auch ein
+Textprojekt — es meldete dann "Noch keine Bilder". Ursache war kein Fehler in
+der Logik, sondern eine Aenderung, die nie ankam: die Zeile, die nach
+`project.modality` verzweigt, wurde beim Umbau nicht eingesetzt, und der
+Import von `TextWorkbench` blieb ungenutzt stehen. TypeScript schweigt dazu,
+und kein Test sah die Projektliste an. Jetzt gibt es `studioPanel.test.tsx`:
+drei Tests, die je eine Modalitaet oeffnen und die richtige Werkbank erwarten
+— ohne die Weiche sind zwei davon rot.
+
+**Vorschlagen und Pruefen koennen jetzt Text.** `start_inference_server`
+entscheidet anhand des Modells, welcher Server laeuft (Ultralytics-Checkpoint
+oder config.json), statt YOLO vorauszusetzen. `studio_suggest` schickt bei
+Textprojekten den Inhalt statt eines Pfades und legt die vorhergesagte Klasse
+als Vorschlag ab; `studio_review` vergleicht Vorhersage und bestaetigtes
+Label. Der Dialog dafuer liegt jetzt in `ModelRunDialog.tsx` und wird von
+beiden Werkbaenken benutzt, statt zweimal fast gleich dazustehen.
+
+**Sichtbar gemacht:** ein vorgeschlagenes Label steht in Bernstein statt in
+Weiss, mit dem Hinweis, dass Enter es uebernimmt. Projektkarten zaehlen Texte
+statt Bilder und tragen das passende Symbol.

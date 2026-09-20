@@ -777,7 +777,7 @@ pub async fn studio_inspect_folder(source_path: String) -> Result<FolderInspecti
 pub async fn studio_model_classes(
     app_handle: tauri::AppHandle, version_id: String,
 ) -> Result<Vec<String>, String> {
-    let (server, classes) = start_yolo_server(&app_handle, &version_id)?;
+    let (server, classes, _) = start_inference_server(&app_handle, &version_id)?;
     server.shutdown();
     Ok(classes)
 }
@@ -1507,10 +1507,18 @@ impl InferenceServer {
     }
 }
 
-/// Startet den YOLO-Server zu einer trainierten Version.
-fn start_yolo_server(
+/// Startet den passenden Inferenz-Server zu einer trainierten Version.
+///
+/// Welcher es ist, entscheidet das Modell, nicht der Aufrufer: liegt ein
+/// Ultralytics-Checkpoint im Ordner, ist es Objekterkennung, sonst ein
+/// HuggingFace-Modell. Dieselbe Unterscheidung trifft das Labor — sie hier zu
+/// wiederholen hiesse, zwei Stellen koennten sich uneinig werden.
+///
+/// Rueckgabe: Server, bekannte Klassen (nur YOLO meldet sie vorab) und die
+/// Modalitaet, die der Server selbst nennt.
+fn start_inference_server(
     app_handle: &tauri::AppHandle, version_id: &str,
-) -> Result<(InferenceServer, Vec<String>), String> {
+) -> Result<(InferenceServer, Vec<String>, String), String> {
     let (version_path, model_id) = crate::laboratory_manager::get_version_info(app_handle, version_id)?;
     let vp = PathBuf::from(&version_path);
     let model_dir_of_model = app_handle.path().app_data_dir()
@@ -1518,20 +1526,21 @@ fn start_yolo_server(
         .join("models").join(&model_id);
 
     // Die Gewichte des eigenen Laufs haben Vorrang vor dem Ausgangsmodell.
-    let model_dir = if crate::model_manager::dir_has_ultralytics_checkpoint(&vp) {
-        vp
+    let (script, pfad_arg, pfad) = if crate::model_manager::dir_has_ultralytics_checkpoint(&vp) {
+        (crate::laboratory_manager::get_yolo_server_path(app_handle)?, "--model-dir", vp.clone())
     } else if crate::model_manager::dir_has_ultralytics_checkpoint(&model_dir_of_model) {
-        model_dir_of_model
+        (crate::laboratory_manager::get_yolo_server_path(app_handle)?, "--model-dir", model_dir_of_model)
+    } else if vp.join("config.json").exists() {
+        (crate::laboratory_manager::get_model_server_path(app_handle)?, "--model-path", vp.clone())
     } else {
-        return Err("Diese Version ist kein YOLO-Modell. Vorschläge gibt es bisher nur für Objekterkennung.".to_string());
+        return Err("Zu dieser Version liess sich kein Modell laden — weder ein YOLO-Checkpoint noch eine config.json.".to_string());
     };
 
-    let script = crate::laboratory_manager::get_yolo_server_path(app_handle)?;
     let python = crate::python_env::resolve_python();
 
     let mut child = Command::new(&python).no_window().python_utf8()
         .arg(script.to_string_lossy().to_string())
-        .arg("--model-dir").arg(model_dir.to_string_lossy().to_string())
+        .arg(pfad_arg).arg(pfad.to_string_lossy().to_string())
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Modell-Server ließ sich nicht starten: {}", e))?;
@@ -1563,7 +1572,9 @@ fn start_yolo_server(
             let classes = ready.get("classes").and_then(|c| c.as_array())
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default();
-            Ok((server, classes))
+            let modalitaet = ready.get("modality").and_then(|m| m.as_str())
+                .unwrap_or("detect").to_string();
+            Ok((server, classes, modalitaet))
         }
         _ => {
             let msg = ready.get("message").and_then(|m| m.as_str())
@@ -1593,7 +1604,8 @@ pub async fn studio_suggest(
         return Err("Alle Bilder sind bereits bestätigt — es gibt nichts vorzuschlagen.".to_string());
     }
 
-    let (mut server, model_classes) = start_yolo_server(&app_handle, &version_id)?;
+    let (mut server, model_classes, _modalitaet) = start_inference_server(&app_handle, &version_id)?;
+    let ist_text = project.modality == "text";
 
     let mut report = SuggestReport {
         processed: 0, with_boxes: 0, boxes_total: 0, left_confirmed,
@@ -1607,8 +1619,16 @@ pub async fn studio_suggest(
             "project_id": project_id, "current": i, "total": total,
         }));
 
-        let path = media_dir.join(&sample.media);
-        if server.send(&serde_json::json!({ "file_path": path.to_string_lossy() })).is_err() {
+        // Text schickt den Inhalt, Bild den Pfad — beides derselbe Server-Weg.
+        let anfrage = if ist_text {
+            match sample.content.as_ref() {
+                Some(text) => serde_json::json!({ "text": text }),
+                None => { report.failed += 1; continue; }
+            }
+        } else {
+            serde_json::json!({ "file_path": media_dir.join(&sample.media).to_string_lossy() })
+        };
+        if server.send(&anfrage).is_err() {
             report.failed += 1;
             continue;
         }
@@ -1621,6 +1641,42 @@ pub async fn studio_suggest(
             continue;
         }
         report.processed += 1;
+
+        if ist_text {
+            // Klassifikation: eine Vorhersage, ein Label.
+            let konfidenz = answer.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let Some(vorhersage) = answer.get("predicted").and_then(|v| v.as_str()) else {
+                report.without_boxes += 1; continue;
+            };
+            if konfidenz < min_confidence { report.without_boxes += 1; continue; }
+
+            let name = match class_index_for(vorhersage, &project.classes) {
+                Some(i) => project.classes[i].clone(),
+                None if add_unknown_classes => {
+                    project.classes.push(vorhersage.to_string());
+                    report.classes_added.push(vorhersage.to_string());
+                    vorhersage.to_string()
+                }
+                None => {
+                    if !report.unmapped_classes.iter().any(|c| c == vorhersage) {
+                        report.unmapped_classes.push(vorhersage.to_string());
+                    }
+                    report.without_boxes += 1;
+                    continue;
+                }
+            };
+
+            report.with_boxes += 1;
+            append_jsonl(&events_path(&dir), &AnnEvent {
+                sample_id: sample.id.clone(),
+                status:    "suggested".to_string(),
+                boxes:     vec![],
+                label:     Some(name),
+                target:    None,
+                at:        Utc::now().to_rfc3339(),
+            })?;
+            continue;
+        }
 
         // Die Masse des Servers zaehlen; kennt er sie nicht, die aus dem Import.
         let width  = answer.get("image_width").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
@@ -1709,7 +1765,8 @@ pub async fn studio_review(
         return Err("Es gibt noch keine bestätigten Bilder zum Prüfen.".to_string());
     }
 
-    let (mut server, _model_classes) = start_yolo_server(&app_handle, &version_id)?;
+    let (mut server, _model_classes, _modalitaet) = start_inference_server(&app_handle, &version_id)?;
+    let ist_text = project.modality == "text";
     let mut doubts: HashMap<String, Doubt> = HashMap::new();
     let mut report = ReviewReport { checked: 0, doubts: 0, agree: 0, failed: 0 };
     let total = bestaetigt.len();
@@ -1720,8 +1777,15 @@ pub async fn studio_review(
             "project_id": project_id, "current": i, "total": total,
         }));
 
-        let path = media_dir.join(&sample.media);
-        if server.send(&serde_json::json!({ "file_path": path.to_string_lossy() })).is_err() {
+        let anfrage = if ist_text {
+            match sample.content.as_ref() {
+                Some(text) => serde_json::json!({ "text": text }),
+                None => { report.failed += 1; continue; }
+            }
+        } else {
+            serde_json::json!({ "file_path": media_dir.join(&sample.media).to_string_lossy() })
+        };
+        if server.send(&anfrage).is_err() {
             report.failed += 1;
             continue;
         }
@@ -1734,6 +1798,26 @@ pub async fn studio_review(
             continue;
         }
         report.checked += 1;
+
+        if ist_text {
+            // Klassifikation: das Modell sagt eine Klasse, im Label steht eine.
+            let vorhersage = answer.get("predicted").and_then(|v| v.as_str()).unwrap_or("");
+            let konfidenz = answer.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let im_label = sample.ann.label.clone().unwrap_or_default();
+            let einig = konfidenz < min_confidence
+                || vorhersage.trim().to_lowercase() == im_label.trim().to_lowercase();
+            if einig {
+                report.agree += 1;
+            } else {
+                report.doubts += 1;
+                doubts.insert(sample.id.clone(), Doubt {
+                    missing: vec![vorhersage.to_string()],
+                    extra:   vec![im_label],
+                    at:      now.clone(),
+                });
+            }
+            continue;
+        }
 
         // Was das Modell sieht — nur Klassen, die das Projekt ueberhaupt kennt.
         // Sonst stuende bei jedem Bild "Offroad fehlt", obwohl das Projekt die

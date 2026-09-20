@@ -3085,7 +3085,8 @@
       "deleteDetail": "\"{name}\" wird mit allen importierten Bildern und Boxen entfernt. Bereits exportierte Datensätze bleiben bestehen.",
       "deletedTitle": "Projekt gelöscht",
       "deletedDetail": "\"{name}\" wurde entfernt",
-      "backToDatasets": "Zurück zu den Datensätzen"
+      "backToDatasets": "Zurück zu den Datensätzen",
+      "cardMetaText": "{samples} Texte · {confirmed} bestätigt · {classes} Klassen"
     },
     "create": {
       "title": "Neues Projekt",
@@ -3299,7 +3300,9 @@
       "doneTitle": "Texte übernommen",
       "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit Klasse",
       "exportClasses": "Schreibt daten.csv mit den Spalten text und label — genau das, was die Train Engine liest.",
-      "exportPairs": "Schreibt daten.jsonl mit source und target — genau das, was Seq2Seq liest."
+      "exportPairs": "Schreibt daten.jsonl mit source und target — genau das, was Seq2Seq liest.",
+      "suggestedHint": "Vorschlag des Modells — Enter übernimmt ihn, eine Zahl wählt eine andere Klasse",
+      "doubtHint": "Modell sagt „{model}“, im Label steht „{label}“"
     }
   }
 }
