@@ -305,6 +305,7 @@ fn main() {
             studio_manager::studio_add_image,
             studio_manager::studio_import_audio,
             studio_manager::studio_add_audio,
+            studio_manager::studio_fetch_urls,
             studio_manager::studio_list_samples,
             studio_manager::studio_set_annotation,
             studio_manager::studio_stats,

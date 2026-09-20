@@ -135,7 +135,9 @@ describe('TextWorkbench', () => {
     // Was nirgends liegt, muss man schreiben koennen — ohne Umweg ueber eine
     // CSV in einem anderen Programm.
     render(<TextWorkbench {...props()} />);
-    fireEvent.click(await screen.findByRole('button', { name: /Schreiben/ }));
+    // Der Weg fuehrt ueber die Quellenauswahl.
+    fireEvent.click(await screen.findByRole('button', { name: /Texte holen/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Selbst schreiben/ }));
 
     const feld = await screen.findByPlaceholderText('Ein Text je Zeile…');
     fireEvent.change(feld, { target: { value: 'Lift kaputt\nPiste top\n\n  Kasse zu  ' } });
@@ -156,7 +158,8 @@ describe('TextWorkbench', () => {
 
   it('gibt den geschriebenen Texten auf Wunsch gleich eine Klasse', async () => {
     render(<TextWorkbench {...props()} />);
-    fireEvent.click(await screen.findByRole('button', { name: /Schreiben/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Texte holen/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Selbst schreiben/ }));
     fireEvent.change(await screen.findByPlaceholderText('Ein Text je Zeile…'),
       { target: { value: 'Lift kaputt' } });
 

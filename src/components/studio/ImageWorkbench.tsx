@@ -15,7 +15,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
   Trash2, Plus, AlertTriangle, ImageOff, Info, Wand2, ShieldQuestion, Copy, Undo2, Film, Database,
-  ChevronDown,
+  ChevronDown, Globe,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -30,6 +30,7 @@ import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
 import ModelRunDialog, { type ModelWithVersionTree } from './ModelRunDialog';
+import FetchDialog from './FetchDialog';
 
 const PAGE = 200;
 
@@ -84,6 +85,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   const [importPlan, setImportPlan] = useState<{ path: string; inspection: FolderInspection } | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
+  const [showFetch, setShowFetch] = useState(false);
   // Die Tastaturhilfe hat man nach dem zweiten Bild verinnerlicht; zugeklappt
   // bleibt die Spalte kurz genug, dass die Seite gar nicht erst scrollt.
   const [showKeys, setShowKeys] = useState(false);
@@ -306,7 +308,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-      if (!current || showExport || modelRun || importPlan || showSource || videoPath) return;
+      if (!current || showExport || modelRun || importPlan || showSource || videoPath || showFetch) return;
 
       if (e.key >= '1' && e.key <= '9') {
         const cls = Number(e.key) - 1;
@@ -343,7 +345,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, boxes, selected, index, samples, classes.length, showExport, modelRun, importPlan, showSource, videoPath]);
+  }, [current, boxes, selected, index, samples, classes.length, showExport, modelRun, importPlan, showSource, videoPath, showFetch]);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -853,6 +855,15 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           onFolder={() => { setShowSource(false); void handleImport(); }}
           onVideo={() => { setShowSource(false); void handlePickVideo(); }}
           onDataset={path => { setShowSource(false); void inspectAndImport(path).catch(err => error(t('studio.import.errorTitle'), String(err))); }}
+          onWeb={() => { setShowSource(false); setShowFetch(true); }}
+        />
+      )}
+
+      {showFetch && (
+        <FetchDialog
+          project={project}
+          onClose={() => setShowFetch(false)}
+          onDone={() => { setShowFetch(false); void reloadFromDisk(); }}
         />
       )}
 
@@ -1226,11 +1237,12 @@ function VideoDialog({ path, onCancel, onRun }: {
 
 // ── Woher kommen die Bilder ───────────────────────────────────────────────
 
-function SourceDialog({ onClose, onFolder, onVideo, onDataset }: {
+function SourceDialog({ onClose, onFolder, onVideo, onDataset, onWeb }: {
   onClose: () => void;
   onFolder: () => void;
   onVideo: () => void;
   onDataset: (path: string) => void;
+  onWeb: () => void;
 }) {
   const { t } = useLanguage();
   const [datasets, setDatasets] = useState<DatasetChoice[] | null>(null);
@@ -1301,6 +1313,7 @@ function SourceDialog({ onClose, onFolder, onVideo, onDataset }: {
                   : t('studio.source.datasetHint', { count: datasets.length }),
               () => setShowList(true), datasets !== null && datasets.length === 0)}
             {tile(<Film className="w-4 h-4" />, t('studio.source.video'), t('studio.source.videoHint'), onVideo)}
+            {tile(<Globe className="w-4 h-4" />, t('studio.source.web'), t('studio.source.webHint'), onWeb)}
           </div>
         )}
 

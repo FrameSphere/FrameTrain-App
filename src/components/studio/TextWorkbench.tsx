@@ -11,13 +11,14 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
-  Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine,
+  Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine, Globe,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { classColor } from '../labGroundTruth';
 import { nextOpenIndex } from './studioBoxes';
 import ModelRunDialog from './ModelRunDialog';
+import FetchDialog from './FetchDialog';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
@@ -58,6 +59,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   const [showExport, setShowExport] = useState(false);
   const [modelRun, setModelRun] = useState<'suggest' | 'review' | null>(null);
   const [showWrite, setShowWrite] = useState(false);
+  const [showFetch, setShowFetch] = useState(false);
+  const [showSource, setShowSource] = useState(false);
   const [running, setRunning] = useState<{ cur: number; total: number } | null>(null);
   const [target, setTarget] = useState('');
   const [showKeys, setShowKeys] = useState(false);
@@ -168,7 +171,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (!current || showExport || plan || modelRun || showWrite) return;
+      if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource) return;
 
       // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
       if (imFeld) {
@@ -197,7 +200,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite]);
+  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite, showFetch, showSource]);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -312,20 +315,12 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => void pickSource(false)} disabled={!!importing}
+          <button onClick={() => setShowSource(true)} disabled={!!importing}
             className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
             {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
             {importing && importing.total > 0
               ? t('studio.import.progress', { current: importing.cur, total: importing.total })
-              : t('studio.text.importFile')}
-          </button>
-          <button onClick={() => setShowWrite(true)} disabled={!!importing}
-            className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
-            <PenLine className="w-4 h-4" /> {t('studio.write.button')}
-          </button>
-          <button onClick={() => void pickSource(true)} disabled={!!importing}
-            className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
-            <FolderOpen className="w-4 h-4" /> {t('studio.text.importFolder')}
+              : t('studio.text.addButton')}
           </button>
           {!paare && (
             <>
@@ -359,20 +354,10 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           <FileText className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t('studio.text.emptyTitle')}</p>
           <p className="text-gray-500 text-sm mt-1 mb-5 max-w-md mx-auto">{t('studio.text.emptyDetail')}</p>
-          <div className="flex items-center justify-center gap-2">
-            <button onClick={() => void pickSource(false)}
-              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
-              <FileText className="w-4 h-4" /> {t('studio.text.importFile')}
-            </button>
-            <button onClick={() => void pickSource(true)}
-              className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm inline-flex items-center gap-2">
-              <FolderOpen className="w-4 h-4" /> {t('studio.text.importFolder')}
-            </button>
-            <button onClick={() => setShowWrite(true)}
-              className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm inline-flex items-center gap-2">
-              <PenLine className="w-4 h-4" /> {t('studio.write.button')}
-            </button>
-          </div>
+          <button onClick={() => setShowSource(true)}
+            className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
+            <FileText className="w-4 h-4" /> {t('studio.text.addButton')}
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
@@ -548,6 +533,29 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           paare={paare}
           onCancel={() => setPlan(null)}
           onRun={(tc, lc, ig) => void runImport(tc, lc, ig)}
+        />
+      )}
+
+      {showSource && (
+        <TextSourceDialog
+          onClose={() => setShowSource(false)}
+          onFile={() => { setShowSource(false); void pickSource(false); }}
+          onFolder={() => { setShowSource(false); void pickSource(true); }}
+          onWeb={() => { setShowSource(false); setShowFetch(true); }}
+          onWrite={() => { setShowSource(false); setShowWrite(true); }}
+        />
+      )}
+
+      {showFetch && (
+        <FetchDialog
+          project={project}
+          onClose={() => setShowFetch(false)}
+          onDone={async () => {
+            setShowFetch(false);
+            setShownId(null);
+            await loadSamples(0, true);
+            await loadStats();
+          }}
         />
       )}
 
@@ -843,6 +851,54 @@ function WriteDialog({ classes, paare, onCancel, onCreate }: {
             <PenLine className="w-4 h-4" /> {t('studio.write.confirmButton')}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Woher kommen die Texte ────────────────────────────────────────────────
+
+function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite }: {
+  onClose: () => void;
+  onFile: () => void;
+  onFolder: () => void;
+  onWeb: () => void;
+  onWrite: () => void;
+}) {
+  const { t } = useLanguage();
+
+  const tile = (icon: React.ReactNode, title: string, hint: string, onClick: () => void) => (
+    <button onClick={onClick}
+      className="w-full flex items-start gap-3 p-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all">
+      <span className="p-2 rounded-lg bg-white/5 border border-white/10 text-gray-300 flex-shrink-0">{icon}</span>
+      <span className="min-w-0">
+        <span className="text-white text-sm block">{title}</span>
+        <span className="text-gray-500 text-xs block mt-0.5">{hint}</span>
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+      onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
+        onClick={e => e.stopPropagation()}>
+        <div>
+          <h3 className="text-white font-semibold">{t('studio.text.sourceTitle')}</h3>
+          <p className="text-gray-500 text-xs mt-1">{t('studio.source.subtitle')}</p>
+        </div>
+
+        <div className="space-y-2">
+          {tile(<FileText className="w-4 h-4" />, t('studio.text.sourceFile'), t('studio.text.sourceFileHint'), onFile)}
+          {tile(<FolderOpen className="w-4 h-4" />, t('studio.text.sourceFolder'), t('studio.text.sourceFolderHint'), onFolder)}
+          {tile(<Globe className="w-4 h-4" />, t('studio.source.web'), t('studio.source.webHint'), onWeb)}
+          {tile(<PenLine className="w-4 h-4" />, t('studio.text.sourceWrite'), t('studio.text.sourceWriteHint'), onWrite)}
+        </div>
+
+        <button onClick={onClose}
+          className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm">
+          {t('common.cancel', 'Abbrechen')}
+        </button>
       </div>
     </div>
   );

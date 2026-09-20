@@ -3268,7 +3268,7 @@
     },
     "source": {
       "title": "Where do the images come from?",
-      "subtitle": "All three ways end up in the same project.",
+      "subtitle": "Every way ends up in the same project.",
       "folder": "Folder on disk",
       "folderHint": "Subfolders included, duplicates only once",
       "dataset": "Existing dataset",
@@ -3277,7 +3277,9 @@
       "noDatasets": "No dataset in FrameTrain yet",
       "video": "Video",
       "videoHint": "Every nth frame is taken",
-      "back": "Back"
+      "back": "Back",
+      "web": "From the web",
+      "webHint": "A list of addresses, with origin and robots.txt"
     },
     "text": {
       "importFile": "File",
@@ -3308,7 +3310,15 @@
       "exportClasses": "Writes daten.csv with the columns text and label — exactly what the train engine reads.",
       "exportPairs": "Writes daten.jsonl with source and target — exactly what seq2seq reads.",
       "suggestedHint": "Model suggestion — Enter accepts it, a number picks another class",
-      "doubtHint": "Model says “{model}”, the label says “{label}”"
+      "doubtHint": "Model says “{model}”, the label says “{label}”",
+      "addButton": "Add texts",
+      "sourceTitle": "Where do the texts come from?",
+      "sourceFile": "File (CSV, JSONL, TXT)",
+      "sourceFileHint": "Columns are suggested and can be changed",
+      "sourceFolder": "Folder with text files",
+      "sourceFolderHint": "Subfolders count as the class",
+      "sourceWrite": "Write them yourself",
+      "sourceWriteHint": "One at a time or as a list, with a class if you like"
     },
     "write": {
       "button": "Write",
@@ -3352,6 +3362,27 @@
       "doneDetail": "{added} new, {duplicates} duplicate, {labels} with an assignment",
       "exportClasses": "Writes one folder per class — the layout the app recognises as classification.",
       "exportTranscript": "Writes each recording with a matching .txt next to it — the layout for transcription."
+    },
+    "fetch": {
+      "title": "Fetch from the web",
+      "subtitleImage": "A list of image addresses — every file carries its origin along.",
+      "subtitleText": "A list of page addresses — the visible text is taken, with its origin.",
+      "urlsLabel": "Addresses (one per line)",
+      "licenseLabel": "Licence (optional)",
+      "licenseHint": "Ends up in PROVENANCE.csv next to every file. Left empty the field stays empty — and the dataset cannot be passed on.",
+      "manners": "robots.txt is read and obeyed, and each server gets a second between requests. What is disallowed is not fetched and is named in the report.",
+      "count": "{count} valid addresses recognised",
+      "progress": "{current} of {total}",
+      "runButton": "Fetch",
+      "errorTitle": "Fetching failed",
+      "blockedTitle": "Disallowed by robots.txt",
+      "report": {
+        "fetched": "Taken",
+        "duplicates": "Already present",
+        "blocked": "Disallowed",
+        "failed": "Unreachable",
+        "skippedType": "Wrong content type"
+      }
     }
   }
 }

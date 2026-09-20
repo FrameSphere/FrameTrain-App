@@ -1427,6 +1427,319 @@ pub async fn studio_import_text(
 }
 
 // ══════════════════════════════════════════════════════════════════
+// WEB
+//
+// Kein Knopf, der das Netz absaugt. Was hier geht, ist eine Liste von
+// Adressen zu holen — und zwar mit Anstand:
+//
+//   * robots.txt wird gelesen und befolgt,
+//   * je Server wird gewartet statt geprasselt,
+//   * jede Datei traegt ihre Herkunft und die angegebene Lizenz mit.
+//
+// Der dritte Punkt ist kein Beiwerk: ein gesammelter Datensatz ohne Herkunft
+// darf dieses Geraet nie verlassen, und das merkt man erst, wenn es zu spaet
+// ist.
+// ══════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FetchReport {
+    pub fetched:        usize,
+    pub duplicates:     usize,
+    /// Von robots.txt untersagt — mit der Adresse, damit es nachvollziehbar ist.
+    pub blocked:        Vec<String>,
+    pub failed:         Vec<String>,
+    pub skipped_type:   Vec<String>,
+}
+
+/// Die Regeln einer robots.txt, soweit sie uns betreffen.
+///
+/// Gelesen werden die Gruppen "User-agent: *" und die auf unseren Namen. Eine
+/// laengere Uebereinstimmung gewinnt, "Allow" schlaegt "Disallow" gleicher
+/// Laenge — so steht es im Entwurf des Standards und so verhalten sich die
+/// grossen Crawler.
+pub fn robots_erlaubt(robots: &str, agent: &str, pfad: &str) -> bool {
+    let agent = agent.to_lowercase();
+
+    // Erst in Gruppen zerlegen: mehrere User-agent-Zeilen hintereinander
+    // gehoeren zu denselben Regeln.
+    let mut gruppen: Vec<(Vec<String>, Vec<(String, bool)>)> = Vec::new();
+    let mut namen: Vec<String> = Vec::new();
+    let mut regeln: Vec<(String, bool)> = Vec::new();
+    let mut zuletzt_regel = false;
+
+    let abschliessen = |gruppen: &mut Vec<(Vec<String>, Vec<(String, bool)>)>,
+                        namen: &mut Vec<String>, regeln: &mut Vec<(String, bool)>| {
+        if !namen.is_empty() {
+            gruppen.push((std::mem::take(namen), std::mem::take(regeln)));
+        } else {
+            regeln.clear();
+        }
+    };
+
+    for zeile in robots.lines() {
+        let zeile = zeile.split('#').next().unwrap_or("").trim();
+        if zeile.is_empty() { continue; }
+        let Some((schluessel, wert)) = zeile.split_once(':') else { continue };
+        let schluessel = schluessel.trim().to_lowercase();
+        let wert = wert.trim().to_string();
+
+        match schluessel.as_str() {
+            "user-agent" => {
+                if zuletzt_regel { abschliessen(&mut gruppen, &mut namen, &mut regeln); }
+                zuletzt_regel = false;
+                namen.push(wert.to_lowercase());
+            }
+            "disallow" | "allow" => {
+                zuletzt_regel = true;
+                regeln.push((wert, schluessel == "allow"));
+            }
+            _ => {}
+        }
+    }
+    abschliessen(&mut gruppen, &mut namen, &mut regeln);
+
+    // Die passendste Gruppe gewinnt: ein Eintrag auf unseren Namen schlaegt
+    // den Stern. Nur diese eine Gruppe gilt dann, nicht beide zusammen.
+    let eigene = gruppen.iter()
+        .find(|(namen, _)| namen.iter().any(|n| n != "*" && agent.contains(n.as_str())));
+    let stern = gruppen.iter().find(|(namen, _)| namen.iter().any(|n| n == "*"));
+    let Some((_, regeln)) = eigene.or(stern) else { return true };
+
+    // Innerhalb der Gruppe gewinnt die laengste Uebereinstimmung; bei gleicher
+    // Laenge das erlaubende Allow.
+    let mut treffer: Vec<(usize, bool)> = Vec::new();
+    for (wert, erlaubt) in regeln {
+        if wert.is_empty() {
+            // "Disallow:" ohne Wert erlaubt alles.
+            if !*erlaubt { treffer.push((0, true)); }
+            continue;
+        }
+        if pfad.starts_with(wert.as_str()) { treffer.push((wert.len(), *erlaubt)); }
+    }
+    match treffer.iter().max_by_key(|(len, erlaubt)| (*len, *erlaubt)) {
+        Some((_, erlaubt)) => *erlaubt,
+        None => true,
+    }
+}
+
+/// Dateiendung aus dem Content-Type, sonst aus der Adresse.
+fn ext_aus_typ(content_type: &str, url: &str) -> Option<String> {
+    let t = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
+    let aus_typ = match t.as_str() {
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/png"  => Some("png"),
+        "image/webp" => Some("webp"),
+        "image/gif"  => Some("gif"),
+        "image/bmp"  => Some("bmp"),
+        _ => None,
+    };
+    if let Some(e) = aus_typ { return Some(e.to_string()); }
+    let pfad = url.split('?').next().unwrap_or(url);
+    let e = Path::new(pfad).extension()?.to_str()?.to_lowercase();
+    if IMAGE_EXTS.contains(&e.as_str()) { Some(e) } else { None }
+}
+
+/// Sichtbarer Text aus HTML.
+///
+/// Bewusst grob: Skript- und Stilbloecke raus, Tags raus, Entities fuer die
+/// haeufigsten Faelle. Das reicht fuer einen Artikel und ist ehrlicher als
+/// eine halbe HTML-Bibliothek, die bei verschachtelten Seiten doch scheitert.
+pub fn html_zu_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len() / 2);
+    let mut in_tag = false;
+    let mut ueberspringen: Option<&str> = None;
+    let bytes: Vec<char> = html.chars().collect();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let rest_lc: String = bytes[i..(i + 9).min(bytes.len())].iter().collect::<String>().to_lowercase();
+        if let Some(tag) = ueberspringen {
+            let ende = format!("</{}", tag);
+            if rest_lc.starts_with(&ende) { ueberspringen = None; }
+            i += 1;
+            continue;
+        }
+        if rest_lc.starts_with("<script") { ueberspringen = Some("script"); i += 1; continue; }
+        if rest_lc.starts_with("<style")  { ueberspringen = Some("style");  i += 1; continue; }
+
+        let c = bytes[i];
+        if c == '<' { in_tag = true; out.push(' '); }
+        else if c == '>' { in_tag = false; }
+        else if !in_tag { out.push(c); }
+        i += 1;
+    }
+
+    let out = out
+        .replace("&nbsp;", " ").replace("&amp;", "&")
+        .replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", "\"").replace("&#39;", "'");
+
+    // Mehrfache Leerzeichen und Leerzeilen zusammenfassen.
+    let mut zeilen: Vec<String> = Vec::new();
+    for zeile in out.lines() {
+        let z = zeile.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !z.is_empty() { zeilen.push(z); }
+    }
+    zeilen.join("\n")
+}
+
+fn host_von(url: &str) -> Option<String> {
+    let ohne = url.split("://").nth(1)?;
+    let host = ohne.split('/').next()?;
+    if host.is_empty() { None } else { Some(host.to_string()) }
+}
+
+fn pfad_von(url: &str) -> String {
+    match url.split("://").nth(1).and_then(|r| r.find('/').map(|i| r[i..].to_string())) {
+        Some(p) => p,
+        None => "/".to_string(),
+    }
+}
+
+const AGENT: &str = "FrameTrain-DatasetStudio";
+
+#[tauri::command]
+pub async fn studio_fetch_urls(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, urls: Vec<String>, license: Option<String>,
+) -> Result<FetchReport, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let project = load_project(&dir)?;
+    let ist_text = project.modality == "text";
+
+    let adressen: Vec<String> = urls.into_iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+        .collect();
+    if adressen.is_empty() { return Err("Keine gültigen Adressen (http:// oder https://)".to_string()); }
+
+    let client = reqwest::Client::builder()
+        .user_agent(format!("{}/1.0 (lokales Werkzeug)", AGENT))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP-Client: {}", e))?;
+
+    let existing = load_samples(&dir);
+    let mut bekannte_medien: std::collections::HashSet<String> =
+        existing.iter().map(|s| s.media.clone()).collect();
+    let mut bekannte_texte: std::collections::HashSet<String> = existing.iter()
+        .filter_map(|s| s.content.as_ref().map(|c| sha256_hex(c.as_bytes())))
+        .collect();
+
+    let mut robots_cache: HashMap<String, String> = HashMap::new();
+    let mut zuletzt: HashMap<String, std::time::Instant> = HashMap::new();
+    let mut report = FetchReport { fetched: 0, duplicates: 0, blocked: vec![], failed: vec![], skipped_type: vec![] };
+    let gesamt = adressen.len();
+    let now = Utc::now().to_rfc3339();
+
+    for (i, url) in adressen.iter().enumerate() {
+        let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({
+            "project_id": project_id, "current": i, "total": gesamt,
+        }));
+
+        let Some(host) = host_von(url) else { report.failed.push(url.clone()); continue };
+
+        // robots.txt einmal je Server.
+        if !robots_cache.contains_key(&host) {
+            let robots_url = format!("{}://{}/robots.txt",
+                if url.starts_with("https") { "https" } else { "http" }, host);
+            let text = match client.get(&robots_url).send().await {
+                Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
+                _ => String::new(),   // keine robots.txt = keine Einschraenkung
+            };
+            robots_cache.insert(host.clone(), text);
+        }
+        if !robots_erlaubt(&robots_cache[&host], AGENT, &pfad_von(url)) {
+            report.blocked.push(url.clone());
+            continue;
+        }
+
+        // Nicht prasseln: je Server mindestens eine Sekunde Abstand.
+        if let Some(t) = zuletzt.get(&host) {
+            let vergangen = t.elapsed();
+            if vergangen < Duration::from_millis(1000) {
+                tokio::time::sleep(Duration::from_millis(1000) - vergangen).await;
+            }
+        }
+        zuletzt.insert(host.clone(), std::time::Instant::now());
+
+        let antwort = match client.get(url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => { report.failed.push(url.clone()); continue; }
+        };
+        let content_type = antwort.headers().get("content-type")
+            .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+
+        if ist_text {
+            let Ok(inhalt) = antwort.text().await else { report.failed.push(url.clone()); continue };
+            let text = if content_type.contains("html") { html_zu_text(&inhalt) } else { inhalt };
+            let text = text.trim().to_string();
+            if text.is_empty() { report.skipped_type.push(url.clone()); continue; }
+            let hash = sha256_hex(text.as_bytes());
+            if bekannte_texte.contains(&hash) { report.duplicates += 1; continue; }
+
+            append_jsonl(&samples_path(&dir), &StudioSample {
+                id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+                media: String::new(),
+                mime: "text/plain".to_string(),
+                content: Some(text),
+                status: "new".to_string(),
+                ann: Annotation::default(),
+                src: SampleSource { kind: "web".to_string(), origin: Some(url.clone()),
+                    license: license.clone(), at: now.clone() },
+                meta: SampleMeta { w: 0, h: 0, group: Some(host.clone()) },
+                abs_path: String::new(),
+                doubt: None,
+            })?;
+            bekannte_texte.insert(hash);
+            report.fetched += 1;
+            continue;
+        }
+
+        let Some(ext) = ext_aus_typ(&content_type, url) else {
+            report.skipped_type.push(url.clone());
+            continue;
+        };
+        let Ok(bytes) = antwort.bytes().await else { report.failed.push(url.clone()); continue };
+        let bytes = bytes.to_vec();
+        if image_dimensions(&bytes).is_none() { report.skipped_type.push(url.clone()); continue; }
+        let (w, h) = image_dimensions(&bytes).unwrap();
+
+        let hash = sha256_hex(&bytes);
+        let rel = format!("{}/{}.{}", &hash[..2], &hash, ext);
+        if bekannte_medien.contains(&rel) { report.duplicates += 1; continue; }
+
+        let ziel = dir.join("media").join(&rel);
+        if let Some(parent) = ziel.parent() { fs::create_dir_all(parent).ok(); }
+        fs::write(&ziel, &bytes).map_err(|e| format!("Speichern: {}", e))?;
+
+        append_jsonl(&samples_path(&dir), &StudioSample {
+            id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+            media: rel.clone(),
+            mime: mime_for(&ext),
+            content: None,
+            status: "new".to_string(),
+            ann: Annotation::default(),
+            src: SampleSource { kind: "web".to_string(), origin: Some(url.clone()),
+                license: license.clone(), at: now.clone() },
+            // Die Quelldomain ist die Gruppe: Bilder einer Seite gehoeren
+            // zusammen und duerfen beim Split nicht auseinanderfallen.
+            meta: SampleMeta { w, h, group: Some(host.clone()) },
+            abs_path: String::new(),
+            doubt: None,
+        })?;
+        bekannte_medien.insert(rel);
+        report.fetched += 1;
+    }
+
+    let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({
+        "project_id": project_id, "current": gesamt, "total": gesamt, "done": true,
+    }));
+    Ok(report)
+}
+
+// ══════════════════════════════════════════════════════════════════
 // AUDIO
 //
 // Dieselbe Ablage wie Bilder: die Datei liegt inhaltsadressiert in media/,
@@ -2657,6 +2970,54 @@ mod tests {
                 license: None, at: "2026-09-20T08:00:00Z".to_string() },
             meta: SampleMeta::default(), abs_path: String::new(), doubt: None,
         }
+    }
+
+    #[test]
+    fn robots_untersagtes_bleibt_untersagt() {
+        let robots = "User-agent: *\nDisallow: /privat/\nDisallow: /intern\n";
+        assert!(!robots_erlaubt(robots, "FrameTrain", "/privat/bild.jpg"));
+        assert!(!robots_erlaubt(robots, "FrameTrain", "/intern/seite"));
+        assert!(robots_erlaubt(robots, "FrameTrain", "/oeffentlich/bild.jpg"));
+    }
+
+    #[test]
+    fn robots_laengere_regel_gewinnt() {
+        // Eine Ausnahme innerhalb eines gesperrten Bereichs muss greifen.
+        let robots = "User-agent: *\nDisallow: /bilder/\nAllow: /bilder/frei/\n";
+        assert!(!robots_erlaubt(robots, "FrameTrain", "/bilder/geheim.jpg"));
+        assert!(robots_erlaubt(robots, "FrameTrain", "/bilder/frei/a.jpg"));
+    }
+
+    #[test]
+    fn robots_gruppe_fuer_uns_schlaegt_die_allgemeine() {
+        let robots = "User-agent: *\nDisallow: /\n\nUser-agent: frametrain-datasetstudio\nDisallow:\n";
+        assert!(robots_erlaubt(robots, "FrameTrain-DatasetStudio", "/irgendwas"));
+        // Ein anderer Name faellt unter die allgemeine Sperre.
+        assert!(!robots_erlaubt(robots, "EinAndererBot", "/irgendwas"));
+    }
+
+    #[test]
+    fn ohne_robots_ist_nichts_gesperrt() {
+        assert!(robots_erlaubt("", "FrameTrain", "/a/b.jpg"));
+        assert!(robots_erlaubt("# nur ein Kommentar\n", "FrameTrain", "/a"));
+    }
+
+    #[test]
+    fn html_wird_zu_lesbarem_text() {
+        let html = "<html><head><style>p{color:red}</style><script>alert(1)</script></head>\
+                    <body><h1>Der Lift</h1><p>steht &amp; wartet.</p></body></html>";
+        let text = html_zu_text(html);
+        assert!(text.contains("Der Lift"), "{}", text);
+        assert!(text.contains("steht & wartet."), "{}", text);
+        assert!(!text.contains("alert"), "Skript blieb stehen: {}", text);
+        assert!(!text.contains("color:red"), "Stil blieb stehen: {}", text);
+    }
+
+    #[test]
+    fn dateiendung_kommt_aus_dem_typ_sonst_aus_der_adresse() {
+        assert_eq!(ext_aus_typ("image/jpeg", "https://x.de/a"), Some("jpg".to_string()));
+        assert_eq!(ext_aus_typ("", "https://x.de/a.PNG?v=2"), Some("png".to_string()));
+        assert_eq!(ext_aus_typ("text/html", "https://x.de/seite"), None);
     }
 
     #[test]

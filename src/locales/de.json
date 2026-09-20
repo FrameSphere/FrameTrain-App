@@ -3268,7 +3268,7 @@
     },
     "source": {
       "title": "Woher kommen die Bilder?",
-      "subtitle": "Alle drei Wege landen im selben Projekt.",
+      "subtitle": "Alle Wege landen im selben Projekt.",
       "folder": "Ordner auf der Festplatte",
       "folderHint": "Unterordner kommen mit, doppelte Bilder nur einmal",
       "dataset": "Vorhandener Datensatz",
@@ -3277,7 +3277,9 @@
       "noDatasets": "Noch kein Datensatz in FrameTrain",
       "video": "Video",
       "videoHint": "Jedes n-te Bild wird übernommen",
-      "back": "Zurück"
+      "back": "Zurück",
+      "web": "Aus dem Netz",
+      "webHint": "Eine Liste von Adressen, mit Herkunft und robots.txt"
     },
     "text": {
       "importFile": "Datei",
@@ -3308,7 +3310,15 @@
       "exportClasses": "Schreibt daten.csv mit den Spalten text und label — genau das, was die Train Engine liest.",
       "exportPairs": "Schreibt daten.jsonl mit source und target — genau das, was Seq2Seq liest.",
       "suggestedHint": "Vorschlag des Modells — Enter übernimmt ihn, eine Zahl wählt eine andere Klasse",
-      "doubtHint": "Modell sagt „{model}“, im Label steht „{label}“"
+      "doubtHint": "Modell sagt „{model}“, im Label steht „{label}“",
+      "addButton": "Texte holen",
+      "sourceTitle": "Woher kommen die Texte?",
+      "sourceFile": "Datei (CSV, JSONL, TXT)",
+      "sourceFileHint": "Spalten werden vorgeschlagen und lassen sich umstellen",
+      "sourceFolder": "Ordner mit Textdateien",
+      "sourceFolderHint": "Unterordner gelten als Klasse",
+      "sourceWrite": "Selbst schreiben",
+      "sourceWriteHint": "Einzeln oder als Liste, auf Wunsch gleich mit Klasse"
     },
     "write": {
       "button": "Schreiben",
@@ -3352,6 +3362,27 @@
       "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit Zuordnung",
       "exportClasses": "Schreibt einen Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
       "exportTranscript": "Schreibt jede Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription."
+    },
+    "fetch": {
+      "title": "Aus dem Netz holen",
+      "subtitleImage": "Eine Liste von Bildadressen — jede Datei bekommt ihre Herkunft mit.",
+      "subtitleText": "Eine Liste von Seitenadressen — der sichtbare Text wird übernommen, mit Herkunft.",
+      "urlsLabel": "Adressen (eine je Zeile)",
+      "licenseLabel": "Lizenz (optional)",
+      "licenseHint": "Steht später in PROVENANCE.csv neben jeder Datei. Ohne Angabe bleibt das Feld leer — und der Datensatz ist nicht weitergebbar.",
+      "manners": "robots.txt wird gelesen und befolgt, je Server wird eine Sekunde gewartet. Was untersagt ist, wird nicht geholt und im Bericht genannt.",
+      "count": "{count} gültige Adressen erkannt",
+      "progress": "{current} von {total}",
+      "runButton": "Holen",
+      "errorTitle": "Abruf fehlgeschlagen",
+      "blockedTitle": "Von robots.txt untersagt",
+      "report": {
+        "fetched": "Übernommen",
+        "duplicates": "Schon vorhanden",
+        "blocked": "Untersagt",
+        "failed": "Nicht erreichbar",
+        "skippedType": "Falscher Inhaltstyp"
+      }
     }
   }
 }

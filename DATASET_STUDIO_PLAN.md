@@ -1,6 +1,6 @@
 # FrameTrain Dataset Studio – Systemplanung
 
-Stand: 2026-09-20 — Beta: Bilder vollstaendig, Text (Klassifikation und Paare) dazu
+Stand: 2026-09-20 — alle drei Modalitaeten, alle vier Erfassungswege gebaut
 Ergaenzt `DATASET_ROADMAP.md`: dort geht es um *vorhandene* Datensaetze (erkennen,
 splitten, importieren), hier um das *Erzeugen* neuer Datensaetze.
 
@@ -375,3 +375,46 @@ beiden Werkbaenken benutzt, statt zweimal fast gleich dazustehen.
 **Sichtbar gemacht:** ein vorgeschlagenes Label steht in Bernstein statt in
 Weiss, mit dem Hinweis, dass Enter es uebernimmt. Projektkarten zaehlen Texte
 statt Bilder und tragen das passende Symbol.
+
+---
+
+## 16. Der Plan, abgeschlossen (1.2.92 / 1.2.93)
+
+Die vier Erfassungswege aus Abschnitt 5 stehen jetzt alle:
+
+| Weg | Stand |
+|---|---|
+| Import | Ordner, vorhandener FrameTrain-Datensatz, CSV/JSONL, Videobilder |
+| Aufnahme | Mikrofon in der Audio-Werkbank |
+| Erstellen | Texte schreiben (einzeln oder als Liste), Bilder aus der Zwischenablage |
+| Web | Adressliste mit robots.txt, Wartezeit je Server und Herkunft je Datei |
+
+Die drei Modalitaeten:
+
+| Modalitaet | Aufgaben | Export |
+|---|---|---|
+| Bild | Boxen | YOLO, optional gruppenbewusst aufgeteilt |
+| Text | Klasse, Paare | daten.csv (text,label), daten.jsonl (source,target) |
+| Audio | Klasse, Transkript | Ordner je Klasse, Audio mit gleichnamiger .txt |
+
+**Selbst erstellen** war der Punkt, der im Plan stand und bis zuletzt fehlte.
+Texte entstehen jetzt in der Werkstatt — ein Feld, eine Zeile je Text, auf
+Wunsch gleich mit Klasse. Bilder kommen per Cmd+V hinein. Der Umweg "erst
+woanders speichern, dann den Ordner importieren" faellt weg.
+
+**Web mit Anstand.** Kein Knopf, der das Netz absaugt: robots.txt wird
+gelesen und befolgt (die passendste Gruppe gewinnt, laengere Regel schlaegt
+kuerzere), je Server liegt eine Sekunde zwischen zwei Anfragen, und jede
+Datei traegt Adresse, Lizenz und Datum mit. Was untersagt ist, steht im
+Bericht — verschwiegen wird nichts.
+
+**Was bewusst offen bleibt:**
+
+- **Aktives Lernen** (Stufe 4). Es braucht einen schnellen Trainingsmodus,
+  sonst wartet man bei jeder Runde und benutzt es nicht. Das ist eine
+  Aenderung am Training, nicht an der Werkstatt, und gehoert dorthin.
+- **Assist-Modelle** (Stufe 3): Whisper fuer Transkripte, SAM fuer Masken.
+  Beides sind Downloads von mehreren hundert Megabyte ueber den
+  Plugin-Installer. Sinnvoll, sobald jemand sie wirklich braucht.
+- **Kamera und Bildschirmausschnitt** als Aufnahmequellen. Die Berechtigung
+  dafuer liegt bereits in der Info.plist, die Oberflaeche fehlt.

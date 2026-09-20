@@ -2,7 +2,7 @@
   "name": "frametrain-desktop",
   "private": true,
   "license": "UNLICENSED",
-  "version": "1.2.92",
+  "version": "1.2.93",
   "type": "module",
   "scripts": {
     "dev": "vite",
