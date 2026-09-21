@@ -9,11 +9,13 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 import {
   Home,
   Layers,
   Upload,
   Play,
+  PlayCircle,
   FlaskConical,
   GitBranch,
   RefreshCw,
@@ -38,6 +40,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { navigateTo, type AppView } from '../ui/navigationEvents';
 import { dateLocale } from '../utils/dateLocale';
 import { formatBytes } from '../utils/formatBytes';
+import { VIDEOS, youtubeWatchUrl } from '../utils/videos';
 import HomeBriefing from './HomeBriefing';
 import {
   buildInsights, lossTrend, trendImprovementPct, sparklinePoints, topResults,
@@ -470,13 +473,25 @@ export default function HomePanel({ userEmail, userId }: HomePanelProps) {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <h3 className="text-lg font-semibold text-white mb-2">{t('home.firstRun.title')}</h3>
           <p className="text-sm text-gray-400 max-w-2xl leading-relaxed">{t('home.firstRun.text')}</p>
-          <button
-            onClick={() => navigateTo('models')}
-            className={`mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-xl text-white text-sm font-medium hover:opacity-90 transition-all`}
-          >
-            <Layers className="w-4 h-4" />
-            {t('home.firstRun.cta')}
-          </button>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => navigateTo('models')}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-xl text-white text-sm font-medium hover:opacity-90 transition-all`}
+            >
+              <Layers className="w-4 h-4" />
+              {t('home.firstRun.cta')}
+            </button>
+            {/* Trainings-Video führt neue Nutzer zum Aha-Moment. In der App
+                betten wir keinen Player ein, sondern öffnen den Link im
+                Standardbrowser (Tauri-Shell). */}
+            <button
+              onClick={() => { void openUrl(youtubeWatchUrl(VIDEOS.train)).catch(() => {}); }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/15 bg-white/5 text-gray-200 text-sm font-medium hover:bg-white/10 hover:border-white/25 transition-all"
+            >
+              <PlayCircle className="w-4 h-4" />
+              {t('home.firstRun.videoCta')}
+            </button>
+          </div>
         </div>
       )}
 

@@ -46,7 +46,8 @@
     "firstRun": {
       "title": "Welcome to FrameTrain",
       "text": "This is where you'll land after signing in: running trainings, last night's results and recent tests at a glance. Start with a model, add a dataset — then the first training can begin.",
-      "cta": "Add your first model"
+      "cta": "Add your first model",
+      "videoCta": "Train your first model – watch the video"
     },
     "insights": {
       "title": "Needs attention",
@@ -1655,6 +1656,17 @@
       "sphereNetTitle": "Upload to SphereNet",
       "sphereNetDesc": "Share your model with the community",
       "sphereNetSoon": "Coming Soon",
+      "hfTitle": "Upload to HuggingFace",
+      "hfDesc": "Publish the model as a repository",
+      "hfRepoLabel": "Repository (name or namespace/name)",
+      "hfRepoPlaceholder": "your-name/my-model",
+      "hfTokenLabel": "Access token (write permission)",
+      "hfPrivate": "Private repository",
+      "hfUploadButton": "Upload",
+      "hfUploading": "Uploading …",
+      "hfHint": "The token is remembered locally on this device.",
+      "hfUploadingHint": "Upload in progress — this can take a moment depending on model size.",
+      "hfCreateToken": "Create a token",
       "cancelButton": "Cancel"
     },
     "notifications": {
@@ -1668,7 +1680,10 @@
       "renameFailed": "Rename Failed",
       "exportSuccess": "Export Successful",
       "exportSuccessDetail": "Version \"{name}\" was exported to {path}.",
-      "exportFailed": "Export Failed"
+      "exportFailed": "Export Failed",
+      "hfSuccess": "Uploaded to HuggingFace",
+      "hfSuccessDetail": "The model is now available at {url}.",
+      "hfFailed": "HuggingFace Upload Failed"
     }
   },
   "updateChecker": {

@@ -46,7 +46,8 @@
     "firstRun": {
       "title": "Willkommen bei FrameTrain",
       "text": "Hier landest du künftig nach dem Login: laufende Trainings, Ergebnisse der letzten Nacht und die letzten Tests auf einen Blick. Fang mit einem Modell an, lade ein Dataset dazu — dann kann das erste Training starten.",
-      "cta": "Erstes Modell hinzufügen"
+      "cta": "Erstes Modell hinzufügen",
+      "videoCta": "Erstes Modell trainieren – Video ansehen"
     },
     "insights": {
       "title": "Braucht Aufmerksamkeit",
@@ -1655,6 +1656,17 @@
       "sphereNetTitle": "Auf SphereNet hochladen",
       "sphereNetDesc": "Teile dein Modell mit der Community",
       "sphereNetSoon": "Bald verfügbar",
+      "hfTitle": "Auf HuggingFace hochladen",
+      "hfDesc": "Modell als Repository veröffentlichen",
+      "hfRepoLabel": "Repository (Name oder Namensraum/Name)",
+      "hfRepoPlaceholder": "dein-name/mein-modell",
+      "hfTokenLabel": "Zugriffstoken (Schreibrechte)",
+      "hfPrivate": "Privates Repository",
+      "hfUploadButton": "Hochladen",
+      "hfUploading": "Wird hochgeladen …",
+      "hfHint": "Token wird lokal auf diesem Gerät gemerkt.",
+      "hfUploadingHint": "Der Upload läuft – je nach Modellgröße dauert das einen Moment.",
+      "hfCreateToken": "Token erstellen",
       "cancelButton": "Abbrechen"
     },
     "notifications": {
@@ -1668,7 +1680,10 @@
       "renameFailed": "Umbenennen fehlgeschlagen",
       "exportSuccess": "Export erfolgreich",
       "exportSuccessDetail": "Version \"{name}\" wurde nach {path} exportiert.",
-      "exportFailed": "Export fehlgeschlagen"
+      "exportFailed": "Export fehlgeschlagen",
+      "hfSuccess": "Auf HuggingFace hochgeladen",
+      "hfSuccessDetail": "Das Modell ist jetzt unter {url} verfügbar.",
+      "hfFailed": "HuggingFace-Upload fehlgeschlagen"
     }
   },
   "updateChecker": {
