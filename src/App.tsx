@@ -105,7 +105,13 @@ function App() {
   // App-Close abfangen
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
 
+    // listen() rejects if window.__TAURI_INTERNALS__ isn't ready yet (e.g. Vite HMR
+    // reloading this module while a previous listen() call is still in flight), and
+    // that rejection previously had no .catch(), surfacing as an unhandled promise
+    // rejection ("Cannot read properties of undefined (reading 'transformCallback')").
+    // Same root cause already handled in contexts/TrainingContext.tsx — swallow it here too.
     listen('app-close-requested', async () => {
       // Prüfe ob Training aktiv ist
       try {
@@ -116,9 +122,18 @@ function App() {
         setIsTrainingActive(false);
       }
       setShowCloseDialog(true);
-    }).then(fn => { unlisten = fn; });
+    }).then(fn => {
+      if (disposed) {
+        try { fn(); } catch { /* already unregistered */ }
+      } else {
+        unlisten = fn;
+      }
+    }).catch(() => { /* listen() itself failed — nothing to unlisten */ });
 
-    return () => { if (unlisten) unlisten(); };
+    return () => {
+      disposed = true;
+      if (unlisten) { try { unlisten(); } catch { /* already unregistered */ } }
+    };
   }, []);
 
   const handleConfirmClose = async () => {
