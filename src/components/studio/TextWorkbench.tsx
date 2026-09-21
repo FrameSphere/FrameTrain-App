@@ -11,7 +11,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
-  Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine, Globe,
+  Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine, Globe, Sparkles,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -19,6 +19,8 @@ import { classColor } from '../labGroundTruth';
 import { nextOpenIndex } from './studioBoxes';
 import ModelRunDialog from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
+import GenerateDialog from './GenerateDialog';
+import type { GeneratedItem } from './generatedTexts';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
@@ -61,6 +63,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   const [showWrite, setShowWrite] = useState(false);
   const [showFetch, setShowFetch] = useState(false);
   const [showSource, setShowSource] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
   const [running, setRunning] = useState<{ cur: number; total: number } | null>(null);
   const [target, setTarget] = useState('');
   const [showKeys, setShowKeys] = useState(false);
@@ -171,7 +174,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource) return;
+      if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate) return;
 
       // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
       if (imFeld) {
@@ -200,7 +203,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite, showFetch, showSource]);
+  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite, showFetch, showSource, showGenerate]);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -263,11 +266,12 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     }
   };
 
-  const addTexts = async (texte: string[], label: string | null, ziel: string | null) => {
+  const addTexts = async (items: GeneratedItem[], origin: string | null) => {
     setShowWrite(false);
+    setShowGenerate(false);
     try {
       const report = await invoke<ImportReport>('studio_add_texts', {
-        projectId: project.id, texts: texte, label, target: ziel,
+        projectId: project.id, items, origin,
       });
       success(t('studio.write.doneTitle'),
         t('studio.write.doneDetail', { added: report.added, duplicates: report.duplicates }));
@@ -543,6 +547,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           onFolder={() => { setShowSource(false); void pickSource(true); }}
           onWeb={() => { setShowSource(false); setShowFetch(true); }}
           onWrite={() => { setShowSource(false); setShowWrite(true); }}
+          onGenerate={() => { setShowSource(false); setShowGenerate(true); }}
         />
       )}
 
@@ -564,7 +569,18 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           classes={classes}
           paare={paare}
           onCancel={() => setShowWrite(false)}
-          onCreate={(texte, label, ziel) => void addTexts(texte, label, ziel)}
+          onCreate={(texte, label, ziel) => void addTexts(
+            texte.map(text => ({ text, label, target: ziel })), null)}
+        />
+      )}
+
+      {showGenerate && (
+        <GenerateDialog
+          project={project}
+          paare={paare}
+          vorhanden={samples.map(x => x.content ?? '').filter(Boolean).slice(0, 40)}
+          onCancel={() => setShowGenerate(false)}
+          onAdd={(items, origin) => void addTexts(items, origin)}
         />
       )}
 
@@ -858,12 +874,13 @@ function WriteDialog({ classes, paare, onCancel, onCreate }: {
 
 // ── Woher kommen die Texte ────────────────────────────────────────────────
 
-function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite }: {
+function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite, onGenerate }: {
   onClose: () => void;
   onFile: () => void;
   onFolder: () => void;
   onWeb: () => void;
   onWrite: () => void;
+  onGenerate: () => void;
 }) {
   const { t } = useLanguage();
 
@@ -893,6 +910,7 @@ function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite }: {
           {tile(<FolderOpen className="w-4 h-4" />, t('studio.text.sourceFolder'), t('studio.text.sourceFolderHint'), onFolder)}
           {tile(<Globe className="w-4 h-4" />, t('studio.source.web'), t('studio.source.webHint'), onWeb)}
           {tile(<PenLine className="w-4 h-4" />, t('studio.text.sourceWrite'), t('studio.text.sourceWriteHint'), onWrite)}
+          {tile(<Sparkles className="w-4 h-4" />, t('studio.text.sourceGenerate'), t('studio.text.sourceGenerateHint'), onGenerate)}
         </div>
 
         <button onClick={onClose}

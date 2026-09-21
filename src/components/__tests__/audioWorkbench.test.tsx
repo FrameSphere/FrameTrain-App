@@ -20,7 +20,7 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error, warning, info: vi.fn() }),
 }));
 
-import AudioWorkbench from '../studio/AudioWorkbench';
+import AudioWorkbench, { audioExtForMime } from '../studio/AudioWorkbench';
 
 const AUFNAHMEN = [
   { id: 's_1', media: 'ab/a.wav', mime: 'audio/wav', status: 'new' as const,
@@ -96,6 +96,47 @@ describe('AudioWorkbench', () => {
         sampleId: 's_1', status: 'confirmed', target: 'Der Lift fährt gleich weiter',
       }));
     });
+  });
+
+  it('legt die Aufnahme unter der Endung ab, die der Recorder liefert', async () => {
+    // WKWebView nimmt MP4 auf, egal was man sich wuenscht. Stand "webm" fest
+    // im Aufruf, lag ein MP4 als .webm im Projekt: der Abspieler blieb stumm
+    // und der Dataset-Import erkannte den Export nicht als Audio.
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => Promise.resolve({ getTracks: () => [] }) },
+    });
+    class FakeRecorder {
+      state = 'recording';
+      mimeType = 'audio/mp4';
+      ondataavailable: ((e: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start() { /* nimmt auf */ }
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])]) });
+        this.onstop?.();
+      }
+    }
+    (globalThis as unknown as { MediaRecorder: unknown }).MediaRecorder = FakeRecorder;
+
+    render(<AudioWorkbench {...props()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Aufnehmen/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Stopp/ }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_add_audio', expect.objectContaining({
+        ext: 'm4a',
+      }));
+    });
+  });
+
+  it('kennt zu jedem Aufnahmeformat die Endung', () => {
+    expect(audioExtForMime('audio/mp4')).toBe('m4a');
+    expect(audioExtForMime('audio/mp4; codecs="mp4a.40.2"')).toBe('m4a');
+    expect(audioExtForMime('audio/webm;codecs=opus')).toBe('webm');
+    expect(audioExtForMime('audio/ogg')).toBe('ogg');
+    expect(audioExtForMime('')).toBe('webm');
   });
 
   it('sagt beim verweigerten Mikrofon, wo man es erlaubt', async () => {

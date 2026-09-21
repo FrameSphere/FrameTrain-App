@@ -3318,7 +3318,9 @@
       "sourceFolder": "Ordner mit Textdateien",
       "sourceFolderHint": "Unterordner gelten als Klasse",
       "sourceWrite": "Selbst schreiben",
-      "sourceWriteHint": "Einzeln oder als Liste, auf Wunsch gleich mit Klasse"
+      "sourceWriteHint": "Einzeln oder als Liste, auf Wunsch gleich mit Klasse",
+      "sourceGenerate": "Erzeugen lassen",
+      "sourceGenerateHint": "Beispiele je Klasse vom KI-Assistenten schreiben lassen"
     },
     "write": {
       "button": "Schreiben",
@@ -3383,6 +3385,35 @@
         "failed": "Nicht erreichbar",
         "skippedType": "Falscher Inhaltstyp"
       }
+    },
+    "generate": {
+      "title": "Texte erzeugen lassen",
+      "subtitle": "Am Anfang eines Projekts gibt es noch nichts zu labeln. Der KI-Assistent schreibt die ersten Beispiele — nichts davon landet ungesehen im Projekt.",
+      "noAI": "Der KI-Assistent ist nicht eingerichtet. In den Einstellungen unter KI-Assistent Anbieter und Schlüssel hinterlegen.",
+      "classesLabel": "Für welche Klassen?",
+      "countLabel": "Wie viele Texte",
+      "countPerClassLabel": "Wie viele je Klasse",
+      "topicLabel": "Worum geht es? (optional)",
+      "topicPlaceholder": "Kurze Nachrichten aus dem Kundendienst, gesprochene Sprache, höchstens ein Satz…",
+      "useExamples": "An den vorhandenen Texten orientieren (Stil und Länge)",
+      "plan": "Es werden bis zu {count} Texte erzeugt — mit {model}.",
+      "runButton": "Erzeugen",
+      "running": "Erzeuge… ({cur}/{total})",
+      "reviewHint": "{count} Vorschläge. Was nicht passt, wird abgewählt — der Rest wird übernommen.",
+      "keep": "Doch behalten",
+      "drop": "Nicht übernehmen",
+      "again": "Noch einmal",
+      "addButton": "{count} übernehmen",
+      "origin": "erzeugt mit {model}",
+      "emptyTitle": "Nichts Brauchbares zurückgekommen",
+      "emptyDetail": "Das Modell hat keine neuen Texte geliefert — vielleicht anderes Thema oder anderes Modell versuchen.",
+      "errorTitle": "Erzeugen fehlgeschlagen",
+      "system": "Du schreibst Trainingsbeispiele für einen Datensatz. Antworte ausschließlich mit einem JSON-Array von Zeichenketten, ohne Nummerierung, ohne Vorwort, ohne Erklärung. Jeder Eintrag ist ein eigenständiges Beispiel und steht für sich. Die Beispiele sollen sich deutlich voneinander unterscheiden — in Wortwahl, Länge und Blickwinkel.",
+      "promptClass": "Schreibe {count} Beispieltexte für die Klasse \"{klasse}\".",
+      "promptPlain": "Schreibe {count} Beispieltexte.",
+      "promptPairs": "Schreibe {count} Paare aus Eingabe und gewünschter Antwort. Antworte als JSON-Array von Objekten mit den Feldern \"text\" und \"target\".",
+      "promptTopic": "Thema und Stil:",
+      "promptExamples": "Vorhandene Beispiele, an denen du dich orientieren sollst (nicht wiederholen):"
     }
   }
 }

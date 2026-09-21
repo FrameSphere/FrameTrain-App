@@ -386,7 +386,7 @@ Die vier Erfassungswege aus Abschnitt 5 stehen jetzt alle:
 |---|---|
 | Import | Ordner, vorhandener FrameTrain-Datensatz, CSV/JSONL, Videobilder |
 | Aufnahme | Mikrofon in der Audio-Werkbank |
-| Erstellen | Texte schreiben (einzeln oder als Liste), Bilder aus der Zwischenablage |
+| Erstellen | Texte schreiben oder erzeugen lassen, Bilder aus der Zwischenablage |
 | Web | Adressliste mit robots.txt, Wartezeit je Server und Herkunft je Datei |
 
 Die drei Modalitaeten:
@@ -418,3 +418,54 @@ Bericht — verschwiegen wird nichts.
   Plugin-Installer. Sinnvoll, sobald jemand sie wirklich braucht.
 - **Kamera und Bildschirmausschnitt** als Aufnahmequellen. Die Berechtigung
   dafuer liegt bereits in der Info.plist, die Oberflaeche fehlt.
+
+---
+
+## 17. Erzeugen statt suchen, und ein Format, das stimmt (1.2.94)
+
+**Rohdaten entstehen lassen.** Der Plan nannte unter "Erstellen" neben dem
+Texteditor die LLM-Synthese; sie war der letzte offene Punkt der vier
+Erfassungswege. Am Anfang eines Projekts gibt es nichts zu labeln — wer eine
+Klassifikation aufsetzt, sitzt vor einer leeren Liste und braucht erst einmal
+Text, bevor Labeln ueberhaupt eine Taetigkeit ist. Der KI-Assistent aus den
+Einstellungen schreibt diese ersten Beispiele. Ein trainiertes Modell braucht
+es dafuer nicht, und genau das ist der Punkt.
+
+Drei Entscheidungen dabei:
+
+- **Je Klasse eine Anfrage.** Ein Modell, das fuer sechs Klassen gleichzeitig
+  schreibt, verteilt ungleich und wiederholt sich. Je Klasse eine Anfrage
+  kostet mehr Aufrufe und liefert dafuer gleichmaessig viele Beispiele — die
+  Zuordnung stimmt, weil sie aus dem Auftrag kommt und nicht aus einer
+  Zuordnung hinterher.
+- **Nichts landet ungesehen im Projekt.** Was zurueckkommt, steht als
+  Vorschlagsliste da und wird einzeln abgewaehlt. Dubletten gegen den
+  vorhandenen Bestand fallen vorher weg.
+- **Erzeugtes bleibt als erzeugt erkennbar.** Jede uebernommene Zeile traegt
+  "erzeugt mit <Modell>" als Herkunft und steht so in PROVENANCE.csv. Ein
+  Datensatz aus erzeugtem Text ist etwas anderes als einer aus gesammeltem;
+  wer das spaeter nicht mehr auseinanderhalten kann, misst seine Genauigkeit
+  am Ende gegen sich selbst.
+
+Dass die Antwort geparst werden muss, ist kein Randfall: kleinere Modelle
+liefern selten gueltiges JSON. Der Leser versucht erst JSON (mit und ohne
+Code-Zaun), dann JSONL, dann die nummerierte Liste — ein Lauf kostet echtes
+Geld und darf nicht an einem fehlenden Komma scheitern.
+
+Dafuer nimmt `studio_add_texts` jetzt Zeilen mit eigener Klasse und eigenem
+Ziel statt einer Klasse fuer den ganzen Block, und eine Herkunft. Das
+Selbst-Schreiben benutzt denselben Weg.
+
+**FIX: Aufnahmen lagen im falschen Format.** Der Webview nennt jede Aufnahme
+"webm"; WKWebView auf macOS nimmt aber MP4 auf. Im Projekt lag damit ein MP4
+unter dem Namen .webm — der Abspieler blieb bei der eigenen Aufnahme stumm,
+und der Dataset-Import haette den Export spaeter nicht einmal als Audio
+erkannt, weil dessen Endungsliste webm gar nicht enthaelt. Gefunden an zwei
+echten Aufnahmen im Projekt "t1": beide beginnen mit `ftypiso5`, also MP4.
+
+Zwei Stellen, damit es nicht wiederkommt: die Werkbank fragt den Recorder,
+was er tatsaechlich aufgenommen hat (`MediaRecorder.mimeType`), und das
+Backend schaut zusaetzlich in die ersten Bytes — der Name der Datei
+entscheidet nicht mehr ueber ihr Format. Aufnahmen, die schon falsch
+benannt auf der Platte liegen, werden beim naechsten Oeffnen des Projekts
+einmalig umbenannt, statt den Nutzer von vorne anfangen zu lassen.

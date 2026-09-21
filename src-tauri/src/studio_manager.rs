@@ -1059,6 +1059,7 @@ pub async fn studio_list_samples(
 ) -> Result<SamplePage, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    repair_audio_exts(&dir);
     let media_dir = dir.join("media");
     let all = load_samples(&dir);
     let doubts = load_doubts(&dir);
@@ -1749,6 +1750,70 @@ pub async fn studio_fetch_urls(
 
 const AUDIO_EXTS: &[&str] = &["wav", "mp3", "flac", "ogg", "m4a", "aac", "webm", "aiff", "aif"];
 
+/// Erkennt an den ersten Bytes, was wirklich in der Datei steht.
+///
+/// Der Name, den der Webview mitschickt, stimmt nicht: MediaRecorder liefert
+/// auf macOS (WKWebView) MP4 und nennt es trotzdem webm, weil der Aufrufer es
+/// so erwartet. Ein MP4 unter .webm kann weder der Abspieler in der Werkbank
+/// noch der Dataset-Import spaeter oeffnen — dessen Audio-Liste kennt webm
+/// nicht einmal. Also fragen wir die Datei selbst.
+fn audio_ext_from_bytes(bytes: &[u8]) -> Option<&'static str> {
+    let at = |off: usize, tag: &[u8]| {
+        bytes.len() >= off + tag.len() && &bytes[off..off + tag.len()] == tag
+    };
+    if at(4, b"ftyp")                                       { return Some("m4a"); }
+    if at(0, &[0x1A, 0x45, 0xDF, 0xA3])                     { return Some("webm"); }
+    if at(0, b"OggS")                                       { return Some("ogg"); }
+    if at(0, b"RIFF") && at(8, b"WAVE")                     { return Some("wav"); }
+    if at(0, b"FORM") && (at(8, b"AIFF") || at(8, b"AIFC")) { return Some("aiff"); }
+    if at(0, b"fLaC")                                       { return Some("flac"); }
+    if at(0, b"ID3")                                        { return Some("mp3"); }
+    if bytes.len() >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0 { return Some("mp3"); }
+    None
+}
+
+/// Die ersten n Bytes einer Datei — mehr braucht die Erkennung nicht.
+fn datei_kopf(p: &Path, n: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut f = fs::File::open(p).ok()?;
+    let mut buf = vec![0u8; n];
+    let gelesen = f.read(&mut buf).ok()?;
+    buf.truncate(gelesen);
+    Some(buf)
+}
+
+/// Einmal je Projekt: Aufnahmen unter falscher Endung richtigstellen.
+///
+/// Bis 1.2.93 hiess jede Aufnahme "webm", auch wenn MP4 darin lag. Wer damals
+/// aufgenommen hat, hoert seine eigene Aufnahme sonst nie — deshalb benennen
+/// wir die Dateien beim naechsten Oeffnen um, statt den Nutzer von vorne
+/// anfangen zu lassen. Die Marke daneben verhindert, dass das bei jedem
+/// Blaettern erneut ueber alle Dateien laeuft.
+fn repair_audio_exts(dir: &Path) -> usize {
+    let marke = dir.join(".medien_geprueft");
+    if marke.exists() { return 0; }
+    let media_dir = dir.join("media");
+    let mut samples: Vec<StudioSample> = read_jsonl(&samples_path(dir));
+    let mut korrigiert = 0usize;
+    for s in samples.iter_mut() {
+        if s.media.is_empty() || !s.mime.starts_with("audio/") { continue; }
+        let alt = media_dir.join(&s.media);
+        let Some(kopf) = datei_kopf(&alt, 16) else { continue };
+        let Some(echt) = audio_ext_from_bytes(&kopf) else { continue };
+        let ist = Path::new(&s.media).extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ist == echt { continue; }
+        let neu_rel = Path::new(&s.media).with_extension(echt).to_string_lossy().to_string();
+        if fs::rename(&alt, media_dir.join(&neu_rel)).is_ok() {
+            s.media = neu_rel;
+            s.mime = audio_mime(echt);
+            korrigiert += 1;
+        }
+    }
+    if korrigiert > 0 { let _ = write_jsonl(&samples_path(dir), &samples); }
+    let _ = fs::write(&marke, b"1");
+    korrigiert
+}
+
 fn audio_mime(ext: &str) -> String {
     match ext {
         "wav"          => "audio/wav",
@@ -1904,7 +1969,14 @@ pub async fn studio_add_audio(
     if bytes.is_empty() { return Err("Die Aufnahme ist leer".to_string()); }
 
     let ext = ext.trim().trim_start_matches('.').to_lowercase();
-    let ext = if AUDIO_EXTS.contains(&ext.as_str()) { ext } else { "webm".to_string() };
+    // Die Datei schlaegt den Namen: was der Webview "webm" nennt, ist auf
+    // macOS MP4. Nur so liegt hinterher eine Endung im Projekt, die zum
+    // Inhalt passt (siehe audio_ext_from_bytes).
+    let ext = match audio_ext_from_bytes(&bytes) {
+        Some(echt) => echt.to_string(),
+        None if AUDIO_EXTS.contains(&ext.as_str()) => ext,
+        None => "webm".to_string(),
+    };
     let hash = sha256_hex(&bytes);
     let rel = format!("{}/{}.{}", &hash[..2], &hash, ext);
 
@@ -1965,18 +2037,34 @@ pub async fn studio_add_audio(
 
 /// Texte von Hand anlegen. Mehrere auf einmal, weil man beim Schreiben selten
 /// bei einem bleibt und eine eingefuegte Liste sonst Zeile fuer Zeile muesste.
+/// Eine selbst angelegte oder erzeugte Textzeile.
+///
+/// Label und Ziel stehen je Zeile, nicht je Aufruf: beim Schreiben von Hand
+/// bekommt der ganze Block dieselbe Klasse, ein Generator liefert dagegen zu
+/// jeder Zeile ihre eigene.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NewText {
+    pub text: String,
+    #[serde(default)] pub label: Option<String>,
+    #[serde(default)] pub target: Option<String>,
+}
+
 #[tauri::command]
 pub async fn studio_add_texts(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
-    project_id: String, texts: Vec<String>, label: Option<String>, target: Option<String>,
+    project_id: String, items: Vec<NewText>, origin: Option<String>,
 ) -> Result<ImportReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
 
-    let sauber: Vec<String> = texts.into_iter()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
+    let sauber: Vec<NewText> = items.into_iter()
+        .map(|i| NewText {
+            text: i.text.trim().to_string(),
+            label: i.label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()),
+            target: i.target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+        })
+        .filter(|i| !i.text.is_empty())
         .collect();
     if sauber.is_empty() { return Err("Kein Text eingegeben".to_string()); }
 
@@ -1985,43 +2073,45 @@ pub async fn studio_add_texts(
         .filter_map(|s| s.content.as_ref().map(|c| sha256_hex(c.as_bytes())))
         .collect();
 
-    // Die Klasse muss es im Projekt geben — sonst steht im Export ein Name,
-    // den die Klassenliste nicht kennt.
-    let label = match label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
-        Some(l) => {
-            match class_index_for(l, &project.classes) {
-                Some(i) => Some(project.classes[i].clone()),
-                None => {
-                    project.classes.push(l.to_string());
-                    save_project(&dir, &project)?;
-                    Some(l.to_string())
-                }
-            }
-        }
-        None => None,
-    };
-    let target = target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-
     let mut report = ImportReport { added: 0, duplicates: 0, unreadable: 0, with_labels: 0,
         classes_added: vec![], unknown_ids: vec![], labels_ignored: 0 };
     let now = Utc::now().to_rfc3339();
+    // Woher die Zeilen stammen, steht spaeter in PROVENANCE.csv. Erzeugter
+    // Text muss dort als erzeugt zu erkennen sein — sonst sieht ein Datensatz
+    // aus wie gesammelte Wirklichkeit, obwohl ihn ein Modell geschrieben hat.
+    let origin = origin.map(|o| o.trim().to_string()).filter(|o| !o.is_empty())
+        .unwrap_or_else(|| "von Hand angelegt".to_string());
 
-    for text in sauber {
-        let hash = sha256_hex(text.as_bytes());
+    for item in sauber {
+        let hash = sha256_hex(item.text.as_bytes());
         if known.contains(&hash) { report.duplicates += 1; continue; }
-        let fertig = label.is_some() || target.is_some();
+
+        // Die Klasse muss es im Projekt geben — sonst steht im Export ein Name,
+        // den die Klassenliste nicht kennt.
+        let label = match item.label.as_deref() {
+            Some(l) => match class_index_for(l, &project.classes) {
+                Some(i) => Some(project.classes[i].clone()),
+                None => {
+                    project.classes.push(l.to_string());
+                    report.classes_added.push(l.to_string());
+                    Some(l.to_string())
+                }
+            },
+            None => None,
+        };
+        let fertig = label.is_some() || item.target.is_some();
         if fertig { report.with_labels += 1; }
 
         append_jsonl(&samples_path(&dir), &StudioSample {
             id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
             media: String::new(),
             mime: "text/plain".to_string(),
-            content: Some(text),
+            content: Some(item.text),
             status: if fertig { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { boxes: vec![], label: label.clone(), target: target.clone() },
+            ann: Annotation { boxes: vec![], label, target: item.target },
             src: SampleSource {
                 kind: "create".to_string(),
-                origin: Some("von Hand angelegt".to_string()),
+                origin: Some(origin.clone()),
                 license: None,
                 at: now.clone(),
             },
@@ -3389,6 +3479,74 @@ mod tests {
         // flatten darf die Projektfelder nicht verschlucken.
         assert_eq!(antwort["name"], "Ski");
         assert_eq!(antwort["classes"][0], "Ski");
+    }
+
+    // ── Audio: die Endung muss zum Inhalt passen ────────────────────────
+    //
+    // Der Webview nennt jede Aufnahme "webm". Auf macOS ist es MP4. Wer sich
+    // auf den Namen verlaesst, legt ein MP4 als .webm ab: der Abspieler bleibt
+    // stumm und der Dataset-Import erkennt den Ordner spaeter gar nicht als
+    // Audio, weil dessen Liste webm nicht enthaelt.
+
+    fn mp4_kopf() -> Vec<u8> {
+        let mut b = vec![0, 0, 0, 0x20];
+        b.extend_from_slice(b"ftypiso5");
+        b.extend_from_slice(&[0; 8]);
+        b
+    }
+
+    #[test]
+    fn mp4_aufnahme_wird_nicht_webm_genannt() {
+        assert_eq!(audio_ext_from_bytes(&mp4_kopf()), Some("m4a"));
+        assert_eq!(audio_ext_from_bytes(&[0x1A, 0x45, 0xDF, 0xA3, 1, 2]), Some("webm"));
+        assert_eq!(audio_ext_from_bytes(b"OggS\0\0\0\0"), Some("ogg"));
+        assert_eq!(audio_ext_from_bytes(b"RIFF\0\0\0\0WAVEfmt "), Some("wav"));
+        assert_eq!(audio_ext_from_bytes(b"fLaC\0\0\0\0"), Some("flac"));
+        assert_eq!(audio_ext_from_bytes(b"ID3\x04\0\0\0"), Some("mp3"));
+        // Nichts Bekanntes: lieber nichts behaupten als raten.
+        assert_eq!(audio_ext_from_bytes(b"einfach nur text"), None);
+        assert_eq!(audio_ext_from_bytes(b"ab"), None);
+    }
+
+    #[test]
+    fn falsch_benannte_aufnahmen_werden_beim_oeffnen_richtiggestellt() {
+        let dir = TempDir::new("audio_reparatur");
+        let d = dir.path();
+        fs::create_dir_all(d.join("media").join("ab")).unwrap();
+        fs::write(d.join("media").join("ab").join("h.webm"), mp4_kopf()).unwrap();
+
+        let mut s = sample("s_1", "new");
+        s.media = "ab/h.webm".to_string();
+        s.mime = "audio/webm".to_string();
+        write_jsonl(&samples_path(d), &[s]).unwrap();
+
+        assert_eq!(repair_audio_exts(d), 1);
+        assert!(d.join("media").join("ab").join("h.m4a").exists(), "Datei nicht umbenannt");
+        assert!(!d.join("media").join("ab").join("h.webm").exists(), "alter Name blieb liegen");
+        let danach: Vec<StudioSample> = read_jsonl(&samples_path(d));
+        assert_eq!(danach[0].media, "ab/h.m4a");
+        assert_eq!(danach[0].mime, "audio/mp4");
+
+        // Zweiter Aufruf laeuft nicht noch einmal ueber alle Dateien.
+        assert_eq!(repair_audio_exts(d), 0);
+    }
+
+    #[test]
+    fn richtige_endungen_bleiben_unangetastet() {
+        let dir = TempDir::new("audio_heil");
+        let d = dir.path();
+        fs::create_dir_all(d.join("media").join("cd")).unwrap();
+        let mut wav = b"RIFF\0\0\0\0WAVE".to_vec();
+        wav.extend_from_slice(&[0; 8]);
+        fs::write(d.join("media").join("cd").join("h.wav"), &wav).unwrap();
+
+        let mut s = sample("s_1", "new");
+        s.media = "cd/h.wav".to_string();
+        s.mime = "audio/wav".to_string();
+        write_jsonl(&samples_path(d), &[s]).unwrap();
+
+        assert_eq!(repair_audio_exts(d), 0);
+        assert!(d.join("media").join("cd").join("h.wav").exists());
     }
 
     #[test]

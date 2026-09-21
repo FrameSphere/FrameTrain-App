@@ -24,6 +24,25 @@ import type {
 
 const PAGE = 200;
 
+/// Welche Endung zu dem gehoert, was der Recorder tatsaechlich aufgenommen hat.
+///
+/// MediaRecorder liefert je nach Webview etwas anderes: WKWebView (macOS, also
+/// auch diese App) nimmt MP4 auf, Chromium WebM. Wer "webm" fest hineinschreibt,
+/// legt auf dem Mac ein MP4 unter falschem Namen ab — der Abspieler bleibt dann
+/// stumm bei der eigenen Aufnahme. Das Backend prueft die Bytes zusaetzlich.
+export function audioExtForMime(mime: string): string {
+  const basis = (mime || '').split(';')[0].trim().toLowerCase();
+  switch (basis) {
+    case 'audio/mp4': case 'video/mp4': case 'audio/aac': case 'audio/x-m4a': return 'm4a';
+    case 'audio/webm': case 'video/webm':                                      return 'webm';
+    case 'audio/ogg': case 'video/ogg': case 'audio/opus':                     return 'ogg';
+    case 'audio/wav': case 'audio/wave': case 'audio/x-wav':                   return 'wav';
+    case 'audio/mpeg': case 'audio/mp3':                                       return 'mp3';
+    case 'audio/flac': case 'audio/x-flac':                                    return 'flac';
+    default:                                                                   return 'webm';
+  }
+}
+
 interface Props {
   project: StudioProject;
   onBack: () => void;
@@ -166,7 +185,11 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
         stopTicker();
         setRecording(false);
         setSeconds(0);
-        const blob = new Blob(chunks.current, { type: 'audio/webm' });
+        // Nicht raten, sondern den Recorder fragen: er weiss, in welchem
+        // Format er aufgenommen hat.
+        const typ = rec.mimeType || 'audio/mp4';
+        const ext = audioExtForMime(typ);
+        const blob = new Blob(chunks.current, { type: typ });
         if (blob.size === 0) {
           warning(t('studio.audio.emptyTitle'), t('studio.audio.emptyDetail'));
           return;
@@ -174,7 +197,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
         try {
           const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
           const report = await invoke<ImportReport>('studio_add_audio', {
-            projectId: project.id, bytes, ext: 'webm', label: null,
+            projectId: project.id, bytes, ext, label: null,
           });
           if (report.duplicates > 0) {
             info(t('studio.audio.recordedTitle'), t('studio.audio.duplicate'));

@@ -3318,7 +3318,9 @@
       "sourceFolder": "Folder with text files",
       "sourceFolderHint": "Subfolders count as the class",
       "sourceWrite": "Write them yourself",
-      "sourceWriteHint": "One at a time or as a list, with a class if you like"
+      "sourceWriteHint": "One at a time or as a list, with a class if you like",
+      "sourceGenerate": "Have them written",
+      "sourceGenerateHint": "Let the AI assistant write examples per class"
     },
     "write": {
       "button": "Write",
@@ -3383,6 +3385,35 @@
         "failed": "Unreachable",
         "skippedType": "Wrong content type"
       }
+    },
+    "generate": {
+      "title": "Have texts written",
+      "subtitle": "At the start of a project there is nothing to label yet. The AI assistant writes the first examples — none of them enter the project unseen.",
+      "noAI": "The AI assistant is not set up. Add a provider and key under Settings, AI assistant.",
+      "classesLabel": "For which classes?",
+      "countLabel": "How many texts",
+      "countPerClassLabel": "How many per class",
+      "topicLabel": "What is it about? (optional)",
+      "topicPlaceholder": "Short customer support messages, spoken language, one sentence at most…",
+      "useExamples": "Follow the existing texts (style and length)",
+      "plan": "Up to {count} texts will be generated — using {model}.",
+      "runButton": "Generate",
+      "running": "Generating… ({cur}/{total})",
+      "reviewHint": "{count} suggestions. Deselect what does not fit — the rest is added.",
+      "keep": "Keep after all",
+      "drop": "Do not add",
+      "again": "Once more",
+      "addButton": "Add {count}",
+      "origin": "generated with {model}",
+      "emptyTitle": "Nothing usable came back",
+      "emptyDetail": "The model returned no new texts — try a different topic or a different model.",
+      "errorTitle": "Generating failed",
+      "system": "You write training examples for a dataset. Reply with a JSON array of strings only — no numbering, no preamble, no explanation. Each entry is a standalone example. The examples must differ clearly from one another in wording, length and perspective.",
+      "promptClass": "Write {count} example texts for the class \"{klasse}\".",
+      "promptPlain": "Write {count} example texts.",
+      "promptPairs": "Write {count} pairs of input and desired answer. Reply as a JSON array of objects with the fields \"text\" and \"target\".",
+      "promptTopic": "Topic and style:",
+      "promptExamples": "Existing examples to follow (do not repeat them):"
     }
   }
 }

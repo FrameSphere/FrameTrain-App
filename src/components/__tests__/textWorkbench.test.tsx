@@ -19,6 +19,16 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning, info: vi.fn() }),
 }));
 
+const callAIMock = vi.fn();
+vi.mock('../../ai/aiClient', () => ({ callAI: (...a: unknown[]) => callAIMock(...a) }));
+vi.mock('../../contexts/AISettingsContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../contexts/AISettingsContext')>()),
+  useAISettings: () => ({ settings: {
+    enabled: true, provider: 'anthropic', apiKey: 'sk-ant-api-x',
+    selectedModel: 'claude-haiku-4-5', ollamaModel: '', tokenBudget: 'balanced',
+  } }),
+}));
+
 import TextWorkbench from '../studio/TextWorkbench';
 
 const TEXTE = [
@@ -150,8 +160,11 @@ describe('TextWorkbench', () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('studio_add_texts', expect.objectContaining({
         projectId: 'sp_text',
-        texts: ['Lift kaputt', 'Piste top', 'Kasse zu'],
-        label: null,
+        items: [
+          { text: 'Lift kaputt', label: null, target: null },
+          { text: 'Piste top',   label: null, target: null },
+          { text: 'Kasse zu',    label: null, target: null },
+        ],
       }));
     });
   });
@@ -170,8 +183,29 @@ describe('TextWorkbench', () => {
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('studio_add_texts', expect.objectContaining({
-        texts: ['Lift kaputt'], label: 'beschwerde',
+        items: [{ text: 'Lift kaputt', label: 'beschwerde', target: null }],
       }));
+    });
+  });
+
+  it('legt erzeugte Texte mit Klasse und Herkunft ab', async () => {
+    // Der ganze Weg: Quelle waehlen, erzeugen lassen, uebernehmen. Genau diese
+    // Verdrahtung fehlte schon einmal, ohne dass TypeScript etwas gemerkt haette.
+    callAIMock.mockResolvedValue('["Lift stand still"]');
+
+    render(<TextWorkbench {...props()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Texte holen/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Erzeugen lassen/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Erzeugen$/ }));
+
+    await screen.findByText('Lift stand still');
+    fireEvent.click(screen.getByRole('button', { name: /^[0-9]+ übernehmen$/ }));
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_add_texts');
+      expect(call).toBeDefined();
+      expect(call![1].items[0]).toMatchObject({ text: 'Lift stand still', label: 'beschwerde' });
+      expect(String(call![1].origin)).toMatch(/claude-haiku-4-5/);
     });
   });
 
