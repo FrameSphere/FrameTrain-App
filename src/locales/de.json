@@ -154,6 +154,18 @@
         "hide": "Verbergen",
         "warning": "Teile deinen API-Key niemals mit anderen. Er gewährt vollen Zugriff auf deinen Account."
       },
+      "huggingface": {
+        "title": "HuggingFace",
+        "subtitle": "Zugriffstoken zum Hochladen trainierter Versionen auf HuggingFace.",
+        "connected": "Verbunden",
+        "label": "Zugriffstoken (Schreibrechte)",
+        "save": "Speichern",
+        "remove": "Entfernen",
+        "saved": "HuggingFace-Token gespeichert.",
+        "removed": "HuggingFace-Token entfernt.",
+        "createToken": "Token erstellen",
+        "hint": "Der Token wird sicher im Schlüsselbund deines Systems abgelegt, nicht im Klartext. Beim Export einer Version wird er automatisch verwendet."
+      },
       "communityName": {
         "title": "Community-Name",
         "subtitle": "Dein öffentlicher Name in der Open Script Library",
@@ -1664,7 +1676,7 @@
       "hfPrivate": "Privates Repository",
       "hfUploadButton": "Hochladen",
       "hfUploading": "Wird hochgeladen …",
-      "hfHint": "Token wird lokal auf diesem Gerät gemerkt.",
+      "hfHint": "Token wird sicher im Schlüsselbund gemerkt (auch in den Einstellungen änderbar).",
       "hfUploadingHint": "Der Upload läuft – je nach Modellgröße dauert das einen Moment.",
       "hfCreateToken": "Token erstellen",
       "cancelButton": "Abbrechen"

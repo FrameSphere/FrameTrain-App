@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Infinity as InfinityIcon } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Upload, Trash2, Infinity as InfinityIcon } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -54,6 +54,9 @@ interface SettingsProps {
 }
 
 type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system';
+
+// Schluesselbund-Konto fuer den HuggingFace-Token — identisch im Versionen-Export.
+const HF_TOKEN_ACCOUNT = 'ft_hf_token';
 
 const STATUS_COLOR: Record<string, string> = {
   open: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
@@ -150,6 +153,60 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   useEffect(() => {
     if (activeTab === 'ai-assistant') ensureProviderKeysLoaded();
   }, [activeTab, ensureProviderKeysLoaded]);
+
+  // HuggingFace-Token aus dem Schluesselbund laden, sobald der Konto-Tab offen ist
+  useEffect(() => {
+    if (activeTab !== 'account') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const value = await invoke<string | null>('secret_get', { key: HF_TOKEN_ACCOUNT });
+        if (cancelled) return;
+        setHfTokenInput(value || '');
+        setHfTokenStored(!!value);
+      } catch {
+        if (!cancelled) setHfTokenStored(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab]);
+
+  const handleSaveHfToken = async () => {
+    const token = hfTokenInput.trim();
+    setSavingHfToken(true);
+    setHfTokenSaved(false);
+    try {
+      if (token) {
+        await invoke('secret_set', { key: HF_TOKEN_ACCOUNT, value: token });
+        setHfTokenStored(true);
+      } else {
+        await invoke('secret_delete', { key: HF_TOKEN_ACCOUNT });
+        setHfTokenStored(false);
+      }
+      setHfTokenSaved(true);
+      setNotification({ type: 'success', message: t('settings.account.huggingface.saved') });
+    } catch (e) {
+      setNotification({ type: 'error', message: String(e) });
+    } finally {
+      setSavingHfToken(false);
+    }
+  };
+
+  const handleDeleteHfToken = async () => {
+    setSavingHfToken(true);
+    try {
+      await invoke('secret_delete', { key: HF_TOKEN_ACCOUNT });
+      setHfTokenInput('');
+      setHfTokenStored(false);
+      setHfTokenSaved(false);
+      setNotification({ type: 'success', message: t('settings.account.huggingface.removed') });
+    } catch (e) {
+      setNotification({ type: 'error', message: String(e) });
+    } finally {
+      setSavingHfToken(false);
+    }
+  };
+
   const [aiSaving, setAiSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [aiTestMsg, setAiTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -189,6 +246,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [communitySaved, setCommunitySaved]       = useState(false);
   const [savingCommunity, setSavingCommunity]     = useState(false);
   const [duplicateNameError, setDuplicateNameError] = useState<string | null>(null);
+
+  // HuggingFace-Token — liegt im OS-Schluesselbund (secret_*), nicht im localStorage
+  const [hfTokenInput, setHfTokenInput]   = useState('');
+  const [hfTokenStored, setHfTokenStored] = useState(false);
+  const [showHfToken, setShowHfToken]     = useState(false);
+  const [savingHfToken, setSavingHfToken] = useState(false);
+  const [hfTokenSaved, setHfTokenSaved]   = useState(false);
 
   // Support state
   const [supportOpen, setSupportOpen] = useState(false);
@@ -660,6 +724,82 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               {t('settings.account.apiKeySection.warning')}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* HuggingFace Token Card */}
+      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <Upload className="w-5 h-5 text-yellow-400" />
+            <h3 className="text-lg font-semibold text-white">{t('settings.account.huggingface.title')}</h3>
+          </div>
+          {hfTokenStored && (
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-500/15 text-emerald-300 text-xs rounded-full">
+              <CheckCircle className="w-3 h-3" /> {t('settings.account.huggingface.connected')}
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-gray-400 mb-4">{t('settings.account.huggingface.subtitle')}</p>
+
+        {hfTokenSaved && (
+          <div className="flex items-center gap-2 p-3 mb-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <p className="text-sm text-emerald-300">{t('settings.account.huggingface.saved')}</p>
+          </div>
+        )}
+
+        <label className="block text-sm font-medium text-gray-400 mb-1">{t('settings.account.huggingface.label')}</label>
+        <div className="flex items-center gap-2">
+          <input
+            type={showHfToken ? 'text' : 'password'}
+            value={hfTokenInput}
+            onChange={e => { setHfTokenInput(e.target.value); setHfTokenSaved(false); }}
+            placeholder="hf_..."
+            spellCheck={false}
+            autoCapitalize="none"
+            className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500/40"
+          />
+          <button
+            onClick={() => setShowHfToken(v => !v)}
+            className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-colors border border-white/10"
+          >
+            {showHfToken ? t('settings.account.apiKeySection.hide') : t('settings.account.apiKeySection.show')}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            onClick={handleSaveHfToken}
+            disabled={savingHfToken}
+            className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            {savingHfToken ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {t('settings.account.huggingface.save')}
+          </button>
+          {hfTokenStored && (
+            <button
+              onClick={handleDeleteHfToken}
+              disabled={savingHfToken}
+              className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-red-500/15 text-gray-300 hover:text-red-300 rounded-lg transition-colors border border-white/10 disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              {t('settings.account.huggingface.remove')}
+            </button>
+          )}
+          <a
+            href="https://huggingface.co/settings/tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 px-3 py-2 text-yellow-400 hover:text-yellow-300 text-sm ml-auto"
+          >
+            {t('settings.account.huggingface.createToken')} <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+
+        <div className="flex items-start space-x-2 p-3 mt-4 bg-white/5 border border-white/10 rounded-lg">
+          <Shield className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-gray-400">{t('settings.account.huggingface.hint')}</p>
         </div>
       </div>
 

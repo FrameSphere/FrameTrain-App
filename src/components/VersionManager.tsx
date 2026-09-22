@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { 
   GitBranch,
   Trash2,
@@ -120,6 +121,37 @@ function getFileIcon(name: string, isDir: boolean) {
   return <File className="w-3.5 h-3.5 text-gray-500" />;
 }
 
+// ============ HuggingFace Upload — gemerkte Zugangsdaten ============
+
+// Der Token ist ein Geheimnis und liegt im OS-Schluesselbund (secret_*), genau wie
+// der KI-API-Key — dasselbe Konto wie in den Einstellungen. Der Namensraum (nicht
+// geheim) bleibt im localStorage, damit der Repo-Vorschlag vorbelegt werden kann.
+const HF_TOKEN_ACCOUNT = 'ft_hf_token';
+const HF_OWNER_KEY = 'frametrain.hf.owner';
+
+async function loadHfToken(): Promise<string> {
+  try { return (await invoke<string | null>('secret_get', { key: HF_TOKEN_ACCOUNT })) || ''; }
+  catch { return ''; }
+}
+async function saveHfToken(token: string): Promise<void> {
+  try { if (token) await invoke('secret_set', { key: HF_TOKEN_ACCOUNT, value: token }); }
+  catch { /* Schluesselbund nicht verfuegbar — Upload klappte trotzdem */ }
+}
+function loadHfOwner(): string {
+  try { return localStorage.getItem(HF_OWNER_KEY) || ''; } catch { return ''; }
+}
+function saveHfOwner(owner: string) {
+  try { localStorage.setItem(HF_OWNER_KEY, owner); } catch { /* Privatmodus o.ae. */ }
+}
+
+// Modellname → gueltiger Repo-Slug (HuggingFace erlaubt a-z0-9._-)
+function slugifyRepo(name: string): string {
+  return name.toLowerCase().trim()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96) || 'mein-modell';
+}
+
 // ============ Version Files Panel ============
 
 function VersionFilesPanel({ versionPath }: { versionPath: string }) {
@@ -221,6 +253,7 @@ interface VersionsModalProps {
   onDelete: (versionId: string) => Promise<void>;
   onRename: (versionId: string, newName: string) => Promise<void>;
   onExport: (versionId: string, versionName: string) => Promise<void>;
+  onUploadHf: (versionId: string, repoId: string, token: string, isPrivate: boolean) => Promise<string>;
   onRefresh: () => Promise<void>;
   gradient: string;
   primaryColor: string;
@@ -230,20 +263,32 @@ function VersionsModal({
   model, 
   versions, 
   onClose, 
-  onDelete, 
+  onDelete,
   onRename,
   onExport,
+  onUploadHf,
   onRefresh,
   gradient,
-  primaryColor 
+  primaryColor
 }: VersionsModalProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [loading, setLoading] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportingVersion, setExportingVersion] = useState<ModelVersion | null>(null);
+  // HuggingFace-Upload — eigenes ausklappbares Formular im Export-Dialog
+  const [showHfForm, setShowHfForm] = useState(false);
+  const [hfRepo, setHfRepo] = useState('');
+  const [hfToken, setHfToken] = useState('');
+  const [hfPrivate, setHfPrivate] = useState(false);
+  const [hfUploading, setHfUploading] = useState(false);
   // Export-Overlay zuerst, sonst der ganze Versions-Dialog.
-  useEscapeKey(() => (showExportModal ? setShowExportModal(false) : onClose()));
+  // Waehrend eines laufenden Uploads bleibt der Dialog offen (Abbruch nicht moeglich).
+  useEscapeKey(() => {
+    if (hfUploading) return;
+    if (showExportModal) { setShowExportModal(false); setShowHfForm(false); }
+    else onClose();
+  });
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const { t, language } = useLanguage();
 
@@ -285,7 +330,42 @@ function VersionsModal({
 
   const handleExportClick = (version: ModelVersion) => {
     setExportingVersion(version);
+    // HuggingFace-Formular vorbelegen: Vorschlag "owner/modell" sofort setzen,
+    // Token aus dem Schluesselbund nachladen (asynchron).
+    const owner = loadHfOwner();
+    const slug = slugifyRepo(model.name);
+    setHfRepo(owner ? `${owner}/${slug}` : slug);
+    setHfToken('');
+    setHfPrivate(false);
+    setShowHfForm(false);
     setShowExportModal(true);
+    loadHfToken().then(setHfToken);
+  };
+
+  const handleUploadHf = async () => {
+    if (!exportingVersion) return;
+    const repo = hfRepo.trim();
+    const token = hfToken.trim();
+    if (!repo || !token) return; // Button ist ohnehin deaktiviert
+    setHfUploading(true);
+    try {
+      await onUploadHf(exportingVersion.id, repo, token, hfPrivate);
+      // Erst nach Erfolg merken — ein falscher Token wird nicht konserviert
+      await saveHfToken(token);
+      if (repo.includes('/')) saveHfOwner(repo.split('/')[0]);
+      setShowExportModal(false);
+      setShowHfForm(false);
+      setExportingVersion(null);
+    } catch (err) {
+      // Fehler zeigt die Elternkomponente als Notification
+    } finally {
+      setHfUploading(false);
+    }
+  };
+
+  const openHfTokenPage = () => {
+    const url = 'https://huggingface.co/settings/tokens';
+    openUrl(url).catch(() => { try { window.open(url, '_blank'); } catch { /* ignore */ } });
   };
 
   const handleExportLocal = async () => {
@@ -553,9 +633,10 @@ function VersionsModal({
               <button
                 onClick={() => {
                   setShowExportModal(false);
+                  setShowHfForm(false);
                   setExportingVersion(null);
                 }}
-                disabled={loading}
+                disabled={loading || hfUploading}
                 className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-all disabled:opacity-50"
               >
                 <X className="w-5 h-5" />
@@ -584,6 +665,83 @@ function VersionsModal({
                 {loading && <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />}
               </button>
 
+              {/* HuggingFace Upload */}
+              <div className="rounded-xl border border-blue-500/40 overflow-hidden">
+                <button
+                  onClick={() => setShowHfForm(v => !v)}
+                  disabled={loading || hfUploading}
+                  className="w-full flex items-center gap-4 p-4 bg-blue-500/5 hover:bg-blue-500/10 transition-all disabled:opacity-50 group"
+                >
+                  <div className="p-3 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg group-hover:scale-110 transition-transform">
+                    <Upload className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="font-semibold text-white">{t('versionManager.exportModal.hfTitle')}</div>
+                    <div className="text-sm text-gray-400">{t('versionManager.exportModal.hfDesc')}</div>
+                  </div>
+                  <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${showHfForm ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showHfForm && (
+                  <div className="p-4 pt-1 space-y-3 bg-blue-500/[0.03] border-t border-blue-500/20">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">{t('versionManager.exportModal.hfRepoLabel')}</label>
+                      <input
+                        type="text"
+                        value={hfRepo}
+                        onChange={(e) => setHfRepo(e.target.value)}
+                        disabled={hfUploading}
+                        placeholder={t('versionManager.exportModal.hfRepoPlaceholder')}
+                        spellCheck={false}
+                        autoCapitalize="none"
+                        className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">{t('versionManager.exportModal.hfTokenLabel')}</label>
+                      <input
+                        type="password"
+                        value={hfToken}
+                        onChange={(e) => setHfToken(e.target.value)}
+                        disabled={hfUploading}
+                        placeholder="hf_..."
+                        spellCheck={false}
+                        autoCapitalize="none"
+                        className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={hfPrivate}
+                        onChange={(e) => setHfPrivate(e.target.checked)}
+                        disabled={hfUploading}
+                        className="w-4 h-4 rounded border-white/20 bg-white/5 accent-blue-500"
+                      />
+                      {t('versionManager.exportModal.hfPrivate')}
+                    </label>
+                    <button
+                      onClick={handleUploadHf}
+                      disabled={hfUploading || !hfRepo.trim() || !hfToken.trim()}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg text-white font-medium hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {hfUploading ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" />{t('versionManager.exportModal.hfUploading')}</>
+                      ) : (
+                        <><Upload className="w-4 h-4" />{t('versionManager.exportModal.hfUploadButton')}</>
+                      )}
+                    </button>
+                    <div className="text-[11px] text-gray-500 leading-relaxed">
+                      {hfUploading ? t('versionManager.exportModal.hfUploadingHint') : t('versionManager.exportModal.hfHint')}
+                      {' · '}
+                      <button onClick={openHfTokenPage} className="text-blue-400 hover:underline">
+                        {t('versionManager.exportModal.hfCreateToken')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* SphereNet Upload - Disabled */}
               <button
                 disabled
@@ -609,9 +767,10 @@ function VersionsModal({
               <button
                 onClick={() => {
                   setShowExportModal(false);
+                  setShowHfForm(false);
                   setExportingVersion(null);
                 }}
-                disabled={loading}
+                disabled={loading || hfUploading}
                 className="w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-lg text-white transition-all disabled:opacity-50"
               >
                 {t('common.cancel')}
@@ -785,6 +944,30 @@ export default function VersionManager() {
     }
   };
 
+  const handleUploadHuggingFace = async (
+    versionId: string,
+    repoId: string,
+    token: string,
+    isPrivate: boolean
+  ): Promise<string> => {
+    try {
+      const url = await invoke<string>('upload_model_version_huggingface', {
+        versionId,
+        repoId,
+        token,
+        private: isPrivate,
+      });
+      success(
+        t('versionManager.notifications.hfSuccess'),
+        t('versionManager.notifications.hfSuccessDetail').replace('{url}', url)
+      );
+      return url;
+    } catch (err: any) {
+      error(t('versionManager.notifications.hfFailed'), ... [String(err)]);
+      throw err;
+    }
+  };
+
   const handleRefreshVersions = async () => {
     if (selectedModel) {
       try {
@@ -894,6 +1077,7 @@ export default function VersionManager() {
           onDelete={handleDeleteVersion}
           onRename={handleRenameVersion}
           onExport={handleExportVersion}
+          onUploadHf={handleUploadHuggingFace}
           onRefresh={handleRefreshVersions}
           gradient={currentTheme.colors.gradient}
           primaryColor={currentTheme.colors.primary}

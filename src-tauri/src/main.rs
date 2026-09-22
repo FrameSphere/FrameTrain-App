@@ -240,6 +240,7 @@ fn main() {
             version_manager::get_version_path_for_ui,
             version_manager::list_version_files,
             version_manager::export_model_version,
+            version_manager::upload_model_version_huggingface,
             analysis_manager::get_training_metrics,
             analysis_manager::get_version_details,
             analysis_manager::get_training_logs,

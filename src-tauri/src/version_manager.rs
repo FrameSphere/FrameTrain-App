@@ -83,9 +83,11 @@ fn copy_dir_recursive_export(src: &PathBuf, dst: &PathBuf) -> Result<(), String>
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::{Manager, State};
 use crate::database::Database;
 use crate::AppState;
+use crate::command_ext::{NoWindow, PythonUtf8};
 
 // ============ Data Structures ============
 
@@ -660,6 +662,125 @@ pub fn get_version_path_for_ui(version_id: String, state: State<AppState>) -> Re
     let db = state.db.lock().map_err(|e| format!("Failed to lock database: {}", e))?;
     
     db.get_version_path(&version_id)
+}
+
+/// Laedt eine Version als Modell-Repository zu HuggingFace hoch.
+///
+/// Der Upload laeuft ueber `huggingface_hub` in genau dem Python, mit dem auch
+/// trainiert wird (`resolve_python`) — dieselbe Umgebung, die das Paket schon
+/// mitbringt. Token und Pfade gehen als Umgebungsvariablen an ein Skript in
+/// einer Temp-Datei, damit der Token nicht in der Prozessliste sichtbar wird.
+#[tauri::command]
+pub fn upload_model_version_huggingface(
+    version_id: String,
+    repo_id: String,
+    token: String,
+    private: bool,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<String, String> {
+    let token = token.trim().to_string();
+    let repo_id = repo_id.trim().to_string();
+    if token.is_empty() {
+        return Err("Kein HuggingFace-Token angegeben".to_string());
+    }
+    if repo_id.is_empty() {
+        return Err("Kein Repository-Name angegeben".to_string());
+    }
+
+    // Versionspfad mit user_id-Pruefung ermitteln (wie beim lokalen Export)
+    let user_id = {
+        let db = state.db.lock()
+            .map_err(|e| format!("Failed to lock database: {}", e))?;
+        db.require_user_id()?.to_string()
+    };
+    let version_path: String = {
+        let db = state.db.lock()
+            .map_err(|e| format!("Failed to lock database: {}", e))?;
+        db.conn.query_row(
+            "SELECT path FROM model_versions_new WHERE id = ?1 AND user_id = ?2",
+            rusqlite::params![&version_id, &user_id],
+            |row| row.get(0),
+        ).map_err(|e| format!("Version not found or access denied: {}", e))?
+    };
+
+    if !Path::new(&version_path).exists() {
+        return Err(format!("Versionsordner nicht gefunden: {}", version_path));
+    }
+
+    let python = crate::python_env::resolve_python();
+
+    // Skript in eine Temp-Datei — nichts landet auf der Kommandozeile
+    let script = r#"import os, json, sys
+try:
+    from huggingface_hub import HfApi
+    api = HfApi(token=os.environ["FT_HF_TOKEN"])
+    repo_id = os.environ["FT_HF_REPO"].strip()
+    private = os.environ.get("FT_HF_PRIVATE") == "1"
+    # Ohne Namensraum ("yolo8n") wuerde create_repo unter dem eigenen Account
+    # anlegen (deinname/yolo8n), der Upload aber woertlich "yolo8n" suchen -> 404.
+    # Darum den Account aus dem Token ergaenzen, wenn kein "/" angegeben ist.
+    if "/" not in repo_id:
+        me = api.whoami()
+        user = me.get("name") if isinstance(me, dict) else None
+        if not user:
+            raise RuntimeError("Konnte den HuggingFace-Account zum Token nicht ermitteln.")
+        repo_id = user + "/" + repo_id
+    created = api.create_repo(repo_id=repo_id, repo_type="model", private=private, exist_ok=True)
+    # Die von create_repo zurueckgegebene ID ist die kanonische — die fuer den Upload nehmen.
+    canonical = getattr(created, "repo_id", None) or repo_id
+    api.upload_folder(folder_path=os.environ["FT_HF_FOLDER"], repo_id=canonical, repo_type="model")
+    print(json.dumps({"ok": True, "url": "https://huggingface.co/" + canonical}))
+except ImportError:
+    print(json.dumps({"ok": False, "error": "huggingface_hub ist in dieser Python-Umgebung nicht installiert (pip install huggingface_hub)."}))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+"#;
+
+    let tmp = std::env::temp_dir()
+        .join(format!("ft_hf_upload_{}.py", uuid::Uuid::new_v4()));
+    fs::write(&tmp, script)
+        .map_err(|e| format!("Temp-Datei konnte nicht geschrieben werden: {}", e))?;
+
+    println!("[HF-Upload] Lade Version {} nach {} hoch", version_id, repo_id);
+
+    let output = Command::new(&python)
+        .no_window()
+        .python_utf8()
+        .arg(tmp.to_string_lossy().to_string())
+        .env("FT_HF_TOKEN", &token)
+        .env("FT_HF_REPO", &repo_id)
+        .env("FT_HF_FOLDER", &version_path)
+        .env("FT_HF_PRIVATE", if private { "1" } else { "0" })
+        .output();
+
+    let _ = fs::remove_file(&tmp);
+
+    let output = output
+        .map_err(|e| format!("Python konnte nicht gestartet werden: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Letzte JSON-Zeile aus stdout — Fortschrittsbalken schreibt nach stderr
+    let json_line = stdout
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('{'))
+        .ok_or_else(|| format!(
+            "Unerwartete Antwort vom Upload.\nstdout: {}\nstderr: {}",
+            stdout.trim(), stderr.trim()
+        ))?;
+
+    let parsed: serde_json::Value = serde_json::from_str(json_line.trim())
+        .map_err(|e| format!("Antwort nicht lesbar: {}", e))?;
+
+    if parsed.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
+        let url = parsed.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+        println!("[HF-Upload] ✅ fertig: {}", url);
+        Ok(url)
+    } else {
+        Err(parsed.get("error").and_then(|e| e.as_str())
+            .unwrap_or("Upload fehlgeschlagen").to_string())
+    }
 }
 
 #[tauri::command]
