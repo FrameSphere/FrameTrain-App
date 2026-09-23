@@ -1676,6 +1676,7 @@
       "hfPrivate": "Privates Repository",
       "hfUploadButton": "Hochladen",
       "hfUploading": "Wird hochgeladen …",
+      "hfPreparing": "Wird vorbereitet …",
       "hfHint": "Token wird sicher im Schlüsselbund gemerkt (auch in den Einstellungen änderbar).",
       "hfUploadingHint": "Der Upload läuft – je nach Modellgröße dauert das einen Moment.",
       "hfCreateToken": "Token erstellen",

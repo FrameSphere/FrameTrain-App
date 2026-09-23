@@ -1676,6 +1676,7 @@
       "hfPrivate": "Private repository",
       "hfUploadButton": "Upload",
       "hfUploading": "Uploading …",
+      "hfPreparing": "Preparing …",
       "hfHint": "The token is stored securely in your keychain (also editable in Settings).",
       "hfUploadingHint": "Upload in progress — this can take a moment depending on model size.",
       "hfCreateToken": "Create a token",

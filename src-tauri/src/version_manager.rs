@@ -82,9 +82,10 @@ fn copy_dir_recursive_export(src: &PathBuf, dst: &PathBuf) -> Result<(), String>
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use tauri::{Manager, State};
+use std::process::{Command, Stdio};
+use tauri::{Manager, State, Emitter};
 use crate::database::Database;
 use crate::AppState;
 use crate::command_ext::{NoWindow, PythonUtf8};
@@ -670,8 +671,39 @@ pub fn get_version_path_for_ui(version_id: String, state: State<AppState>) -> Re
 /// trainiert wird (`resolve_python`) — dieselbe Umgebung, die das Paket schon
 /// mitbringt. Token und Pfade gehen als Umgebungsvariablen an ein Skript in
 /// einer Temp-Datei, damit der Token nicht in der Prozessliste sichtbar wird.
+#[derive(Clone, Serialize)]
+struct HfUploadProgress {
+    version_id: String,
+    /// 0–100; -1 bedeutet "unbestimmt" (laeuft, aber noch keine Prozentzahl)
+    percent: f64,
+    /// "starting" | "uploading" | "done" | "error"
+    phase: String,
+    /// Menschlich lesbarer Status, z. B. der Dateiname der gerade lauft
+    message: String,
+}
+
+/// Sucht in einer tqdm-Zeile die Prozentzahl und (falls vorhanden) die Beschreibung.
+/// tqdm schreibt z. B. "best.pt:  45%|####5 | 45.0M/100M [..]" -> (45.0, "best.pt").
+fn parse_tqdm_line(s: &str) -> Option<(f64, Option<String>)> {
+    let pct_pos = s.find('%')?;
+    let bytes = s.as_bytes();
+    let mut start = pct_pos;
+    while start > 0 {
+        let c = bytes[start - 1];
+        if c.is_ascii_digit() || c == b'.' { start -= 1; } else { break; }
+    }
+    if start == pct_pos { return None; }
+    let num: f64 = s[start..pct_pos].trim().parse().ok()?;
+    if !(0.0..=100.0).contains(&num) { return None; }
+    let desc = s.find(':').and_then(|ci| {
+        if ci < start && ci > 0 { Some(s[..ci].trim().to_string()) } else { None }
+    });
+    Some((num, desc.filter(|d| !d.is_empty())))
+}
+
 #[tauri::command]
 pub fn upload_model_version_huggingface(
+    app_handle: tauri::AppHandle,
     version_id: String,
     repo_id: String,
     token: String,
@@ -743,7 +775,15 @@ except Exception as e:
 
     println!("[HF-Upload] Lade Version {} nach {} hoch", version_id, repo_id);
 
-    let output = Command::new(&python)
+    // "Los geht's" — die UI zeigt sofort einen (unbestimmten) Balken
+    let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
+        version_id: version_id.clone(),
+        percent: -1.0,
+        phase: "starting".to_string(),
+        message: String::new(),
+    });
+
+    let mut child = Command::new(&python)
         .no_window()
         .python_utf8()
         .arg(tmp.to_string_lossy().to_string())
@@ -751,24 +791,92 @@ except Exception as e:
         .env("FT_HF_REPO", &repo_id)
         .env("FT_HF_FOLDER", &version_path)
         .env("FT_HF_PRIVATE", if private { "1" } else { "0" })
-        .output();
+        // tqdm-Fortschritt erzwingen, auch wenn die Ausgabe eine Pipe ist
+        .env("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("Python konnte nicht gestartet werden: {}", e)
+        })?;
 
+    // stderr in einem eigenen Thread lesen: tqdm aktualisiert per '\r',
+    // darum byteweise lesen und an '\r'/'\n' zerlegen und Fortschritt emittieren.
+    let stderr = child.stderr.take();
+    let ah = app_handle.clone();
+    let vid = version_id.clone();
+    let stderr_handle = std::thread::spawn(move || {
+        let mut collected = String::new();
+        let mut last_emitted: i32 = -2;
+        if let Some(se) = stderr {
+            let mut reader = BufReader::new(se);
+            let mut buf = [0u8; 4096];
+            let mut line: Vec<u8> = Vec::new();
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        for &b in &buf[..n] {
+                            if b == b'\r' || b == b'\n' {
+                                if !line.is_empty() {
+                                    let s = String::from_utf8_lossy(&line).to_string();
+                                    if let Some((pct, desc)) = parse_tqdm_line(&s) {
+                                        let rounded = pct.round() as i32;
+                                        if rounded != last_emitted {
+                                            last_emitted = rounded;
+                                            let _ = ah.emit("hf-upload-progress", HfUploadProgress {
+                                                version_id: vid.clone(),
+                                                percent: pct,
+                                                phase: "uploading".to_string(),
+                                                message: desc.unwrap_or_default(),
+                                            });
+                                        }
+                                    } else {
+                                        collected.push_str(&s);
+                                        collected.push('\n');
+                                    }
+                                    line.clear();
+                                }
+                            } else {
+                                line.push(b);
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        collected
+    });
+
+    // stdout enthaelt die JSON-Endzeile
+    let mut stdout_str = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let _ = so.read_to_string(&mut stdout_str);
+    }
+
+    let stderr_str = stderr_handle.join().unwrap_or_default();
+    let _ = child.wait();
     let _ = fs::remove_file(&tmp);
 
-    let output = output
-        .map_err(|e| format!("Python konnte nicht gestartet werden: {}", e))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    // Letzte JSON-Zeile aus stdout — Fortschrittsbalken schreibt nach stderr
-    let json_line = stdout
+    // Letzte JSON-Zeile aus stdout
+    let json_line = stdout_str
         .lines()
         .rev()
         .find(|l| l.trim_start().starts_with('{'))
-        .ok_or_else(|| format!(
-            "Unerwartete Antwort vom Upload.\nstdout: {}\nstderr: {}",
-            stdout.trim(), stderr.trim()
-        ))?;
+        .ok_or_else(|| {
+            let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
+                version_id: version_id.clone(),
+                percent: -1.0,
+                phase: "error".to_string(),
+                message: String::new(),
+            });
+            format!(
+                "Unerwartete Antwort vom Upload.\nstdout: {}\nstderr: {}",
+                stdout_str.trim(), stderr_str.trim()
+            )
+        })?;
 
     let parsed: serde_json::Value = serde_json::from_str(json_line.trim())
         .map_err(|e| format!("Antwort nicht lesbar: {}", e))?;
@@ -776,8 +884,20 @@ except Exception as e:
     if parsed.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
         let url = parsed.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
         println!("[HF-Upload] ✅ fertig: {}", url);
+        let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
+            version_id: version_id.clone(),
+            percent: 100.0,
+            phase: "done".to_string(),
+            message: String::new(),
+        });
         Ok(url)
     } else {
+        let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
+            version_id: version_id.clone(),
+            percent: -1.0,
+            phase: "error".to_string(),
+            message: String::new(),
+        });
         Err(parsed.get("error").and_then(|e| e.as_str())
             .unwrap_or("Upload fehlgeschlagen").to_string())
     }

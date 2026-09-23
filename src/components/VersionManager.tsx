@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
@@ -282,6 +282,9 @@ function VersionsModal({
   const [hfToken, setHfToken] = useState('');
   const [hfPrivate, setHfPrivate] = useState(false);
   const [hfUploading, setHfUploading] = useState(false);
+  // Live-Fortschritt aus den Backend-Events; percent < 0 = unbestimmt
+  const [hfProgress, setHfProgress] = useState<{ percent: number; phase: string; message: string } | null>(null);
+  const uploadingVersionIdRef = useRef<string | null>(null);
   // Export-Overlay zuerst, sonst der ganze Versions-Dialog.
   // Waehrend eines laufenden Uploads bleibt der Dialog offen (Abbruch nicht moeglich).
   useEscapeKey(() => {
@@ -291,6 +294,18 @@ function VersionsModal({
   });
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const { t, language } = useLanguage();
+
+  // Live-Fortschritt des HuggingFace-Uploads aus dem Backend
+  useEffect(() => {
+    const unlisten = listen<{ version_id: string; percent: number; phase: string; message: string }>(
+      'hf-upload-progress',
+      (e) => {
+        if (e.payload.version_id !== uploadingVersionIdRef.current) return;
+        setHfProgress({ percent: e.payload.percent, phase: e.payload.phase, message: e.payload.message });
+      }
+    );
+    return () => { unlisten.then(f => f()); };
+  }, []);
 
   const handleStartEdit = (version: ModelVersion) => {
     setEditingId(version.id);
@@ -347,6 +362,8 @@ function VersionsModal({
     const repo = hfRepo.trim();
     const token = hfToken.trim();
     if (!repo || !token) return; // Button ist ohnehin deaktiviert
+    uploadingVersionIdRef.current = exportingVersion.id;
+    setHfProgress({ percent: -1, phase: 'starting', message: '' });
     setHfUploading(true);
     try {
       await onUploadHf(exportingVersion.id, repo, token, hfPrivate);
@@ -360,6 +377,8 @@ function VersionsModal({
       // Fehler zeigt die Elternkomponente als Notification
     } finally {
       setHfUploading(false);
+      setHfProgress(null);
+      uploadingVersionIdRef.current = null;
     }
   };
 
@@ -731,6 +750,33 @@ function VersionsModal({
                         <><Upload className="w-4 h-4" />{t('versionManager.exportModal.hfUploadButton')}</>
                       )}
                     </button>
+
+                    {hfUploading && (
+                      <div className="space-y-1.5">
+                        <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                          {hfProgress && hfProgress.percent >= 0 ? (
+                            <div
+                              className="h-full bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full transition-all duration-200"
+                              style={{ width: `${Math.min(100, Math.max(0, hfProgress.percent))}%` }}
+                            />
+                          ) : (
+                            <div className="h-full w-full bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full animate-pulse" />
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-gray-400">
+                          <span className="truncate">
+                            {hfProgress?.message
+                              || (hfProgress && hfProgress.percent >= 0
+                                    ? t('versionManager.exportModal.hfUploading')
+                                    : t('versionManager.exportModal.hfPreparing'))}
+                          </span>
+                          {hfProgress && hfProgress.percent >= 0 && (
+                            <span className="tabular-nums shrink-0 ml-2 text-gray-300">{Math.round(hfProgress.percent)}%</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="text-[11px] text-gray-500 leading-relaxed">
                       {hfUploading ? t('versionManager.exportModal.hfUploadingHint') : t('versionManager.exportModal.hfHint')}
                       {' · '}
