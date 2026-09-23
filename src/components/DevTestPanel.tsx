@@ -30,6 +30,7 @@ import OpenLibraryModal from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
 import { highlightPythonToHtml } from '../utils/pythonHighlight';
 import { buildDatasetRefs, refsForPrompt, refsToEnv, selectedFirst, type DevRef } from '../utils/devDatasetRefs';
+import ModalPortal from './ui/ModalPortal';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
   useEffect(() => { setName(defaultName); }, [defaultName]);
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
           <div className="flex items-center gap-2"><Save className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">{t('devTestPanel.saveDialog.title')}</h2></div>
@@ -82,7 +83,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white text-sm font-medium transition-all">{t('devTestPanel.saveDialog.cancelButton')}</button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -107,7 +108,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-2"><FolderClosed className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">{t('devTestPanel.library.title')}</h2></div>
@@ -150,7 +151,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
           )}
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -832,7 +833,7 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
   if (!isOpen) return null;
   const ctx = `[Dev Test Fehler]\n\nTitel: ${errorTitle}\n\nFehler: ${errorMessage}\n\nDetails: ${errorDetails}\n\nSkript:\n${script}\n\nAusgabe:\n${output}`;
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-red-500/10 flex-shrink-0">
           <div className="flex items-center gap-3"><XCircle className="w-7 h-7 text-red-400 flex-shrink-0" /><div><h2 className="text-lg font-bold text-white">{t('devTestPanel.errorModal.title')}</h2><p className="text-sm text-red-300">{errorTitle}</p></div></div>
@@ -854,7 +855,7 @@ function DevTestErrorModal({ isOpen, errorTitle, errorMessage, errorDetails, scr
           <button onClick={onClose} className="ml-auto px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-all">{t('devTestPanel.errorModal.closeButton')}</button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 

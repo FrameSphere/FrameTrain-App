@@ -21,6 +21,7 @@ import { nextOpenIndex } from './studioBoxes';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
+import ModalPortal from '../ui/ModalPortal';
 
 const PAGE = 200;
 
@@ -575,7 +576,7 @@ function AudioExportDialog({ project, confirmed, onClose, onDone }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -615,6 +616,6 @@ function AudioExportDialog({ project, confirmed, onClose, onDone }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

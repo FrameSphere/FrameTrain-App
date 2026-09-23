@@ -12,6 +12,7 @@ import { Loader2, Globe, ShieldCheck } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import type { StudioProject } from './studioTypes';
+import ModalPortal from '../ui/ModalPortal';
 
 export interface FetchReport {
   fetched:      number;
@@ -62,7 +63,7 @@ export default function FetchDialog({ project, onClose, onDone }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={busy ? undefined : onClose}>
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
@@ -151,6 +152,6 @@ export default function FetchDialog({ project, onClose, onDone }: {
           </>
         )}
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

@@ -70,6 +70,7 @@ const STATUS_COLOR: Record<string, string> = {
 import {
   MANAGER_API, readStoredTickets, submitSupportTicket, type StoredTicket,
 } from '../utils/supportTicket';
+import ModalPortal from './ui/ModalPortal';
 
 // Support hook – persists ticket list in localStorage
 function useStoredTickets(userId: string) {
@@ -84,7 +85,7 @@ function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () 
   const { t } = useLanguage();
   useEscapeKey(onClose);
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-red-500/20 max-w-sm w-full p-6 space-y-4">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center">
@@ -118,7 +119,7 @@ function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () 
           {t('settings.account.duplicateName.retry')}
         </button>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 

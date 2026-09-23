@@ -17,6 +17,7 @@ import ImageWorkbench from './ImageWorkbench';
 import TextWorkbench from './TextWorkbench';
 import AudioWorkbench from './AudioWorkbench';
 import type { StudioProject } from './studioTypes';
+import ModalPortal from '../ui/ModalPortal';
 
 export default function StudioPanel() {
   const { t, language } = useLanguage();
@@ -158,7 +159,7 @@ export default function StudioPanel() {
       )}
 
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+        <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
           onClick={() => setConfirmDelete(null)}>
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
             onClick={e => e.stopPropagation()}>
@@ -177,7 +178,7 @@ export default function StudioPanel() {
               </button>
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
     </div>
   );
@@ -219,7 +220,7 @@ function CreateDialog({ onClose, onCreated }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -284,6 +285,6 @@ function CreateDialog({ onClose, onCreated }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

@@ -133,6 +133,7 @@ import { callAI as callAIClient } from '../ai/aiClient';
 import { findLastJsonObject } from '../ai/jsonBlock';
 import { MarkdownText } from './ui/MarkdownText';
 import { dateLocale } from '../utils/dateLocale';
+import ModalPortal from './ui/ModalPortal';
 
 /**
  * Gemeinsamer Einstieg fuer Training, Labor und die Dev-Panels.
@@ -468,7 +469,7 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-2"><BookOpen className="w-5 h-5 text-blue-400" /><h2 className="text-lg font-bold text-white">{t('trainingPanel.templates.title')}</h2></div>
@@ -529,7 +530,7 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
           )}
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -895,7 +896,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
     .trim();
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-violet-400" /><h2 className="text-lg font-bold text-white">{t('trainingPanel.aiAssistant.title')}</h2></div>
@@ -1079,7 +1080,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
           )}
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -1746,7 +1747,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
       {/* Training History Modal */}
       {showHistory && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-3xl max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <div className="flex items-center gap-3">
@@ -1844,7 +1845,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               })()}
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {/* Header */}

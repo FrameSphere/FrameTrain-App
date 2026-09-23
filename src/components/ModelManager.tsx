@@ -36,6 +36,7 @@ import { detectPlugin, detectPluginForModel, PLUGINS, type ModelDetectionInfo } 
 import type { ModelConfig } from '../plugins/types';
 import { dateLocale } from '../utils/dateLocale';
 import { submitSupportTicket } from '../utils/supportTicket';
+import ModalPortal from './ui/ModalPortal';
 
 // ============ Types ============
 
@@ -283,7 +284,7 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+    <ModalPortal><div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[85vh]">
         <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
         <div className="p-6 pb-4 flex items-start gap-4">
@@ -401,7 +402,7 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
           </>
         )}
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -417,7 +418,7 @@ function DeleteConfirmDialog({ modelName, onConfirm, onCancel }: DeleteDialogPro
   const { t } = useLanguage();
   useEscapeKey(onCancel);
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+    <ModalPortal><div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
         <div className="h-1 bg-gradient-to-r from-red-500 to-orange-500" />
         <div className="p-6 space-y-5">
@@ -442,7 +443,7 @@ function DeleteConfirmDialog({ modelName, onConfirm, onCancel }: DeleteDialogPro
           </div>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -984,7 +985,7 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
 
       {/* ── Import Modal ── */}
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
 
             {/* Modal Header */}
@@ -1052,7 +1053,7 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
               )}
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
     </div>
   );

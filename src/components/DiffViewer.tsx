@@ -5,6 +5,7 @@ import {
 import type { CodeEdit } from '../ai/codeEdits';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import ModalPortal from './ui/ModalPortal';
 
 interface DiffViewerProps {
   edits: CodeEdit[];
@@ -184,7 +185,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-950 rounded-2xl border border-white/10 w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-white/[0.02] flex-shrink-0">
@@ -255,6 +256,6 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
           </div>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

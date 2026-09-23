@@ -13,6 +13,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType } from '../plugins/datasetCompatHelpers';
+import ModalPortal from './ui/ModalPortal';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -263,7 +264,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div
         className="relative w-full max-w-5xl h-[88vh] rounded-2xl shadow-2xl flex flex-col border border-white/10 bg-[rgb(13,20,38)]"
       >
@@ -739,6 +740,6 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
           </div>
         )}
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

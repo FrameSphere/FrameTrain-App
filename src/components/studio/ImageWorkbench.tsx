@@ -31,6 +31,7 @@ import type {
 } from './studioTypes';
 import ModelRunDialog, { type ModelWithVersionTree } from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
+import ModalPortal from '../ui/ModalPortal';
 
 const PAGE = 200;
 
@@ -953,7 +954,7 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -1025,7 +1026,7 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -1094,7 +1095,7 @@ function ImportDialog({ inspection, onCancel, onRun }: {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onCancel}>
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
@@ -1180,7 +1181,7 @@ function ImportDialog({ inspection, onCancel, onRun }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -1195,7 +1196,7 @@ function VideoDialog({ path, onCancel, onRun }: {
   const name = path.split(/[\\/]/).pop() ?? path;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onCancel}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -1231,7 +1232,7 @@ function VideoDialog({ path, onCancel, onRun }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -1266,7 +1267,7 @@ function SourceDialog({ onClose, onFolder, onVideo, onDataset, onWeb }: {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
@@ -1322,6 +1323,6 @@ function SourceDialog({ onClose, onFolder, onVideo, onDataset, onWeb }: {
           {t('common.cancel', 'Abbrechen')}
         </button>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

@@ -10,6 +10,7 @@ import { Loader2, Wand2, ShieldQuestion } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import type { StudioProject } from './studioTypes';
+import ModalPortal from '../ui/ModalPortal';
 
 export interface VersionTreeItem { id: string; name: string; version_number: number; }
 export interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
@@ -82,7 +83,7 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
   const report = suggestReport || reviewReport;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={busy ? undefined : onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -209,6 +210,6 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
           </>
         )}
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

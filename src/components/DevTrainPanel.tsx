@@ -33,6 +33,7 @@ import { detectScriptModality, pyPath, templateOutputPath, type ScriptModality }
 import { generateYoloTrainScript } from './yoloDevScripts';
 import DiffViewer from './DiffViewer';
 import { dateLocale } from '../utils/dateLocale';
+import ModalPortal from './ui/ModalPortal';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ function DevTrainErrorModal({
   const errorContext = `[Dev Train Fehler]\n\nTitel: ${errorTitle}\n\nFehler: ${errorMessage}\n\nDetails: ${errorDetails}\n\nSkript:\n${script}\n\nAusgabe/Logs:\n${output}`;
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-9999 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-9999 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-red-500/10 flex-shrink-0">
@@ -219,7 +220,7 @@ function DevTrainErrorModal({
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -242,7 +243,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
           <div className="flex items-center gap-2">
@@ -280,7 +281,7 @@ function SaveNameDialog({ isOpen, defaultName, onSave, onClose }: { isOpen: bool
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -305,7 +306,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-2"><FolderClosed className="w-5 h-5 text-amber-400" /><h2 className="text-lg font-bold text-white">{t('devTrainPanel.library.title')}</h2></div>
@@ -348,7 +349,7 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
           )}
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 

@@ -24,6 +24,7 @@ import type { GeneratedItem } from './generatedTexts';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
+import ModalPortal from '../ui/ModalPortal';
 
 const PAGE = 200;
 
@@ -627,7 +628,7 @@ function TextImportDialog({ inspection, paare, onCancel, onRun }: {
   const hatSpalten = inspection.columns.length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onCancel}>
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
@@ -698,7 +699,7 @@ function TextImportDialog({ inspection, paare, onCancel, onRun }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -738,7 +739,7 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -778,7 +779,7 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -803,7 +804,7 @@ function WriteDialog({ classes, paare, onCancel, onCreate }: {
   const bereit = zeilen.length > 0 && (!paare || ziel.trim().length > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onCancel}>
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
@@ -868,7 +869,7 @@ function WriteDialog({ classes, paare, onCancel, onCreate }: {
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -896,7 +897,7 @@ function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite, onGenerat
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
@@ -918,6 +919,6 @@ function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite, onGenerat
           {t('common.cancel', 'Abbrechen')}
         </button>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

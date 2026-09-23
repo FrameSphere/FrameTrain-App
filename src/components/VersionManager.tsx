@@ -35,6 +35,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { dateLocale } from '../utils/dateLocale';
+import ModalPortal from './ui/ModalPortal';
 
 // ============ Types ============
 
@@ -409,7 +410,7 @@ function VersionsModal({
   });
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-4xl max-h-[85vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/10">
@@ -638,7 +639,7 @@ function VersionsModal({
 
       {/* Export Modal */}
       {showExportModal && exportingVersion && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
             {/* Export Modal Header */}
             <div className="flex items-center justify-between p-6 border-b border-white/10">
@@ -823,9 +824,9 @@ function VersionsModal({
               </button>
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
-    </div>
+    </div></ModalPortal>
   );
 }
 

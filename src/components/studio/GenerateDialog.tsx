@@ -23,6 +23,7 @@ import { resolveModel, PROVIDER_META } from '../../ai/providerMeta';
 import { classColor } from '../labGroundTruth';
 import { parseGenerated, ohneDubletten, type GeneratedItem } from './generatedTexts';
 import type { StudioProject } from './studioTypes';
+import ModalPortal from '../ui/ModalPortal';
 
 const MAX_PRO_KLASSE = 50;
 
@@ -129,7 +130,7 @@ export default function GenerateDialog({
   const behalten = vorschlaege ? vorschlaege.length - aus.size : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+    <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={busy ? undefined : onCancel}>
       <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
@@ -262,6 +263,6 @@ export default function GenerateDialog({
           </>
         )}
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }

@@ -26,6 +26,7 @@ import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/dat
 import { detectPluginForModel } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
 import { navigateTo } from '../ui/navigationEvents';
+import ModalPortal from './ui/ModalPortal';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -385,7 +386,7 @@ function DatasetStructureGuide() {
 function DeleteDialog({ name, onConfirm, onCancel }: { name: string; onConfirm: () => void; onCancel: () => void }) {
   const { t } = useLanguage();
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+    <ModalPortal><div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
         <div className="h-1 bg-gradient-to-r from-red-500 to-orange-500" />
         <div className="p-6 space-y-5">
@@ -406,7 +407,7 @@ function DeleteDialog({ name, onConfirm, onCancel }: { name: string; onConfirm: 
           </div>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -969,7 +970,7 @@ export default function DatasetUpload() {
 
       {/* Split Modal */}
       {showSplitModal && datasetToSplit && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
               <div>
@@ -1089,12 +1090,12 @@ export default function DatasetUpload() {
               </button>
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {/* Halve Modal */}
       {showHalveModal && datasetToHalve && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
               <div>
@@ -1142,12 +1143,12 @@ export default function DatasetUpload() {
               </button>
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {/* Import Modal */}
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
 
             <div className="px-6 py-5 border-b border-white/10 flex items-start justify-between flex-shrink-0">
@@ -1438,7 +1439,7 @@ export default function DatasetUpload() {
               )}
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
     </div>
   );

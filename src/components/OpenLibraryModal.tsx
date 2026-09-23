@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useNotification } from '../contexts/NotificationContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import ModalPortal from './ui/ModalPortal';
 
 // ── API ───────────────────────────────────────────────────────────────────
 
@@ -131,7 +132,7 @@ function DuplicateNameError({
 }) {
   const { t } = useLanguage();
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-red-500/30 w-full max-w-md overflow-hidden">
         <div className="px-6 py-5 bg-red-500/10 border-b border-red-500/20 flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
@@ -161,7 +162,7 @@ function DuplicateNameError({
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -178,7 +179,7 @@ function UnverifiedWarning({
 }) {
   const { t } = useLanguage();
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-amber-500/30 w-full max-w-md overflow-hidden">
         <div className="px-6 py-5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0" />
@@ -203,7 +204,7 @@ function UnverifiedWarning({
           </button>
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -914,7 +915,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
 
  return (
     <>
-      <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+      <ModalPortal><div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
         <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-3xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
 
           {/* Modal Header */}
@@ -1108,7 +1109,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
             </div>
           )}
         </div>
-      </div>
+      </div></ModalPortal>
 
       {/* Unverified Warning */}
       {pendingUnverified && (

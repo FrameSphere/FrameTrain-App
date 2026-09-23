@@ -34,6 +34,7 @@ import { readUserDevScripts } from '../utils/devScriptStorage';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { dateLocale } from '../utils/dateLocale';
 import { parseDelimitedRows } from './csvRows';
+import ModalPortal from './ui/ModalPortal';
 
 // ── Eigene Dev-Scripts (DevTrain + DevTest) — strikt user-getrennt ───────────
 interface LabSavedScript { id: string; name: string; script: string; savedAt: string; source: 'train' | 'test'; }
@@ -408,7 +409,7 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-2"><FlaskConical className="w-5 h-5 text-pink-400" /><h2 className="text-lg font-bold text-white">{t('laboratoryPanel.sessionsModal.title')}</h2></div>
@@ -457,7 +458,7 @@ function SessionsModal({ onLoad, onClose, userId }: { onLoad: (s: LabSession) =>
           })}
         </div>
       </div>
-    </div>
+    </div></ModalPortal>
   );
 }
 
@@ -2644,7 +2645,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
       {/* ── Eigene Dev-Scripts (aus DevTrain/DevTest gespeichert) ── */}
       {showMyScripts && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowMyScripts(false)}>
+        <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowMyScripts(false)}>
           <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
               <div className="flex items-center gap-2">
@@ -2687,7 +2688,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
               ))}
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {/* ── Open Library: Community-Scripts ── */}
