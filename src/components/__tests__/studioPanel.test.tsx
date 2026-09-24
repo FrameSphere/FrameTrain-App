@@ -67,6 +67,23 @@ describe('StudioPanel', () => {
     expect(screen.queryByText('Noch keine Bilder')).not.toBeInTheDocument();
   });
 
+  it('zaehlt auf der Karte, was im Projekt wirklich liegt', async () => {
+    // Ein Audioprojekt stand als "2 Bilder" mit Bildsymbol in der Liste.
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_projects') return PROJEKTE.map(p => ({ ...p, sample_count: 2, confirmed_count: 1 }));
+      return null;
+    });
+    render(<StudioPanel />);
+
+    expect(await screen.findByText('2 Aufnahmen · 1 bestätigt · 1 Klassen')).toBeInTheDocument();
+    expect(screen.getByText('2 Bilder · 1 bestätigt · 1 Klassen')).toBeInTheDocument();
+    expect(screen.getByText('2 Texte · 1 bestätigt · 1 Klassen')).toBeInTheDocument();
+    // Paare haben keine Klassen — "0 Klassen" haette nach einem Fehler ausgesehen.
+    expect(screen.getByText('2 Paare · 1 bestätigt')).toBeInTheDocument();
+    expect(screen.getByLabelText('audio')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('image')).toHaveLength(1);
+  });
+
   it('oeffnet ein Paar-Projekt ebenfalls in der Text-Werkbank', async () => {
     render(<StudioPanel />);
     fireEvent.click(await screen.findByText('Umformulieren'));

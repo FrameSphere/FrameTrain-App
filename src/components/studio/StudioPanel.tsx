@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X, FileText,
+  ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X, FileText, AudioLines,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -18,6 +18,28 @@ import TextWorkbench from './TextWorkbench';
 import AudioWorkbench from './AudioWorkbench';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+
+/// Was auf der Projektkarte steht, haengt an Modalitaet und Aufgabe.
+///
+/// Frueher gab es nur "Text oder sonst Bild" — ein Audioprojekt zaehlte dann
+/// "2 Bilder" und trug ein Bildsymbol. Paare und Transkripte haben ausserdem
+/// keine Klassen; "0 Klassen" dort wuerde einen Fehler vermuten lassen, wo keiner ist.
+export function cardMetaKey(p: Pick<StudioProject, 'modality' | 'task'>): string {
+  if (p.modality === 'audio') {
+    return p.task === 'transcript' ? 'studio.projects.cardMetaTranscript' : 'studio.projects.cardMetaAudio';
+  }
+  if (p.modality === 'text') {
+    return p.task === 'pairs' ? 'studio.projects.cardMetaPairs' : 'studio.projects.cardMetaText';
+  }
+  return 'studio.projects.cardMeta';
+}
+
+function ProjectIcon({ modality }: { modality: string }) {
+  const cls = 'w-4 h-4 text-gray-300';
+  if (modality === 'audio') return <AudioLines className={cls} aria-label="audio" />;
+  if (modality === 'text') return <FileText className={cls} aria-label="text" />;
+  return <ImageIcon className={cls} aria-label="image" />;
+}
 
 export default function StudioPanel() {
   const { t, language } = useLanguage();
@@ -114,14 +136,12 @@ export default function StudioPanel() {
               <button onClick={() => setOpenId(p.id)} className="w-full text-left p-5">
                 <div className="flex items-start gap-3">
                   <span className="p-2 rounded-lg bg-white/5 border border-white/10">
-                    {p.modality === 'text'
-                      ? <FileText className="w-4 h-4 text-gray-300" />
-                      : <ImageIcon className="w-4 h-4 text-gray-300" />}
+                    <ProjectIcon modality={p.modality} />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-white font-medium truncate">{p.name}</p>
                     <p className="text-gray-500 text-xs mt-0.5">
-                      {t(p.modality === 'text' ? 'studio.projects.cardMetaText' : 'studio.projects.cardMeta', {
+                      {t(cardMetaKey(p), {
                         samples: p.sample_count ?? 0,
                         confirmed: p.confirmed_count ?? 0,
                         classes: p.classes.length,

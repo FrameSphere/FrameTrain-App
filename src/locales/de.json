@@ -3120,7 +3120,10 @@
       "deletedTitle": "Projekt gelöscht",
       "deletedDetail": "\"{name}\" wurde entfernt",
       "backToDatasets": "Zurück zu den Datensätzen",
-      "cardMetaText": "{samples} Texte · {confirmed} bestätigt · {classes} Klassen"
+      "cardMetaText": "{samples} Texte · {confirmed} bestätigt · {classes} Klassen",
+      "cardMetaAudio": "{samples} Aufnahmen · {confirmed} bestätigt · {classes} Klassen",
+      "cardMetaTranscript": "{samples} Aufnahmen · {confirmed} transkribiert",
+      "cardMetaPairs": "{samples} Paare · {confirmed} bestätigt"
     },
     "create": {
       "title": "Neues Projekt",

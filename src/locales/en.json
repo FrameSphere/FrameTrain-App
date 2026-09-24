@@ -3120,7 +3120,10 @@
       "deletedTitle": "Project deleted",
       "deletedDetail": "\"{name}\" was removed",
       "backToDatasets": "Back to datasets",
-      "cardMetaText": "{samples} texts · {confirmed} confirmed · {classes} classes"
+      "cardMetaText": "{samples} texts · {confirmed} confirmed · {classes} classes",
+      "cardMetaAudio": "{samples} recordings · {confirmed} confirmed · {classes} classes",
+      "cardMetaTranscript": "{samples} recordings · {confirmed} transcribed",
+      "cardMetaPairs": "{samples} pairs · {confirmed} confirmed"
     },
     "create": {
       "title": "New project",
