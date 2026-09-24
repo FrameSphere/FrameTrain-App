@@ -145,6 +145,59 @@ function saveHfOwner(owner: string) {
   try { localStorage.setItem(HF_OWNER_KEY, owner); } catch { /* Privatmodus o.ae. */ }
 }
 
+export interface HfProgress {
+  /** 0–100; < 0 = unbestimmt (laeuft, aber noch keine Prozentzahl) */
+  percent: number;
+  phase: string;
+  /** Dateiname beim klassischen LFS-Upload, sonst leer */
+  message: string;
+  /** Xet-Upload: fertig verarbeitete / gesamte Dateien */
+  filesDone: number | null;
+  filesTotal: number | null;
+  /** pipelined_upload: verarbeitete / gesamte Bytes und Tempo (Bytes/s) */
+  bytesDone: number | null;
+  bytesTotal: number | null;
+  speed: number | null;
+}
+
+// Statuszeile unter dem Balken. Bei 100 % laeuft noch der Commit auf dem Hub —
+// "Wird abgeschlossen" statt eines scheinbar haengenden "100 %".
+export function hfStatusText(p: HfProgress | null, t: (key: string) => string): string {
+  if (!p || p.percent < 0) {
+    // Abschnitte ohne Prozentangabe — sonst stand minutenlang nur "Wird vorbereitet" da
+    if (p?.phase === 'create_repo') return t('versionManager.exportModal.hfPhaseRepo');
+    if (p?.phase === 'upload') return t('versionManager.exportModal.hfPhaseUpload');
+    return t('versionManager.exportModal.hfPreparing');
+  }
+  if (p.percent >= 100) return t('versionManager.exportModal.hfFinalizing');
+  if (p.bytesTotal) {
+    const done = p.bytesDone ?? 0;
+    const parts = [
+      t('versionManager.exportModal.hfBytesProgress')
+        .replace('{done}', formatBytes(done))
+        .replace('{total}', formatBytes(p.bytesTotal)),
+    ];
+    if (p.speed && p.speed > 0) {
+      parts.push(`${formatBytes(p.speed)}/s`);
+      const remaining = Math.max(0, (p.bytesTotal - done) / p.speed);
+      parts.push(t('versionManager.exportModal.hfRemaining').replace('{time}', formatElapsed(remaining)));
+    }
+    return parts.join(' · ');
+  }
+  if (p.filesTotal) {
+    return t('versionManager.exportModal.hfFilesProgress')
+      .replace('{done}', String(p.filesDone ?? 0))
+      .replace('{total}', String(p.filesTotal));
+  }
+  return p.message || t('versionManager.exportModal.hfUploading');
+}
+
+// Sekunden → "m:ss"
+export function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 // Modellname → gueltiger Repo-Slug (HuggingFace erlaubt a-z0-9._-)
 function slugifyRepo(name: string): string {
   return name.toLowerCase().trim()
@@ -284,8 +337,10 @@ function VersionsModal({
   const [hfPrivate, setHfPrivate] = useState(false);
   const [hfUploading, setHfUploading] = useState(false);
   // Live-Fortschritt aus den Backend-Events; percent < 0 = unbestimmt
-  const [hfProgress, setHfProgress] = useState<{ percent: number; phase: string; message: string } | null>(null);
+  const [hfProgress, setHfProgress] = useState<HfProgress | null>(null);
   const uploadingVersionIdRef = useRef<string | null>(null);
+  // Mitlaufende Zeit — Lebenszeichen, solange noch keine Prozentzahl da ist
+  const [hfElapsed, setHfElapsed] = useState(0);
   // Export-Overlay zuerst, sonst der ganze Versions-Dialog.
   // Waehrend eines laufenden Uploads bleibt der Dialog offen (Abbruch nicht moeglich).
   useEscapeKey(() => {
@@ -298,15 +353,41 @@ function VersionsModal({
 
   // Live-Fortschritt des HuggingFace-Uploads aus dem Backend
   useEffect(() => {
-    const unlisten = listen<{ version_id: string; percent: number; phase: string; message: string }>(
+    const unlisten = listen<{
+      version_id: string;
+      percent: number;
+      phase: string;
+      message: string;
+      files_done: number | null;
+      files_total: number | null;
+      bytes_done: number | null;
+      bytes_total: number | null;
+      speed: number | null;
+    }>(
       'hf-upload-progress',
       (e) => {
         if (e.payload.version_id !== uploadingVersionIdRef.current) return;
-        setHfProgress({ percent: e.payload.percent, phase: e.payload.phase, message: e.payload.message });
+        setHfProgress({
+          percent: e.payload.percent,
+          phase: e.payload.phase,
+          message: e.payload.message,
+          filesDone: e.payload.files_done,
+          filesTotal: e.payload.files_total,
+          bytesDone: e.payload.bytes_done,
+          bytesTotal: e.payload.bytes_total,
+          speed: e.payload.speed,
+        });
       }
     );
     return () => { unlisten.then(f => f()); };
   }, []);
+
+  useEffect(() => {
+    if (!hfUploading) { setHfElapsed(0); return; }
+    const start = Date.now();
+    const id = setInterval(() => setHfElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [hfUploading]);
 
   const handleStartEdit = (version: ModelVersion) => {
     setEditingId(version.id);
@@ -364,7 +445,10 @@ function VersionsModal({
     const token = hfToken.trim();
     if (!repo || !token) return; // Button ist ohnehin deaktiviert
     uploadingVersionIdRef.current = exportingVersion.id;
-    setHfProgress({ percent: -1, phase: 'starting', message: '' });
+    setHfProgress({
+      percent: -1, phase: 'starting', message: '',
+      filesDone: null, filesTotal: null, bytesDone: null, bytesTotal: null, speed: null,
+    });
     setHfUploading(true);
     try {
       await onUploadHf(exportingVersion.id, repo, token, hfPrivate);
@@ -765,15 +849,12 @@ function VersionsModal({
                           )}
                         </div>
                         <div className="flex items-center justify-between text-[11px] text-gray-400">
-                          <span className="truncate">
-                            {hfProgress?.message
-                              || (hfProgress && hfProgress.percent >= 0
-                                    ? t('versionManager.exportModal.hfUploading')
-                                    : t('versionManager.exportModal.hfPreparing'))}
+                          <span className="truncate">{hfStatusText(hfProgress, t)}</span>
+                          <span className="tabular-nums shrink-0 ml-2 text-gray-300">
+                            {hfProgress && hfProgress.percent >= 0
+                              ? `${Math.round(hfProgress.percent)}%`
+                              : formatElapsed(hfElapsed)}
                           </span>
-                          {hfProgress && hfProgress.percent >= 0 && (
-                            <span className="tabular-nums shrink-0 ml-2 text-gray-300">{Math.round(hfProgress.percent)}%</span>
-                          )}
                         </div>
                       </div>
                     )}

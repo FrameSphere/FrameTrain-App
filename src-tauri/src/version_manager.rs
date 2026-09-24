@@ -82,7 +82,7 @@ fn copy_dir_recursive_export(src: &PathBuf, dst: &PathBuf) -> Result<(), String>
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tauri::{Manager, State, Emitter};
@@ -678,31 +678,124 @@ struct HfUploadProgress {
     percent: f64,
     /// "starting" | "uploading" | "done" | "error"
     phase: String,
-    /// Menschlich lesbarer Status, z. B. der Dateiname der gerade lauft
+    /// Menschlich lesbarer Status, z. B. der Dateiname der gerade laeuft
     message: String,
+    /// Xet-Upload (alter create_commit-Pfad): fertig verarbeitete / gesamte Dateien
+    files_done: Option<i64>,
+    files_total: Option<i64>,
+    /// pipelined_upload: verarbeitete / gesamte Bytes
+    bytes_done: Option<i64>,
+    bytes_total: Option<i64>,
+    /// Geglaettetes Tempo in Bytes pro Sekunde
+    speed: Option<f64>,
 }
 
-/// Sucht in einer tqdm-Zeile die Prozentzahl und (falls vorhanden) die Beschreibung.
-/// tqdm schreibt z. B. "best.pt:  45%|####5 | 45.0M/100M [..]" -> (45.0, "best.pt").
-fn parse_tqdm_line(s: &str) -> Option<(f64, Option<String>)> {
-    let pct_pos = s.find('%')?;
-    let bytes = s.as_bytes();
-    let mut start = pct_pos;
-    while start > 0 {
-        let c = bytes[start - 1];
-        if c.is_ascii_digit() || c == b'.' { start -= 1; } else { break; }
+/// Zusatzangaben einer Fortschrittszeile — je nach Upload-Pfad unterschiedlich gefuellt.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct ProgressDetail {
+    files: Option<(i64, i64)>,
+    bytes: Option<(i64, i64)>,
+    speed: Option<f64>,
+}
+
+/// Eine stdout-Zeile des Upload-Skripts.
+#[derive(Debug, PartialEq)]
+enum UploadLine {
+    /// {"progress": {"percent": .., "desc"?, "files_done"?, "files_total"?,
+    ///               "bytes_done"?, "bytes_total"?, "speed"?}}
+    Progress { percent: f64, desc: String, detail: ProgressDetail },
+    /// {"phase": "create_repo"} — Abschnitt ohne Prozentangabe
+    Phase(String),
+    /// {"ok": ..} — Endergebnis (die komplette Zeile)
+    Result(String),
+    /// Alles andere (Ausgaben von Bibliotheken usw.)
+    Other,
+}
+
+fn parse_upload_line(line: &str) -> UploadLine {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('{') {
+        return UploadLine::Other;
     }
-    if start == pct_pos { return None; }
-    let num: f64 = s[start..pct_pos].trim().parse().ok()?;
-    if !(0.0..=100.0).contains(&num) { return None; }
-    let desc = s.find(':').and_then(|ci| {
-        if ci < start && ci > 0 { Some(s[..ci].trim().to_string()) } else { None }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return UploadLine::Other;
+    };
+    if let Some(p) = v.get("progress") {
+        let percent = p.get("percent").and_then(|x| x.as_f64()).unwrap_or(-1.0);
+        let desc = p.get("desc").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let pair = |a: &str, b: &str| match (
+            p.get(a).and_then(|x| x.as_i64()),
+            p.get(b).and_then(|x| x.as_i64()),
+        ) {
+            (Some(d), Some(t)) if t > 0 => Some((d, t)),
+            _ => None,
+        };
+        let detail = ProgressDetail {
+            files: pair("files_done", "files_total"),
+            bytes: pair("bytes_done", "bytes_total"),
+            speed: p.get("speed").and_then(|x| x.as_f64()).filter(|s| s.is_finite() && *s >= 0.0),
+        };
+        UploadLine::Progress { percent, desc, detail }
+    } else if let Some(phase) = v.get("phase").and_then(|x| x.as_str()) {
+        UploadLine::Phase(phase.to_string())
+    } else if v.get("ok").is_some() {
+        UploadLine::Result(trimmed.to_string())
+    } else {
+        UploadLine::Other
+    }
+}
+
+/// Protokoll des letzten Uploads (ohne Token) mit Zeitstempeln — damit sich
+/// nachvollziehen laesst, WANN welche Zeile kam, falls der Fortschritt wieder
+/// nicht ankommt. Schreibt sofort durch, die Datei ist auch mitten im Lauf aktuell.
+struct TraceLog {
+    file: std::sync::Mutex<Option<fs::File>>,
+    t0: std::time::Instant,
+}
+
+impl TraceLog {
+    fn open(path: Option<&Path>) -> Self {
+        let file = path.and_then(|p| {
+            if let Some(dir) = p.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            fs::File::create(p).ok()
+        });
+        TraceLog { file: std::sync::Mutex::new(file), t0: std::time::Instant::now() }
+    }
+
+    fn line(&self, tag: &str, text: &str) {
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(f) = guard.as_mut() {
+                let _ = writeln!(f, "[{:>8.2}s] {} {}", self.t0.elapsed().as_secs_f64(), tag, text);
+            }
+        }
+    }
+}
+
+fn emit_hf_progress(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    percent: f64,
+    phase: &str,
+    message: String,
+    detail: ProgressDetail,
+) {
+    let _ = app.emit("hf-upload-progress", HfUploadProgress {
+        version_id: version_id.to_string(),
+        percent,
+        phase: phase.to_string(),
+        message,
+        files_done: detail.files.map(|f| f.0),
+        files_total: detail.files.map(|f| f.1),
+        bytes_done: detail.bytes.map(|b| b.0),
+        bytes_total: detail.bytes.map(|b| b.1),
+        speed: detail.speed,
     });
-    Some((num, desc.filter(|d| !d.is_empty())))
 }
 
 #[tauri::command]
-pub fn upload_model_version_huggingface(
+pub async fn upload_model_version_huggingface(
     app_handle: tauri::AppHandle,
     version_id: String,
     repo_id: String,
@@ -739,12 +832,195 @@ pub fn upload_model_version_huggingface(
         return Err(format!("Versionsordner nicht gefunden: {}", version_path));
     }
 
+    // Der eigentliche Upload blockiert (Python-Prozess, Netzwerk). Als synchroner
+    // Command lief er im Main-Thread und fror die UI ein (Beachball, keine Bar).
+    // Darum in einen Blocking-Thread auslagern — der Main-Thread bleibt frei und
+    // die Fortschritts-Events kommen live an.
+    tauri::async_runtime::spawn_blocking(move || {
+        run_hf_upload(app_handle, version_id, repo_id, token, private, version_path)
+    })
+    .await
+    .map_err(|e| format!("Upload-Task fehlgeschlagen: {}", e))?
+}
+
+/// Blockierender Teil des HuggingFace-Uploads: Python starten, Fortschritt streamen,
+/// Ergebnis parsen. Laeuft in einem Blocking-Thread (spawn_blocking), damit der
+/// Main-Thread frei bleibt.
+fn run_hf_upload(
+    app_handle: tauri::AppHandle,
+    version_id: String,
+    repo_id: String,
+    token: String,
+    private: bool,
+    version_path: String,
+) -> Result<String, String> {
     let python = crate::python_env::resolve_python();
 
     // Skript in eine Temp-Datei — nichts landet auf der Kommandozeile
     let script = r#"import os, json, sys
+import time as _time
+
+# Fortschritt selbst melden statt die tqdm-Ausgabe zu parsen: huggingface_hub
+# zeichnet seine Balken mit tqdm (die hf-Klasse erbt von tqdm.std.tqdm). update()
+# der Basisklasse abfangen und je ganzem Prozent eine JSON-Zeile auf stdout
+# schreiben — das Backend liest stdout zeilenweise live mit.
+#
+# Mit hf_xet (Standard in huggingface_hub 1.x) gibt es zwei Gesamtbalken:
+#   "Processing Files (a / b)" — ueber alle Bytes; Chunking, Dedup und Upload
+#                                laufen parallel -> das ist der Hauptbalken.
+#   "New Data Upload"          — nur tatsaechlich neue Bytes nach Dedup; bei schon
+#                                bekannten Modellen fast 0 -> ignorieren, sonst
+#                                springt der Balken zwischen zwei Werten.
+# Die Dateibalken setzen .n direkt (ohne update) und tauchen hier nicht auf.
+# Ohne hf_xet (klassischer LFS-Pfad) laeuft je Datei ein Balken mit dem Dateinamen.
+import re as _re
+_FILES_RE = _re.compile(r"\((\d+)\s*/\s*(\d+)\)")
+
+def _install_progress():
+    try:
+        from tqdm import tqdm as _T
+    except Exception:
+        return
+    _orig = _T.update
+    def _upd(self, n=1):
+        r = _orig(self, n)
+        try:
+            if not self.total:
+                return r
+            desc = (self.desc or "").strip()
+            if desc.endswith(":"):
+                desc = desc[:-1].strip()
+            if desc.startswith("New Data Upload"):
+                return r
+            pct = min(100.0, self.n * 100.0 / self.total)
+            ip = int(pct)
+            now = _time.monotonic()
+            # Tempo je Balken (geglaettet), nur bei Byte-Balken sinnvoll
+            if getattr(self, "unit", "") == "B":
+                prev = getattr(self, "_ft_prev", None)
+                if prev is None:
+                    self._ft_prev = (now, self.n)
+                    self._ft_speed = 0.0
+                elif now - prev[0] >= 0.5:
+                    rate = max(0.0, (self.n - prev[1]) / (now - prev[0]))
+                    old = getattr(self, "_ft_speed", 0.0)
+                    self._ft_speed = rate if old == 0 else 0.3 * rate + 0.7 * old
+                    self._ft_prev = (now, self.n)
+            # Neues ganzes Prozent sofort, sonst hoechstens jede Sekunde (Tempo/Restzeit)
+            if getattr(self, "_ft_last", -1) == ip and now - getattr(self, "_ft_last_emit", 0.0) < 1.0:
+                return r
+            self._ft_last = ip
+            self._ft_last_emit = now
+            info = {"percent": pct}
+            if getattr(self, "unit", "") == "B":
+                info["bytes_done"] = int(self.n)
+                info["bytes_total"] = int(self.total)
+                info["speed"] = getattr(self, "_ft_speed", 0.0)
+            if desc.startswith("Processing Files"):
+                m = _FILES_RE.search(desc)
+                if m:
+                    info["files_done"] = int(m.group(1))
+                    info["files_total"] = int(m.group(2))
+            else:
+                info["desc"] = desc
+            print(json.dumps({"progress": info}), flush=True)
+        except Exception:
+            pass
+        return r
+    _T.update = _upd
+
+# Abschnitte ohne Prozentangabe melden, damit die UI nicht minutenlang nur
+# "Wird vorbereitet" zeigt und das Protokoll zeigt, wo die Zeit bleibt.
+def _phase(name):
+    print(json.dumps({"phase": name}), flush=True)
+
+# huggingface_hub >= 1.x laedt mit hf_xet ueber pipelined_upload (_upload_pipeline).
+# Dessen _LiveDisplay zeichnet nur, wenn stderr ein Terminal ist, und reicht sonst
+# (Loglevel WARNING) hf_xet GAR KEINEN Fortschritts-Callback durch — in der App ist
+# stderr eine Pipe, also kam nie Fortschritt an. Eigene Anzeige: immer aktiv, zeichnet
+# nie auf stderr, meldet Bytes, Tempo und Prozent als JSON auf stdout.
+def _install_pipeline_progress():
+    import time as _time
+    try:
+        import huggingface_hub._upload_pipeline as _up
+        _Base = _up._LiveDisplay
+    except Exception:
+        return  # aeltere huggingface_hub ohne Pipeline -> der tqdm-Patch greift
+
+    # Eingriff so klein wie moeglich: nur "aktiv, aber nie aufs Terminal zeichnen".
+    # Ohne TTY zeichnet die Basisklasse nichts; ihr Render-Thread schreibt nur
+    # logger.info, das beim Standard-Loglevel stumm bleibt.
+    class _FTDisplay(_Base):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self._tty = False
+            self._active = True
+            self._ft_commits = {}
+            self._ft_last_pct = -1
+            self._ft_last_emit = 0.0
+            self._ft_prev = None
+            self._ft_speed = 0.0
+
+        def new_xet_callback(self):
+            inner = super().new_xet_callback()
+            key = object()
+            def cb(group_report, item_reports):
+                if inner is not None:
+                    inner(group_report, item_reports)
+                # Unsere Meldung darf den Upload nie gefaehrden — aendert eine kuenftige
+                # huggingface_hub-Version Interna, faellt die UI nur auf "unbestimmt" zurueck.
+                try:
+                    # Mehrere Upload-Commits koennen gleichzeitig laufen; ihre Zaehler sind
+                    # je Commit kumulativ -> je Commit merken und aufsummieren.
+                    with self._lock:
+                        self._ft_commits[key] = (group_report.total_bytes_completed, group_report.total_bytes)
+                        done = sum(v[0] for v in self._ft_commits.values())
+                        total = sum(v[1] for v in self._ft_commits.values())
+                    self._ft_report(done, total)
+                except Exception:
+                    pass
+            return cb
+
+        def _ft_report(self, done, total):
+            if total <= 0:
+                return
+            now = _time.monotonic()
+            if self._ft_prev is None:
+                self._ft_prev = (now, done)
+            elif now - self._ft_prev[0] >= 0.5:
+                rate = max(0.0, (done - self._ft_prev[1]) / (now - self._ft_prev[0]))
+                self._ft_speed = rate if self._ft_speed == 0 else 0.3 * rate + 0.7 * self._ft_speed
+                self._ft_prev = (now, done)
+            pct = min(100.0, done * 100.0 / total)
+            ip = int(pct)
+            # Neues ganzes Prozent sofort, sonst hoechstens jede Sekunde (Tempo/Restzeit)
+            if ip == self._ft_last_pct and now - self._ft_last_emit < 1.0:
+                return
+            self._ft_last_pct = ip
+            self._ft_last_emit = now
+            print(json.dumps({"progress": {
+                "percent": pct, "bytes_done": int(done), "bytes_total": int(total),
+                "speed": self._ft_speed,
+            }}), flush=True)
+
+    _up._LiveDisplay = _FTDisplay
+
+# Fortschritt ist Beiwerk: scheitert die Installation, laeuft der Upload trotzdem.
+for _install in (_install_progress, _install_pipeline_progress):
+    try:
+        _install()
+    except Exception:
+        pass
+
 try:
+    _phase("connect")
     from huggingface_hub import HfApi
+    try:
+        import huggingface_hub as _hh
+        from huggingface_hub.utils._runtime import is_xet_available as _xa
+        print(json.dumps({"info": {"hf_hub": _hh.__version__, "xet": bool(_xa()), "python": sys.version.split()[0]}}), flush=True)
+    except Exception:
+        pass
     api = HfApi(token=os.environ["FT_HF_TOKEN"])
     repo_id = os.environ["FT_HF_REPO"].strip()
     private = os.environ.get("FT_HF_PRIVATE") == "1"
@@ -757,9 +1033,11 @@ try:
         if not user:
             raise RuntimeError("Konnte den HuggingFace-Account zum Token nicht ermitteln.")
         repo_id = user + "/" + repo_id
+    _phase("create_repo")
     created = api.create_repo(repo_id=repo_id, repo_type="model", private=private, exist_ok=True)
     # Die von create_repo zurueckgegebene ID ist die kanonische — die fuer den Upload nehmen.
     canonical = getattr(created, "repo_id", None) or repo_id
+    _phase("upload")
     api.upload_folder(folder_path=os.environ["FT_HF_FOLDER"], repo_id=canonical, repo_type="model")
     print(json.dumps({"ok": True, "url": "https://huggingface.co/" + canonical}))
 except ImportError:
@@ -776,12 +1054,17 @@ except Exception as e:
     println!("[HF-Upload] Lade Version {} nach {} hoch", version_id, repo_id);
 
     // "Los geht's" — die UI zeigt sofort einen (unbestimmten) Balken
-    let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
-        version_id: version_id.clone(),
-        percent: -1.0,
-        phase: "starting".to_string(),
-        message: String::new(),
-    });
+    emit_hf_progress(&app_handle, &version_id, -1.0, "starting", String::new(), ProgressDetail::default());
+
+    let log_path = app_handle.path().app_log_dir().ok().map(|d| d.join("hf-upload-last.log"));
+    let trace = std::sync::Arc::new(TraceLog::open(log_path.as_deref()));
+    trace.line("INFO", &format!("python={} repo={} ordner={}", python, repo_id, version_path));
+    if let Ok(entries) = fs::read_dir(&version_path) {
+        for e in entries.flatten() {
+            let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+            trace.line("INFO", &format!("datei {} ({} Bytes)", e.file_name().to_string_lossy(), size));
+        }
+    }
 
     let mut child = Command::new(&python)
         .no_window()
@@ -791,8 +1074,10 @@ except Exception as e:
         .env("FT_HF_REPO", &repo_id)
         .env("FT_HF_FOLDER", &version_path)
         .env("FT_HF_PRIVATE", if private { "1" } else { "0" })
-        // tqdm-Fortschritt erzwingen, auch wenn die Ausgabe eine Pipe ist
+        // tqdm muss aktiv sein, sonst ruft niemand update() auf
         .env("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+        // hf_transfer (Rust) meldet Fortschritt anders — Standard-Upload erzwingen
+        .env("HF_HUB_ENABLE_HF_TRANSFER", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -801,82 +1086,108 @@ except Exception as e:
             format!("Python konnte nicht gestartet werden: {}", e)
         })?;
 
-    // stderr in einem eigenen Thread lesen: tqdm aktualisiert per '\r',
-    // darum byteweise lesen und an '\r'/'\n' zerlegen und Fortschritt emittieren.
+    // stderr: fuer Fehlermeldungen sammeln und mit Zeitstempel protokollieren.
+    // tqdm aktualisiert per '\r' — darum an '\r' und '\n' zerlegen. Eigener Thread,
+    // damit eine volle stderr-Pipe den Prozess nicht blockiert.
     let stderr = child.stderr.take();
-    let ah = app_handle.clone();
-    let vid = version_id.clone();
+    let trace_err = trace.clone();
     let stderr_handle = std::thread::spawn(move || {
         let mut collected = String::new();
-        let mut last_emitted: i32 = -2;
-        if let Some(se) = stderr {
-            let mut reader = BufReader::new(se);
-            let mut buf = [0u8; 4096];
-            let mut line: Vec<u8> = Vec::new();
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        for &b in &buf[..n] {
-                            if b == b'\r' || b == b'\n' {
-                                if !line.is_empty() {
-                                    let s = String::from_utf8_lossy(&line).to_string();
-                                    if let Some((pct, desc)) = parse_tqdm_line(&s) {
-                                        let rounded = pct.round() as i32;
-                                        if rounded != last_emitted {
-                                            last_emitted = rounded;
-                                            let _ = ah.emit("hf-upload-progress", HfUploadProgress {
-                                                version_id: vid.clone(),
-                                                percent: pct,
-                                                phase: "uploading".to_string(),
-                                                message: desc.unwrap_or_default(),
-                                            });
-                                        }
-                                    } else {
-                                        collected.push_str(&s);
-                                        collected.push('\n');
-                                    }
-                                    line.clear();
-                                }
-                            } else {
-                                line.push(b);
-                            }
+        let Some(se) = stderr else { return collected };
+        let mut reader = BufReader::new(se);
+        let mut buf = [0u8; 8192];
+        let mut seg: Vec<u8> = Vec::new();
+        let mut last = String::new();
+        let mut logged = 0usize;
+        let flush_seg = |seg: &mut Vec<u8>, collected: &mut String, last: &mut String, logged: &mut usize| {
+            if seg.is_empty() { return; }
+            let s = String::from_utf8_lossy(seg).trim().to_string();
+            seg.clear();
+            if s.is_empty() || s == *last { return; }
+            if *logged < 3000 {
+                trace_err.line("ERR", &s);
+                *logged += 1;
+            }
+            // Fuer eine eventuelle Fehlermeldung nur die letzten ~8 KB behalten
+            collected.push_str(&s);
+            collected.push('\n');
+            if collected.len() > 8192 {
+                let cut = collected.len() - 8192;
+                let cut = (cut..collected.len()).find(|i| collected.is_char_boundary(*i)).unwrap_or(0);
+                collected.drain(..cut);
+            }
+            *last = s;
+        };
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    for &b in &buf[..n] {
+                        if b == b'\r' || b == b'\n' {
+                            flush_seg(&mut seg, &mut collected, &mut last, &mut logged);
+                        } else {
+                            seg.push(b);
                         }
                     }
-                    Err(_) => break,
                 }
             }
         }
+        flush_seg(&mut seg, &mut collected, &mut last, &mut logged);
         collected
     });
 
-    // stdout enthaelt die JSON-Endzeile
-    let mut stdout_str = String::new();
-    if let Some(mut so) = child.stdout.take() {
-        let _ = so.read_to_string(&mut stdout_str);
+    // stdout live zeilenweise: Fortschritt/Phase -> Event, {"ok": ...} -> Ergebnis
+    let mut result_line: Option<String> = None;
+    let mut last_emitted: i32 = -2;
+    let mut progress_lines = 0usize;
+    if let Some(so) = child.stdout.take() {
+        for line in BufReader::new(so).lines() {
+            let line = match line { Ok(l) => l, Err(_) => break };
+            match parse_upload_line(&line) {
+                UploadLine::Progress { percent, desc, detail } => {
+                    progress_lines += 1;
+                    trace.line("OUT", line.trim());
+                    // Python drosselt schon (je Prozent bzw. hoechstens 1/s) — jede Zeile
+                    // weiterreichen, damit Tempo und Restzeit live bleiben.
+                    let rounded = percent.round() as i32;
+                    if rounded != last_emitted && rounded % 10 == 0 {
+                        println!("[HF-Upload] {}%", rounded);
+                    }
+                    last_emitted = rounded;
+                    emit_hf_progress(&app_handle, &version_id, percent, "uploading", desc, detail);
+                }
+                UploadLine::Phase(phase) => {
+                    trace.line("OUT", line.trim());
+                    println!("[HF-Upload] Phase: {}", phase);
+                    emit_hf_progress(&app_handle, &version_id, -1.0, &phase, String::new(), ProgressDetail::default());
+                }
+                UploadLine::Result(r) => {
+                    trace.line("OUT", "{\"ok\": ...} (Ergebnis)");
+                    result_line = Some(r);
+                }
+                UploadLine::Other => {
+                    if !line.trim().is_empty() {
+                        trace.line("OUT", line.trim());
+                    }
+                }
+            }
+        }
     }
 
     let stderr_str = stderr_handle.join().unwrap_or_default();
-    let _ = child.wait();
+    let status = child.wait();
     let _ = fs::remove_file(&tmp);
+    trace.line("INFO", &format!("prozess beendet: {:?}, fortschrittszeilen={}", status.map(|s| s.code()), progress_lines));
+    println!(
+        "[HF-Upload] {} Fortschrittszeilen empfangen. Protokoll: {}",
+        progress_lines,
+        log_path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "-".into())
+    );
 
-    // Letzte JSON-Zeile aus stdout
-    let json_line = stdout_str
-        .lines()
-        .rev()
-        .find(|l| l.trim_start().starts_with('{'))
-        .ok_or_else(|| {
-            let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
-                version_id: version_id.clone(),
-                percent: -1.0,
-                phase: "error".to_string(),
-                message: String::new(),
-            });
-            format!(
-                "Unerwartete Antwort vom Upload.\nstdout: {}\nstderr: {}",
-                stdout_str.trim(), stderr_str.trim()
-            )
-        })?;
+    let json_line = result_line.ok_or_else(|| {
+        emit_hf_progress(&app_handle, &version_id, -1.0, "error", String::new(), ProgressDetail::default());
+        format!("Unerwartete Antwort vom Upload.\nstderr: {}", stderr_str.trim())
+    })?;
 
     let parsed: serde_json::Value = serde_json::from_str(json_line.trim())
         .map_err(|e| format!("Antwort nicht lesbar: {}", e))?;
@@ -884,20 +1195,10 @@ except Exception as e:
     if parsed.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
         let url = parsed.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
         println!("[HF-Upload] ✅ fertig: {}", url);
-        let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
-            version_id: version_id.clone(),
-            percent: 100.0,
-            phase: "done".to_string(),
-            message: String::new(),
-        });
+        emit_hf_progress(&app_handle, &version_id, 100.0, "done", String::new(), ProgressDetail::default());
         Ok(url)
     } else {
-        let _ = app_handle.emit("hf-upload-progress", HfUploadProgress {
-            version_id: version_id.clone(),
-            percent: -1.0,
-            phase: "error".to_string(),
-            message: String::new(),
-        });
+        emit_hf_progress(&app_handle, &version_id, -1.0, "error", String::new(), ProgressDetail::default());
         Err(parsed.get("error").and_then(|e| e.as_str())
             .unwrap_or("Upload fehlgeschlagen").to_string())
     }
@@ -919,4 +1220,74 @@ pub fn list_version_files(path: String) -> Result<Vec<serde_json::Value>, String
     }
 
     Ok(files)
+}
+
+#[cfg(test)]
+mod hf_upload_tests {
+    use super::*;
+
+    #[test]
+    fn xet_fortschritt_mit_dateizahl() {
+        let l = r#"{"progress": {"percent": 42.5, "files_done": 1, "files_total": 4}}"#;
+        assert_eq!(
+            parse_upload_line(l),
+            UploadLine::Progress { percent: 42.5, desc: String::new(), detail: ProgressDetail { files: Some((1, 4)), ..Default::default() } }
+        );
+    }
+
+    #[test]
+    fn lfs_fortschritt_mit_dateiname() {
+        let l = r#"{"progress": {"percent": 7.0, "desc": "model.safetensors"}}"#;
+        assert_eq!(
+            parse_upload_line(l),
+            UploadLine::Progress { percent: 7.0, desc: "model.safetensors".into(), detail: ProgressDetail::default() }
+        );
+    }
+
+    #[test]
+    fn dateizahl_ohne_gesamt_wird_verworfen() {
+        let l = r#"{"progress": {"percent": 3.0, "files_done": 0, "files_total": 0}}"#;
+        assert_eq!(
+            parse_upload_line(l),
+            UploadLine::Progress { percent: 3.0, desc: String::new(), detail: ProgressDetail::default() }
+        );
+    }
+
+    #[test]
+    fn pipeline_fortschritt_mit_bytes_und_tempo() {
+        // So meldet _FTDisplay im pipelined_upload (hf_xet, huggingface_hub 1.x)
+        let l = r#"{"progress": {"percent": 50.0, "bytes_done": 7863375, "bytes_total": 15728640, "speed": 524225.5}}"#;
+        assert_eq!(
+            parse_upload_line(l),
+            UploadLine::Progress {
+                percent: 50.0,
+                desc: String::new(),
+                detail: ProgressDetail { files: None, bytes: Some((7863375, 15728640)), speed: Some(524225.5) },
+            }
+        );
+    }
+
+    #[test]
+    fn unsinniges_tempo_wird_verworfen() {
+        let l = r#"{"progress": {"percent": 1.0, "bytes_done": 1, "bytes_total": 2, "speed": -5}}"#;
+        let UploadLine::Progress { detail, .. } = parse_upload_line(l) else { panic!("keine Fortschrittszeile") };
+        assert_eq!(detail.speed, None);
+    }
+
+    #[test]
+    fn phase_und_ergebnis() {
+        assert_eq!(parse_upload_line(r#"{"phase": "create_repo"}"#), UploadLine::Phase("create_repo".into()));
+        let ok = r#"{"ok": true, "url": "https://huggingface.co/a/b"}"#;
+        assert_eq!(parse_upload_line(ok), UploadLine::Result(ok.into()));
+        let err = r#"{"ok": false, "error": "401"}"#;
+        assert_eq!(parse_upload_line(err), UploadLine::Result(err.into()));
+    }
+
+    #[test]
+    fn fremde_ausgaben_werden_ignoriert() {
+        assert_eq!(parse_upload_line("Processing Files (0 / 1): 12%|#"), UploadLine::Other);
+        assert_eq!(parse_upload_line(r#"{"info": {"xet": true}}"#), UploadLine::Other);
+        assert_eq!(parse_upload_line("{kaputt"), UploadLine::Other);
+        assert_eq!(parse_upload_line(""), UploadLine::Other);
+    }
 }
