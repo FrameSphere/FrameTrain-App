@@ -303,6 +303,8 @@ fn main() {
             studio_manager::studio_inspect_text,
             studio_manager::studio_import_text,
             studio_manager::studio_add_texts,
+            studio_manager::studio_delete_samples,
+            studio_manager::studio_edit_text,
             studio_manager::studio_add_image,
             studio_manager::studio_import_audio,
             studio_manager::studio_add_audio,

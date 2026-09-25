@@ -21,7 +21,9 @@ import { useAISettings } from '../../contexts/AISettingsContext';
 import { callAI } from '../../ai/aiClient';
 import { resolveModel, PROVIDER_META } from '../../ai/providerMeta';
 import { classColor } from '../labGroundTruth';
-import { parseGenerated, ohneDubletten, type GeneratedItem } from './generatedTexts';
+import {
+  parseGenerated, ohneDubletten, beispieleFuer, type GeneratedItem, type VorhandenerText,
+} from './generatedTexts';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
 
@@ -31,7 +33,7 @@ export interface GenerateDialogProps {
   project: StudioProject;
   paare: boolean;
   /** Vorhandene Texte: gegen Dubletten und als Beispiel fuer den Stil. */
-  vorhanden: string[];
+  vorhanden: VorhandenerText[];
   onCancel: () => void;
   onAdd: (items: GeneratedItem[], origin: string) => void;
 }
@@ -68,8 +70,9 @@ export default function GenerateDialog({
   // schreibt, verteilt ungleich und wiederholt sich. Je Klasse eine Anfrage
   // kostet mehr Aufrufe, liefert aber gleichmaessig viele Beispiele.
   const auftrag = (klasse: string | null): string => {
-    const beispiele = anlehnen && vorhanden.length > 0
-      ? `\n\n${t('studio.generate.promptExamples')}\n${vorhanden.slice(0, 8).map(b => `- ${b}`).join('\n')}`
+    const vorlage = anlehnen ? beispieleFuer(vorhanden, paare ? null : klasse) : [];
+    const beispiele = vorlage.length > 0
+      ? `\n\n${t('studio.generate.promptExamples')}\n${vorlage.map(b => `- ${b}`).join('\n')}`
       : '';
     const zusatz = thema.trim() ? `\n\n${t('studio.generate.promptTopic')} ${thema.trim()}` : '';
     if (paare) {
@@ -106,7 +109,7 @@ export default function GenerateDialog({
           gesammelt.push(klasse ? { ...item, label: klasse } : item);
         }
       }
-      const frisch = ohneDubletten(gesammelt, vorhanden);
+      const frisch = ohneDubletten(gesammelt, vorhanden.map(v => v.text));
       if (frisch.length === 0) {
         error(t('studio.generate.emptyTitle'), t('studio.generate.emptyDetail'));
         return;
@@ -120,9 +123,16 @@ export default function GenerateDialog({
     }
   };
 
+  const aendern = (i: number, teil: Partial<GeneratedItem>) => {
+    setVorschlaege(v => v ? v.map((item, k) => (k === i ? { ...item, ...teil } : item)) : v);
+  };
+
   const uebernehmen = () => {
     if (!vorschlaege) return;
-    const behalten = vorschlaege.filter((_, i) => !aus.has(i));
+    // Was beim Korrigieren leer geworden ist, faellt weg.
+    const behalten = vorschlaege
+      .filter((item, i) => !aus.has(i) && item.text.trim())
+      .map(item => ({ ...item, text: item.text.trim() }));
     if (behalten.length === 0) return;
     onAdd(behalten, t('studio.generate.origin', { model: modell }));
   };
@@ -231,12 +241,23 @@ export default function GenerateDialog({
                     className="mt-0.5 p-1 rounded hover:bg-white/10 text-gray-400 flex-shrink-0">
                     {aus.has(i) ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
                   </button>
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words whitespace-pre-wrap">{item.text}</p>
-                    {item.target && (
-                      <p className="mt-1 text-gray-400 break-words whitespace-pre-wrap">
-                        → {item.target}
-                      </p>
+                  {/* Direkt korrigierbar: ein fast richtiges Beispiel soll nicht
+                      verworfen werden muessen, nur weil ein Wort nicht passt. */}
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <textarea value={item.text} disabled={aus.has(i)}
+                      aria-label={t('studio.generate.editItem', { n: i + 1 })}
+                      rows={Math.min(5, Math.max(1, Math.ceil(item.text.length / 70)))}
+                      onChange={e => aendern(i, { text: e.target.value })}
+                      className={`w-full bg-transparent resize-none rounded px-1 -mx-1 focus:outline-none focus:bg-black/30 ${aus.has(i) ? 'line-through' : ''}`} />
+                    {item.target !== undefined && item.target !== null && (
+                      <div className="flex items-start gap-1 text-gray-400">
+                        <span className="mt-0.5">→</span>
+                        <textarea value={item.target} disabled={aus.has(i)}
+                          aria-label={t('studio.generate.editTarget', { n: i + 1 })}
+                          rows={Math.min(5, Math.max(1, Math.ceil(item.target.length / 70)))}
+                          onChange={e => aendern(i, { target: e.target.value })}
+                          className="w-full bg-transparent resize-none rounded px-1 focus:outline-none focus:bg-black/30" />
+                      </div>
                     )}
                   </div>
                   {item.label && (

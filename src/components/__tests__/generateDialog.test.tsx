@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-import { parseGenerated, ohneDubletten } from '../studio/generatedTexts';
+import { parseGenerated, ohneDubletten, beispieleFuer } from '../studio/generatedTexts';
 
 const callAIMock = vi.fn();
 vi.mock('../../ai/aiClient', () => ({ callAI: (...a: unknown[]) => callAIMock(...a) }));
@@ -82,6 +82,29 @@ describe('ohneDubletten', () => {
   });
 });
 
+describe('beispieleFuer', () => {
+  const VORHANDEN = [
+    { text: 'Passwort zuruecksetzen bitte', label: 'Request', bestaetigt: true },
+    { text: 'Rechnung schicken', label: 'Request', bestaetigt: true },
+    { text: 'Seite zeigt Fehler 500', label: 'Error', bestaetigt: false },
+    { text: 'App stuerzt ab', label: 'error', bestaetigt: true },
+  ];
+
+  it('gibt einer Klasse nur ihre eigenen Beispiele, Bestaetigtes zuerst', () => {
+    // Frueher bekam jede Klasse die ersten Texte des Projekts — fast nur Request.
+    expect(beispieleFuer(VORHANDEN, 'Error')).toEqual(['App stuerzt ab', 'Seite zeigt Fehler 500']);
+  });
+
+  it('gibt lieber keine Beispiele als die einer anderen Klasse', () => {
+    expect(beispieleFuer(VORHANDEN, 'Question')).toEqual([]);
+  });
+
+  it('zeigt bei Paaren Eingabe und Antwort', () => {
+    expect(beispieleFuer([{ text: 'Wo ist mein Paket?', target: 'Nummer erfragen' }], null))
+      .toEqual(['Wo ist mein Paket? → Nummer erfragen']);
+  });
+});
+
 describe('GenerateDialog', () => {
   beforeEach(() => {
     callAIMock.mockReset();
@@ -89,7 +112,8 @@ describe('GenerateDialog', () => {
   });
 
   const props = (onAdd = vi.fn()) => ({
-    project: projekt, paare: false, vorhanden: [] as string[],
+    project: projekt, paare: false,
+    vorhanden: [] as { text: string; label?: string | null; bestaetigt?: boolean }[],
     onCancel: vi.fn(), onAdd,
   });
 
@@ -129,6 +153,34 @@ describe('GenerateDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^[0-9]+ übernehmen$/ }));
 
     expect(onAdd.mock.calls[0][0]).toEqual([{ text: 'b' }]);
+  });
+
+  it('schickt jeder Klasse nur ihre eigenen Stilbeispiele mit', async () => {
+    callAIMock.mockResolvedValue('["x"]');
+    render(<GenerateDialog {...props()} vorhanden={[
+      { text: 'Passwort zuruecksetzen bitte', label: 'beschwerde', bestaetigt: true },
+      { text: 'Tolle Piste', label: 'lob', bestaetigt: true },
+    ]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+    await waitFor(() => expect(callAIMock).toHaveBeenCalledTimes(2));
+
+    const auftraege = callAIMock.mock.calls.map(c => (c[1] as { messages: { content: string }[] }).messages[0].content);
+    const fuerLob = auftraege.find(a => a.includes('"lob"'))!;
+    expect(fuerLob).toContain('Tolle Piste');
+    expect(fuerLob).not.toContain('Passwort');
+  });
+
+  it('uebernimmt einen in der Vorschau korrigierten Text', async () => {
+    callAIMock.mockResolvedValue('["Der Lift steht stil"]');
+    const onAdd = vi.fn();
+    render(<GenerateDialog {...props(onAdd)} project={{ ...projekt, classes: [] }} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+
+    const feld = await screen.findByLabelText('Vorschlag 1 bearbeiten');
+    fireEvent.change(feld, { target: { value: 'Der Lift steht still' } });
+    fireEvent.click(screen.getByRole('button', { name: /^[0-9]+ übernehmen$/ }));
+
+    expect(onAdd.mock.calls[0][0]).toEqual([{ text: 'Der Lift steht still' }]);
   });
 
   it('sagt es, wenn nichts Brauchbares zurueckkam', async () => {

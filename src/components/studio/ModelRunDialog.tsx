@@ -6,11 +6,13 @@
 
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Loader2, Wand2, ShieldQuestion } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import { ordneModelle, type StudioModel } from './studioModels';
 
 export interface VersionTreeItem { id: string; name: string; version_number: number; }
 export interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
@@ -45,28 +47,54 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
   const [minConfidence, setMinConfidence] = useState(0.25);
   const [addUnknown, setAddUnknown] = useState(false);
   const [busy, setBusy] = useState(false);
+  // null = alle offenen. "Die naechsten 20" ist zum Ausprobieren eines
+  // Modells gedacht: ob es taugt, sieht man an 20 Bildern, nicht erst an 2000.
+  const [umfang, setUmfang] = useState<number | null>(null);
+  // Der Fortschritt stand bisher in der Werkbank — hinter diesem Dialog, also
+  // unsichtbar. 28 Sekunden Spinner ohne Zahl sehen aus wie ein Haenger.
+  const [lauf, setLauf] = useState<{ cur: number; total: number } | null>(null);
   const [suggestReport, setSuggestReport] = useState<SuggestReport | null>(null);
   const [reviewReport, setReviewReport] = useState<ReviewReport | null>(null);
   const suggest = mode === 'suggest';
 
   useEffect(() => {
-    invoke<ModelWithVersionTree[]>('list_models_with_version_tree')
-      .then(list => {
+    // Passende Modelle zuerst und vorausgewaehlt — sonst lief ein Textprojekt
+    // mit dem erstbesten Bildmodell los (siehe studioModels.tsx).
+    Promise.all([
+      invoke<ModelWithVersionTree[]>('list_models_with_version_tree'),
+      invoke<StudioModel[]>('list_models').catch(() => [] as StudioModel[]),
+    ])
+      .then(([list, infos]) => {
+        const info = new Map(infos.map(m => [m.id, m]));
         const withVersions = list.filter(m => m.versions.length > 0);
-        setTree(withVersions);
-        const first = withVersions[0]?.versions[0];
+        const { passend, andere } = ordneModelle(
+          withVersions.map(m => ({ ...(info.get(m.id) ?? {}), ...m })), project);
+        const geordnet = [...passend, ...andere].map(m => withVersions.find(x => x.id === m.id)!);
+        setTree(geordnet);
+        const first = geordnet[0]?.versions[0];
         if (first) setVersionId(first.id);
       })
       .catch(() => { /* Auswahl bleibt leer, der Knopf bleibt gesperrt */ });
   }, []);
 
+  useEffect(() => {
+    const name = mode === 'suggest' ? 'studio-suggest-progress' : 'studio-review-progress';
+    const un = listen<{ project_id: string; current: number; total: number; done?: boolean }>(name, ev => {
+      if (ev.payload.project_id !== project.id) return;
+      setLauf(ev.payload.done ? null : { cur: ev.payload.current, total: ev.payload.total });
+    });
+    return () => { void un.then(f => f()); };
+  }, [mode, project.id]);
+
   const run = async () => {
     if (!versionId) return;
     setBusy(true);
+    setLauf(null);
     try {
       if (suggest) {
         setSuggestReport(await invoke<SuggestReport>('studio_suggest', {
           projectId: project.id, versionId, minConfidence, addUnknownClasses: addUnknown,
+          limit: umfang,
         }));
       } else {
         setReviewReport(await invoke<ReviewReport>('studio_review', {
@@ -77,6 +105,7 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
       error(t(suggest ? 'studio.suggest.errorTitle' : 'studio.review.errorTitle'), String(err));
     } finally {
       setBusy(false);
+      setLauf(null);
     }
   };
 
@@ -191,9 +220,36 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
               </label>
             )}
 
+            {suggest && (
+              <div>
+                <span className="text-gray-400 text-xs">{t('studio.suggest.scopeLabel')}</span>
+                <div className="mt-1.5 flex gap-1.5">
+                  {([null, 20, 50] as const).map(n => (
+                    <button key={String(n)} onClick={() => setUmfang(n)} disabled={busy}
+                      className={`px-2.5 py-1.5 rounded-lg border text-xs transition-all ${umfang === n ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}>
+                      {n === null ? t('studio.suggest.scopeAll') : t('studio.suggest.scopeNext', { count: n })}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <p className="text-gray-500 text-xs">
               {t(suggest ? 'studio.suggest.safetyNote' : 'studio.review.safetyNote')}
             </p>
+
+            {busy && (
+              <div className="space-y-1.5" role="status">
+                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div className="h-full bg-white/40 transition-all"
+                    style={{ width: lauf && lauf.total > 0 ? `${Math.round((lauf.cur / lauf.total) * 100)}%` : '0%' }} />
+                </div>
+                <p className="text-gray-400 text-[11px] tabular-nums">
+                  {lauf ? t('studio.suggest.progress', { cur: lauf.cur + 1, total: lauf.total })
+                        : t('studio.suggest.starting')}
+                </p>
+              </div>
+            )}
 
             <div className="flex gap-2 pt-1">
               <button onClick={onClose} disabled={busy}

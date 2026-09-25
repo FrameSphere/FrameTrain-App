@@ -19,7 +19,7 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }));
 
-import ImageWorkbench from '../studio/ImageWorkbench';
+import ImageWorkbench, { hatBilder } from '../studio/ImageWorkbench';
 
 const PROJECT = {
   id: 'sp_test', name: 'Ski-Lift', modality: 'image', task: 'bbox',
@@ -57,6 +57,16 @@ function mockBackend(samples = SAMPLES) {
 }
 
 const props = { project: PROJECT, onBack: vi.fn(), onProjectChanged: vi.fn() };
+
+describe('hatBilder', () => {
+  it('laesst Textsammlungen aus der Bildquelle heraus', () => {
+    expect(hatBilder({ extensions: ['.csv', '.md'] })).toBe(false);
+    expect(hatBilder({ extensions: ['.PNG', '.txt'] })).toBe(true);
+    expect(hatBilder({ extensions: ['jpg'] })).toBe(true);
+    // Unbekannt heisst nicht "keine Bilder".
+    expect(hatBilder({ extensions: [] })).toBe(true);
+  });
+});
 
 describe('ImageWorkbench', () => {
   beforeEach(() => { invokeMock.mockReset(); mockBackend(); });
@@ -205,6 +215,19 @@ describe('ImageWorkbench', () => {
     expect(img.className).not.toContain('max-w-none');
   });
 
+  it('vergroessert ein kleines Bild auf die Flaeche', async () => {
+    // Ein 224er Bild blieb 224 Pixel gross — zu klein, um genau zu zeichnen.
+    // Ohne Zoom richtet sich die Breite nach Hoehe 520 und Seitenverhaeltnis.
+    const klein = [{ ...SAMPLES[0], meta: { w: 224, h: 224 } }, SAMPLES[1]];
+    mockBackend(klein);
+    render(<ImageWorkbench {...props} />);
+    const img = await screen.findByRole('presentation');
+    const rahmen = img.parentElement as HTMLElement;
+    expect(rahmen.style.width).toBe('520px');
+    expect(rahmen.style.maxWidth).toBe('100%');
+    expect(img.className).toContain('w-full');
+  });
+
   it('vergroessert beim Zoom wirklich', async () => {
     // maxHeight deckelt nur: ein Bild, das kleiner ist als der Deckel, blieb
     // bei jeder Zoomstufe gleich gross. Im Zoom muss die Hoehe gesetzt werden.
@@ -293,6 +316,88 @@ describe('ImageWorkbench', () => {
       expect(args.projectId).toBe('sp_test');
       expect(args.bytes.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
     }, { timeout: 2000 });
+  });
+
+  it('zeigt nach dem Neuladen die neuen Boxen desselben Bildes', async () => {
+    // Nach "Vorschlagen" kommt das gezeigte Bild mit Boxen zurueck — unter
+    // derselben ID. Wurden die Boxen nur beim ID-Wechsel uebernommen, blieb
+    // das Bild leer, und Enter bestaetigte leere Boxen: der Vorschlag war weg.
+    const leer = [{ ...SAMPLES[0], ann: { boxes: [] } }, SAMPLES[1]];
+    const vorgeschlagen = [
+      { ...SAMPLES[0], status: 'suggested' as const,
+        ann: { boxes: [{ cls: 1, x: 0.4, y: 0.4, w: 0.2, h: 0.2 }] } },
+      SAMPLES[1],
+    ];
+    let liste: unknown[] = leer;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_samples') return { total: liste.length, items: liste };
+      if (cmd === 'studio_stats') return STATS;
+      if (cmd === 'studio_add_image') {
+        liste = vorgeschlagen;
+        return { added: 1, duplicates: 0, unreadable: 0, with_labels: 0,
+          classes_added: [], unknown_ids: [], labels_ignored: 0 };
+      }
+      return null;
+    });
+
+    render(<ImageWorkbench {...props} />);
+    await screen.findByText('1 / 2');
+
+    // Irgendein Weg, der von der Platte neu laedt — hier die Zwischenablage.
+    const datei = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'x.png', { type: 'image/png' });
+    const ereignis = new Event('paste') as Event & { clipboardData: unknown };
+    ereignis.clipboardData = { items: [{ type: 'image/png', getAsFile: () => datei }] };
+    window.dispatchEvent(ereignis);
+
+    // Die neue Box steht in der Warteschlange ...
+    await waitFor(() => expect(screen.getAllByText('Sky').length).toBeGreaterThanOrEqual(2));
+
+    // ... und Enter bestaetigt sie, statt sie zu loeschen.
+    invokeMock.mockClear();
+    fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation');
+      expect(call, 'Enter hat nichts gespeichert').toBeTruthy();
+      const args = call![1] as { sampleId: string; status: string; boxes: { cls: number; w: number }[] };
+      expect(args.sampleId).toBe('s_1');
+      expect(args.status).toBe('confirmed');
+      expect(args.boxes).toHaveLength(1);
+      expect(args.boxes[0].cls).toBe(1);
+      expect(args.boxes[0].w).toBeCloseTo(0.2, 6);
+    });
+  });
+
+  it('nimmt ein misslungenes Bild nach zweitem Klick aus dem Projekt', async () => {
+    render(<ImageWorkbench {...props} />);
+    await screen.findByText('1 / 2');
+    fireEvent.click(screen.getByRole('button', { name: /Entfernen/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Wirklich entfernen/ }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_delete_samples', {
+        projectId: 'sp_test', sampleIds: ['s_1'],
+      });
+    });
+  });
+
+  it('beschriftet die Regler der Aufteilung', async () => {
+    // Vorher standen zwei Regler ohne Namen untereinander.
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_samples') return { total: 2, items: SAMPLES };
+      if (cmd === 'studio_stats') return { ...STATS, confirmed: 3 };
+      if (cmd === 'list_models') return [];
+      return null;
+    });
+    render(<ImageWorkbench {...props} />);
+    const knopf = await screen.findByRole('button', { name: /Exportieren/ });
+    await waitFor(() => expect(knopf).not.toBeDisabled());
+    fireEvent.click(knopf);
+    fireEvent.click(await screen.findByLabelText(/aufteilen/i));
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Training' }), { target: { value: '80' } });
+    fireEvent.change(screen.getByRole('slider', { name: 'Validierung' }), { target: { value: '15' } });
+    expect(screen.getByText('5 %')).toBeInTheDocument();
+    // Bei drei Bildern sagt der Dialog, dass Teile leer bleiben koennen.
+    expect(screen.getByText(/Bei 3 Bildern/)).toBeInTheDocument();
   });
 
   it('bietet den Export erst an, wenn etwas bestaetigt ist', async () => {

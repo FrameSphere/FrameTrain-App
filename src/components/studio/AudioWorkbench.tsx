@@ -17,11 +17,14 @@ import {
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { classColor } from '../labGroundTruth';
+import { useStudioModels, StudioModelSelect } from './studioModels';
+import { statsNachAenderung } from './studioStats';
 import { nextOpenIndex } from './studioBoxes';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import RemoveSampleButton from './RemoveSampleButton';
 
 const PAGE = 200;
 
@@ -50,8 +53,6 @@ interface Props {
   onProjectChanged: (p: StudioProject) => void;
 }
 
-interface ModelInfo { id: string; name: string; }
-
 export default function AudioWorkbench({ project, onBack, onProjectChanged }: Props) {
   const { t } = useLanguage();
   const { success, error, warning, info } = useNotification();
@@ -68,6 +69,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
   const [transcript, setTranscript] = useState('');
   const [showKeys, setShowKeys] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [wartetAufMikrofon, setWartetAufMikrofon] = useState(false);
   const [seconds, setSeconds] = useState(0);
 
   const recorder = useRef<MediaRecorder | null>(null);
@@ -112,9 +114,17 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
 
   // Beim Wechsel sofort umstellen, nicht im Effekt — sonst landet ein
   // schneller Tastendruck auf dem Transkript der vorigen Aufnahme.
+  // Was gezeigt wird, haengt an Sample *und* Ladestand. Die ID allein reicht
+  // nicht: nach einem Modelllauf oder Import kommt dasselbe Sample mit neuen
+  // Boxen oder Labels zurueck. Wurde vorher nur zurueckgesetzt und dann
+  // geladen, rendert React dazwischen mit den alten Daten, merkt sich die ID —
+  // und uebernimmt die neuen nie. Ein Enter bestaetigte dann leere Boxen und
+  // loeschte den Vorschlag. Der Zaehler steigt erst, wenn die Daten da sind.
+  const [ladeStand, setLadeStand] = useState(0);
+  const shownKey = current ? `${current.id}#${ladeStand}` : null;
   const [shownId, setShownId] = useState<string | null>(null);
-  if (current && shownId !== current.id) {
-    setShownId(current.id);
+  if (current && shownId !== shownKey) {
+    setShownId(shownKey);
     setTranscript(current.ann.target ?? '');
   }
 
@@ -126,16 +136,33 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
       await invoke('studio_set_annotation', {
         projectId: project.id, sampleId: sample.id, boxes: [], status, label, target: ziel,
       });
-      setStats(prev => prev && sample.status !== status
-        ? { ...prev, [sample.status]: Math.max(0, prev[sample.status] - 1), [status]: prev[status] + 1 }
-        : prev);
+      setStats(prev => prev ? statsNachAenderung(prev, project.classes,
+        { status: sample.status, boxes: [], label: sample.ann.label },
+        { status, boxes: [], label }, false) : prev);
       setSamples(prev => prev.map(s => s.id === sample.id
         ? { ...s, status, ann: { ...s.ann, label: label ?? undefined, target: ziel ?? undefined } } : s));
     } catch (err: unknown) {
       error(t('studio.notifications.saveError'), String(err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, t]);
+  }, [project.id, project.classes, t]);
+
+  // ── Entfernen ───────────────────────────────────────────────────────────
+  const removeCurrent = async () => {
+    if (!current) return;
+    const warLetztes = index >= samples.length - 1;
+    try {
+      await invoke('studio_delete_samples', { projectId: project.id, sampleIds: [current.id] });
+      // Das naechste Sample rueckt auf denselben Platz; nur am Ende der Liste
+      // muss der Zeiger einen Schritt zurueck.
+      if (warLetztes) setIndex(i => Math.max(0, i - 1));
+      await loadSamples(0, true);
+      setLadeStand(n => n + 1);
+      await loadStats();
+    } catch (err: unknown) {
+      error(t('studio.remove.errorTitle'), String(err));
+    }
+  };
 
   const goTo = (i: number) => {
     if (samples.length === 0) return;
@@ -176,8 +203,14 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
   };
 
   const startRecording = async () => {
+    // Eine zweite Aufnahme neben der laufenden verliert man sonst still.
+    if (recording || wartetAufMikrofon) return;
+    // Beim ersten Mal fragt macOS nach dem Mikrofon. Bis dahin passierte in der
+    // App nichts — es sah aus, als haette der Knopf nicht reagiert.
+    setWartetAufMikrofon(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setWartetAufMikrofon(false);
       const rec = new MediaRecorder(stream);
       chunks.current = [];
       rec.ondataavailable = e => { if (e.data.size > 0) chunks.current.push(e.data); };
@@ -206,9 +239,15 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
           }
           success(t('studio.audio.recordedTitle'),
             t('studio.write.doneDetail', { added: report.added, duplicates: report.duplicates }));
-          setShownId(null);
           await loadSamples(0, true);
+          setLadeStand(n => n + 1);
           await loadStats();
+          // Die Projektliste eigens nachziehen: wer waehrend der Aufnahme
+          // zurueck zur Liste geht, stoppt sie damit — gespeichert wird aber
+          // erst danach, und die Liste hatte schon mit dem alten Stand geladen.
+          const list = await invoke<StudioProject[]>('studio_list_projects');
+          const fresh = list.find(x => x.id === project.id);
+          if (fresh) onProjectChanged(fresh);
         } catch (err: unknown) {
           error(t('studio.audio.errorTitle'), String(err));
         }
@@ -219,6 +258,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
       setSeconds(0);
       ticker.current = window.setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (err: unknown) {
+      setWartetAufMikrofon(false);
       // Auf macOS scheitert die Anfrage ohne Systemfreigabe — das muss man
       // dem Nutzer sagen, sonst sucht er den Fehler in der App.
       error(t('studio.audio.micErrorTitle'), t('studio.audio.micErrorDetail', { detail: String(err) }));
@@ -234,6 +274,20 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
     stopTicker();
     if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
   }, []);
+
+  /** Derselbe Knopf oben und im leeren Zustand — beide muessen stoppen koennen. */
+  const aufnahmeKnopf = (form: string) => (
+    <button onClick={recording ? stopRecording : () => void startRecording()}
+      disabled={wartetAufMikrofon}
+      className={`${form} border text-sm transition-all inline-flex items-center gap-2 disabled:opacity-70 ${recording
+        ? 'bg-red-500/20 hover:bg-red-500/30 border-red-500/40 text-red-200'
+        : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}>
+      {wartetAufMikrofon ? <Loader2 className="w-4 h-4 animate-spin" />
+        : recording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+      {wartetAufMikrofon ? t('studio.audio.waitingForMic')
+        : recording ? t('studio.audio.stop', { time: uhrzeit }) : t('studio.audio.record')}
+    </button>
+  );
 
   // ── Tastatur ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -295,8 +349,8 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
         const fresh = list.find(x => x.id === project.id);
         if (fresh) onProjectChanged(fresh);
       }
-      setShownId(null);
       await loadSamples(0, true);
+      setLadeStand(n => n + 1);
       await loadStats();
     } catch (err: unknown) {
       error(t('studio.import.errorTitle'), String(err));
@@ -339,13 +393,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={recording ? stopRecording : () => void startRecording()}
-            className={`px-3 py-2 rounded-lg border text-sm transition-all inline-flex items-center gap-2 ${recording
-              ? 'bg-red-500/20 hover:bg-red-500/30 border-red-500/40 text-red-200'
-              : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}>
-            {recording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            {recording ? t('studio.audio.stop', { time: uhrzeit }) : t('studio.audio.record')}
-          </button>
+          {aufnahmeKnopf('px-3 py-2 rounded-lg')}
           <button onClick={() => void importFolder()} disabled={!!importing || recording}
             className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
             {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
@@ -370,10 +418,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
           <p className="text-white font-medium">{t('studio.audio.emptyProjectTitle')}</p>
           <p className="text-gray-500 text-sm mt-1 mb-5 max-w-md mx-auto">{t('studio.audio.emptyProjectDetail')}</p>
           <div className="flex items-center justify-center gap-2">
-            <button onClick={() => void startRecording()}
-              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
-              <Mic className="w-4 h-4" /> {t('studio.audio.record')}
-            </button>
+            {aufnahmeKnopf('px-4 py-2.5 rounded-xl')}
             <button onClick={() => void importFolder()}
               className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm inline-flex items-center gap-2">
               <FolderOpen className="w-4 h-4" /> {t('studio.audio.importFolder')}
@@ -462,6 +507,8 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
                     className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2">
                     <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
                   </button>
+                  <span className="ml-auto" />
+                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} />
                 </div>
               </>
             )}
@@ -480,6 +527,13 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
                         <span className="text-[10px] font-mono text-gray-500 border border-white/10 rounded px-1">{i + 1}</span>
                       )}
                       <span className="text-gray-200 text-xs truncate">{name}</span>
+                      {/* Die Verteilung ist bei einer Klassifikation das, worauf es
+                          ankommt: 58 zu 2 trainiert ein Modell, das immer die
+                          grosse Klasse sagt. Gezaehlt wird nur Bestaetigtes. */}
+                      <span className="ml-auto text-gray-500 text-xs tabular-nums"
+                        title={t('studio.workbench.classCountHint')}>
+                        {stats?.per_class?.[i] ?? 0}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -547,16 +601,9 @@ function AudioExportDialog({ project, confirmed, onClose, onDone }: {
 }) {
   const { t } = useLanguage();
   const { success, error } = useNotification();
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelId, setModelId] = useState('');
+  const { models, modelId, setModelId } = useStudioModels(project);
   const [name, setName] = useState(project.name);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    invoke<ModelInfo[]>('list_models')
-      .then(list => { setModels(list); if (list.length > 0) setModelId(list[0].id); })
-      .catch(() => { /* Auswahl bleibt leer */ });
-  }, []);
 
   const run = async () => {
     if (!modelId) return;
@@ -595,14 +642,10 @@ function AudioExportDialog({ project, confirmed, onClose, onDone }: {
 
         <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.export.modelLabel')}</span>
-          <select value={modelId} onChange={e => setModelId(e.target.value)}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
-            {models.length === 0 && <option value="">{t('studio.export.noModels')}</option>}
-            {models.map(m => <option key={m.id} value={m.id} className="bg-[#101218]">{m.name}</option>)}
-          </select>
+          <StudioModelSelect project={project} models={models} value={modelId} onChange={setModelId} />
         </label>
 
-        <p className="text-gray-500 text-xs">{t('studio.export.summary', { confirmed })}</p>
+        <p className="text-gray-500 text-xs">{t('studio.export.summaryAudio', { confirmed })}</p>
 
         <div className="flex gap-2">
           <button onClick={onClose}

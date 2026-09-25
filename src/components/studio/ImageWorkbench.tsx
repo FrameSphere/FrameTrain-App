@@ -26,12 +26,15 @@ import {
   classLabel, summarize, nextOpenIndex,
   type PixelBox, type Handle,
 } from './studioBoxes';
+import { useStudioModels, StudioModelSelect } from './studioModels';
+import { statsNachAenderung } from './studioStats';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
 import ModelRunDialog, { type ModelWithVersionTree } from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
 import ModalPortal from '../ui/ModalPortal';
+import RemoveSampleButton from './RemoveSampleButton';
 
 const PAGE = 200;
 
@@ -46,8 +49,6 @@ interface Props {
   onProjectChanged: (p: StudioProject) => void;
 }
 
-interface ModelInfo { id: string; name: string; }
-
 interface DatasetChoice {
   id:           string;
   name:         string;
@@ -55,6 +56,17 @@ interface DatasetChoice {
   file_count:   number;
   size_bytes:   number;
   dataset_type?: string;
+  extensions?:  string[];
+}
+
+const BILD_ENDUNGEN = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif']);
+
+/// Taugt der Datensatz als Bildquelle? Ein Bildprojekt bot bisher auch imdb
+/// und andere Textsammlungen an — ein Klick darauf importierte schlicht nichts.
+/// Ohne bekannte Endungen bleibt er waehlbar: dann laesst sich nichts sagen.
+export function hatBilder(d: { extensions?: string[] }): boolean {
+  if (!d.extensions || d.extensions.length === 0) return true;
+  return d.extensions.some(e => BILD_ENDUNGEN.has((e.startsWith('.') ? e : `.${e}`).toLowerCase()));
 }
 
 interface FolderInspection {
@@ -100,6 +112,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
 
   const classes = project.classes;
   const current = samples[index];
+  // Masse aus dem Dateikopf bekannt -> das Bild kann die Flaeche fuellen.
+  const fuellt = zoom <= 1 && !!current && current.meta.w > 0 && current.meta.h > 0;
   const imgW    = current?.meta?.w ?? 0;
   const imgH    = current?.meta?.h ?? 0;
 
@@ -147,14 +161,22 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   // neues Objekt zurueck. Wuerde hier auch dann zurueckgesetzt, verliert die
   // gerade gezeichnete Box 400 ms spaeter ihre Auswahl — und die Klassentaste
   // greift ins Leere.
+  // Was gezeigt wird, haengt an Sample *und* Ladestand. Die ID allein reicht
+  // nicht: nach einem Modelllauf oder Import kommt dasselbe Sample mit neuen
+  // Boxen oder Labels zurueck. Wurde vorher nur zurueckgesetzt und dann
+  // geladen, rendert React dazwischen mit den alten Daten, merkt sich die ID —
+  // und uebernimmt die neuen nie. Ein Enter bestaetigte dann leere Boxen und
+  // loeschte den Vorschlag. Der Zaehler steigt erst, wenn die Daten da sind.
+  const [ladeStand, setLadeStand] = useState(0);
+  const shownKey = current ? `${current.id}#${ladeStand}` : null;
   const [shownId, setShownId] = useState<string | null>(null);
   if (!current && shownId !== null) {
     setShownId(null);
     setBoxes([]);
     setSelected(-1);
   }
-  if (current && shownId !== current.id) {
-    setShownId(current.id);
+  if (current && shownId !== shownKey) {
+    setShownId(shownKey);
     setBoxes(current.ann.boxes.map(b => toPixel(b, current.meta.w, current.meta.h)));
     setSelected(-1);
     setDrag(null);
@@ -162,25 +184,24 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   }
 
   // ── Speichern ───────────────────────────────────────────────────────────
-  const applyDelta = (from: SampleStatus, to: SampleStatus) => {
-    if (from === to) return;
-    setStats(prev => prev ? { ...prev, [from]: Math.max(0, prev[from] - 1), [to]: prev[to] + 1 } : prev);
-  };
-
   const persist = useCallback(async (status: SampleStatus, px: PixelBox[], sample: StudioSample) => {
     const norm = px.map(b => toNormalized(b, sample.meta.w, sample.meta.h)).filter(isUsable);
     try {
       await invoke('studio_set_annotation', {
         projectId: project.id, sampleId: sample.id, boxes: norm, status,
       });
-      applyDelta(sample.status, status);
+      // Alle Zahlen nachfuehren, nicht nur den Status — sonst stand "Boxen 0"
+      // neben einem Bild mit Box, bis man das Projekt neu oeffnete.
+      setStats(prev => prev ? statsNachAenderung(prev, project.classes,
+        { status: sample.status, boxes: sample.ann.boxes },
+        { status, boxes: norm }, true) : prev);
       setSamples(prev => prev.map(s => s.id === sample.id
         ? { ...s, status, ann: { boxes: norm } } : s));
     } catch (err: unknown) {
       error(t('studio.notifications.saveError'), String(err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, t]);
+  }, [project.id, project.classes, t]);
 
   /** Jede Box-Aenderung landet verzoegert auf der Platte — kein Speichern-Knopf. */
   const commitBoxes = (next: PixelBox[], merken = true) => {
@@ -216,6 +237,23 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   };
 
   // ── Navigation ──────────────────────────────────────────────────────────
+  // ── Entfernen ───────────────────────────────────────────────────────────
+  const removeCurrent = async () => {
+    if (!current) return;
+    const warLetztes = index >= samples.length - 1;
+    try {
+      await invoke('studio_delete_samples', { projectId: project.id, sampleIds: [current.id] });
+      // Das naechste Sample rueckt auf denselben Platz; nur am Ende der Liste
+      // muss der Zeiger einen Schritt zurueck.
+      if (warLetztes) setIndex(i => Math.max(0, i - 1));
+      await loadSamples(0, true);
+      setLadeStand(n => n + 1);
+      await loadStats();
+    } catch (err: unknown) {
+      error(t('studio.remove.errorTitle'), String(err));
+    }
+  };
+
   const goTo = (i: number) => {
     if (samples.length === 0) return;
     setIndex(Math.min(Math.max(i, 0), samples.length - 1));
@@ -360,8 +398,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
 
   /// Von der Platte neu einlesen und den gezeigten Bildzustand erzwingen.
   const reloadFromDisk = useCallback(async () => {
-    setShownId(null);
     await loadSamples(0, true);
+    setLadeStand(n => n + 1);
     await loadStats();
   }, [loadSamples, loadStats]);
 
@@ -506,8 +544,13 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   };
 
   // ── Darstellung ─────────────────────────────────────────────────────────
-  const stroke = Math.max(1.5, Math.min(imgW || 1, imgH || 1) / 300);
-  const fontSize = Math.max(11, Math.min(imgW || 1, imgH || 1) / 28);
+  // Strich und Schrift sind in Bildpunkten angegeben. Wird ein kleines Bild
+  // auf die Flaeche vergroessert, wuerden die Untergrenzen mitwachsen — eine
+  // 11er Schrift waere auf einem 224er Bild 25 Pixel hoch. Deshalb gelten die
+  // Untergrenzen auf dem Bildschirm, nicht im Bild.
+  const vergroessert = fuellt && imgH > 0 ? Math.max(1, 520 / imgH) : 1;
+  const stroke = Math.max(1.5 / vergroessert, Math.min(imgW || 1, imgH || 1) / 300);
+  const fontSize = Math.max(11 / vergroessert, Math.min(imgW || 1, imgH || 1) / 28);
   const draftBox = drag?.kind === 'draw'
     ? boxFromPoints(drag.from, drag.to, '')
     : null;
@@ -621,7 +664,13 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     laesst seinen linken Teil nicht erreichen — der Bildlauf
                     beginnt erst am sichtbaren Rand. */}
                 <div className={`w-full flex ${zoom > 1 ? 'overflow-auto max-h-[520px] justify-start' : 'justify-center'}`}>
-                <div className="relative inline-block">
+                {/* Ohne Zoom fuellt das Bild die Flaeche, auch wenn es klein ist:
+                    ein 224er Bild blieb sonst 224 Pixel gross und liess sich
+                    kaum genau beschriften. Die Breite folgt aus der Hoehe 520
+                    und dem Seitenverhaeltnis, gedeckelt auf die Spalte — so
+                    bleibt das Verhaeltnis erhalten und die Boxen sitzen. */}
+                <div className="relative inline-block"
+                  style={fuellt ? { width: Math.round(520 * current.meta.w / current.meta.h), maxWidth: '100%' } : undefined}>
                   <img
                     ref={imgRef}
                     src={convertFileSrc(current.abs_path)}
@@ -637,8 +686,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     // ein Deckel vergroessert nichts, ein 512er Bild waere bei
                     // jeder Zoomstufe gleich gross geblieben. Der Rahmen darum
                     // faengt das Ueberstehende mit Bildlauf auf.
-                    style={zoom > 1 ? { height: 520 * zoom } : { maxHeight: 520 }}
-                    className={`object-contain block rounded-lg select-none cursor-crosshair ${zoom > 1 ? 'max-w-none w-auto' : 'max-w-full'}`}
+                    style={zoom > 1 ? { height: 520 * zoom } : fuellt ? undefined : { maxHeight: 520 }}
+                    className={`object-contain block rounded-lg select-none cursor-crosshair ${zoom > 1 ? 'max-w-none w-auto' : fuellt ? 'max-w-full w-full h-auto' : 'max-w-full'}`}
                     onPointerDown={onPointerDown}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
@@ -761,6 +810,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2 disabled:opacity-30">
                     <Undo2 className="w-4 h-4" /> {t('studio.workbench.undo')}
                   </button>
+                  <span className="ml-auto" />
+                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} />
                 </div>
               </>
             )}
@@ -920,20 +971,13 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
 }) {
   const { t } = useLanguage();
   const { success, error } = useNotification();
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelId, setModelId] = useState('');
+  const { models, modelId, setModelId } = useStudioModels(project);
   const [name, setName] = useState(project.name);
   const [includeSuggested, setIncludeSuggested] = useState(false);
   const [split, setSplit] = useState(false);
   const [trainPct, setTrainPct] = useState(70);
   const [valPct, setValPct] = useState(20);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    invoke<ModelInfo[]>('list_models')
-      .then(list => { setModels(list); if (list.length > 0) setModelId(list[0].id); })
-      .catch(() => { /* Auswahl bleibt leer, der Knopf bleibt gesperrt */ });
-  }, []);
 
   const run = async () => {
     if (!modelId) return;
@@ -944,7 +988,10 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
         trainRatio: split ? trainPct / 100 : 0,
         valRatio:   split ? valPct / 100 : 0,
       });
-      success(t('studio.export.doneTitle'), t('studio.export.doneDetail', { name }));
+      // Wer die Aufteilung schon hier gewaehlt hat, soll nicht lesen, er
+      // muesse sie noch im Dataset-Bereich vornehmen.
+      success(t('studio.export.doneTitle'),
+        t(split ? 'studio.export.doneDetailSplit' : 'studio.export.doneDetail', { name }));
       onDone();
     } catch (err: unknown) {
       error(t('studio.export.errorTitle'), String(err));
@@ -971,11 +1018,7 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
 
         <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.export.modelLabel')}</span>
-          <select value={modelId} onChange={e => setModelId(e.target.value)}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
-            {models.length === 0 && <option value="">{t('studio.export.noModels')}</option>}
-            {models.map(m => <option key={m.id} value={m.id} className="bg-[#101218]">{m.name}</option>)}
-          </select>
+          <StudioModelSelect project={project} models={models} value={modelId} onChange={setModelId} />
         </label>
 
         <label className="flex items-start gap-2 cursor-pointer">
@@ -992,22 +1035,40 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
         </label>
 
         {split && (
-          <div className="pl-6 space-y-2">
-            <label className="block">
-              <span className="text-gray-400 text-xs">
-                {t('studio.export.ratios', { train: trainPct, val: valPct, test: Math.max(0, 100 - trainPct - valPct) })}
-              </span>
-              <input type="range" min={40} max={95} step={5} value={trainPct}
-                onChange={e => {
-                  const v = Number(e.target.value);
-                  setTrainPct(v);
-                  if (v + valPct > 100) setValPct(Math.max(0, 100 - v));
-                }}
-                className="mt-2 w-full" />
-              <input type="range" min={0} max={50} step={5} value={valPct}
-                onChange={e => setValPct(Math.min(Number(e.target.value), 100 - trainPct))}
-                className="mt-1 w-full" />
-            </label>
+          <div className="pl-6 space-y-2.5">
+            {/* Ein Balken zeigt die Aufteilung, jeder Regler sagt, was er stellt.
+                Vorher standen zwei Regler ohne Beschriftung untereinander. */}
+            <div className="flex h-2 rounded-full overflow-hidden" aria-hidden>
+              <div className="bg-emerald-400/70" style={{ width: `${trainPct}%` }} />
+              <div className="bg-sky-400/70" style={{ width: `${valPct}%` }} />
+              <div className="bg-amber-400/70 flex-1" />
+            </div>
+            {([
+              ['train', trainPct, 40, 95, 'bg-emerald-400/70', (v: number) => {
+                setTrainPct(v);
+                if (v + valPct > 100) setValPct(Math.max(0, 100 - v));
+              }],
+              ['val', valPct, 0, 50, 'bg-sky-400/70', (v: number) => setValPct(Math.min(v, 100 - trainPct))],
+            ] as const).map(([key, wert, min, max, farbe, setzen]) => (
+              <label key={key} className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-sm flex-shrink-0 ${farbe}`} />
+                <span className="text-gray-400 text-xs w-24 flex-shrink-0">{t(`studio.export.split_${key}`)}</span>
+                <input type="range" min={min} max={max} step={5} value={wert}
+                  aria-label={t(`studio.export.split_${key}`)}
+                  onChange={e => setzen(Number(e.target.value))}
+                  className="flex-1" />
+                <span className="text-gray-300 text-xs tabular-nums w-10 text-right">{wert} %</span>
+              </label>
+            ))}
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-sm flex-shrink-0 bg-amber-400/70" />
+              <span className="text-gray-400 text-xs w-24 flex-shrink-0">{t('studio.export.split_test')}</span>
+              <span className="flex-1 text-gray-600 text-[11px]">{t('studio.export.split_testHint')}</span>
+              <span className="text-gray-300 text-xs tabular-nums w-10 text-right">{Math.max(0, 100 - trainPct - valPct)} %</span>
+            </div>
+            {confirmed < 10 && (
+              <p className="text-amber-300/80 text-[11px]">{t('studio.export.splitFewWarning', { count: confirmed })}</p>
+            )}
             <p className="text-gray-500 text-[11px]">{t('studio.export.splitGroupNote')}</p>
           </div>
         )}
@@ -1251,7 +1312,7 @@ function SourceDialog({ onClose, onFolder, onVideo, onDataset, onWeb }: {
 
   useEffect(() => {
     invoke<DatasetChoice[]>('list_all_datasets')
-      .then(list => setDatasets(list.filter(d => d.storage_path)))
+      .then(list => setDatasets(list.filter(d => d.storage_path && hatBilder(d))))
       .catch(() => setDatasets([]));
   }, []);
 

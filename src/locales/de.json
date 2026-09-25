@@ -3133,7 +3133,7 @@
       "classesLabel": "Klassen",
       "classesPlaceholder": "Lift, Sky, Mast",
       "classesHint": "Mit Komma oder Zeilenumbruch getrennt. Lässt sich später ergänzen — ein Import bringt vorhandene Klassen selbst mit.",
-      "formatNote": "Export als YOLO: images/, labels/ und classes.txt. Die Aufteilung in Train, Val und Test übernimmt danach der Split im Dataset-Bereich, der Bild und Label zusammenhält.",
+      "formatNote": "Export als YOLO: images/, labels/ und classes.txt. Aufteilen in Train, Val und Test geht direkt beim Export oder später mit dem Split im Dataset-Bereich — beide halten Bild und Label zusammen.",
       "confirmButton": "Anlegen",
       "kindLabel": "Was soll gelabelt werden?",
       "kindImage": "Bilder",
@@ -3177,7 +3177,8 @@
       "videoButton": "Video",
       "zoomLevel": "Zoom {factor}-fach",
       "classHotkey": "{name} — Taste {key}",
-      "selectHint": "Box anklicken, um ihre Klasse zu ändern"
+      "selectHint": "Box anklicken, um ihre Klasse zu ändern",
+      "classCountHint": "Bestätigte Samples dieser Klasse"
     },
     "filter": {
       "all": "Alle",
@@ -3246,7 +3247,17 @@
       "errorTitle": "Export fehlgeschlagen",
       "splitLabel": "Beim Export in train, val und test aufteilen",
       "ratios": "{train} % Training, {val} % Validierung, {test} % Test",
-      "splitGroupNote": "Bilder derselben Gruppe (etwa eines Videos) bleiben zusammen."
+      "splitGroupNote": "Bilder derselben Gruppe (etwa eines Videos) bleiben zusammen.",
+      "summaryText": "{confirmed} bestätigte Texte werden exportiert.",
+      "summaryAudio": "{confirmed} bestätigte Aufnahmen werden exportiert.",
+      "doneDetailSplit": "„{name}“ liegt jetzt im Dataset-Bereich, schon aufgeteilt in train, val und test.",
+      "modelsFitting": "Passend zu diesem Projekt",
+      "modelsOther": "Andere Modelle",
+      "split_train": "Training",
+      "split_val": "Validierung",
+      "split_test": "Test",
+      "split_testHint": "der Rest",
+      "splitFewWarning": "Bei {count} Bildern bleiben Validierung oder Test womöglich leer."
     },
     "notifications": {
       "loadError": "Laden fehlgeschlagen",
@@ -3261,7 +3272,7 @@
       "addUnknown": "Klassen, die das Modell kennt und das Projekt nicht, neu anlegen",
       "safetyNote": "Bestätigte Bilder werden nicht angefasst. Vorschläge gelten als ungeprüft, bis du sie mit Enter bestätigst.",
       "runButton": "Starten",
-      "progress": "{current} von {total}",
+      "progress": "{cur} von {total}",
       "hint": "Vorschlag des Modells — Enter übernimmt, Boxen lassen sich vorher ändern",
       "errorTitle": "Vorschlagen fehlgeschlagen",
       "report": {
@@ -3274,7 +3285,11 @@
         "unmappedHint": "Diese Boxen wurden weggelassen. Lege die Klasse im Projekt an oder starte erneut mit der Option oben.",
         "classesAdded": "Neu angelegt",
         "close": "Fertig"
-      }
+      },
+      "scopeLabel": "Wie viele?",
+      "scopeAll": "Alle offenen",
+      "scopeNext": "Die nächsten {count}",
+      "starting": "Modell wird geladen…"
     },
     "review": {
       "title": "Labels prüfen lassen",
@@ -3400,7 +3415,8 @@
       "doneTitle": "Aufnahmen übernommen",
       "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit Zuordnung",
       "exportClasses": "Schreibt einen Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
-      "exportTranscript": "Schreibt jede Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription."
+      "exportTranscript": "Schreibt jede Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription.",
+      "waitingForMic": "Warte auf Freigabe des Mikrofons…"
     },
     "fetch": {
       "title": "Aus dem Netz holen",
@@ -3450,7 +3466,22 @@
       "promptPlain": "Schreibe {count} Beispieltexte.",
       "promptPairs": "Schreibe {count} Paare aus Eingabe und gewünschter Antwort. Antworte als JSON-Array von Objekten mit den Feldern \"text\" und \"target\".",
       "promptTopic": "Thema und Stil:",
-      "promptExamples": "Vorhandene Beispiele, an denen du dich orientieren sollst (nicht wiederholen):"
+      "promptExamples": "Vorhandene Beispiele, an denen du dich orientieren sollst (nicht wiederholen):",
+      "editItem": "Vorschlag {n} bearbeiten",
+      "editTarget": "Antwort zu Vorschlag {n} bearbeiten"
+    },
+    "remove": {
+      "button": "Entfernen",
+      "confirm": "Wirklich entfernen?",
+      "hint": "Nimmt dieses Sample aus dem Projekt – zweiter Klick bestätigt",
+      "errorTitle": "Entfernen fehlgeschlagen"
+    },
+    "edit": {
+      "button": "Text bearbeiten",
+      "save": "Speichern",
+      "fieldLabel": "Text bearbeiten",
+      "hint": "Cmd+Enter speichert, Esc bricht ab",
+      "errorTitle": "Speichern fehlgeschlagen"
     }
   }
 }

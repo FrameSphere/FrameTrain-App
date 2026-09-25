@@ -3133,7 +3133,7 @@
       "classesLabel": "Classes",
       "classesPlaceholder": "Lift, Sky, Pylon",
       "classesHint": "Separated by comma or line break. Can be extended later — an import brings its own classes along.",
-      "formatNote": "Exports as YOLO: images/, labels/ and classes.txt. Splitting into train, val and test is done afterwards by the split in the dataset area, which keeps image and label together.",
+      "formatNote": "Exports as YOLO: images/, labels/ and classes.txt. Splitting into train, val and test happens right at export or later with the split in the dataset area — both keep image and label together.",
       "confirmButton": "Create",
       "kindLabel": "What will be labelled?",
       "kindImage": "Images",
@@ -3177,7 +3177,8 @@
       "videoButton": "Video",
       "zoomLevel": "Zoom {factor}x",
       "classHotkey": "{name} — key {key}",
-      "selectHint": "Click a box to change its class"
+      "selectHint": "Click a box to change its class",
+      "classCountHint": "Confirmed samples of this class"
     },
     "filter": {
       "all": "All",
@@ -3246,7 +3247,17 @@
       "errorTitle": "Export failed",
       "splitLabel": "Split into train, val and test on export",
       "ratios": "{train} % training, {val} % validation, {test} % test",
-      "splitGroupNote": "Images of the same group (a video, for instance) stay together."
+      "splitGroupNote": "Images of the same group (a video, for instance) stay together.",
+      "summaryText": "{confirmed} confirmed texts will be exported.",
+      "summaryAudio": "{confirmed} confirmed recordings will be exported.",
+      "doneDetailSplit": "\"{name}\" is now in the dataset area, already split into train, val and test.",
+      "modelsFitting": "Fitting this project",
+      "modelsOther": "Other models",
+      "split_train": "Training",
+      "split_val": "Validation",
+      "split_test": "Test",
+      "split_testHint": "the rest",
+      "splitFewWarning": "With {count} images, validation or test may stay empty."
     },
     "notifications": {
       "loadError": "Loading failed",
@@ -3261,7 +3272,7 @@
       "addUnknown": "Create classes the model knows and the project does not",
       "safetyNote": "Confirmed images are left untouched. Suggestions count as unreviewed until you confirm them with Enter.",
       "runButton": "Start",
-      "progress": "{current} of {total}",
+      "progress": "{cur} of {total}",
       "hint": "Model suggestion — Enter accepts it, boxes can be adjusted first",
       "errorTitle": "Suggesting failed",
       "report": {
@@ -3274,7 +3285,11 @@
         "unmappedHint": "Those boxes were left out. Add the class to the project, or run again with the option above.",
         "classesAdded": "Newly created",
         "close": "Done"
-      }
+      },
+      "scopeLabel": "How many?",
+      "scopeAll": "All open",
+      "scopeNext": "The next {count}",
+      "starting": "Loading model…"
     },
     "review": {
       "title": "Have the labels checked",
@@ -3400,7 +3415,8 @@
       "doneTitle": "Recordings imported",
       "doneDetail": "{added} new, {duplicates} duplicate, {labels} with an assignment",
       "exportClasses": "Writes one folder per class — the layout the app recognises as classification.",
-      "exportTranscript": "Writes each recording with a matching .txt next to it — the layout for transcription."
+      "exportTranscript": "Writes each recording with a matching .txt next to it — the layout for transcription.",
+      "waitingForMic": "Waiting for microphone access…"
     },
     "fetch": {
       "title": "Fetch from the web",
@@ -3450,7 +3466,22 @@
       "promptPlain": "Write {count} example texts.",
       "promptPairs": "Write {count} pairs of input and desired answer. Reply as a JSON array of objects with the fields \"text\" and \"target\".",
       "promptTopic": "Topic and style:",
-      "promptExamples": "Existing examples to follow (do not repeat them):"
+      "promptExamples": "Existing examples to follow (do not repeat them):",
+      "editItem": "Edit suggestion {n}",
+      "editTarget": "Edit answer to suggestion {n}"
+    },
+    "remove": {
+      "button": "Remove",
+      "confirm": "Really remove?",
+      "hint": "Takes this sample out of the project – a second click confirms",
+      "errorTitle": "Removing failed"
+    },
+    "edit": {
+      "button": "Edit text",
+      "save": "Save",
+      "fieldLabel": "Edit text",
+      "hint": "Cmd+Enter saves, Esc cancels",
+      "errorTitle": "Saving failed"
     }
   }
 }

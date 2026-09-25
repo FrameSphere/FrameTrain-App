@@ -469,3 +469,54 @@ Backend schaut zusaetzlich in die ersten Bytes — der Name der Datei
 entscheidet nicht mehr ueber ihr Format. Aufnahmen, die schon falsch
 benannt auf der Platte liegen, werden beim naechsten Oeffnen des Projekts
 einmalig umbenannt, statt den Nutzer von vorne anfangen zu lassen.
+
+---
+
+## 18. Nach dem ersten echten Durchgang (1.3.0)
+
+Die Werkstatt wurde in der installierten App end-to-end durchgetestet: ein
+Bildprojekt aus einem vorhandenen Datensatz, Boxen, Modellvorschlaege,
+Export mit Aufteilung; Aufnahmen in einem Audioprojekt; erzeugte Texte und
+ein Textexport. Der Kern trug. Was dabei auffiel, ist hier behoben.
+
+**Fehler**
+
+- *Textexport machte das Training kaputt.* PROVENANCE.csv lag neben
+  daten.csv; seq_classification liest bei ungeteiltem Text jede CSV im
+  Ordner. Text und Transkripte liegen jetzt wie Audioklassen in `dataset/`,
+  die Beipackzettel eine Ebene darueber, registriert wird nur `dataset/`.
+- *Vorschlaege verschwanden vom gezeigten Bild.* Nach einem Modelllauf kam
+  dasselbe Sample mit Boxen zurueck, die Werkbank uebernahm sie aber nur beim
+  Wechsel der ID — und Enter bestaetigte dann leere Boxen. Was gezeigt wird,
+  haengt jetzt an ID *und* Ladestand; der Zaehler steigt erst, wenn die
+  Daten da sind. Gilt fuer alle drei Werkbaenke.
+- *Zaehler standen.* Boxen und Anzahl je Klasse werden nach jeder Aenderung
+  nachgefuehrt (studioStats.ts, gleiche Regeln wie compute_stats im
+  Backend). Die Projektkarte zieht nach einer Aufnahme nach, auch wenn man
+  die Seite waehrend der Aufnahme verlassen hat.
+- *Falsche Texte und Vorbelegung.* Der Export nennt Texte und Aufnahmen
+  statt Bilder; wer beim Export aufgeteilt hat, liest nicht mehr, er solle
+  im Dataset-Bereich aufteilen. Export- und Vorschlagsdialog waehlen ein
+  Modell, das zur Projektart passt (dieselbe Plugin-Erkennung wie das
+  Training), die uebrigen stehen darunter.
+
+**Luecken**
+
+- Samples lassen sich entfernen (zweiter Klick bestaetigt, Mediendatei wird
+  mit geloescht, wenn nichts anderes auf sie zeigt) und Texte bearbeiten
+  (Label und Status bleiben, Dubletten werden abgelehnt).
+- Die Textliste zeigt den Text, die Klasse als Farbe daneben.
+- Text und Audio zeigen die Anzahl bestaetigter Samples je Klasse.
+- Der Generator schickt jeder Klasse nur Beispiele dieser Klasse mit und
+  lieber gar keine als fremde; Vorschlaege lassen sich vor dem Uebernehmen
+  korrigieren.
+- Kleine Bilder fuellen die Flaeche, Strich und Schrift bleiben dabei auf
+  dem Bildschirm gleich gross.
+- Vorschlagen zeigt den Fortschritt im Dialog und kann auf die naechsten 20
+  oder 50 begrenzt werden — neue Bilder zuerst.
+- Die Regler der Aufteilung sind beschriftet, mit Balken und Warnung bei
+  sehr wenigen Bildern.
+- "Vorhandener Datensatz" bietet in Bildprojekten nur Quellen mit Bildern an.
+- Waehrend macOS nach dem Mikrofon fragt, sagt die App das. Nebenbei
+  behoben: im leeren Audioprojekt liess sich eine laufende Aufnahme nicht
+  stoppen, ein zweiter Klick startete eine zweite.

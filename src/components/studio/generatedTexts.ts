@@ -118,3 +118,29 @@ export function ohneDubletten(items: GeneratedItem[], vorhanden: string[]): Gene
   }
   return out;
 }
+
+/** Was schon im Projekt steht — als Stilvorlage und gegen Dubletten. */
+export interface VorhandenerText {
+  text: string;
+  label?: string | null;
+  target?: string | null;
+  bestaetigt?: boolean;
+}
+
+/**
+ * Stilbeispiele fuer genau einen Auftrag.
+ *
+ * Frueher bekam jede Klasse dieselben Beispiele: die ersten Texte des
+ * Projekts, im Test fast nur "Request". Ein starkes Modell gleicht das aus,
+ * ein kleineres schreibt dann Request-Texte und nennt sie "Error". Deshalb:
+ * fuer eine Klasse nur Texte dieser Klasse, Bestaetigtes zuerst — und lieber
+ * gar keine Beispiele als die einer anderen Klasse.
+ */
+export function beispieleFuer(vorhanden: VorhandenerText[], klasse: string | null, max = 8): string[] {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const kandidaten = klasse === null
+    ? vorhanden
+    : vorhanden.filter(v => v.label && norm(v.label) === norm(klasse));
+  const sortiert = [...kandidaten.filter(v => v.bestaetigt), ...kandidaten.filter(v => !v.bestaetigt)];
+  return sortiert.slice(0, max).map(v => (v.target ? `${v.text} → ${v.target}` : v.text));
+}

@@ -16,6 +16,8 @@ import {
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { classColor } from '../labGroundTruth';
+import { useStudioModels, StudioModelSelect } from './studioModels';
+import { statsNachAenderung } from './studioStats';
 import { nextOpenIndex } from './studioBoxes';
 import ModelRunDialog from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
@@ -25,6 +27,7 @@ import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
 } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import RemoveSampleButton from './RemoveSampleButton';
 
 const PAGE = 200;
 
@@ -43,8 +46,6 @@ interface Props {
   onBack: () => void;
   onProjectChanged: (p: StudioProject) => void;
 }
-
-interface ModelInfo { id: string; name: string; }
 
 export default function TextWorkbench({ project, onBack, onProjectChanged }: Props) {
   const { t } = useLanguage();
@@ -108,10 +109,21 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
 
   // Zieltext des aktuellen Samples — waehrend des Renderns, damit ein
   // schneller Tastendruck nicht auf dem Text des vorigen Samples landet.
+  // Was gezeigt wird, haengt an Sample *und* Ladestand. Die ID allein reicht
+  // nicht: nach einem Modelllauf oder Import kommt dasselbe Sample mit neuen
+  // Boxen oder Labels zurueck. Wurde vorher nur zurueckgesetzt und dann
+  // geladen, rendert React dazwischen mit den alten Daten, merkt sich die ID —
+  // und uebernimmt die neuen nie. Ein Enter bestaetigte dann leere Boxen und
+  // loeschte den Vorschlag. Der Zaehler steigt erst, wenn die Daten da sind.
+  const [ladeStand, setLadeStand] = useState(0);
+  const shownKey = current ? `${current.id}#${ladeStand}` : null;
   const [shownId, setShownId] = useState<string | null>(null);
-  if (current && shownId !== current.id) {
-    setShownId(current.id);
+  // Entwurf beim Bearbeiten des Textes selbst; null = es wird nicht bearbeitet.
+  const [entwurf, setEntwurf] = useState<string | null>(null);
+  if (current && shownId !== shownKey) {
+    setShownId(shownKey);
     setTarget(current.ann.target ?? '');
+    setEntwurf(null);
   }
 
   // ── Speichern ───────────────────────────────────────────────────────────
@@ -123,18 +135,51 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         projectId: project.id, sampleId: sample.id, boxes: [], status,
         label, target: ziel,
       });
-      setStats(prev => prev && sample.status !== status
-        ? { ...prev, [sample.status]: Math.max(0, prev[sample.status] - 1), [status]: prev[status] + 1 }
-        : prev);
+      setStats(prev => prev ? statsNachAenderung(prev, project.classes,
+        { status: sample.status, boxes: [], label: sample.ann.label },
+        { status, boxes: [], label }, false) : prev);
       setSamples(prev => prev.map(s => s.id === sample.id
         ? { ...s, status, ann: { ...s.ann, label: label ?? undefined, target: ziel ?? undefined } } : s));
     } catch (err: unknown) {
       error(t('studio.notifications.saveError'), String(err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, t]);
+  }, [project.id, project.classes, t]);
 
   useEffect(() => () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); }, []);
+
+  // ── Text bearbeiten ─────────────────────────────────────────────────────
+  // Ein Tippfehler oder ein fast richtiges erzeugtes Beispiel soll nicht
+  // geloescht und neu geschrieben werden muessen. Label und Status bleiben.
+  const saveEdit = async () => {
+    if (!current || entwurf === null) return;
+    const neu = entwurf.trim();
+    if (neu === (current.content ?? '').trim()) { setEntwurf(null); return; }
+    try {
+      await invoke('studio_edit_text', { projectId: project.id, sampleId: current.id, content: neu });
+      setSamples(prev => prev.map(x => (x.id === current.id ? { ...x, content: neu } : x)));
+      setEntwurf(null);
+    } catch (err: unknown) {
+      error(t('studio.edit.errorTitle'), String(err));
+    }
+  };
+
+  // ── Entfernen ───────────────────────────────────────────────────────────
+  const removeCurrent = async () => {
+    if (!current) return;
+    const warLetztes = index >= samples.length - 1;
+    try {
+      await invoke('studio_delete_samples', { projectId: project.id, sampleIds: [current.id] });
+      // Das naechste Sample rueckt auf denselben Platz; nur am Ende der Liste
+      // muss der Zeiger einen Schritt zurueck.
+      if (warLetztes) setIndex(i => Math.max(0, i - 1));
+      await loadSamples(0, true);
+      setLadeStand(n => n + 1);
+      await loadStats();
+    } catch (err: unknown) {
+      error(t('studio.remove.errorTitle'), String(err));
+    }
+  };
 
   const goTo = (i: number) => {
     if (samples.length === 0) return;
@@ -175,7 +220,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate) return;
+      if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate || entwurf !== null) return;
 
       // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
       if (imFeld) {
@@ -204,7 +249,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite, showFetch, showSource, showGenerate]);
+  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite, showFetch, showSource, showGenerate, entwurf]);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -257,8 +302,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         const fresh = list.find(x => x.id === project.id);
         if (fresh) onProjectChanged(fresh);
       }
-      setShownId(null);
       await loadSamples(0, true);
+      setLadeStand(n => n + 1);
       await loadStats();
     } catch (err: unknown) {
       error(t('studio.import.errorTitle'), String(err));
@@ -279,8 +324,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
       const list = await invoke<StudioProject[]>('studio_list_projects');
       const fresh = list.find(x => x.id === project.id);
       if (fresh) onProjectChanged(fresh);
-      setShownId(null);
       await loadSamples(0, true);
+      setLadeStand(n => n + 1);
       await loadStats();
     } catch (err: unknown) {
       error(t('studio.write.errorTitle'), String(err));
@@ -381,9 +426,17 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                 <button key={s.id} onClick={() => goTo(i)}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all ${i === index ? 'bg-white/10' : 'hover:bg-white/[0.04]'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s.status)}`} />
-                  <span className="text-gray-300 text-xs truncate">
-                    {s.ann.label ?? ((s.content ?? '').slice(0, 30) || t('studio.text.noLabel'))}
+                  {/* Der Text selbst, nicht nur die Klasse — bei 62 Zeilen stand
+                      sonst 62-mal "Request" untereinander. Die Klasse steht als
+                      Farbe daneben. */}
+                  <span className="text-gray-300 text-xs truncate flex-1 min-w-0">
+                    {(s.content ?? '').replace(/\s+/g, ' ').trim() || t('studio.text.noLabel')}
                   </span>
+                  {s.ann.label && (
+                    <span className="w-2 h-2 rounded-sm flex-shrink-0"
+                      title={s.ann.label}
+                      style={{ background: classColor(s.ann.label, classes) }} />
+                  )}
                 </button>
               ))}
               {samples.length < total && (
@@ -397,11 +450,39 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 flex flex-col gap-4">
             {current && (
               <>
-                <div className="rounded-lg bg-black/30 border border-white/10 p-4 max-h-64 overflow-y-auto">
-                  <p className="text-gray-100 text-sm whitespace-pre-wrap leading-relaxed">
-                    {current.content}
-                  </p>
-                </div>
+                {entwurf !== null ? (
+                  <div className="space-y-2">
+                    <textarea value={entwurf} onChange={e => setEntwurf(e.target.value)} rows={5} autoFocus
+                      aria-label={t('studio.edit.fieldLabel')}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveEdit(); }
+                        if (e.key === 'Escape') { e.preventDefault(); setEntwurf(null); }
+                      }}
+                      className="w-full px-4 py-3 rounded-lg bg-black/30 border border-white/25 text-gray-100 text-sm leading-relaxed focus:outline-none resize-y" />
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => void saveEdit()} disabled={!entwurf.trim()}
+                        className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs inline-flex items-center gap-1.5 disabled:opacity-40">
+                        <Check className="w-3.5 h-3.5" /> {t('studio.edit.save')}
+                      </button>
+                      <button onClick={() => setEntwurf(null)}
+                        className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs">
+                        {t('common.cancel', 'Abbrechen')}
+                      </button>
+                      <span className="text-gray-600 text-[11px]">{t('studio.edit.hint')}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="group relative rounded-lg bg-black/30 border border-white/10 p-4 pr-12 max-h-64 overflow-y-auto">
+                    <p className="text-gray-100 text-sm whitespace-pre-wrap leading-relaxed">
+                      {current.content}
+                    </p>
+                    <button onClick={() => setEntwurf(current.content ?? '')}
+                      title={t('studio.edit.button')} aria-label={t('studio.edit.button')}
+                      className="absolute top-2 right-2 p-1.5 rounded-md bg-white/5 hover:bg-white/15 border border-white/10 text-gray-400 hover:text-white transition-all">
+                      <PenLine className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {paare ? (
                   <label className="block">
@@ -466,6 +547,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                     className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2">
                     <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
                   </button>
+                  <span className="ml-auto" />
+                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} />
                 </div>
               </>
             )}
@@ -484,6 +567,13 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                         <span className="text-[10px] font-mono text-gray-500 border border-white/10 rounded px-1">{i + 1}</span>
                       )}
                       <span className="text-gray-200 text-xs truncate">{name}</span>
+                      {/* Die Verteilung ist bei einer Klassifikation das, worauf es
+                          ankommt: 58 zu 2 trainiert ein Modell, das immer die
+                          grosse Klasse sagt. Gezaehlt wird nur Bestaetigtes. */}
+                      <span className="ml-auto text-gray-500 text-xs tabular-nums"
+                        title={t('studio.workbench.classCountHint')}>
+                        {stats?.per_class?.[i] ?? 0}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -558,8 +648,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           onClose={() => setShowFetch(false)}
           onDone={async () => {
             setShowFetch(false);
-            setShownId(null);
             await loadSamples(0, true);
+            setLadeStand(n => n + 1);
             await loadStats();
           }}
         />
@@ -579,7 +669,10 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         <GenerateDialog
           project={project}
           paare={paare}
-          vorhanden={samples.map(x => x.content ?? '').filter(Boolean).slice(0, 40)}
+          vorhanden={samples.filter(x => x.content).map(x => ({
+            text: x.content ?? '', label: x.ann.label, target: x.ann.target,
+            bestaetigt: x.status === 'confirmed',
+          }))}
           onCancel={() => setShowGenerate(false)}
           onAdd={(items, origin) => void addTexts(items, origin)}
         />
@@ -595,8 +688,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
             const list = await invoke<StudioProject[]>('studio_list_projects');
             const fresh = list.find(x => x.id === project.id);
             if (fresh) onProjectChanged(fresh);
-            setShownId(null);
             await loadSamples(0, true);
+            setLadeStand(n => n + 1);
             await loadStats();
           }}
         />
@@ -710,16 +803,9 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
 }) {
   const { t } = useLanguage();
   const { success, error } = useNotification();
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelId, setModelId] = useState('');
+  const { models, modelId, setModelId } = useStudioModels(project);
   const [name, setName] = useState(project.name);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    invoke<ModelInfo[]>('list_models')
-      .then(list => { setModels(list); if (list.length > 0) setModelId(list[0].id); })
-      .catch(() => { /* Auswahl bleibt leer */ });
-  }, []);
 
   const run = async () => {
     if (!modelId) return;
@@ -758,14 +844,10 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
 
         <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.export.modelLabel')}</span>
-          <select value={modelId} onChange={e => setModelId(e.target.value)}
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
-            {models.length === 0 && <option value="">{t('studio.export.noModels')}</option>}
-            {models.map(m => <option key={m.id} value={m.id} className="bg-[#101218]">{m.name}</option>)}
-          </select>
+          <StudioModelSelect project={project} models={models} value={modelId} onChange={setModelId} />
         </label>
 
-        <p className="text-gray-500 text-xs">{t('studio.export.summary', { confirmed })}</p>
+        <p className="text-gray-500 text-xs">{t('studio.export.summaryText', { confirmed })}</p>
 
         <div className="flex gap-2">
           <button onClick={onClose}

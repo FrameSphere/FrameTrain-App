@@ -209,6 +209,91 @@ describe('TextWorkbench', () => {
     });
   });
 
+  it('zaehlt die Klasse in der Seitenleiste sofort mit', async () => {
+    // Die Verteilung ist bei Klassifikation das Wichtigste — und stand bisher
+    // nirgends. Nach einer Zuordnung muss sie ohne Neuladen stimmen.
+    render(<TextWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+    const zaehler = () => screen.getAllByTitle('Bestätigte Samples dieser Klasse').map(e => e.textContent);
+    expect(zaehler()).toEqual(['0', '0']);
+
+    fireEvent.keyDown(window, { key: '1' });
+
+    await waitFor(() => expect(zaehler()).toEqual(['1', '0']));
+  });
+
+  it('waehlt beim Export ein Textmodell statt des ersten Modells der Liste', async () => {
+    // Vorher stand hier yolo8n — und der Datensatz haengte danach an einem
+    // Bildmodell, mit dem er nie trainiert werden kann.
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_samples') return { total: TEXTE.length, items: TEXTE };
+      if (cmd === 'studio_stats') return { ...STATS, confirmed: 1, new: 1 };
+      if (cmd === 'list_models') return [
+        { id: 'm_yolo', name: 'yolo8n', source_path: 'ultralytics/yolov8n', model_type: 'yolo' },
+        { id: 'm_bert', name: 'bert', source_path: 'bert-base-uncased', model_type: 'bert' },
+      ];
+      return null;
+    });
+    render(<TextWorkbench {...props()} />);
+    const knopf = await screen.findByRole('button', { name: /Exportieren/ });
+    await waitFor(() => expect(knopf).not.toBeDisabled());
+    fireEvent.click(knopf);
+
+    const auswahl = await screen.findByRole('combobox');
+    await waitFor(() => expect((auswahl as HTMLSelectElement).value).toBe('m_bert'));
+    // Und die Zusammenfassung spricht von Texten, nicht von Bildern.
+    expect(screen.getByText('1 bestätigte Texte werden exportiert.')).toBeInTheDocument();
+  });
+
+  it('laesst einen Text korrigieren, ohne Klasse und Status anzufassen', async () => {
+    render(<TextWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Text bearbeiten' }));
+    const feld = screen.getByLabelText('Text bearbeiten');
+    // Ziffern im Feld sind Text, keine Klassenkuerzel.
+    fireEvent.change(feld, { target: { value: 'Der Lift stand still, dreimal' } });
+    fireEvent.keyDown(window, { key: '1' });
+    fireEvent.keyDown(feld, { key: 'Enter', metaKey: true });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_edit_text', {
+        projectId: 'sp_text', sampleId: 's_1', content: 'Der Lift stand still, dreimal',
+      });
+    });
+    expect(invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation')).toBeUndefined();
+    expect((await screen.findAllByText('Der Lift stand still, dreimal')).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('entfernt ein Sample erst beim zweiten Klick', async () => {
+    // Ein Klick allein darf nichts loeschen — die Datei ist danach weg.
+    render(<TextWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+
+    fireEvent.click(screen.getByRole('button', { name: /Entfernen/ }));
+    expect(invokeMock.mock.calls.find(c => c[0] === 'studio_delete_samples')).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('button', { name: /Wirklich entfernen/ }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_delete_samples', {
+        projectId: 'sp_text', sampleIds: ['s_1'],
+      });
+    });
+  });
+
+  it('zeigt in der Liste den Text, nicht nur die Klasse', async () => {
+    // Bei gelabelten Zeilen stand frueher nur die Klasse — 62-mal "Request".
+    const gelabelt = [TEXTE[0], { ...TEXTE[1], status: 'confirmed' as const,
+      ann: { boxes: [], label: 'lob' } }];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_samples') return { total: 2, items: gelabelt };
+      if (cmd === 'studio_stats') return STATS;
+      return null;
+    });
+    render(<TextWorkbench {...props()} />);
+    expect(await screen.findByText('Tolle Piste heute')).toBeInTheDocument();
+  });
+
   it('bestaetigt ein Paar nicht ohne Zieltext', async () => {
     render(<TextWorkbench {...props('pairs')} />);
     const feld = await screen.findByPlaceholderText('Zieltext…');

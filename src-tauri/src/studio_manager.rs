@@ -1112,13 +1112,19 @@ pub async fn studio_stats(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let project = load_project(&dir)?;
-    let samples = load_samples(&dir);
+    Ok(compute_stats(&project, &load_samples(&dir), load_doubts(&dir).len()))
+}
+
+/// Die Zahlen rechts in der Werkbank. Das Frontend fuehrt sie nach jeder
+/// Aenderung selbst nach (studioStats.ts) und muss dabei genau so zaehlen.
+fn compute_stats(project: &StudioProject, samples: &[StudioSample], doubts: usize) -> StudioStats {
+    let bild = project.modality != "text" && project.modality != "audio";
     let mut stats = StudioStats {
         total: samples.len(), new: 0, suggested: 0, confirmed: 0, skipped: 0,
         boxes_total: 0, per_class: vec![0; project.classes.len()], empty_confirmed: 0,
-        doubts: load_doubts(&dir).len(),
+        doubts,
     };
-    for s in &samples {
+    for s in samples {
         match s.status.as_str() {
             "new"       => stats.new += 1,
             "suggested" => stats.suggested += 1,
@@ -1126,13 +1132,23 @@ pub async fn studio_stats(
             "skipped"   => stats.skipped += 1,
             _ => {}
         }
-        if s.status == "confirmed" && s.ann.boxes.is_empty() { stats.empty_confirmed += 1; }
+        // "Bestaetigt ohne Box" ist nur bei Bildern ein Hinweis; ein Text
+        // hat nie Boxen und waere sonst immer "leer".
+        if bild && s.status == "confirmed" && s.ann.boxes.is_empty() { stats.empty_confirmed += 1; }
         for b in &s.ann.boxes {
             stats.boxes_total += 1;
             if b.cls < stats.per_class.len() { stats.per_class[b.cls] += 1; }
         }
+        // Bei Text und Audio ist die Verteilung der Labels das, worauf es
+        // ankommt. Gezaehlt wird nur Bestaetigtes — ein Modellvorschlag ist
+        // noch keine Aussage darueber, wie ausgewogen der Datensatz ist.
+        if s.status == "confirmed" {
+            if let Some(i) = s.ann.label.as_deref().and_then(|l| class_index_for(l, &project.classes)) {
+                stats.per_class[i] += 1;
+            }
+        }
     }
-    Ok(stats)
+    stats
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2037,6 +2053,83 @@ pub async fn studio_add_audio(
 
 /// Texte von Hand anlegen. Mehrere auf einmal, weil man beim Schreiben selten
 /// bei einem bleibt und eine eingefuegte Liste sonst Zeile fuer Zeile muesste.
+// ══════════════════════════════════════════════════════════════════
+// SAMPLES ENTFERNEN UND BEARBEITEN
+//
+// Beim Selbst-Erstellen entsteht auch Ausschuss: ein Tippfehler, ein
+// schlechtes erzeugtes Beispiel, eine verpatzte Aufnahme. Ohne Entfernen
+// wanderte all das in den Export.
+// ══════════════════════════════════════════════════════════════════
+
+/// Entfernt Samples aus dem Basiszustand. Ereignisse zu ihnen bleiben liegen,
+/// werden beim Falten aber nicht mehr zugeordnet — und beim naechsten
+/// Kompaktieren ohnehin verworfen. Eine Mediendatei wird nur geloescht, wenn
+/// kein anderes Sample mehr auf sie zeigt.
+fn remove_samples(dir: &Path, ids: &[String]) -> Result<usize, String> {
+    let weg: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let alle: Vec<StudioSample> = read_jsonl(&samples_path(dir));
+    let (raus, bleiben): (Vec<StudioSample>, Vec<StudioSample>) =
+        alle.into_iter().partition(|s| weg.contains(s.id.as_str()));
+    if raus.is_empty() { return Ok(0); }
+    write_jsonl(&samples_path(dir), &bleiben)?;
+
+    let noch_benutzt: std::collections::HashSet<&str> =
+        bleiben.iter().map(|s| s.media.as_str()).collect();
+    for s in &raus {
+        if !s.media.is_empty() && !noch_benutzt.contains(s.media.as_str()) {
+            let _ = fs::remove_file(dir.join("media").join(&s.media));
+        }
+    }
+
+    let mut doubts = load_doubts(dir);
+    let vorher = doubts.len();
+    doubts.retain(|id, _| !weg.contains(id.as_str()));
+    if doubts.len() != vorher { save_doubts(dir, &doubts)?; }
+    Ok(raus.len())
+}
+
+#[tauri::command]
+pub async fn studio_delete_samples(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, sample_ids: Vec<String>,
+) -> Result<usize, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let n = remove_samples(&dir, &sample_ids)?;
+    let mut project = load_project(&dir)?;
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)?;
+    Ok(n)
+}
+
+/// Aendert den Text eines Samples. Der Text ist Teil des Basiszustands, kein
+/// Ereignis — er wird deshalb in samples.jsonl ersetzt. Doppelte Texte
+/// bleiben ausgeschlossen, genau wie beim Anlegen.
+fn edit_text(dir: &Path, sample_id: &str, content: &str) -> Result<(), String> {
+    let neu = content.trim();
+    if neu.is_empty() { return Err("Ein leerer Text kann nicht gespeichert werden".to_string()); }
+    let mut alle: Vec<StudioSample> = read_jsonl(&samples_path(dir));
+    if alle.iter().any(|s| s.id != sample_id && s.content.as_deref().map(str::trim) == Some(neu)) {
+        return Err("Diesen Text gibt es im Projekt schon".to_string());
+    }
+    let Some(s) = alle.iter_mut().find(|s| s.id == sample_id) else {
+        return Err(format!("Sample nicht gefunden: {}", sample_id));
+    };
+    if s.content.is_none() { return Err("Nur Texte lassen sich bearbeiten".to_string()); }
+    s.content = Some(neu.to_string());
+    write_jsonl(&samples_path(dir), &alle)
+}
+
+#[tauri::command]
+pub async fn studio_edit_text(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, sample_id: String, content: String,
+) -> Result<(), String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    edit_text(&dir, &sample_id, &content)
+}
+
 /// Eine selbst angelegte oder erzeugte Textzeile.
 ///
 /// Label und Ziel stehen je Zeile, nicht je Aufruf: beim Schreiben von Hand
@@ -2345,11 +2438,25 @@ fn start_inference_server(
     }
 }
 
+/// Welche Samples ein Vorschlagslauf anfasst.
+///
+/// Bestaetigte Arbeit wird nie ueberschrieben. Unter den offenen kommen die
+/// noch nie gesehenen zuerst, dann uebersprungene, zuletzt schon
+/// vorgeschlagene — wer "die naechsten 20" waehlt, will neue Vorschlaege, nicht
+/// dieselben 20 noch einmal. Ohne Grenze laeuft es wie bisher ueber alle.
+fn fuer_vorschlag(samples: &[StudioSample], limit: Option<usize>) -> Vec<&StudioSample> {
+    let rang = |s: &StudioSample| match s.status.as_str() { "new" => 0, "skipped" => 1, _ => 2 };
+    let mut offen: Vec<&StudioSample> = samples.iter().filter(|s| s.status != "confirmed").collect();
+    offen.sort_by_key(|s| rang(s));
+    if let Some(n) = limit.filter(|n| *n > 0) { offen.truncate(n); }
+    offen
+}
+
 #[tauri::command]
 pub async fn studio_suggest(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, version_id: String,
-    min_confidence: f64, add_unknown_classes: bool,
+    min_confidence: f64, add_unknown_classes: bool, limit: Option<usize>,
 ) -> Result<SuggestReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
@@ -2357,9 +2464,8 @@ pub async fn studio_suggest(
     let samples = load_samples(&dir);
     let media_dir = dir.join("media");
 
-    // Bestaetigte Arbeit wird nie ueberschrieben.
-    let offen: Vec<&StudioSample> = samples.iter().filter(|s| s.status != "confirmed").collect();
-    let left_confirmed = samples.len() - offen.len();
+    let left_confirmed = samples.iter().filter(|s| s.status == "confirmed").count();
+    let offen = fuer_vorschlag(&samples, limit);
     if offen.is_empty() {
         return Err("Alle Bilder sind bereits bestätigt — es gibt nichts vorzuschlagen.".to_string());
     }
@@ -2715,11 +2821,19 @@ Herkunft je Bild steht in PROVENANCE.csv.
 /// Die Spalten sind nicht frei gewaehlt: die Train Engine liest bei
 /// Klassifikation text/label aus einer CSV und bei Seq2Seq source/target aus
 /// einer JSONL. Was hier entsteht, muss dort ohne Zwischenschritt passen.
+///
+/// Die Daten liegen in `<out>/dataset/`, die Beipackzettel eine Ebene darueber.
+/// Die Train Engine liest bei ungeteiltem Text *jede* CSV im Ordner
+/// (seq_classification: `path.glob("*.csv")`) — PROVENANCE.csv neben daten.csv
+/// waere als Trainingsdaten mitgelaufen. Zurueckgegeben wird der Ordner, der
+/// registriert werden soll.
 fn write_text_export(
     project: &StudioProject, samples: &[&StudioSample], out: &Path,
-) -> Result<(), String> {
+) -> Result<PathBuf, String> {
     let seq2seq = project.task == "pairs";
     let mut provenance = String::from("sample_id,herkunft,lizenz,status\n");
+    let daten = out.join("dataset");
+    fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
 
     if seq2seq {
         let mut zeilen = String::new();
@@ -2732,7 +2846,7 @@ fn write_text_export(
                 csv_field(s.src.license.as_deref().unwrap_or("")),
                 csv_field(&s.status)));
         }
-        fs::write(out.join("daten.jsonl"), zeilen).map_err(|e| format!("JSONL: {}", e))?;
+        fs::write(daten.join("daten.jsonl"), zeilen).map_err(|e| format!("JSONL: {}", e))?;
     } else {
         let mut zeilen = String::from("text,label\n");
         for s in samples {
@@ -2743,7 +2857,7 @@ fn write_text_export(
                 csv_field(s.src.license.as_deref().unwrap_or("")),
                 csv_field(&s.status)));
         }
-        fs::write(out.join("daten.csv"), zeilen).map_err(|e| format!("CSV: {}", e))?;
+        fs::write(daten.join("daten.csv"), zeilen).map_err(|e| format!("CSV: {}", e))?;
     }
 
     fs::write(out.join("PROVENANCE.csv"), provenance)
@@ -2764,9 +2878,10 @@ Herkunft je Text steht in PROVENANCE.csv.
         date = Utc::now().format("%Y-%m-%d"),
         count = samples.len(),
         classes = if project.classes.is_empty() { "—".to_string() } else { project.classes.join(", ") },
-        format = if seq2seq { "daten.jsonl mit source und target" } else { "daten.csv mit text und label" });
+        format = if seq2seq { "dataset/daten.jsonl mit source und target" }
+                 else { "dataset/daten.csv mit text und label" });
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
-    Ok(())
+    Ok(daten)
 }
 
 /// Schreibt das Projekt als Audiodatensatz.
@@ -2783,8 +2898,10 @@ fn write_audio_export(
     // Klassenordner werden nur erkannt, wenn im Wurzelordner keine Dateien
     // liegen — PROVENANCE.csv und DATA_CARD.md dort wuerden die Erkennung auf
     // "flat_file" kippen und das Training blockieren. Deshalb liegen die
-    // Klassen eine Ebene tiefer, die Beipackzettel bleiben darueber.
-    let daten = if transkript { out.to_path_buf() } else { out.join("dataset") };
+    // Daten eine Ebene tiefer, die Beipackzettel bleiben darueber. Fuer
+    // Transkripte gilt dasselbe: im registrierten Ordner liegt nur, was
+    // trainiert werden soll.
+    let daten = out.join("dataset");
     fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
 
     for s in samples {
@@ -2870,8 +2987,7 @@ pub async fn studio_export(
     // Klassenordnern muss die Wurzel dateifrei bleiben, sonst wird der Typ
     // falsch erkannt.
     let zu_registrieren = if ist_text {
-        write_text_export(&project, &selected, &out)?;
-        out.clone()
+        write_text_export(&project, &selected, &out)?
     } else if ist_audio {
         write_audio_export(&project, &selected, &dir.join("media"), &out)?
     } else {
@@ -3161,12 +3277,13 @@ mod tests {
         fs::create_dir_all(&out).unwrap();
         let daten = write_audio_export(&project, &[&s1], &dir.path().join("media"), &out).unwrap();
 
-        assert_eq!(daten, out, "Transkripte brauchen keinen Unterordner");
-        assert!(out.join("s_1.wav").exists());
-        assert_eq!(fs::read_to_string(out.join("s_1.txt")).unwrap(),
+        assert!(daten.join("s_1.wav").exists());
+        assert_eq!(fs::read_to_string(daten.join("s_1.txt")).unwrap(),
             "Der Lift faehrt gleich weiter");
+        assert!(out.join("PROVENANCE.csv").exists());
+        assert!(!daten.join("PROVENANCE.csv").exists(), "Beipackzettel gehoert nicht zu den Daten");
 
-        let analysis = crate::dataset_manager::detect_dataset_type(&out);
+        let analysis = crate::dataset_manager::detect_dataset_type(&daten);
         assert_eq!(analysis.detected_type.as_str(), "audio_transcript",
             "erkannt als {:?}", analysis.detected_type);
     }
@@ -3187,15 +3304,44 @@ mod tests {
         let s2 = textsample("s_2", "Tolle Piste", Some("lob"));
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        write_text_export(&project, &[&s1, &s2], &out).unwrap();
+        let daten = write_text_export(&project, &[&s1, &s2], &out).unwrap();
 
-        let csv = fs::read_to_string(out.join("daten.csv")).unwrap();
+        let csv = fs::read_to_string(daten.join("daten.csv")).unwrap();
         let tabelle = parse_csv(&csv);
         assert_eq!(tabelle[0], vec!["text", "label"]);
         assert_eq!(tabelle[1], vec!["Der Lift stand still, zweimal", "beschwerde"]);
         assert_eq!(tabelle[2], vec!["Tolle Piste", "lob"]);
         assert!(out.join("PROVENANCE.csv").exists());
         assert!(out.join("DATA_CARD.md").exists());
+    }
+
+    #[test]
+    fn textexport_legt_nur_trainingsdaten_in_den_registrierten_ordner() {
+        // Die Train Engine liest bei ungeteiltem Text jede CSV im Ordner. Lag
+        // PROVENANCE.csv neben daten.csv, lief die Herkunftstabelle als
+        // Trainingsdaten mit — und die App warnte vor gemischten Dateitypen.
+        let dir = TempDir::new("textexport_ordner");
+        let project = StudioProject {
+            id: "sp_t".to_string(), name: "Rueckmeldungen".to_string(),
+            modality: "text".to_string(), task: "classification".to_string(),
+            target_format: "flat_file".to_string(),
+            classes: vec!["lob".to_string()],
+            created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let s1 = textsample("s_1", "Tolle Piste", Some("lob"));
+        let out = dir.path().join("out");
+        fs::create_dir_all(&out).unwrap();
+        let daten = write_text_export(&project, &[&s1], &out).unwrap();
+
+        assert_ne!(daten, out, "registriert werden darf nicht der Ordner mit den Beipackzetteln");
+        let dateien: Vec<String> = fs::read_dir(&daten).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(dateien, vec!["daten.csv".to_string()]);
+
+        let analysis = crate::dataset_manager::detect_dataset_type(&daten);
+        assert_eq!(analysis.detected_type.as_str(), "flat_file");
+        assert!(analysis.warnings.iter().all(|w| !w.contains("gemischte")),
+            "Warnungen: {:?}", analysis.warnings);
     }
 
     #[test]
@@ -3213,9 +3359,9 @@ mod tests {
         let s2 = textsample("s_2", "Ohne Ziel", None);
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        write_text_export(&project, &[&s1, &s2], &out).unwrap();
+        let daten = write_text_export(&project, &[&s1, &s2], &out).unwrap();
 
-        let jsonl = fs::read_to_string(out.join("daten.jsonl")).unwrap();
+        let jsonl = fs::read_to_string(daten.join("daten.jsonl")).unwrap();
         let zeilen: Vec<&str> = jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
         assert_eq!(zeilen.len(), 1, "die Zeile ohne Ziel darf nicht mit");
         let v: serde_json::Value = serde_json::from_str(zeilen[0]).unwrap();
@@ -3547,6 +3693,82 @@ mod tests {
 
         assert_eq!(repair_audio_exts(d), 0);
         assert!(d.join("media").join("cd").join("h.wav").exists());
+    }
+
+    #[test]
+    fn zaehlt_bestaetigte_labels_je_klasse() {
+        // Bei Text und Audio stand in der Seitenleiste keine Verteilung —
+        // das Backend zaehlte nur Boxen. Ob eine Klassifikation ausgewogen
+        // ist, sah man nicht.
+        let project = StudioProject {
+            id: "sp_t".to_string(), name: "Meldungen".to_string(), modality: "text".to_string(),
+            task: "classification".to_string(), target_format: "flat_file".to_string(),
+            classes: vec!["Request".to_string(), "Error".to_string()],
+            created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let a = textsample("s_1", "a", Some("request"));
+        let b = textsample("s_2", "b", Some("Error"));
+        let mut c = textsample("s_3", "c", Some("Error"));
+        c.status = "suggested".to_string();
+        let st = compute_stats(&project, &[a, b, c], 0);
+        // Gross/klein wie beim Import egal; der Vorschlag zaehlt nicht mit.
+        assert_eq!(st.per_class, vec![1, 1]);
+        assert_eq!(st.confirmed, 2);
+        // Ein Text hat nie Boxen — "bestaetigt ohne Box" ist dort kein Hinweis.
+        assert_eq!(st.empty_confirmed, 0);
+    }
+
+    #[test]
+    fn entfernte_samples_verschwinden_samt_datei() {
+        let dir = TempDir::new("entfernen");
+        let d = dir.path();
+        fs::create_dir_all(d.join("media/ab")).unwrap();
+        fs::write(d.join("media/ab/s_1.jpg"), b"x").unwrap();
+        fs::write(d.join("media/ab/s_2.jpg"), b"y").unwrap();
+        write_jsonl(&samples_path(d), &[sample("s_1", "new"), sample("s_2", "confirmed")]).unwrap();
+        // Ein spaeteres Ereignis zum entfernten Sample darf es nicht zurueckholen.
+        append_jsonl(&events_path(d), &AnnEvent {
+            sample_id: "s_1".to_string(), status: "confirmed".to_string(),
+            boxes: vec![], label: None, target: None, at: "x".to_string(),
+        }).unwrap();
+
+        assert_eq!(remove_samples(d, &["s_1".to_string()]).unwrap(), 1);
+        let rest = load_samples(d);
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].id, "s_2");
+        assert!(!d.join("media/ab/s_1.jpg").exists(), "Datei blieb liegen");
+        assert!(d.join("media/ab/s_2.jpg").exists());
+    }
+
+    #[test]
+    fn text_bearbeiten_ersetzt_ihn_und_verweigert_dubletten() {
+        let dir = TempDir::new("bearbeiten");
+        let d = dir.path();
+        write_jsonl(&samples_path(d), &[
+            textsample("s_1", "Lift kaputt", Some("beschwerde")),
+            textsample("s_2", "Piste top", Some("lob")),
+        ]).unwrap();
+
+        edit_text(d, "s_1", "  Der Lift ist kaputt  ").unwrap();
+        let alle = load_samples(d);
+        assert_eq!(alle[0].content.as_deref(), Some("Der Lift ist kaputt"));
+        // Label bleibt, nur der Text aendert sich.
+        assert_eq!(alle[0].ann.label.as_deref(), Some("beschwerde"));
+
+        assert!(edit_text(d, "s_1", "Piste top").is_err(), "Dublette haette abgelehnt werden muessen");
+        assert!(edit_text(d, "s_1", "   ").is_err(), "leerer Text haette abgelehnt werden muessen");
+    }
+
+    #[test]
+    fn vorschlag_nimmt_zuerst_die_neuen_und_haelt_die_grenze() {
+        let samples = vec![
+            sample("s_1", "suggested"), sample("s_2", "confirmed"),
+            sample("s_3", "new"), sample("s_4", "skipped"), sample("s_5", "new"),
+        ];
+        let alle: Vec<&str> = fuer_vorschlag(&samples, None).iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(alle, vec!["s_3", "s_5", "s_4", "s_1"], "Bestaetigtes nie, Neues zuerst");
+        let zwei: Vec<&str> = fuer_vorschlag(&samples, Some(2)).iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(zwei, vec!["s_3", "s_5"]);
     }
 
     #[test]

@@ -139,6 +139,49 @@ describe('AudioWorkbench', () => {
     expect(audioExtForMime('')).toBe('webm');
   });
 
+  it('zeigt, dass auf die Mikrofon-Freigabe gewartet wird', async () => {
+    // macOS fragt beim ersten Mal nach. Bis dahin tat sich in der App nichts,
+    // und es sah aus, als haette der Knopf nicht reagiert.
+    let freigeben: (s: unknown) => void = () => {};
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => new Promise(r => { freigeben = r; }) },
+    });
+    render(<AudioWorkbench {...props()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Aufnehmen/ }));
+    expect(await screen.findByText('Warte auf Freigabe des Mikrofons…')).toBeInTheDocument();
+    freigeben({ getTracks: () => [] });
+  });
+
+  it('laesst auch im leeren Projekt eine laufende Aufnahme stoppen', async () => {
+    // Der Knopf im leeren Zustand blieb "Aufnehmen" — ein zweiter Klick
+    // startete eine zweite Aufnahme neben der ersten.
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_samples') return { total: 0, items: [] };
+      if (cmd === 'studio_stats') return { ...STATS, total: 0, new: 0 };
+      return null;
+    });
+    let gestartet = 0;
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => { gestartet += 1; return Promise.resolve({ getTracks: () => [] }); } },
+    });
+    class FakeRecorder {
+      state = 'recording'; mimeType = 'audio/mp4';
+      ondataavailable: ((e: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start() { /* nimmt auf */ }
+      stop() { this.state = 'inactive'; }
+    }
+    (globalThis as unknown as { MediaRecorder: unknown }).MediaRecorder = FakeRecorder;
+
+    render(<AudioWorkbench {...props()} />);
+    const knoepfe = await screen.findAllByRole('button', { name: /Aufnehmen/ });
+    fireEvent.click(knoepfe[knoepfe.length - 1]);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Stopp/ })).toHaveLength(2));
+    expect(gestartet).toBe(1);
+  });
+
   it('sagt beim verweigerten Mikrofon, wo man es erlaubt', async () => {
     // Genau hier verliert man sonst eine Stunde: macOS lehnt still ab, und in
     // der App sieht es aus, als waere die Aufnahme kaputt.
