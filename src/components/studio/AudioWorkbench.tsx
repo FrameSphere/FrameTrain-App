@@ -25,6 +25,7 @@ import type {
 } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
+import { useEscape } from './useEscape';
 
 const PAGE = 200;
 
@@ -496,15 +497,15 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
                   <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {transkript && (
                     <button onClick={() => void confirmTranscript()}
-                      className="px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm inline-flex items-center gap-2">
+                      className="px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm whitespace-nowrap inline-flex items-center gap-2">
                       <Check className="w-4 h-4" /> {t('studio.workbench.confirm')}
                     </button>
                   )}
                   <button onClick={() => void skip()}
-                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2">
+                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm whitespace-nowrap inline-flex items-center gap-2">
                     <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
                   </button>
                   <span className="ml-auto" />
@@ -621,6 +622,8 @@ function AudioExportDialog({ project, confirmed, onClose, onDone }: {
       setBusy(false);
     }
   };
+
+  useEscape(onClose, !busy);
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"

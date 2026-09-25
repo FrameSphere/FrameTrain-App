@@ -93,7 +93,9 @@ describe('ImageWorkbench', () => {
         projectId: 'sp_test', sampleId: 's_1', status: 'confirmed',
         boxes: [{ cls: 0, x: 0.5, y: 0.5, w: 0.2, h: 0.4 }],
       }));
-    });
+      // Unter Last (volle Suite parallel) brauchte das einmal 1041 ms — knapp
+      // ueber dem Standard. Mehr Luft, ohne dass der Test etwas anderes prueft.
+    }, { timeout: 3000 });
     // Die Box muss die Umrechnung in Pixel und zurueck unveraendert ueberstehen.
     await screen.findByText('2 / 2');
   });

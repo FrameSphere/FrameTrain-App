@@ -294,6 +294,15 @@ describe('TextWorkbench', () => {
     expect(await screen.findByText('Tolle Piste heute')).toBeInTheDocument();
   });
 
+  it('schliesst die Quellenauswahl mit Escape', async () => {
+    // Im Test liess sie sich nur per Klick daneben schliessen.
+    render(<TextWorkbench {...props()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Texte holen/ }));
+    expect(await screen.findByText('Woher kommen die Texte?')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('Woher kommen die Texte?')).not.toBeInTheDocument());
+  });
+
   it('bestaetigt ein Paar nicht ohne Zieltext', async () => {
     render(<TextWorkbench {...props('pairs')} />);
     const feld = await screen.findByPlaceholderText('Zieltext…');

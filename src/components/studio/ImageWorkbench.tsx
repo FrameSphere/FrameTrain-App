@@ -35,6 +35,7 @@ import ModelRunDialog, { type ModelWithVersionTree } from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
 import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
+import { useEscape } from './useEscape';
 
 const PAGE = 200;
 
@@ -792,22 +793,22 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                   <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
                   {zoom > 1 && <span className="tabular-nums">{t('studio.workbench.zoomLevel', { factor: zoom.toFixed(1).replace('.', ',') })}</span>}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button onClick={() => void confirmAndNext()}
-                    className="px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm inline-flex items-center gap-2">
+                    className="px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-200 text-sm whitespace-nowrap inline-flex items-center gap-2">
                     <Check className="w-4 h-4" /> {t('studio.workbench.confirm')}
                   </button>
                   <button onClick={() => void skipAndNext()}
-                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2">
+                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm whitespace-nowrap inline-flex items-center gap-2">
                     <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
                   </button>
                   <button onClick={copyFromPrevious} disabled={index === 0 || !samples[index - 1]?.ann.boxes.length}
-                    className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2 disabled:opacity-30"
+                    className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm whitespace-nowrap inline-flex items-center gap-2 disabled:opacity-30"
                     title={t('studio.workbench.copyPreviousHint')}>
                     <Copy className="w-4 h-4" /> {t('studio.workbench.copyPrevious')}
                   </button>
                   <button onClick={undo} disabled={undoStack.current.length === 0}
-                    className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm inline-flex items-center gap-2 disabled:opacity-30">
+                    className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm whitespace-nowrap inline-flex items-center gap-2 disabled:opacity-30">
                     <Undo2 className="w-4 h-4" /> {t('studio.workbench.undo')}
                   </button>
                   <span className="ml-auto" />
@@ -1000,6 +1001,8 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
     }
   };
 
+  useEscape(onClose, !busy);
+
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
@@ -1155,6 +1158,8 @@ function ImportDialog({ inspection, onCancel, onRun }: {
     </label>
   );
 
+  useEscape(onCancel);
+
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onCancel}>
@@ -1256,6 +1261,8 @@ function VideoDialog({ path, onCancel, onRun }: {
   const [maxFrames, setMaxFrames] = useState(500);
   const name = path.split(/[\\/]/).pop() ?? path;
 
+  useEscape(onCancel);
+
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onCancel}>
@@ -1326,6 +1333,8 @@ function SourceDialog({ onClose, onFolder, onVideo, onDataset, onWeb }: {
       </span>
     </button>
   );
+
+  useEscape(onClose);
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"

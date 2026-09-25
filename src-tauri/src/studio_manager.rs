@@ -2127,7 +2127,11 @@ pub async fn studio_edit_text(
 ) -> Result<(), String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
-    edit_text(&dir, &sample_id, &content)
+    edit_text(&dir, &sample_id, &content)?;
+    // Die Projektliste sortiert nach letzter Aenderung — eine Korrektur ist eine.
+    let mut project = load_project(&dir)?;
+    project.updated_at = Utc::now().to_rfc3339();
+    save_project(&dir, &project)
 }
 
 /// Eine selbst angelegte oder erzeugte Textzeile.

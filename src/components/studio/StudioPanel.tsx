@@ -18,6 +18,7 @@ import TextWorkbench from './TextWorkbench';
 import AudioWorkbench from './AudioWorkbench';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import { useEscape } from './useEscape';
 
 /// Was auf der Projektkarte steht, haengt an Modalitaet und Aufgabe.
 ///
@@ -238,6 +239,8 @@ function CreateDialog({ onClose, onCreated }: {
       setBusy(false);
     }
   };
+
+  useEscape(onClose, !busy);
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"

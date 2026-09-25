@@ -26,6 +26,7 @@ import {
 } from './generatedTexts';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import { useEscape } from './useEscape';
 
 const MAX_PRO_KLASSE = 50;
 
@@ -138,6 +139,8 @@ export default function GenerateDialog({
   };
 
   const behalten = vorschlaege ? vorschlaege.length - aus.size : 0;
+
+  useEscape(onCancel, !busy);
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"

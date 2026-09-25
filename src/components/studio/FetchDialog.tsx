@@ -13,6 +13,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import { useEscape } from './useEscape';
 
 export interface FetchReport {
   fetched:      number;
@@ -61,6 +62,8 @@ export default function FetchDialog({ project, onClose, onDone }: {
       setFortschritt(null);
     }
   };
+
+  useEscape(onClose, !busy);
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"

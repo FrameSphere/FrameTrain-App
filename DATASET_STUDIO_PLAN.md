@@ -520,3 +520,13 @@ ein Textexport. Der Kern trug. Was dabei auffiel, ist hier behoben.
 - Waehrend macOS nach dem Mikrofon fragt, sagt die App das. Nebenbei
   behoben: im leeren Audioprojekt liess sich eine laufende Aufnahme nicht
   stoppen, ein zweiter Klick startete eine zweite.
+
+**Nachtrag 1.3.1** — aus der Pruefung von 1.3.0 in der App: Escape schliesst
+jeden Dialog der Werkstatt (ausser waehrend ein Export oder Modelllauf
+arbeitet); die Knoepfe unter dem Bild brechen nicht mehr in sich um, sondern
+ruecken als Ganzes in die naechste Zeile; eine Textkorrektur zaehlt als
+Aenderung und rueckt das Projekt in der Liste nach vorn. In der App
+bestaetigt: Vorschlag bleibt nach dem Lauf auf dem gezeigten Bild und wird
+mit Enter samt Box gespeichert, Zaehler laufen live, Entfernen, Bearbeiten,
+Textexport als `dataset/daten.csv` am Textmodell ohne Warnung, Warten auf
+die Mikrofon-Freigabe wird angezeigt.

@@ -31,7 +31,7 @@ export default function RemoveSampleButton({ onRemove, disabled }: {
       }}
       disabled={disabled}
       title={t('studio.remove.hint')}
-      className={`px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-2 transition-all disabled:opacity-40 ${sicher
+      className={`px-3 py-2 rounded-lg border text-sm whitespace-nowrap inline-flex items-center gap-2 transition-all disabled:opacity-40 ${sicher
         ? 'bg-red-500/20 border-red-500/40 text-red-200'
         : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-400'}`}>
       <Trash2 className="w-4 h-4" />
