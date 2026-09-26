@@ -15,7 +15,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
   Trash2, Plus, AlertTriangle, ImageOff, Info, Wand2, ShieldQuestion, Copy, Undo2, Film, Database,
-  ChevronDown, Globe,
+  ChevronDown, Globe, Tag, CopyPlus, ClipboardPaste, SquarePlus, Eye, EyeOff, ZoomOut, ListEnd,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -23,6 +23,8 @@ import { clientToImagePoint, boxFromPoints } from '../labCorrection';
 import { classColor } from '../labGroundTruth';
 import {
   toPixel, toNormalized, isUsable, hitTest, handleAt, resizeTo, movedBy,
+  boxInDerMitte, resizedBy, duplicated, cycleSelection, nudgeStep,
+  boxesToClipboardText, boxesFromClipboardText, type StudioBox,
   classLabel, summarize, nextOpenIndex,
   type PixelBox, type Handle,
 } from './studioBoxes';
@@ -36,6 +38,7 @@ import FetchDialog from './FetchDialog';
 import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
 import { useEscape } from './useEscape';
+import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextMenuRegistry';
 
 const PAGE = 200;
 
@@ -90,6 +93,16 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   const [boxes, setBoxes]       = useState<PixelBox[]>([]);
   const [selected, setSelected] = useState(-1);
   const [activeClass, setActiveClass] = useState(0);
+  // H blendet die Boxen aus, um zu sehen, was darunter liegt.
+  const [boxenAus, setBoxenAus] = useState(false);
+  // "Bild entfernen …" aus dem Rechtsklick-Menue schaltet den Knopf scharf,
+  // statt selbst zu loeschen — der zweite Klick bleibt beim Nutzer.
+  const [entfernenScharf, setEntfernenScharf] = useState(0);
+  // Zuletzt kopierte Boxen, falls die System-Zwischenablage nicht erreichbar ist.
+  const letzteKopie = useRef<StudioBox[]>([]);
+  // Box unter dem Zeiger beim Rechtsklick — das Menue wird im selben Moment
+  // gebaut, in dem die Auswahl gesetzt wird, und sieht den neuen State noch nicht.
+  const rechtsklickBox = useRef(-1);
   const [drag, setDrag]         = useState<Drag | null>(null);
   const [stats, setStats]       = useState<StudioStats | null>(null);
   const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
@@ -343,49 +356,214 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     setDrag(null);
   };
 
-  // ── Tastatur ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-      if (!current || showExport || modelRun || importPlan || showSource || videoPath || showFetch) return;
+  // ── Boxen per Tastatur und Menue ────────────────────────────────────────
+  const setBoxClass = (i: number, cls: number) => {
+    setActiveClass(cls);
+    if (i >= 0 && i < boxes.length) commitBoxes(boxes.map((b, k) => (k === i ? { ...b, cls } : b)));
+  };
 
-      if (e.key >= '1' && e.key <= '9') {
-        const cls = Number(e.key) - 1;
-        if (cls >= classes.length) return;
-        e.preventDefault();
-        setActiveClass(cls);
-        if (selected >= 0) commitBoxes(boxes.map((b, i) => (i === selected ? { ...b, cls } : b)));
-        return;
+  const deleteBox = (i: number) => {
+    if (i < 0 || i >= boxes.length) return;
+    commitBoxes(boxes.filter((_, k) => k !== i));
+    setSelected(-1);
+  };
+
+  const newBoxInCenter = () => {
+    if (!current || imgW <= 0 || classes.length === 0) return;
+    commitBoxes([...boxes, boxInDerMitte(Math.min(activeClass, classes.length - 1), imgW, imgH)]);
+    setSelected(boxes.length);
+  };
+
+  const duplicateBox = (i: number) => {
+    if (i < 0 || i >= boxes.length) return;
+    commitBoxes([...boxes, duplicated(boxes[i], imgW, imgH)]);
+    setSelected(boxes.length);
+  };
+
+  /** Pfeile bewegen die ausgewaehlte Box, mit ⌥ aendern sie ihre Groesse. */
+  const nudgeSelected = (key: string, weit: boolean, groesse: boolean) => {
+    const b = boxes[selected];
+    if (!b) return;
+    const d = nudgeStep(imgW, imgH, weit);
+    const rechts = key === 'ArrowRight' ? 1 : key === 'ArrowLeft' ? -1 : 0;
+    const runter = key === 'ArrowDown' ? 1 : key === 'ArrowUp' ? -1 : 0;
+    const neu = groesse
+      // ⌥→ breiter, ⌥← schmaler, ⌥↑ hoeher, ⌥↓ flacher
+      ? resizedBy(b, rechts * d * 2, -runter * d * 2, imgW, imgH)
+      : movedBy(b, rechts * d, runter * d, imgW, imgH);
+    commitBoxes(boxes.map((x, k) => (k === selected ? neu : x)));
+  };
+
+  /** ⌘C: die ausgewaehlte Box oder, ohne Auswahl, alle Boxen des Bildes. */
+  const copyBoxes = async (i: number) => {
+    if (!current || boxes.length === 0) return;
+    const quelle = i >= 0 && i < boxes.length ? [boxes[i]] : boxes;
+    const norm = quelle.map(b => toNormalized(b, imgW, imgH)).filter(isUsable);
+    letzteKopie.current = norm;
+    try { await navigator.clipboard.writeText(boxesToClipboardText(norm)); }
+    catch { /* dann bleibt die interne Kopie */ }
+    info(t('studio.keys.copiedTitle'), t('studio.keys.copiedDetail', { count: norm.length }));
+  };
+
+  const pasteBoxes = (liste: StudioBox[]) => {
+    if (!current || imgW <= 0 || liste.length === 0) return;
+    const px = liste.map(b => toPixel(
+      { ...b, cls: b.cls < classes.length ? b.cls : Math.min(activeClass, classes.length - 1) },
+      imgW, imgH));
+    commitBoxes([...boxes, ...px]);
+    setSelected(boxes.length);
+  };
+  // Der Einfuege-Handler lebt in einem Effekt ohne diese Abhaengigkeiten.
+  const pasteBoxesRef = useRef(pasteBoxes);
+  pasteBoxesRef.current = pasteBoxes;
+
+  const goToNextOpen = () => {
+    const next = nextOpenIndex(samples.map(x => x.status), index);
+    if (next >= 0) goTo(next);
+  };
+
+  const dialogOffen = !!(showExport || modelRun || importPlan || showSource || videoPath || showFetch);
+
+  // ── Rechtsklick-Menue ───────────────────────────────────────────────────
+  //
+  // Dieselben Handgriffe wie auf der Tastatur, mit dem Kuerzel daneben — wer
+  // klickt, lernt dabei die Tasten. Auf einer Box geht es um diese Box,
+  // sonst um das Bild und das Projekt.
+  useContextMenuActions(({ target }) => {
+    if (dialogOffen) return [];
+    const aufBild = !!target?.closest('[data-studio-canvas]');
+    const box = aufBild ? rechtsklickBox.current : selected;
+    const gBox = t('studio.menu.box');
+    const gBild = t('studio.menu.image');
+    const gProjekt = t('studio.menu.project');
+    const aktionen: ContextMenuAction[] = [];
+
+    if (current && box >= 0 && box < boxes.length) {
+      aktionen.push(
+        {
+          id: 'st-box-class', group: gBox, label: t('studio.menu.boxClass'), icon: Tag, onSelect: () => {},
+          submenu: classes.map((name, i) => ({
+            id: `st-box-class-${i}`, label: name, shortcut: i < 9 ? String(i + 1) : undefined,
+            disabled: boxes[box]?.cls === i,
+            onSelect: () => setBoxClass(box, i),
+          })),
+        },
+        { id: 'st-box-dup', group: gBox, label: t('studio.menu.duplicate'), icon: CopyPlus, shortcut: '⌘D',
+          onSelect: () => duplicateBox(box) },
+        { id: 'st-box-copy', group: gBox, label: t('studio.menu.copyBox'), icon: Copy, shortcut: '⌘C',
+          onSelect: () => { void copyBoxes(box); } },
+        { id: 'st-box-del', group: gBox, label: t('studio.menu.deleteBox'), icon: Trash2, shortcut: '⌫',
+          danger: true, onSelect: () => deleteBox(box) },
+      );
+    }
+    if (current) {
+      aktionen.push(
+        { id: 'st-img-confirm', group: gBild, label: t('studio.menu.confirmNext'), icon: Check, shortcut: '↵',
+          onSelect: () => { void confirmAndNext(); } },
+        { id: 'st-img-skip', group: gBild, label: t('studio.workbench.skip'), icon: SkipForward, shortcut: 'S',
+          onSelect: () => { void skipAndNext(); } },
+        { id: 'st-img-next', group: gBild, label: t('studio.menu.nextOpen'), icon: ListEnd, shortcut: 'N',
+          onSelect: goToNextOpen },
+        { id: 'st-img-new', group: gBild, label: t('studio.menu.newBox'), icon: SquarePlus, shortcut: 'B',
+          disabled: classes.length === 0, onSelect: newBoxInCenter },
+        { id: 'st-img-prev', group: gBild, label: t('studio.workbench.copyPrevious'), icon: Copy, shortcut: 'V',
+          disabled: index === 0 || !samples[index - 1]?.ann.boxes.length, onSelect: copyFromPrevious },
+        { id: 'st-img-paste', group: gBild, label: t('studio.menu.pasteBoxes'), icon: ClipboardPaste, shortcut: '⌘V',
+          disabled: letzteKopie.current.length === 0,
+          onSelect: () => pasteBoxes(letzteKopie.current) },
+        { id: 'st-img-hide', group: gBild,
+          label: boxenAus ? t('studio.menu.showBoxes') : t('studio.menu.hideBoxes'),
+          icon: boxenAus ? Eye : EyeOff, shortcut: 'H', onSelect: () => setBoxenAus(v => !v) },
+        { id: 'st-img-zoom', group: gBild, label: t('studio.menu.resetZoom'), icon: ZoomOut, shortcut: '0',
+          disabled: zoom === 1, onSelect: () => setZoom(1) },
+        { id: 'st-img-remove', group: gBild, label: t('studio.menu.removeImage'), icon: Trash2, danger: true,
+          onSelect: () => setEntfernenScharf(n => n + 1) },
+      );
+    }
+    aktionen.push(
+      { id: 'st-prj-source', group: gProjekt, label: t('studio.menu.getImages'), icon: FolderOpen,
+        disabled: !!importing, onSelect: () => setShowSource(true) },
+      { id: 'st-prj-suggest', group: gProjekt, label: t('studio.menu.suggest'), icon: Wand2,
+        disabled: !!running || total === 0, onSelect: () => setModelRun('suggest') },
+      { id: 'st-prj-review', group: gProjekt, label: t('studio.menu.review'), icon: ShieldQuestion,
+        disabled: !!running || confirmed === 0, onSelect: () => setModelRun('review') },
+      { id: 'st-prj-export', group: gProjekt, label: t('studio.menu.export'), icon: Download,
+        disabled: confirmed === 0, onSelect: () => setShowExport(true) },
+    );
+    return aktionen;
+  });
+
+  // ── Tastatur ────────────────────────────────────────────────────────────
+  // Ein einziger Listener, der immer den Handler des aktuellen Renderdurchgangs
+  // ruft. Vorher wurde der Handler per useEffect neu angemeldet — das laeuft
+  // erst nach dem Zeichnen, und ein Tastendruck direkt danach erreichte noch
+  // den alten Handler, der das gerade geladene Sample nicht kannte.
+  const tastenRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  tastenRef.current = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    if (!current || dialogOffen) return;
+
+    const mod = e.metaKey || e.ctrlKey;
+    const taste = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // Mit ⌘ gelten nur die ausdruecklichen Kuerzel. Alles andere geht an das
+    // System — frueher fing "V" auch ⌘V ab und das Einfuegen eines Bildes
+    // aus der Zwischenablage kam nie an.
+    if (mod) {
+      if (taste === 'z') { e.preventDefault(); undo(); }
+      else if (taste === 'd' && selected >= 0) { e.preventDefault(); duplicateBox(selected); }
+      else if (taste === 'c' && boxes.length > 0 && !window.getSelection()?.toString()) {
+        e.preventDefault(); void copyBoxes(selected);
       }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault(); undo(); return;
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      setSelected(cycleSelection(boxes.length, selected, e.shiftKey ? -1 : 1));
+      return;
+    }
+    // Mit ausgewaehlter Box bewegen die Pfeile die Box; ohne blaettern sie.
+    if (selected >= 0 && e.key.startsWith('Arrow')) {
+      e.preventDefault(); nudgeSelected(e.key, e.shiftKey, e.altKey); return;
+    }
+    if (taste === 'b') { e.preventDefault(); newBoxInCenter(); return; }
+    if (taste === 'h') { e.preventDefault(); setBoxenAus(v => !v); return; }
+    if (taste === 'n') { e.preventDefault(); goToNextOpen(); return; }
+
+    if (e.key >= '1' && e.key <= '9') {
+      const cls = Number(e.key) - 1;
+      if (cls >= classes.length) return;
+      e.preventDefault();
+      setActiveClass(cls);
+      if (selected >= 0) commitBoxes(boxes.map((b, i) => (i === selected ? { ...b, cls } : b)));
+      return;
+    }
+    if (taste === 'v') { e.preventDefault(); copyFromPrevious(); return; }
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(z => Math.min(z * 1.5, 6)); return; }
+    if (e.key === '-') { e.preventDefault(); setZoom(z => Math.max(z / 1.5, 1)); return; }
+    if (e.key === '0') { e.preventDefault(); setZoom(1); return; }
+    if (e.key === 'Enter')  { e.preventDefault(); void confirmAndNext(); return; }
+    if (taste === 's') { e.preventDefault(); void skipAndNext(); return; }
+    if (e.key === 'Escape') { setSelected(-1); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); goTo(index - 1); return; }
+    // Auf Mac schickt die Entf-Taste 'Backspace'. Ist eine Box ausgewaehlt,
+    // ist Loeschen gemeint; sonst der Schritt zurueck.
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault();
+      if (selected >= 0) {
+        commitBoxes(boxes.filter((_, i) => i !== selected));
+        setSelected(-1);
+      } else {
+        goTo(index - 1);
       }
-      if (e.key === 'v' || e.key === 'V') { e.preventDefault(); copyFromPrevious(); return; }
-      if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(z => Math.min(z * 1.5, 6)); return; }
-      if (e.key === '-') { e.preventDefault(); setZoom(z => Math.max(z / 1.5, 1)); return; }
-      if (e.key === '0') { e.preventDefault(); setZoom(1); return; }
-      if (e.key === 'Enter')  { e.preventDefault(); void confirmAndNext(); return; }
-      if (e.key === 's' || e.key === 'S') { e.preventDefault(); void skipAndNext(); return; }
-      if (e.key === 'Escape') { setSelected(-1); return; }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); goTo(index - 1); return; }
-      // Auf Mac schickt die Entf-Taste 'Backspace'. Ist eine Box ausgewaehlt,
-      // ist Loeschen gemeint; sonst der Schritt zurueck.
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        e.preventDefault();
-        if (selected >= 0) {
-          commitBoxes(boxes.filter((_, i) => i !== selected));
-          setSelected(-1);
-        } else {
-          goTo(index - 1);
-        }
-      }
-    };
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => tastenRef.current(e);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, boxes, selected, index, samples, classes.length, showExport, modelRun, importPlan, showSource, videoPath, showFetch]);
+  }, []);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -474,7 +652,12 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     const onPaste = async (e: ClipboardEvent) => {
       const eintrag = Array.from(e.clipboardData?.items ?? [])
         .find(i => i.type.startsWith('image/'));
-      if (!eintrag) return;
+      if (!eintrag) {
+        // Kein Bild, vielleicht Boxen aus ⌘C. Was zuletzt kopiert wurde, gilt.
+        const boxen = boxesFromClipboardText(e.clipboardData?.getData('text/plain'));
+        if (boxen) { e.preventDefault(); pasteBoxesRef.current(boxen); }
+        return;
+      }
       const datei = eintrag.getAsFile();
       if (!datei) return;
       e.preventDefault();
@@ -692,11 +875,22 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     onPointerDown={onPointerDown}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
+                    onContextMenu={e => {
+                      // Die Box unter dem Zeiger wird ausgewaehlt, damit das Menue
+                      // sich auf sie bezieht — wie ein Rechtsklick in jedem Editor.
+                      const el = imgRef.current;
+                      if (!el) return;
+                      const pt = clientToImagePoint(el.getBoundingClientRect(), imgW, imgH, e.clientX, e.clientY);
+                      const i = boxenAus ? -1 : hitTest(boxes, pt.x, pt.y);
+                      rechtsklickBox.current = i;
+                      setSelected(i);
+                    }}
+                    data-studio-canvas=""
                   />
                   {imgW > 0 && imgH > 0 && (
                     <svg viewBox={`0 0 ${imgW} ${imgH}`}
                       className="absolute inset-0 w-full h-full pointer-events-none">
-                      {boxes.map((b, i) => {
+                      {!boxenAus && boxes.map((b, i) => {
                         const color = classColor(classLabel(b.cls, classes), classes);
                         const w = b.x2 - b.x1, h = b.y2 - b.y1;
                         const labelY = b.y1 > fontSize * 1.3 ? b.y1 - fontSize * 0.4 : b.y1 + fontSize;
@@ -733,7 +927,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                       wer die Box anklickt, erwartet hier die Klassen, die links
                       in der Liste stehen. Angesetzt wird in Prozent der
                       Bildmasse, damit es bei jedem Zoom sitzt. */}
-                  {selected >= 0 && boxes[selected] && imgW > 0 && imgH > 0 && classes.length > 0 && (() => {
+                  {!boxenAus && selected >= 0 && boxes[selected] && imgW > 0 && imgH > 0 && classes.length > 0 && (() => {
                     const b = boxes[selected];
                     const untenNah = b.y2 > imgH * 0.78;
                     return (
@@ -778,7 +972,11 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     </span>
                   </div>
                 )}
-                {selected < 0 && boxes.length > 0 && (
+                {boxenAus ? (
+                  <p className="text-amber-300/80 text-[11px] inline-flex items-center gap-1.5">
+                    <EyeOff className="w-3.5 h-3.5" /> {t('studio.keys.boxesHidden', { count: boxes.length })}
+                  </p>
+                ) : selected < 0 && boxes.length > 0 && (
                   <p className="text-gray-600 text-[11px]">{t('studio.workbench.selectHint')}</p>
                 )}
                 {current.status === 'suggested' && (
@@ -812,7 +1010,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     <Undo2 className="w-4 h-4" /> {t('studio.workbench.undo')}
                   </button>
                   <span className="ml-auto" />
-                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} />
+                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} armSignal={entfernenScharf} />
                 </div>
               </>
             )}
@@ -892,7 +1090,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
               </button>
               {showKeys && (
                 <div className="space-y-1 text-[11px] text-gray-400 px-3 pb-3">
-                  {['classes', 'confirm', 'skip', 'back', 'delete', 'undo', 'copy', 'zoom'].map(k => (
+                  {['classes', 'confirm', 'skip', 'nextOpen', 'back', 'newBox', 'cycle', 'nudge', 'resize', 'duplicate', 'clipboard', 'delete', 'undo', 'copy', 'hide', 'zoom', 'menu'].map(k => (
                     <p key={k}>{t(`studio.shortcuts.${k}`)}</p>
                   ))}
                 </div>

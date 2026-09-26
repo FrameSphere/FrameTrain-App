@@ -2484,6 +2484,14 @@
       "deleteSuccess": "Gelöscht",
       "deleteSuccessDetail": "„{name}“ wurde entfernt.",
       "deleteError": "Löschen fehlgeschlagen"
+    },
+    "menu": {
+      "showFiles": "Dateien anzeigen",
+      "split": "Aufteilen …",
+      "halve": "Halbieren …",
+      "revealInFinder": "Im Finder zeigen",
+      "delete": "Löschen …",
+      "build": "Datensatz bauen"
     }
   },
   "datasetFileManager": {
@@ -3200,11 +3208,26 @@
       "classes": "1 bis 9 — Klasse wählen",
       "confirm": "Enter — bestätigen und weiter",
       "skip": "S — überspringen",
-      "back": "Pfeiltasten — blättern",
+      "back": "Pfeiltasten — blättern (ohne ausgewählte Box)",
       "delete": "Entf — ausgewählte Box löschen",
       "undo": "Cmd+Z — Rückgängig",
       "copy": "V — Boxen vom vorigen Bild",
-      "zoom": "+ und − — Zoom, 0 setzt zurück"
+      "zoom": "+ und − — Zoom, 0 setzt zurück",
+      "nextOpen": "N — zum nächsten offenen Sample",
+      "newBox": "B — neue Box in der Mitte",
+      "cycle": "Tab / Shift+Tab — nächste / vorige Box",
+      "nudge": "Pfeiltasten — ausgewählte Box verschieben, mit Shift weiter",
+      "resize": "Alt + Pfeiltasten — Box breiter, schmaler, höher, flacher",
+      "duplicate": "Cmd+D — Box duplizieren",
+      "clipboard": "Cmd+C / Cmd+V — Boxen kopieren und auf einem anderen Bild einfügen",
+      "hide": "H — Boxen aus- und einblenden",
+      "menu": "Rechtsklick — alle Aktionen mit ihren Kürzeln",
+      "editText": "E — Text bearbeiten",
+      "writeTexts": "Cmd+N — Texte selbst schreiben",
+      "generateTexts": "G — Texte erzeugen lassen",
+      "play": "Leertaste — abspielen und anhalten",
+      "seek": "[ und ] — 5 Sekunden zurück und vor",
+      "record": "R — aufnehmen und stoppen"
     },
     "import": {
       "dialogTitle": "Bildordner wählen",
@@ -3482,6 +3505,44 @@
       "fieldLabel": "Text bearbeiten",
       "hint": "Cmd+Enter speichert, Esc bricht ab",
       "errorTitle": "Speichern fehlgeschlagen"
+    },
+    "menu": {
+      "box": "Box",
+      "image": "Bild",
+      "project": "Projekt",
+      "text": "Text",
+      "recording": "Aufnahme",
+      "boxClass": "Klasse",
+      "duplicate": "Duplizieren",
+      "copyBox": "Kopieren",
+      "deleteBox": "Löschen",
+      "confirmNext": "Bestätigen und weiter",
+      "nextOpen": "Nächstes offenes",
+      "newBox": "Neue Box",
+      "pasteBoxes": "Boxen einfügen",
+      "showBoxes": "Boxen einblenden",
+      "hideBoxes": "Boxen ausblenden",
+      "resetZoom": "Zoom zurücksetzen",
+      "removeImage": "Bild entfernen …",
+      "getImages": "Bilder holen …",
+      "suggest": "Vorschlagen …",
+      "review": "Prüfen …",
+      "export": "Exportieren …",
+      "assignClass": "Klasse zuweisen",
+      "removeText": "Text entfernen …",
+      "getTexts": "Texte holen …",
+      "playPause": "Abspielen / Pause",
+      "spaceKey": "Leertaste",
+      "removeRecording": "Aufnahme entfernen …",
+      "startRecording": "Aufnehmen",
+      "stopRecording": "Aufnahme stoppen",
+      "openProject": "Öffnen",
+      "deleteProject": "Löschen …"
+    },
+    "keys": {
+      "copiedTitle": "Boxen kopiert",
+      "copiedDetail": "{count} Box(en) in der Zwischenablage – mit Cmd+V auf einem anderen Bild einfügen.",
+      "boxesHidden": "{count} Boxen ausgeblendet – H blendet sie wieder ein"
     }
   }
 }

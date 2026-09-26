@@ -182,6 +182,30 @@ describe('AudioWorkbench', () => {
     expect(gestartet).toBe(1);
   });
 
+  it('spielt mit der Leertaste ab und haelt wieder an', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    render(<AudioWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+    fireEvent.keyDown(window, { key: ' ' });
+    expect(play).toHaveBeenCalledTimes(1);
+    play.mockRestore();
+    pause.mockRestore();
+  });
+
+  it('startet mit R eine Aufnahme', async () => {
+    let angefragt = 0;
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => { angefragt += 1; return new Promise(() => {}); } },
+    });
+    render(<AudioWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+    fireEvent.keyDown(window, { key: 'r' });
+    expect(angefragt).toBe(1);
+    expect(await screen.findByText('Warte auf Freigabe des Mikrofons…')).toBeInTheDocument();
+  });
+
   it('sagt beim verweigerten Mikrofon, wo man es erlaubt', async () => {
     // Genau hier verliert man sonst eine Stunde: macOS lehnt still ab, und in
     // der App sieht es aus, als waere die Aufnahme kaputt.

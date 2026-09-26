@@ -30,6 +30,7 @@ vi.mock('../../contexts/AISettingsContext', async (importOriginal) => ({
 }));
 
 import TextWorkbench from '../studio/TextWorkbench';
+import { collectContextMenuActions } from '../../ui/contextMenuRegistry';
 
 const TEXTE = [
   {
@@ -301,6 +302,47 @@ describe('TextWorkbench', () => {
     expect(await screen.findByText('Woher kommen die Texte?')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Woher kommen die Texte?')).not.toBeInTheDocument());
+  });
+
+  it('oeffnet mit E das Bearbeiten, mit G den Generator und mit Cmd+N das Schreiben', async () => {
+    render(<TextWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+    fireEvent.keyDown(window, { key: 'e' });
+    expect(await screen.findByLabelText('Text bearbeiten')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+
+    fireEvent.keyDown(window, { key: 'g' });
+    expect(await screen.findByText('Texte erzeugen lassen')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('Texte erzeugen lassen')).not.toBeInTheDocument());
+
+    fireEvent.keyDown(window, { key: 'n', metaKey: true });
+    expect(await screen.findByText('Texte selbst anlegen')).toBeInTheDocument();
+  });
+
+  it('ueberspringt bei Cmd+S nicht', async () => {
+    // Buchstaben-Kuerzel gelten nur ohne ⌘ — ⌘S ist Speichern, nicht Ueberspringen.
+    render(<TextWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await new Promise(r => setTimeout(r, 300));
+    expect(invokeMock.mock.calls.find(c => c[0] === 'studio_set_annotation')).toBeUndefined();
+  });
+
+  it('bietet per Rechtsklick die Klassen und die Projektaktionen an', async () => {
+    render(<TextWorkbench {...props()} />);
+    await screen.findByText('1 / 2');
+    const aktionen = collectContextMenuActions({ target: document.body });
+    const klassen = aktionen.find(a => a.id === 'st-txt-class')!.submenu!;
+    expect(klassen.map(k => [k.label, k.shortcut])).toEqual([['beschwerde', '1'], ['lob', '2']]);
+    expect(aktionen.find(a => a.id === 'st-txt-write')?.shortcut).toBe('⌘N');
+
+    klassen[1].onSelect();
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('studio_set_annotation', expect.objectContaining({
+        sampleId: 's_1', label: 'lob', status: 'confirmed',
+      }));
+    });
   });
 
   it('bestaetigt ein Paar nicht ohne Zieltext', async () => {

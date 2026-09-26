@@ -12,7 +12,7 @@ import {
   Scissors, Layers, FileText, Filter, AlertTriangle, AlertCircle,
   Zap, Heart, Info, Target, Folder, Mic, FolderTree, Hammer,
 } from 'lucide-react';
-import { useContextMenuActions } from '../ui/contextMenuRegistry';
+import { useContextMenuActions, type ContextMenuAction } from '../ui/contextMenuRegistry';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { usePageContext } from '../contexts/PageContext';
@@ -54,6 +54,7 @@ interface DatasetInfo {
   training_count:  number;
   last_used_at:    string | null;
   extensions?:     string[];
+  storage_path?:   string;
   // v2
   dataset_type?:   DatasetType;
   pairing_status?: PairingStatus | null;
@@ -635,20 +636,66 @@ export default function DatasetUpload() {
   };
 
   // ── Rechtsklick-Menü: Dataset-Aktionen ────────────────────────────────────
-  useContextMenuActions(() => [
-    {
-      id: 'ds-import', group: t('sidebar.nav.datasets'),
-      label: t('datasetUpload.emptyState.noDatasets.addButton'), icon: Upload,
-      disabled: !selectedModelId,
-      onSelect: () => setShowImportModal(true),
-    },
-    {
-      id: 'ds-refresh', group: t('sidebar.nav.datasets'),
-      label: t('common.refresh'), icon: RefreshCw,
-      disabled: !selectedModelId,
-      onSelect: () => { void loadDatasets(); },
-    },
-  ]);
+  const modalOffen = !!(showImportModal || deleteTarget || fileManagerDataset || showSplitModal || showHalveModal);
+
+  // Rechtsklick: auf einer Karte dieser Datensatz, danach die Seite.
+  useContextMenuActions(({ target }) => {
+    if (modalOffen) return [];
+    const aktionen: ContextMenuAction[] = [];
+    const id = target?.closest('[data-dataset-id]')?.getAttribute('data-dataset-id');
+    const ds = id ? datasets.find(d => d.id === id) : undefined;
+    if (ds) {
+      aktionen.push(
+        { id: 'ds-card-files', group: ds.name, label: t('datasetUpload.menu.showFiles'), icon: FileText,
+          onSelect: () => setFileManagerDataset(ds) },
+        { id: 'ds-card-split', group: ds.name, label: t('datasetUpload.menu.split'), icon: Scissors,
+          onSelect: () => openSplitModal(ds) },
+        { id: 'ds-card-halve', group: ds.name, label: t('datasetUpload.menu.halve'), icon: Layers,
+          onSelect: () => { setDatasetToHalve(ds); setInheritSplits(true); setShowHalveModal(true); } },
+        { id: 'ds-card-finder', group: ds.name, label: t('datasetUpload.menu.revealInFinder'), icon: FolderOpen,
+          disabled: !ds.storage_path,
+          onSelect: () => { if (ds.storage_path) void invoke('open_path_in_finder', { path: ds.storage_path }).catch(() => {}); } },
+        { id: 'ds-card-delete', group: ds.name, label: t('datasetUpload.menu.delete'), icon: Trash2, danger: true,
+          onSelect: () => setDeleteTarget(ds) },
+      );
+    }
+    aktionen.push(
+      {
+        id: 'ds-import', group: t('sidebar.nav.datasets'),
+        label: t('datasetUpload.emptyState.noDatasets.addButton'), icon: Upload, shortcut: '⌘N',
+        disabled: !selectedModelId,
+        onSelect: () => setShowImportModal(true),
+      },
+      {
+        id: 'ds-build', group: t('sidebar.nav.datasets'),
+        label: t('datasetUpload.menu.build'), icon: Hammer, shortcut: '⌘B',
+        onSelect: () => navigateTo('studio'),
+      },
+      {
+        id: 'ds-refresh', group: t('sidebar.nav.datasets'),
+        label: t('common.refresh'), icon: RefreshCw,
+        disabled: !selectedModelId,
+        onSelect: () => { void loadDatasets(); },
+      },
+    );
+    return aktionen;
+  });
+
+  // ⌘N fuegt einen Datensatz hinzu, ⌘B oeffnet die Werkstatt — die zwei
+  // Wege, auf denen ein Datensatz entsteht.
+  useEffect(() => {
+    if (modalOffen) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'n' && selectedModelId) { e.preventDefault(); setShowImportModal(true); }
+      else if (k === 'b') { e.preventDefault(); navigateTo('studio'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modalOffen, selectedModelId]);
 
   // ── Local Import ──
 
@@ -1462,7 +1509,8 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
   const typeMeta = dataset.dataset_type ? DATASET_TYPE_LABELS[dataset.dataset_type] : null;
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/[0.07] transition-all group flex flex-col gap-4">
+    <div data-dataset-id={dataset.id}
+      className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/[0.07] transition-all group flex flex-col gap-4">
       {/* Top row */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0">

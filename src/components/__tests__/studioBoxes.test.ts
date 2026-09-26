@@ -131,3 +131,48 @@ describe('naechstes offenes Bild', () => {
     expect(nextOpenIndex(['confirmed', 'skipped'], 0)).toBe(-1);
   });
 });
+
+describe('Boxen per Tastatur', () => {
+  it('legt eine neue Box mittig an', async () => {
+    const { boxInDerMitte } = await import('../studio/studioBoxes');
+    expect(boxInDerMitte(2, 400, 200)).toEqual({ cls: 2, x1: 150, y1: 75, x2: 250, y2: 125 });
+  });
+
+  it('aendert die Groesse um die Mitte und bleibt im Bild', async () => {
+    const { resizedBy } = await import('../studio/studioBoxes');
+    const b = { cls: 0, x1: 100, y1: 100, x2: 200, y2: 200 };
+    expect(resizedBy(b, 20, 0, 1000, 1000)).toEqual({ cls: 0, x1: 90, y1: 100, x2: 210, y2: 200 });
+    // Am Rand wird verschoben statt ueberzustehen.
+    const rand = resizedBy({ cls: 0, x1: 0, y1: 0, x2: 100, y2: 100 }, 40, 40, 1000, 1000);
+    expect(rand.x1).toBe(0);
+    expect(rand.x2).toBe(140);
+    // Nie kleiner als die Mindestgroesse, nie groesser als das Bild.
+    expect(resizedBy(b, -500, -500, 1000, 1000).x2 - resizedBy(b, -500, -500, 1000, 1000).x1).toBeGreaterThan(0);
+    expect(resizedBy(b, 5000, 0, 1000, 1000).x2 - resizedBy(b, 5000, 0, 1000, 1000).x1).toBe(1000);
+  });
+
+  it('dupliziert versetzt, am Rand in die andere Richtung', async () => {
+    const { duplicated } = await import('../studio/studioBoxes');
+    const mitte = duplicated({ cls: 1, x1: 100, y1: 100, x2: 200, y2: 200 }, 1000, 1000);
+    expect(mitte.x1).toBe(130);
+    const ecke = duplicated({ cls: 1, x1: 900, y1: 900, x2: 1000, y2: 1000 }, 1000, 1000);
+    expect(ecke.x1).toBe(870);
+  });
+
+  it('wechselt die Auswahl im Kreis', async () => {
+    const { cycleSelection } = await import('../studio/studioBoxes');
+    expect(cycleSelection(3, -1, 1)).toBe(0);
+    expect(cycleSelection(3, 2, 1)).toBe(0);
+    expect(cycleSelection(3, 0, -1)).toBe(2);
+    expect(cycleSelection(0, -1, 1)).toBe(-1);
+  });
+
+  it('bringt Boxen ueber die Zwischenablage und erkennt fremden Text', async () => {
+    const { boxesToClipboardText, boxesFromClipboardText } = await import('../studio/studioBoxes');
+    const boxen = [{ cls: 1, x: 0.5, y: 0.5, w: 0.2, h: 0.3 }];
+    expect(boxesFromClipboardText(boxesToClipboardText(boxen))).toEqual(boxen);
+    expect(boxesFromClipboardText('irgendein Text')).toBeNull();
+    expect(boxesFromClipboardText('{"frametrain-boxes": "kaputt"}')).toBeNull();
+    expect(boxesFromClipboardText(null)).toBeNull();
+  });
+});

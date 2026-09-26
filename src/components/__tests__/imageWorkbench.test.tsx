@@ -68,7 +68,9 @@ describe('hatBilder', () => {
   });
 });
 
-describe('ImageWorkbench', () => {
+// Mehr Zeit je Test: gespeichert wird verzoegert (400 ms), und auf einer
+// ausgelasteten Maschine reichten die 5 Sekunden Standard knapp nicht.
+describe('ImageWorkbench', { timeout: 15000 }, () => {
   beforeEach(() => { invokeMock.mockReset(); mockBackend(); });
 
   it('zeigt die vorhandenen Boxen in der Warteschlange mit Klassennamen', async () => {

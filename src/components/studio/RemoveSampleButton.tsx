@@ -7,16 +7,26 @@
 // danach weg. Der erste Klick macht den Knopf rot, der zweite entfernt, und
 // nach drei Sekunden ohne zweiten Klick ist er wieder harmlos.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
-export default function RemoveSampleButton({ onRemove, disabled }: {
+export default function RemoveSampleButton({ onRemove, disabled, armSignal = 0 }: {
   onRemove: () => void;
   disabled?: boolean;
+  /** Steigt der Wert, wird der Knopf scharf geschaltet — so kann das
+   *  Rechtsklick-Menue "Entfernen …" anbieten, ohne selbst zu loeschen. */
+  armSignal?: number;
 }) {
   const { t } = useLanguage();
   const [sicher, setSicher] = useState(false);
+
+  // Nur auf eine Aenderung reagieren, nicht auf den Startwert: der Knopf wird
+  // je Sample neu erzeugt, und der alte Wert hat mit dem neuen Sample nichts zu tun.
+  const startwert = useRef(armSignal);
+  useEffect(() => {
+    if (armSignal !== startwert.current) setSicher(true);
+  }, [armSignal]);
 
   useEffect(() => {
     if (!sicher) return;

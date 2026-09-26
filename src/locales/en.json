@@ -2484,6 +2484,14 @@
       "deleteSuccess": "Deleted",
       "deleteSuccessDetail": "“{name}” was removed.",
       "deleteError": "Delete Failed"
+    },
+    "menu": {
+      "showFiles": "Show files",
+      "split": "Split …",
+      "halve": "Halve …",
+      "revealInFinder": "Show in Finder",
+      "delete": "Delete …",
+      "build": "Build dataset"
     }
   },
   "datasetFileManager": {
@@ -3200,11 +3208,26 @@
       "classes": "1 to 9 — pick class",
       "confirm": "Enter — confirm and continue",
       "skip": "S — skip",
-      "back": "Arrow keys — page through",
+      "back": "Arrow keys — browse (with no box selected)",
       "delete": "Del — delete selected box",
       "undo": "Cmd+Z — undo",
       "copy": "V — boxes from the previous image",
-      "zoom": "+ and − — zoom, 0 resets"
+      "zoom": "+ and − — zoom, 0 resets",
+      "nextOpen": "N — next open sample",
+      "newBox": "B — new box in the middle",
+      "cycle": "Tab / Shift+Tab — next / previous box",
+      "nudge": "Arrow keys — move the selected box, further with Shift",
+      "resize": "Alt + arrow keys — box wider, narrower, taller, flatter",
+      "duplicate": "Cmd+D — duplicate box",
+      "clipboard": "Cmd+C / Cmd+V — copy boxes and paste them on another image",
+      "hide": "H — hide and show boxes",
+      "menu": "Right-click — every action with its shortcut",
+      "editText": "E — edit text",
+      "writeTexts": "Cmd+N — write texts yourself",
+      "generateTexts": "G — have texts written",
+      "play": "Space — play and pause",
+      "seek": "[ and ] — 5 seconds back and forward",
+      "record": "R — record and stop"
     },
     "import": {
       "dialogTitle": "Choose image folder",
@@ -3482,6 +3505,44 @@
       "fieldLabel": "Edit text",
       "hint": "Cmd+Enter saves, Esc cancels",
       "errorTitle": "Saving failed"
+    },
+    "menu": {
+      "box": "Box",
+      "image": "Image",
+      "project": "Project",
+      "text": "Text",
+      "recording": "Recording",
+      "boxClass": "Class",
+      "duplicate": "Duplicate",
+      "copyBox": "Copy",
+      "deleteBox": "Delete",
+      "confirmNext": "Confirm and next",
+      "nextOpen": "Next open",
+      "newBox": "New box",
+      "pasteBoxes": "Paste boxes",
+      "showBoxes": "Show boxes",
+      "hideBoxes": "Hide boxes",
+      "resetZoom": "Reset zoom",
+      "removeImage": "Remove image …",
+      "getImages": "Get images …",
+      "suggest": "Suggest …",
+      "review": "Check …",
+      "export": "Export …",
+      "assignClass": "Assign class",
+      "removeText": "Remove text …",
+      "getTexts": "Get texts …",
+      "playPause": "Play / pause",
+      "spaceKey": "Space",
+      "removeRecording": "Remove recording …",
+      "startRecording": "Record",
+      "stopRecording": "Stop recording",
+      "openProject": "Open",
+      "deleteProject": "Delete …"
+    },
+    "keys": {
+      "copiedTitle": "Boxes copied",
+      "copiedDetail": "{count} box(es) on the clipboard – paste them on another image with Cmd+V.",
+      "boxesHidden": "{count} boxes hidden – H shows them again"
     }
   }
 }

@@ -134,3 +134,83 @@ export function nextOpenIndex(statuses: string[], from: number): number {
   for (let i = 0; i <= from && i < statuses.length; i++) if (open(statuses[i])) return i;
   return -1;
 }
+
+// ── Boxen per Tastatur ─────────────────────────────────────────────────────
+//
+// Zeichnen geht nur mit der Maus; wer schnell labelt, hat die Hand aber an
+// der Tastatur. Diese Funktionen stehen hinter B (neue Box), den Pfeiltasten
+// (verschieben, mit ⌥ Groesse aendern), ⌘D (duplizieren) und Tab (naechste
+// Box). Alle bleiben im Bild — eine Box ausserhalb waere im Export weg.
+
+/** Neue Box mittig, ein Viertel so gross wie das Bild. */
+export function boxInDerMitte(cls: number, width: number, height: number): PixelBox {
+  const w = width / 4;
+  const h = height / 4;
+  return { cls, x1: (width - w) / 2, y1: (height - h) / 2, x2: (width + w) / 2, y2: (height + h) / 2 };
+}
+
+/**
+ * Groesse um die Mitte aendern. `dw`/`dh` sind Pixel je Seite zusammen;
+ * kleiner als MIN_SIDE wird eine Box nie, groesser als das Bild auch nicht.
+ */
+export function resizedBy(b: PixelBox, dw: number, dh: number, width: number, height: number): PixelBox {
+  const minW = Math.max(1, width * MIN_SIDE * 2);
+  const minH = Math.max(1, height * MIN_SIDE * 2);
+  const w = Math.min(Math.max(b.x2 - b.x1 + dw, minW), width);
+  const h = Math.min(Math.max(b.y2 - b.y1 + dh, minH), height);
+  const cx = (b.x1 + b.x2) / 2;
+  const cy = (b.y1 + b.y2) / 2;
+  const x1 = Math.min(Math.max(cx - w / 2, 0), width - w);
+  const y1 = Math.min(Math.max(cy - h / 2, 0), height - h);
+  return { cls: b.cls, x1, y1, x2: x1 + w, y2: y1 + h };
+}
+
+/** Kopie leicht versetzt, damit man sie sieht und gleich verschieben kann. */
+export function duplicated(b: PixelBox, width: number, height: number): PixelBox {
+  const d = Math.min(width, height) * 0.03;
+  const moved = movedBy(b, d, d, width, height);
+  // Stand die Box schon am Rand, rutscht die Kopie in die andere Richtung.
+  if (moved.x1 === b.x1 && moved.y1 === b.y1) return movedBy(b, -d, -d, width, height);
+  return moved;
+}
+
+/** Naechste (dir=1) oder vorige (dir=-1) Box, im Kreis. Ohne Auswahl die erste bzw. letzte. */
+export function cycleSelection(count: number, selected: number, dir: 1 | -1): number {
+  if (count === 0) return -1;
+  if (selected < 0) return dir === 1 ? 0 : count - 1;
+  return (selected + dir + count) % count;
+}
+
+/** Schrittweite der Pfeiltasten: 1 % der kuerzeren Bildseite, mit ⇧ 5 %. */
+export function nudgeStep(width: number, height: number, weit: boolean): number {
+  return Math.max(1, Math.min(width, height) * (weit ? 0.05 : 0.01));
+}
+
+// ── Boxen ueber die Zwischenablage ─────────────────────────────────────────
+//
+// ⌘C legt die Boxen als Text in die System-Zwischenablage, ⌘V holt sie wieder.
+// Ueber die Systemablage statt einer internen: dann gilt, was zuletzt kopiert
+// wurde — ein danach kopierter Screenshot wird als Bild eingefuegt, nicht
+// von alten Boxen verdrängt. Normalisiert, damit sie auf Bildern anderer
+// Groesse an derselben Stelle landen.
+
+const ABLAGE_KENNUNG = 'frametrain-boxes';
+
+export function boxesToClipboardText(boxes: StudioBox[]): string {
+  return JSON.stringify({ [ABLAGE_KENNUNG]: boxes });
+}
+
+export function boxesFromClipboardText(text: string | null | undefined): StudioBox[] | null {
+  if (!text || !text.includes(ABLAGE_KENNUNG)) return null;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const liste = parsed[ABLAGE_KENNUNG];
+    if (!Array.isArray(liste)) return null;
+    const boxes = liste.filter((b): b is StudioBox =>
+      !!b && typeof b === 'object'
+      && ['cls', 'x', 'y', 'w', 'h'].every(k => typeof (b as Record<string, unknown>)[k] === 'number'));
+    return boxes.length > 0 ? boxes : null;
+  } catch {
+    return null;
+  }
+}

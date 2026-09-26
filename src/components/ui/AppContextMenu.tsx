@@ -36,6 +36,7 @@ interface Row {
   disabled?: boolean;
   danger?: boolean;
   accent?: boolean;
+  shortcut?: string;
   submenu?: Row[];
 }
 
@@ -76,7 +77,7 @@ export default function AppContextMenu() {
       }
       e.preventDefault();
       const selection = window.getSelection()?.toString().trim() ?? '';
-      const pageActions = collectContextMenuActions();
+      const pageActions = collectContextMenuActions({ target });
       setCopied(false);
       setOpenSub(null);
       setMenu({ x: e.clientX, y: e.clientY, selection, pageActions });
@@ -145,19 +146,25 @@ export default function AppContextMenu() {
       ] });
     }
 
-    // 2. Seiten-Aktionen (mit Gruppen-Überschrift der aktuellen Seite)
-    if (menu.pageActions.length > 0) {
-      result.push({
-        heading: menu.pageActions[0].group,
-        rows: menu.pageActions.map((a) => ({
-          id: a.id,
-          label: a.label,
-          icon: a.icon,
-          disabled: a.disabled,
-          onSelect: () => { if (!a.disabled) { a.onSelect(); close(); } },
-        })),
-      });
+    // 2. Seiten-Aktionen — je Gruppe ein Abschnitt mit eigener Ueberschrift,
+    //    in der Reihenfolge, in der die Seite sie liefert (Box, Bild, Projekt).
+    const alsZeile = (a: ContextMenuAction): Row => ({
+      id: a.id,
+      label: a.label,
+      icon: a.icon,
+      disabled: a.disabled,
+      danger: a.danger,
+      shortcut: a.shortcut,
+      submenu: a.submenu?.map(alsZeile),
+      onSelect: () => { if (!a.disabled) { a.onSelect(); close(); } },
+    });
+    const gruppen: { heading?: string; rows: Row[] }[] = [];
+    for (const a of menu.pageActions) {
+      const letzte = gruppen[gruppen.length - 1];
+      if (letzte && letzte.heading === a.group) letzte.rows.push(alsZeile(a));
+      else gruppen.push({ heading: a.group, rows: [alsZeile(a)] });
     }
+    result.push(...gruppen);
 
     // 3. Globale Aktion + Navigation
     result.push({ rows: [
@@ -230,6 +237,9 @@ export default function AppContextMenu() {
               >
                 {row.icon && <row.icon className="w-3.5 h-3.5 flex-shrink-0" />}
                 <span className="flex-1 truncate">{row.label}</span>
+                {row.shortcut && (
+                  <span className="text-[11px] font-mono text-gray-500 flex-shrink-0">{row.shortcut}</span>
+                )}
                 {row.submenu && <ChevronRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
               </button>
 
@@ -242,10 +252,14 @@ export default function AppContextMenu() {
                     <button
                       key={sub.id}
                       onClick={sub.onSelect}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-200 hover:bg-white/10 transition-colors"
+                      disabled={sub.disabled}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors ${sub.disabled ? 'text-gray-600 cursor-default' : 'text-gray-200 hover:bg-white/10'}`}
                     >
                       {sub.icon && <sub.icon className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />}
                       <span className="flex-1 truncate">{sub.label}</span>
+                      {sub.shortcut && (
+                        <span className="text-[11px] font-mono text-gray-500 flex-shrink-0">{sub.shortcut}</span>
+                      )}
                     </button>
                   ))}
                 </div>

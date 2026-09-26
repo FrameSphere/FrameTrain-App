@@ -530,3 +530,40 @@ bestaetigt: Vorschlag bleibt nach dem Lauf auf dem gezeigten Bild und wird
 mit Enter samt Box gespeichert, Zaehler laufen live, Entfernen, Bearbeiten,
 Textexport als `dataset/daten.csv` am Textmodell ohne Warnung, Warten auf
 die Mikrofon-Freigabe wird angezeigt.
+
+---
+
+## 19. Tastatur und Rechtsklick (1.3.2)
+
+Wer schnell labelt, hat die Hand an der Tastatur. Bisher gab es Kuerzel nur
+fuer Klasse, Bestaetigen, Ueberspringen und Blaettern, und das
+Rechtsklick-Menue kannte die Werkstatt gar nicht.
+
+**Bild:** B legt eine Box in der Mitte an, Tab / Shift+Tab waehlt die
+naechste Box, die Pfeile verschieben die ausgewaehlte Box (Shift weiter),
+Alt + Pfeile aendern ihre Groesse, Cmd+D dupliziert, Cmd+C / Cmd+V bringt
+Boxen auf ein anderes Bild, H blendet die Boxen aus, N springt zum
+naechsten offenen Bild. Ohne ausgewaehlte Box blaettern die Pfeile wie
+bisher. Kopiert wird ueber die System-Zwischenablage, damit gilt, was
+zuletzt kopiert wurde — ein danach kopierter Screenshot wird als Bild
+eingefuegt.
+
+**Text:** E bearbeitet, G oeffnet den Generator, Cmd+N das Schreiben.
+**Audio:** Leertaste spielt ab, R nimmt auf, [ und ] springen 5 Sekunden.
+**Listen:** Cmd+N legt ein Projekt bzw. einen Datensatz an, Cmd+B oeffnet
+vom Dataset-Bereich die Werkstatt.
+
+**Rechtsklick:** Das Menue zeigt jetzt je Gruppe einen Abschnitt, das
+Kuerzel rechts neben der Aktion und Untermenues (die Klassen des
+Projekts). Seiten erfahren, worauf geklickt wurde: auf einer Box geht es
+um diese Box, auf einer Projekt- oder Dataset-Karte um dieses Projekt bzw.
+diesen Datensatz (Dateien, Aufteilen, Halbieren, Im Finder zeigen,
+Loeschen). "Entfernen …" im Menue schaltet den Knopf scharf, geloescht wird
+erst mit dem zweiten Klick.
+
+**Nebenbei behoben:** Die Taste V fing auch Cmd+V ab — das Einfuegen eines
+Bildes aus der Zwischenablage kam in der Bild-Werkbank nie an. Buchstaben
+gelten jetzt nur ohne Cmd. Und der Tasten-Handler wurde per useEffect neu
+angemeldet, das laeuft erst nach dem Zeichnen; ein Tastendruck direkt nach
+dem Laden erreichte manchmal noch den alten Handler. Jetzt ruft ein einziger
+Listener immer den aktuellen Handler.

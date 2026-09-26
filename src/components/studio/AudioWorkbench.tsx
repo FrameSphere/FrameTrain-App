@@ -12,7 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
-  Plus, AlertTriangle, ChevronDown, Mic, Square, AudioLines,
+  Plus, AlertTriangle, ChevronDown, Mic, Square, AudioLines, Tag, ListEnd, Trash2, Play,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -25,6 +25,7 @@ import type {
 } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
+import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextMenuRegistry';
 import { useEscape } from './useEscape';
 
 const PAGE = 200;
@@ -74,6 +75,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
   const [seconds, setSeconds] = useState(0);
 
   const recorder = useRef<MediaRecorder | null>(null);
+  const player   = useRef<HTMLAudioElement | null>(null);
   const chunks   = useRef<Blob[]>([]);
   const ticker   = useRef<number | null>(null);
 
@@ -147,6 +149,54 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, project.classes, t]);
+
+  const [entfernenScharf, setEntfernenScharf] = useState(0);
+
+  const goToNextOpen = () => {
+    const next = nextOpenIndex(samples.map(x => x.status), index);
+    if (next >= 0) goTo(next);
+  };
+
+  // ── Rechtsklick-Menue ───────────────────────────────────────────────────
+  useContextMenuActions(() => {
+    if (showExport) return [];
+    const gAufnahme = t('studio.menu.recording');
+    const gProjekt = t('studio.menu.project');
+    const aktionen: ContextMenuAction[] = [];
+    if (current) {
+      aktionen.push({ id: 'st-aud-play', group: gAufnahme, label: t('studio.menu.playPause'), icon: Play,
+        shortcut: t('studio.menu.spaceKey'),
+        onSelect: () => { const a = player.current; if (a) { if (a.paused) void a.play(); else a.pause(); } } });
+      if (!transkript && classes.length > 0) {
+        aktionen.push({
+          id: 'st-aud-class', group: gAufnahme, label: t('studio.menu.assignClass'), icon: Tag, onSelect: () => {},
+          submenu: classes.map((name, i) => ({
+            id: `st-aud-class-${i}`, label: name, shortcut: i < 9 ? String(i + 1) : undefined,
+            onSelect: () => { void assign(name); },
+          })),
+        });
+      }
+      aktionen.push(
+        { id: 'st-aud-skip', group: gAufnahme, label: t('studio.workbench.skip'), icon: SkipForward, shortcut: 'S',
+          onSelect: () => { void skip(); } },
+        { id: 'st-aud-next', group: gAufnahme, label: t('studio.menu.nextOpen'), icon: ListEnd, shortcut: 'N',
+          onSelect: goToNextOpen },
+        { id: 'st-aud-remove', group: gAufnahme, label: t('studio.menu.removeRecording'), icon: Trash2, danger: true,
+          onSelect: () => setEntfernenScharf(n => n + 1) },
+      );
+    }
+    aktionen.push(
+      { id: 'st-aud-record', group: gProjekt,
+        label: recording ? t('studio.menu.stopRecording') : t('studio.menu.startRecording'),
+        icon: recording ? Square : Mic, shortcut: 'R', disabled: wartetAufMikrofon,
+        onSelect: () => { if (recording) stopRecording(); else void startRecording(); } },
+      { id: 'st-aud-folder', group: gProjekt, label: t('studio.audio.importFolder'), icon: FolderOpen,
+        disabled: !!importing || recording, onSelect: () => { void importFolder(); } },
+      { id: 'st-aud-export', group: gProjekt, label: t('studio.menu.export'), icon: Download,
+        disabled: (stats?.confirmed ?? 0) === 0, onSelect: () => setShowExport(true) },
+    );
+    return aktionen;
+  });
 
   // ── Entfernen ───────────────────────────────────────────────────────────
   const removeCurrent = async () => {
@@ -291,38 +341,66 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
   );
 
   // ── Tastatur ────────────────────────────────────────────────────────────
+  // Ein einziger Listener, der immer den Handler des aktuellen Renderdurchgangs
+  // ruft. Vorher wurde der Handler per useEffect neu angemeldet — das laeuft
+  // erst nach dem Zeichnen, und ein Tastendruck direkt danach erreichte noch
+  // den alten Handler, der das gerade geladene Sample nicht kannte.
+  const tastenRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  tastenRef.current = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null;
+    const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    if (showExport) return;
+    if (imFeld) {
+      if (current && transkript && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault(); void confirmTranscript();
+      }
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const taste = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // R geht auch im leeren Projekt — dort faengt man ja mit Aufnehmen an.
+    if (taste === 'r') {
+      e.preventDefault();
+      if (recording) stopRecording(); else void startRecording();
+      return;
+    }
+    if (!current) return;
+    if (e.key === ' ') {
+      // Sonst loest die Leertaste den zuletzt geklickten Knopf noch einmal aus.
+      e.preventDefault();
+      const a = player.current;
+      if (a) { if (a.paused) void a.play(); else a.pause(); }
+      return;
+    }
+    if (e.key === '[' || e.key === ']') {
+      e.preventDefault();
+      const a = player.current;
+      if (a) a.currentTime = Math.max(0, a.currentTime + (e.key === ']' ? 5 : -5));
+      return;
+    }
+    if (taste === 'n') { e.preventDefault(); goToNextOpen(); return; }
+    if (e.key >= '1' && e.key <= '9' && !transkript) {
+      const i = Number(e.key) - 1;
+      if (i >= classes.length) return;
+      e.preventDefault();
+      void assign(classes[i]);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (transkript) void confirmTranscript();
+      else if (current.ann.label) void assign(current.ann.label);
+      return;
+    }
+    if (taste === 's') { e.preventDefault(); void skip(); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); goTo(index - 1); }
+  };
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (!current || showExport) return;
-      if (imFeld) {
-        if (transkript && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault(); void confirmTranscript();
-        }
-        return;
-      }
-      if (e.key >= '1' && e.key <= '9' && !transkript) {
-        const i = Number(e.key) - 1;
-        if (i >= classes.length) return;
-        e.preventDefault();
-        void assign(classes[i]);
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (transkript) void confirmTranscript();
-        else if (current.ann.label) void assign(current.ann.label);
-        return;
-      }
-      if (e.key === 's' || e.key === 'S') { e.preventDefault(); void skip(); return; }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
-      if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); goTo(index - 1); }
-    };
+    const onKey = (e: KeyboardEvent) => tastenRef.current(e);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, samples, classes, transkript, transcript, showExport]);
+  }, []);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -460,7 +538,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
             {current && (
               <>
                 <div className="rounded-lg bg-black/30 border border-white/10 p-4">
-                  <audio key={current.id} controls src={convertFileSrc(current.abs_path)} className="w-full" />
+                  <audio key={current.id} ref={player} controls src={convertFileSrc(current.abs_path)} className="w-full" />
                 </div>
 
                 {transkript ? (
@@ -509,7 +587,7 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
                     <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
                   </button>
                   <span className="ml-auto" />
-                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} />
+                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} armSignal={entfernenScharf} />
                 </div>
               </>
             )}
@@ -575,7 +653,12 @@ export default function AudioWorkbench({ project, onBack, onProjectChanged }: Pr
                 <div className="space-y-1 text-[11px] text-gray-400 px-3 pb-3">
                   <p>{t(transkript ? 'studio.text.shortcutPair' : 'studio.shortcuts.classes')}</p>
                   <p>{t('studio.shortcuts.skip')}</p>
+                  <p>{t('studio.shortcuts.nextOpen')}</p>
                   <p>{t('studio.shortcuts.back')}</p>
+                  <p>{t('studio.shortcuts.play')}</p>
+                  <p>{t('studio.shortcuts.seek')}</p>
+                  <p>{t('studio.shortcuts.record')}</p>
+                  <p>{t('studio.shortcuts.menu')}</p>
                 </div>
               )}
             </div>

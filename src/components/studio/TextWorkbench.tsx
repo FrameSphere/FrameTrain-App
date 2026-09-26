@@ -12,6 +12,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
   Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine, Globe, Sparkles,
+  Tag, ListEnd, Trash2,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -28,6 +29,7 @@ import type {
 } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
+import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextMenuRegistry';
 import { useEscape } from './useEscape';
 
 const PAGE = 200;
@@ -165,6 +167,65 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     }
   };
 
+  const [entfernenScharf, setEntfernenScharf] = useState(0);
+
+  const goToNextOpen = () => {
+    const next = nextOpenIndex(samples.map(x => x.status), index);
+    if (next >= 0) goTo(next);
+  };
+
+  // ── Rechtsklick-Menue ───────────────────────────────────────────────────
+  useContextMenuActions(() => {
+    if (showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate) return [];
+    const gText = t('studio.menu.text');
+    const gProjekt = t('studio.menu.project');
+    const aktionen: ContextMenuAction[] = [];
+    if (current) {
+      if (!paare && classes.length > 0) {
+        aktionen.push({
+          id: 'st-txt-class', group: gText, label: t('studio.menu.assignClass'), icon: Tag, onSelect: () => {},
+          submenu: classes.map((name, i) => ({
+            id: `st-txt-class-${i}`, label: name, shortcut: i < 9 ? String(i + 1) : undefined,
+            onSelect: () => { void assign(name); },
+          })),
+        });
+      }
+      if (paare) {
+        aktionen.push({ id: 'st-txt-confirm', group: gText, label: t('studio.menu.confirmNext'), icon: Check,
+          shortcut: '⌘↵', onSelect: () => { void confirmPair(); } });
+      }
+      aktionen.push(
+        { id: 'st-txt-edit', group: gText, label: t('studio.edit.button'), icon: PenLine, shortcut: 'E',
+          onSelect: () => setEntwurf(current.content ?? '') },
+        { id: 'st-txt-skip', group: gText, label: t('studio.workbench.skip'), icon: SkipForward, shortcut: 'S',
+          onSelect: () => { void skip(); } },
+        { id: 'st-txt-next', group: gText, label: t('studio.menu.nextOpen'), icon: ListEnd, shortcut: 'N',
+          onSelect: goToNextOpen },
+        { id: 'st-txt-remove', group: gText, label: t('studio.menu.removeText'), icon: Trash2, danger: true,
+          onSelect: () => setEntfernenScharf(n => n + 1) },
+      );
+    }
+    aktionen.push(
+      { id: 'st-txt-source', group: gProjekt, label: t('studio.menu.getTexts'), icon: FileText,
+        onSelect: () => setShowSource(true) },
+      { id: 'st-txt-write', group: gProjekt, label: t('studio.text.sourceWrite'), icon: PenLine, shortcut: '⌘N',
+        onSelect: () => setShowWrite(true) },
+      { id: 'st-txt-generate', group: gProjekt, label: t('studio.text.sourceGenerate'), icon: Sparkles, shortcut: 'G',
+        onSelect: () => setShowGenerate(true) },
+    );
+    if (!paare) {
+      aktionen.push(
+        { id: 'st-txt-suggest', group: gProjekt, label: t('studio.menu.suggest'), icon: Wand2,
+          disabled: !!running || total === 0, onSelect: () => setModelRun('suggest') },
+        { id: 'st-txt-review', group: gProjekt, label: t('studio.menu.review'), icon: ShieldQuestion,
+          disabled: !!running || (stats?.confirmed ?? 0) === 0, onSelect: () => setModelRun('review') },
+      );
+    }
+    aktionen.push({ id: 'st-txt-export', group: gProjekt, label: t('studio.menu.export'), icon: Download,
+      disabled: (stats?.confirmed ?? 0) === 0, onSelect: () => setShowExport(true) });
+    return aktionen;
+  });
+
   // ── Entfernen ───────────────────────────────────────────────────────────
   const removeCurrent = async () => {
     if (!current) return;
@@ -217,40 +278,54 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   };
 
   // ── Tastatur ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate || entwurf !== null) return;
+  // Ein einziger Listener, der immer den Handler des aktuellen Renderdurchgangs
+  // ruft. Vorher wurde der Handler per useEffect neu angemeldet — das laeuft
+  // erst nach dem Zeichnen, und ein Tastendruck direkt danach erreichte noch
+  // den alten Handler, der das gerade geladene Sample nicht kannte.
+  const tastenRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  tastenRef.current = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null;
+    const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate || entwurf !== null) return;
 
-      // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
-      if (imFeld) {
-        if (paare && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault(); void confirmPair();
-        }
-        return;
+    // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
+    if (imFeld) {
+      if (paare && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault(); void confirmPair();
       }
-      if (e.key >= '1' && e.key <= '9' && !paare) {
-        const i = Number(e.key) - 1;
-        if (i >= classes.length) return;
-        e.preventDefault();
-        void assign(classes[i]);
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (paare) void confirmPair();
-        else if (current.ann.label) void assign(current.ann.label);
-        return;
-      }
-      if (e.key === 's' || e.key === 'S') { e.preventDefault(); void skip(); return; }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
-      if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); goTo(index - 1); }
-    };
+      return;
+    }
+    const taste = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // Mit ⌘ nur die ausdruecklichen Kuerzel — ⌘S soll nicht ueberspringen.
+    if (e.metaKey || e.ctrlKey) {
+      if (taste === 'n') { e.preventDefault(); setShowWrite(true); }
+      return;
+    }
+    if (taste === 'e') { e.preventDefault(); setEntwurf(current.content ?? ''); return; }
+    if (taste === 'n') { e.preventDefault(); goToNextOpen(); return; }
+    if (taste === 'g') { e.preventDefault(); setShowGenerate(true); return; }
+    if (e.key >= '1' && e.key <= '9' && !paare) {
+      const i = Number(e.key) - 1;
+      if (i >= classes.length) return;
+      e.preventDefault();
+      void assign(classes[i]);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (paare) void confirmPair();
+      else if (current.ann.label) void assign(current.ann.label);
+      return;
+    }
+    if (e.key === 's' || e.key === 'S') { e.preventDefault(); void skip(); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); goTo(index - 1); }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => tastenRef.current(e);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, samples, classes, paare, target, showExport, plan, modelRun, showWrite, showFetch, showSource, showGenerate, entwurf]);
+  }, []);
 
   // ── Import ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -549,7 +624,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                     <SkipForward className="w-4 h-4" /> {t('studio.workbench.skip')}
                   </button>
                   <span className="ml-auto" />
-                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} />
+                  <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} armSignal={entfernenScharf} />
                 </div>
               </>
             )}
@@ -615,7 +690,12 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                 <div className="space-y-1 text-[11px] text-gray-400 px-3 pb-3">
                   <p>{t(paare ? 'studio.text.shortcutPair' : 'studio.shortcuts.classes')}</p>
                   <p>{t('studio.shortcuts.skip')}</p>
+                  <p>{t('studio.shortcuts.nextOpen')}</p>
                   <p>{t('studio.shortcuts.back')}</p>
+                  <p>{t('studio.shortcuts.editText')}</p>
+                  <p>{t('studio.shortcuts.writeTexts')}</p>
+                  <p>{t('studio.shortcuts.generateTexts')}</p>
+                  <p>{t('studio.shortcuts.menu')}</p>
                 </div>
               )}
             </div>

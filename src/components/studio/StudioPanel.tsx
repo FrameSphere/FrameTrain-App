@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X, FileText, AudioLines,
+  ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X, FileText, AudioLines, FolderOpen,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -18,6 +18,7 @@ import TextWorkbench from './TextWorkbench';
 import AudioWorkbench from './AudioWorkbench';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
+import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextMenuRegistry';
 import { useEscape } from './useEscape';
 
 /// Was auf der Projektkarte steht, haengt an Modalitaet und Aufgabe.
@@ -66,6 +67,39 @@ export default function StudioPanel() {
   useEffect(() => { void load(); }, [load]);
 
   const openProject = projects.find(p => p.id === openId) ?? null;
+  const listeAktiv = !openProject && !showCreate && !confirmDelete;
+
+  // ⌘N legt ein neues Projekt an — solange die Liste zu sehen ist. In einer
+  // Werkbank gehoert ⌘N der Werkbank (Texte schreiben).
+  useEffect(() => {
+    if (!listeAktiv) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); setShowCreate(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [listeAktiv]);
+
+  // Rechtsklick: auf einer Karte das Projekt, sonst die Liste.
+  useContextMenuActions(({ target }) => {
+    if (!listeAktiv) return [];
+    const aktionen: ContextMenuAction[] = [];
+    const id = target?.closest('[data-studio-project]')?.getAttribute('data-studio-project');
+    const p = id ? projects.find(x => x.id === id) : undefined;
+    if (p) {
+      aktionen.push(
+        { id: 'st-list-open', group: p.name, label: t('studio.menu.openProject'), icon: FolderOpen,
+          onSelect: () => setOpenId(p.id) },
+        { id: 'st-list-delete', group: p.name, label: t('studio.menu.deleteProject'), icon: Trash2, danger: true,
+          onSelect: () => setConfirmDelete(p) },
+      );
+    }
+    aktionen.push({ id: 'st-list-new', group: t('studio.title'), label: t('studio.projects.newButton'), icon: Plus,
+      shortcut: '⌘N', onSelect: () => setShowCreate(true) });
+    return aktionen;
+  });
 
   if (openProject) {
     // Die Werkbank richtet sich nach der Modalitaet des Projekts. Fehlt diese
@@ -133,6 +167,7 @@ export default function StudioPanel() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {projects.map(p => (
             <div key={p.id}
+              data-studio-project={p.id}
               className="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition-all overflow-hidden">
               <button onClick={() => setOpenId(p.id)} className="w-full text-left p-5">
                 <div className="flex items-start gap-3">

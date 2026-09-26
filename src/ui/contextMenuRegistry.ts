@@ -16,18 +16,32 @@ export interface ContextMenuAction {
   group?: string;
   icon?: LucideIcon;
   disabled?: boolean;
+  /** Rot hervorgehoben — fuer Loeschen und Entfernen. */
+  danger?: boolean;
+  /** Tastenkuerzel, rechts in der Zeile angezeigt (z. B. "⌘D"). Nur Anzeige —
+   *  ausgefuehrt wird es von der Seite selbst. So lernt man die Kuerzel beim
+   *  Klicken, statt sie in einer Hilfe nachlesen zu muessen. */
+  shortcut?: string;
+  /** Untermenue, etwa die Klassen eines Projekts. */
+  submenu?: ContextMenuAction[];
   onSelect: () => void;
 }
 
-type Provider = () => ContextMenuAction[];
+/** Worauf rechts geklickt wurde — damit eine Seite passende Aktionen zeigt
+ *  (die Box unter dem Zeiger, die Karte eines Datensatzes). */
+export interface ContextMenuContext {
+  target: HTMLElement | null;
+}
+
+type Provider = (ctx: ContextMenuContext) => ContextMenuAction[];
 
 const providers = new Set<Provider>();
 
 /** Sammelt alle Aktionen der aktuell gemounteten Seiten ein. */
-export function collectContextMenuActions(): ContextMenuAction[] {
+export function collectContextMenuActions(ctx: ContextMenuContext = { target: null }): ContextMenuAction[] {
   const out: ContextMenuAction[] = [];
   providers.forEach((p) => {
-    try { out.push(...p()); } catch { /* defekter Provider blockiert das Menü nicht */ }
+    try { out.push(...p(ctx)); } catch { /* defekter Provider blockiert das Menü nicht */ }
   });
   return out;
 }
@@ -41,7 +55,7 @@ export function useContextMenuActions(factory: Provider): void {
   const ref = useRef(factory);
   ref.current = factory;
   useEffect(() => {
-    const provider: Provider = () => ref.current();
+    const provider: Provider = (ctx) => ref.current(ctx);
     providers.add(provider);
     return () => { providers.delete(provider); };
   }, []);

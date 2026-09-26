@@ -5,7 +5,7 @@
 // Nichts schlaegt fehl, nichts steht im Log — es ist einfach die falsche Seite.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const invokeMock = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
@@ -19,6 +19,7 @@ vi.mock('../../contexts/NotificationContext', () => ({
 }));
 
 import StudioPanel from '../studio/StudioPanel';
+import { collectContextMenuActions } from '../../ui/contextMenuRegistry';
 
 const PROJEKTE = [
   { id: 'sp_img', name: 'Ski-Bilder', modality: 'image', task: 'bbox',
@@ -82,6 +83,19 @@ describe('StudioPanel', () => {
     expect(screen.getByText('2 Paare · 1 bestätigt')).toBeInTheDocument();
     expect(screen.getByLabelText('audio')).toBeInTheDocument();
     expect(screen.getAllByLabelText('image')).toHaveLength(1);
+  });
+
+  it('legt mit Cmd+N ein Projekt an und bietet auf einer Karte Oeffnen und Loeschen', async () => {
+    render(<StudioPanel />);
+    const titel = await screen.findByText('Rückmeldungen');
+    const aktionen = collectContextMenuActions({ target: titel as HTMLElement });
+    expect(aktionen.map(a => a.id)).toEqual(['st-list-open', 'st-list-delete', 'st-list-new']);
+    expect(aktionen[0].group).toBe('Rückmeldungen');
+
+    const vorher = screen.getAllByText('Neues Projekt').length;
+    fireEvent.keyDown(window, { key: 'n', metaKey: true });
+    // Der Dialog traegt denselben Titel wie der Knopf — er kommt dazu.
+    await waitFor(() => expect(screen.getAllByText('Neues Projekt').length).toBe(vorher + 1));
   });
 
   it('oeffnet ein Paar-Projekt ebenfalls in der Text-Werkbank', async () => {
