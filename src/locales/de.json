@@ -2770,7 +2770,8 @@
       "correctionLabelPlaceholder": "Richtige Klasse",
       "correctionTextPlaceholder": "Der Text, wie er hätte sein müssen",
       "correctionDiscard": "Verwerfen",
-      "correctionKeep": "Übernehmen"
+      "correctionKeep": "Übernehmen",
+      "vlmQuestionPlaceholder": "Frage zum Bild (leer = Standardprompt aus dem Training)"
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -3179,7 +3180,15 @@
       "embeddingLabel": "Satz oder Satzpaar",
       "embeddingPlaceholder": "Ein Satz – die ähnlichsten Texte kommen aus dem unten gewählten Dataset. Oder zwei Sätze vergleichen: Satz A ||| Satz B",
       "embeddingResult": "Ergebnis (Kosinus-Ähnlichkeit)",
-      "metrics": "Kennzahlen"
+      "metrics": "Kennzahlen",
+      "t2iLabel": "Prompt",
+      "t2iPlaceholder": "Beschreibung des Bildes, z.B. a photo of sks dog on the beach",
+      "t2iResult": "Erzeugtes Bild",
+      "vlmImageLabel": "Bild",
+      "vlmImagePlaceholder": "Vollständiger Pfad zu einem Bild, z.B. /Users/du/bilder/rechnung.png",
+      "vlmQuestionLabel": "Frage zum Bild (optional)",
+      "vlmQuestionPlaceholder": "z.B. Welche Farbe hat die Form? Leer = Standardprompt aus dem Training",
+      "vlmResult": "Antwort des Modells"
     }
   },
   "studio": {

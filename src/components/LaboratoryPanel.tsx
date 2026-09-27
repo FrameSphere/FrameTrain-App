@@ -1010,6 +1010,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const [serverVersionId, setServerVersionId] = useState<string | null>(null);
   const [serverInputKind, setServerInputKind] = useState<LabInputKind | null>(null);
   const [serverModality,  setServerModality]  = useState<string | null>(null);
+  // Frage zum Bild fuer VLMs. Ohne Frage nimmt der Server den Standardprompt
+  // aus dem Training — der Dateiname des Samples waere keine sinnvolle Frage.
+  const [labQuestion, setLabQuestion] = useState('');
   const serverStatusRef = useRef<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   // Samples
@@ -1708,6 +1711,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
         }>('lab_infer_sample', {
           text: currentSample.text,
           filePath: currentSample.fileKind ? currentSample.filePath ?? null : null,
+          question: labQuestion.trim() || null,
         });
 
         setTestResult({
@@ -1755,7 +1759,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       setTestError(String(e));
       setTesting(false);
     }
-  }, [currentSample, selectedVersionId, engineMode, devScript, modelPath, dsRefs, testing, t]);
+  }, [currentSample, selectedVersionId, engineMode, devScript, modelPath, dsRefs, testing, t, labQuestion]);
 
   // ── Rate Sample ──────────────────────────────────────────────────────────
 
@@ -2315,6 +2319,16 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     </details>
                   )}
 
+                  {serverModality === 'vlm' && engineMode === 'engine' && (
+                    <input
+                      value={labQuestion}
+                      onChange={e => setLabQuestion(e.target.value)}
+                      placeholder={t('laboratoryPanel.testing.vlmQuestionPlaceholder')}
+                      aria-label={t('laboratoryPanel.testing.vlmQuestionPlaceholder')}
+                      className="w-full px-3 py-2 bg-slate-900/60 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-pink-500/50"
+                    />
+                  )}
+
                   {/* Test-Button */}
                   {!alreadyRated ? (
                     <button onClick={handleRunTest} disabled={testing}
@@ -2368,6 +2382,15 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {/* Result */}
                   {testResult && !testing && (
                     <>
+                      {/* Text-to-Image: das Ergebnis ist der Pfad des erzeugten Bildes */}
+                      {serverModality === 'text_to_image' && testResult.predicted && testResult.predicted !== '?' && (
+                        <img
+                          src={convertFileSrc(testResult.predicted)}
+                          alt={currentSample?.text ?? ''}
+                          className="w-full max-h-80 object-contain rounded-xl border border-white/10 bg-black/20"
+                        />
+                      )}
+
                       {/* Hauptklasse */}
                       <div className="px-4 py-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
                         <span className="text-amber-300 text-lg font-bold">{testResult.predicted}</span>

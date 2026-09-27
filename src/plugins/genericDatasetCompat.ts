@@ -39,6 +39,10 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: ['.jsonl', '.json', '.parquet', ...CONLL_EXTS], missing: 'Keine Token-Daten gefunden (JSONL/Parquet mit tokens + ner_tags oder CoNLL-Text .conll/.iob/.txt).' };
     case 'sentence_embedding':
       return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) mit Satzpaaren gefunden.' };
+    case 'text_to_image_lora':
+      return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'Keine Bilddateien gefunden — für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).' };
+    case 'vision_language':
+      return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'Keine Bilddateien gefunden — ein VLM lernt aus Bild + Frage + Antwort.' };
     case 'seq2seq':
     case 'seq_classification':
       return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.' };

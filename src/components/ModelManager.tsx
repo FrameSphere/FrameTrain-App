@@ -106,7 +106,6 @@ function formatDownloads(n: number | undefined): string {
  * Textgenerierung (Decoder-LLMs) trainiert seit dem causal-lm-Plugin ebenfalls.
  */
 const UNSUPPORTED_PIPELINE_TAGS: Record<string, string> = {
-  'text-to-image': 'Bildgenerierung',
   'text-to-speech': 'Sprachsynthese',
   'text-to-audio': 'Audiogenerierung',
   'image-to-image': 'Bild-zu-Bild',
@@ -115,7 +114,11 @@ const UNSUPPORTED_PIPELINE_TAGS: Record<string, string> = {
 };
 
 /** Aufgabenarten, die ein Plugin auch ohne bekannten Modellnamen trainiert. */
-const SUPPORTED_PIPELINE_TAGS = new Set(['text-generation', 'conversational']);
+const SUPPORTED_PIPELINE_TAGS = new Set([
+  'text-generation', 'conversational',
+  // Diffusion-LoRA (text_to_image_lora) und Vision-Language-Modelle
+  'text-to-image', 'image-text-to-text', 'image-to-text', 'visual-question-answering',
+]);
 
 /** Prüft ein HF-Suchergebnis, bevor irgendetwas heruntergeladen wird. */
 export function checkHfModelSupport(
@@ -138,7 +141,7 @@ export function checkHfModelSupport(
       supported: false,
       // Der Satz nannte frueher nur Sequenzklassifikation. Seit 1.2.17 kommen
       // Bild, Audio und Seq2Seq dazu — die alte Formulierung log den Nutzer an.
-      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), NER/Token-Klassifikation, Sentence Embeddings, Bild-, Audio- und Videoklassifikation, Seq2Seq (T5/BART) Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi) sowie YOLO-Objekterkennung.`,
+      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), NER/Token-Klassifikation, Sentence Embeddings, Bild-, Audio- und Videoklassifikation, Seq2Seq (T5/BART) Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi), Stable-Diffusion-LoRA, Vision-Language-Modelle sowie YOLO-Objekterkennung.`,
     };
   }
   return { supported: false, reason: (result as { supported: false; reason: string }).reason };

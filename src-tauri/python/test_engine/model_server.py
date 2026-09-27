@@ -6,13 +6,14 @@ Bleibt als Hintergrundprozess am Leben und beantwortet Inferenz-Anfragen
 via stdin/stdout JSON-Protokoll.
 
 Protokoll:
-  Rust -> Python (stdin):   {"text": "..."}\n                (Text / Seq2Seq / Token / Embedding)
+  Rust -> Python (stdin):   {"text": "..."}\n                (Text / Seq2Seq / LLM / Token / Embedding / Text-to-Image)
                             {"file_path": "/pfad/bild.png"}\n (Bild / Audio / ASR)
                             {"file_path": "/v.mp4", "start": 2.0, "end": 6.0}\n (Video)
+                            {"file_path": "/bild.png", "question": "..."}\n (VLM)
   Python -> Rust (stdout):  {"predicted": "...", "confidence": 0.95, ...}\n
 
 Startup:
-  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video|token|embedding",
+  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video|causal_lm|token|embedding|vlm|text_to_image",
                     "input_kind": "text|image|audio"}\n
   Python -> Rust:  {"type": "error", "message": "..."}\n  (bei Fehler)
 """
@@ -22,6 +23,9 @@ import json
 import sys
 import time
 from pathlib import Path
+
+# ft_data (gemeinsame Helfer fuer Video, VLM, Diffusion) liegt eine Ebene hoeher.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Unbuffered line-by-line stdout (kritisch fuer IPC) + UTF-8 erzwingen.
 # Auf Windows ist stdout/stderr per Default cp1252 (charmap); ein Emoji oder
@@ -67,14 +71,19 @@ ASR_MODEL_TYPES = {"whisper", "speech_to_text", "speech-encoder-decoder", "moons
 def detect_modality(model_cfg: dict) -> str:
     """Bestimmt aus config.json, welche Auto-Klasse und welche Eingabe passt.
 
-    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video" | "causal_lm" | "token"
+    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video" | "causal_lm" | "token" | "vlm"
     ("embedding" erkennt detect_modality_for_dir an modules.json — die
-    config.json eines Sentence-Transformers sagt nur "BertModel".)
+    config.json eines Sentence-Transformers sagt nur "BertModel". "text_to_image"
+    erkennt is_diffusion_model an model_index.json.)
     """
     archs = [a for a in (model_cfg.get("architectures") or []) if isinstance(a, str)]
     arch = archs[0] if archs else ""
     model_type = str(model_cfg.get("model_type", "")).lower()
 
+    # Vor dem ForConditionalGeneration-Zweig: SmolVLM, BLIP & Co. melden sich
+    # genauso wie T5 und wurden sonst als Text-Seq2Seq ohne Bild geladen.
+    if model_type not in ASR_MODEL_TYPES and _is_vlm_config(model_cfg):
+        return "vlm"
     if arch.endswith("ForImageClassification"):
         return "image"
     if arch.endswith("ForAudioClassification") or arch.endswith("ForAudioFrameClassification"):
@@ -124,6 +133,20 @@ def detect_modality_for_dir(model_path: Path, model_cfg: dict) -> str:
     if (model_path / "modules.json").exists() or (model_path / "sentence_bert_config.json").exists():
         return "embedding"
     return detect_modality(model_cfg)
+def _is_vlm_config(model_cfg: dict) -> bool:
+    try:
+        from ft_data.vlm import is_vlm_config
+    except ImportError:
+        return False
+    return is_vlm_config(model_cfg)
+
+
+def is_diffusion_model(model_path: Path) -> bool:
+    """Diffusers-Pipeline (model_index.json) oder LoRA-Export von text_to_image_lora."""
+    p = Path(model_path)
+    if (p / "config.json").exists():
+        return False
+    return (p / "model_index.json").exists() or (p / "text_to_image_lora.json").exists()
 
 
 # Wie im Audio-Test-Plugin: laengere Aufnahmen werden gekappt
@@ -139,6 +162,11 @@ INPUT_KIND = {
     "video":   "video",
     "token":   "text",
     "embedding": "text",
+    # VLM: Bild plus optionale Frage ("question"/"text"); ohne Frage gilt der
+    # Standardprompt aus dem Training.
+    "vlm":     "image",
+    # Prompt rein, Pfad des erzeugten PNG raus.
+    "text_to_image": "text",
 }
 
 
@@ -169,12 +197,6 @@ class ModelServer:
         self._torch = torch
         self._np    = np
 
-        model_cfg = self._read_config()
-
-        self.id2label = self._load_labels(model_cfg)
-
-        self.modality = detect_modality_for_dir(self.model_path, model_cfg)
-
         # Geraet waehlen (CUDA > MPS > CPU)
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -183,6 +205,19 @@ class ModelServer:
         else:
             self.device = torch.device("cpu")
 
+        # Diffusion-Pipelines haben keine config.json im Wurzelordner, sondern
+        # model_index.json + Unterordner — sie laufen ganz ueber ft_data.diffusion.
+        if is_diffusion_model(self.model_path):
+            self.modality = "text_to_image"
+            self._load_text_to_image()
+            return
+
+        model_cfg = self._read_config()
+
+        self.id2label = self._load_labels(model_cfg)
+
+        self.modality = detect_modality_for_dir(self.model_path, model_cfg)
+
         loader = {
             "image":   self._load_image,
             "audio":   self._load_audio,
@@ -190,6 +225,7 @@ class ModelServer:
             "video":   self._load_video,
             "token":   self._load_token,
             "embedding": self._load_embedding,
+            "vlm":     self._load_vlm,
             "seq2seq": self._load_seq2seq,
             "causal_lm": self._load_causal_lm,
             "text":    self._load_text,
@@ -354,6 +390,17 @@ class ModelServer:
         if root not in sys.path:
             sys.path.insert(0, root)
         return importlib.import_module(f"ft_data.{name}")
+    def _load_vlm(self):
+        from ft_data.vlm import load_model
+        self.model, self.processor, self.vlm_family, self.vlm_info = load_model(self.model_path, self.device)
+
+    def _load_text_to_image(self):
+        from ft_data.diffusion import default_size, load_pipeline
+        self.pipe, self.t2i_info = load_pipeline(self.model_path, self.device)
+        self.t2i_size = default_size(self.pipe, self.t2i_info)
+        # Erzeugte Bilder liegen beim Modell, damit das Labor sie spaeter noch findet.
+        self.t2i_out = self.model_path / "generated"
+        self.model = self.pipe.unet
 
     def _load_audio(self):
         from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
@@ -368,6 +415,13 @@ class ModelServer:
     # ── Inferenz ─────────────────────────────────────────────────────────
 
     def infer(self, req: dict) -> dict:
+        if self.modality == "vlm":
+            return self._infer_vlm(self._require_file(req, "Bild"), req)
+        if self.modality == "text_to_image":
+            if not str(req.get("text") or "").strip():
+                raise ValueError("Dieses Modell erzeugt Bilder aus einem Prompt — bitte einen Text eingeben "
+                                 "oder Text-Samples (Captions) laden.")
+            return self._infer_text_to_image(self._require_text(req), req)
         if self.modality == "image":
             return self._infer_image(self._require_file(req, "Bild"))
         if self.modality == "audio":
@@ -536,6 +590,33 @@ class ModelServer:
             "norm": norm,
             "inference_time": time.time() - t0,
         }
+    def _infer_vlm(self, path: Path, req: dict) -> dict:
+        from PIL import Image
+        from ft_data.vlm import DEFAULT_PROMPT, generate
+        question = str(req.get("question") or req.get("prompt") or "").strip()
+        if not question:
+            question = str(self.vlm_info.get("default_prompt", DEFAULT_PROMPT) or "")
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+        t0 = time.time()
+        max_new = int(req.get("max_new_tokens") or self.vlm_info.get("max_new_tokens") or 64)
+        answer = generate(self.model, self.processor, self.vlm_family, [img], [question], max_new)[0]
+        # Freier Text: keine Konfidenz (wie Seq2Seq).
+        return {"predicted": answer, "question": question, "inference_time": time.time() - t0}
+
+    def _infer_text_to_image(self, prompt: str, req: dict) -> dict:
+        from ft_data.diffusion import generate_image, safe_filename
+        t0 = time.time()
+        seed = int(req.get("seed", 42))
+        img = generate_image(
+            self.pipe, prompt, steps=int(req.get("num_inference_steps") or 25),
+            guidance=float(req.get("guidance_scale") or 7.5), seed=seed,
+            negative_prompt=str(req.get("negative_prompt") or ""), size=self.t2i_size)
+        self.t2i_out.mkdir(parents=True, exist_ok=True)
+        path = self.t2i_out / f"{time.strftime('%Y%m%d_%H%M%S')}_{safe_filename(prompt)}_{seed}.png"
+        img.save(path)
+        return {"predicted": str(path), "image_path": str(path), "output_kind": "image",
+                "inference_time": time.time() - t0}
 
     def _read_audio(self, path: Path, cap: bool = True):
         """Laedt eine Audiodatei als Mono-Wellenform in der Modell-Samplerate.

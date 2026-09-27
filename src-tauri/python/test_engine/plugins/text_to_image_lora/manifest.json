@@ -1,0 +1,10 @@
+{
+  "task_type": "text_to_image_lora",
+  "name": "Text-to-Image (Stable Diffusion + LoRA)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Erzeugt Bilder aus Prompts mit einem LoRA-trainierten Stable-Diffusion-Modell.",
+  "input_type": "text",
+  "output_format": "image"
+}

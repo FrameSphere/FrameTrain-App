@@ -1,0 +1,10 @@
+{
+  "task_type": "vision_language",
+  "name": "Vision-Language (VLM)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz fuer Bild-Text-Modelle: Bild + Frage -> Antwort, Bildbeschreibung.",
+  "input_type": "image",
+  "output_format": "text"
+}

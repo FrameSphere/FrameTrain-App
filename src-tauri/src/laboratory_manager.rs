@@ -444,12 +444,26 @@ pub async fn lab_start_model_server(
     Ok(())
 }
 
+/// Wartezeit auf eine Antwort des Modell-Servers je Modalitaet.
+fn infer_timeout_secs(modality: &str) -> u64 {
+    match modality {
+        "text_to_image" => 600,
+        "vlm" => 120,
+        // Ein LLM schreibt Token fuer Token — 256 Tokens eines 7B-Modells
+        // brauchen auf dem Mac leicht ueber 30 s.
+        "causal_lm" => 180,
+        _ => 30,
+    }
+}
+
 /// Fuehrt Inferenz auf einem einzelnen Sample durch (Text oder Datei).
 /// Schnell (~50ms) weil das Modell bereits geladen ist.
 #[tauri::command]
 pub fn lab_infer_sample(
     text: String,
     file_path: Option<String>,
+    // Frage zum Bild (VLM). Andere Modelle ignorieren das Feld.
+    question: Option<String>,
     state: tauri::State<'_, Arc<Mutex<LabState>>>,
 ) -> Result<InferResult, String> {
     let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
@@ -471,7 +485,11 @@ pub fn lab_infer_sample(
                 "Dieses Modell erwartet eine {}-Datei. Lade im Labor {}-Samples aus einem Dataset.",
                 kind, kind
             ))?;
-            serde_json::json!({ "file_path": path }).to_string()
+            let q = question.as_deref().map(str::trim).filter(|q| !q.is_empty());
+            match q {
+                Some(q) if server.modality == "vlm" => serde_json::json!({ "file_path": path, "question": q }).to_string(),
+                _ => serde_json::json!({ "file_path": path }).to_string(),
+            }
         } else if !server.is_canvas && file.is_some() {
             return Err(format!(
                 "Dieses Modell erwartet {}, es wurde aber eine Datei ausgewählt.                  Passt das Dataset zum Modell?",
@@ -495,10 +513,9 @@ pub fn lab_infer_sample(
         writeln!(server.stdin, "{}", req).map_err(|e| format!("Schreibfehler: {}", e))?;
         server.stdin.flush().map_err(|e| format!("Flush-Fehler: {}", e))?;
 
-        // Auf Antwort warten. Ein LLM schreibt Token fuer Token — 256 Tokens
-        // eines 7B-Modells brauchen auf dem Mac leicht ueber 30 s.
-        let warten = if server.modality == "causal_lm" { 180 } else { 30 };
-        server.receiver.recv_timeout(Duration::from_secs(warten))
+        // Auf Antwort warten. Bilderzeugung braucht je nach Modell und Geraet
+        // deutlich laenger als eine Klassifikation (SD 1.5 auf der CPU: Minuten).
+        server.receiver.recv_timeout(Duration::from_secs(infer_timeout_secs(&server.modality)))
     }; // server-Borrow endet hier
 
     match recv_result {
@@ -971,5 +988,19 @@ mod export_tests {
         };
         let items = vec![item(&["Sky", "Tree"]), item(&["Tree", "Person"])];
         assert_eq!(collect_class_names(&items), vec!["Sky", "Tree", "Person"]);
+    }
+}
+
+
+#[cfg(test)]
+mod infer_timeout_tests {
+    use super::infer_timeout_secs;
+
+    #[test]
+    fn bilderzeugung_bekommt_mehr_zeit_als_klassifikation() {
+        assert_eq!(infer_timeout_secs("text"), 30);
+        assert_eq!(infer_timeout_secs("image"), 30);
+        assert!(infer_timeout_secs("text_to_image") >= 300);
+        assert!(infer_timeout_secs("vlm") > 30);
     }
 }

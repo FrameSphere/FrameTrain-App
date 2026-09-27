@@ -1,0 +1,11 @@
+{
+  "task_type": "vision_language",
+  "name": "Vision-Language (VLM, LoRA)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Feintuning von Bild-Text-Modellen mit LoRA: Bild + Frage -> Antwort, Bildbeschreibung, OCR-artige Aufgaben. SmolVLM, Qwen2-VL, PaliGemma, LLaVA, BLIP.",
+  "supported_architectures": ["idefics3", "smolvlm", "qwen2_vl", "qwen2_5_vl", "paligemma", "llava", "blip", "florence2"],
+  "dataset_formats": ["jsonl_image_question_answer", "jsonl_messages", "image_caption_txt", "folder_class"],
+  "metrics": ["train_loss", "val_loss", "exact_match", "rougeL"]
+}

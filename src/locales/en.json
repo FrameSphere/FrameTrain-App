@@ -2770,7 +2770,8 @@
       "correctionLabelPlaceholder": "Correct class",
       "correctionTextPlaceholder": "The text as it should have been",
       "correctionDiscard": "Discard",
-      "correctionKeep": "Keep"
+      "correctionKeep": "Keep",
+      "vlmQuestionPlaceholder": "Question about the image (empty = default prompt from training)"
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -3179,7 +3180,15 @@
       "embeddingLabel": "Sentence or sentence pair",
       "embeddingPlaceholder": "One sentence – the most similar texts come from the dataset selected below. Or compare two sentences: Sentence A ||| Sentence B",
       "embeddingResult": "Result (cosine similarity)",
-      "metrics": "Metrics"
+      "metrics": "Metrics",
+      "t2iLabel": "Prompt",
+      "t2iPlaceholder": "Describe the image, e.g. a photo of sks dog on the beach",
+      "t2iResult": "Generated image",
+      "vlmImageLabel": "Image",
+      "vlmImagePlaceholder": "Full path to an image, e.g. /Users/you/pictures/invoice.png",
+      "vlmQuestionLabel": "Question about the image (optional)",
+      "vlmQuestionPlaceholder": "e.g. What colour is the shape? Empty = default prompt from training",
+      "vlmResult": "Model answer"
     }
   },
   "studio": {

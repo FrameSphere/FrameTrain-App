@@ -85,8 +85,8 @@ describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
     expect(pluginOf('openai/clip-vit-base-patch32')).toBeNull();
   });
 
-  it('BLIP wird abgelehnt', () => {
-    expect(pluginOf('Salesforce/blip-image-captioning-base')).toBeNull();
+  it('BLIP-Captioning gehoert seit dem VLM-Plugin zu vision-language, nicht zur Bildklassifikation', () => {
+    expect(pluginOf('Salesforce/blip-image-captioning-base')).toBe('vision-language');
   });
 
   it('config.json schlaegt den Namen', () => {
