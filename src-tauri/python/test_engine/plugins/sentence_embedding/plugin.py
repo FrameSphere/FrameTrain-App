@@ -46,7 +46,8 @@ class Plugin:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
-            raise ImportError("sentence-transformers fehlt. Installiere: pip install sentence-transformers")
+            from ft_data.deps import missing
+            raise missing("sentence-transformers", what="Der Embedding-Test")
         model_path = Path(self.config.model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Modellpfad existiert nicht: {model_path}")

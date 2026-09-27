@@ -45,7 +45,7 @@ def main() -> int:
     except ImportError:
         emit({"type": "error", "message":
               "OpenCV fehlt. Es wird mit dem YOLO-Plugin installiert "
-              "(Einstellungen > Plugins) oder mit: pip install opencv-python"})
+              "(Einstellungen → Python-Pakete → „HuggingFace-Stack“) oder im Terminal: \"" + sys.executable + "\" -m pip install opencv-python"})
         return 1
 
     video = Path(args.video)

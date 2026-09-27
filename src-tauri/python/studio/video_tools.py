@@ -44,7 +44,7 @@ def need_cv2():
     except ImportError:
         emit({"type": "error", "message":
               "OpenCV fehlt. Es wird mit dem YOLO- oder Video-Plugin installiert "
-              "(Einstellungen > Plugins) oder mit: pip install opencv-python"})
+              "(Einstellungen → Python-Pakete → „HuggingFace-Stack“) oder im Terminal: \"" + sys.executable + "\" -m pip install opencv-python"})
         sys.exit(1)
 
 

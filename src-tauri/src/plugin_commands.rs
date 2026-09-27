@@ -115,21 +115,16 @@ pub struct YoloInferenceResult {
 // ══════════════════════════════════════════════════════════════════
 
 fn verify_python_available() -> Result<(), String> {
-    let candidates: Vec<&str> = if cfg!(target_os = "windows") {
-        vec!["python", "python3"]
-    } else {
-        vec!["python3", "python"]
-    };
-    for cmd in &candidates {
-        if let Ok(out) = Command::new(cmd).no_window().arg("--version").output() {
-            if out.status.success() {
-                let version = String::from_utf8_lossy(&out.stdout);
-                println!("[Deps] Python gefunden: {} ({})", cmd, version.trim());
-                return Ok(());
-            }
+    // Dieselbe Suche wie ueberall (python_env) — frueher nur "python3"/"python"
+    // im PATH. Eine Mac-App aus dem Finder sieht Homebrew dort nicht, und
+    // /usr/bin/python3 ist ohne Entwicklerwerkzeuge nur ein Platzhalter.
+    match crate::python_env::resolve_python_with_version() {
+        (Some(path), Some(version)) => {
+            println!("[Deps] Python gefunden: {} ({})", path, version);
+            Ok(())
         }
+        _ => Err(format!("Python wurde nicht gefunden. {}", crate::python_env::install_hint())),
     }
-    Err("Python ist nicht installiert oder nicht im PATH verfügbar. Bitte installiere Python 3.8+ von python.org.".to_string())
 }
 
 fn get_python_executable() -> String {
@@ -160,8 +155,63 @@ fn version_exceeds_max(version: &str, max_major: u32, max_minor: u32) -> bool {
 /// numpy 2.x, daher keine Obergrenze mehr.
 const VERSION_CEILINGS: &[(&str, u32, u32)] = &[];
 
-fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
-    let import_name = match package {
+/// Mindestversionen. Gegen diese Staende sind die Plugins getestet; aeltere
+/// schon installierte Pakete gelten als "nicht installiert" und werden beim
+/// Installieren angehoben (pip install "paket>=x"). Ohne das blieb z. B. ein
+/// altes peft 0.7 liegen — diffusers liess sich damit gar nicht importieren.
+pub const MIN_VERSIONS: &[(&str, &str)] = &[
+    ("transformers", "4.56.0"),   // dtype= in from_pretrained, neue Auto-Klassen
+    ("datasets", "2.14.0"),
+    ("huggingface_hub", "0.19.0"),
+    ("scikit-learn", "1.3.0"),
+    ("numpy", "1.26.0"),          // keine Obergrenze: pip nimmt das passende Wheel
+    ("pandas", "2.2.0"),          // numpy-2-kompatibel, Wheels bis Py3.13
+    ("pyarrow", "14.0.0"),
+    ("accelerate", "1.0.0"),
+    ("ultralytics", "8.3.0"),     // YOLO11, seg/pose/obb/cls
+    ("pillow", "9.0.0"),
+    ("librosa", "0.10.0"),
+    ("soundfile", "0.12.0"),
+    ("opencv-python", "4.8.0"),
+    ("peft", "0.17.0"),           // diffusers verlangt >= 0.17
+    ("diffusers", "0.32.0"),
+    ("sentence-transformers", "3.0.0"), // SentenceTransformerTrainer
+    ("seqeval", "1.2.0"),
+    ("jiwer", "3.0.0"),
+    ("rouge-score", "0.1.2"),
+    ("sacrebleu", "2.0.0"),
+    ("mlx-lm", "0.31.0"),         // Tuner-API, gegen die causal_lm geschrieben ist
+    ("bitsandbytes", "0.45.0"),
+];
+
+/// "paket>=x.y" fuer pip — mit Untergrenze wird ein zu altes Paket angehoben.
+pub fn install_spec(package: &str) -> String {
+    match MIN_VERSIONS.iter().find(|(p, _)| *p == package) {
+        Some((p, min)) => format!("{}>={}", p, min),
+        None => package.to_string(),
+    }
+}
+
+fn version_tuple(v: &str) -> Vec<u32> {
+    v.split('.')
+        .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0))
+        .collect()
+}
+
+/// Liegt eine installierte Version unter der Mindestversion?
+pub fn below_min_version(package: &str, version: &str) -> bool {
+    let Some((_, min)) = MIN_VERSIONS.iter().find(|(p, _)| *p == package) else { return false };
+    let (a, b) = (version_tuple(version), version_tuple(min));
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y { return x < y; }
+    }
+    false
+}
+
+/// Import-Name eines pip-Pakets.
+fn import_name_of(package: &str) -> String {
+    match package {
         "scikit-learn"    => "sklearn",
         "opencv-python"   => "cv2",
         "pillow"          => "PIL",
@@ -169,7 +219,48 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
         "sentence-transformers" => "sentence_transformers",
         "mlx-lm"          => "mlx_lm",
         other             => other,
-    };
+    }.replace('-', "_")
+}
+
+/// Bewertet eine gefundene Version (Ober- und Untergrenzen).
+fn status_for(package: &str, version: String) -> DependencyStatus {
+    if let Some(&(_, max_major, max_minor)) = VERSION_CEILINGS.iter().find(|(p, _, _)| *p == package) {
+        if version_exceeds_max(&version, max_major, max_minor) {
+            return DependencyStatus { package: package.to_string(), installed: false, version: Some(version) };
+        }
+    }
+    if below_min_version(package, &version) {
+        eprintln!("[Deps] {} {} ist aelter als die Mindestversion -- wird angehoben", package, version);
+        return DependencyStatus { package: package.to_string(), installed: false, version: Some(version) };
+    }
+    DependencyStatus { package: package.to_string(), installed: true, version: Some(version) }
+}
+
+/// Prueft mehrere Pakete in EINEM Python-Prozess. Einzeln kostete jeder
+/// Aufruf einen Interpreterstart samt torch-Import — acht Pakete vor dem
+/// Training dauerten so leicht zehn Sekunden.
+pub fn check_packages_batch(python: &str, packages: &[&str]) -> Vec<DependencyStatus> {
+    let pairs: Vec<String> = packages.iter()
+        .map(|p| format!("({:?}, {:?})", p, import_name_of(p)))
+        .collect();
+    let script = format!(
+        "import importlib, importlib.metadata, json\nout = {{}}\nfor pkg, mod in [{}]:\n    try:\n        importlib.import_module(mod)\n        out[pkg] = importlib.metadata.version(pkg)\n    except Exception:\n        out[pkg] = None\nprint('FT_DEPS ' + json.dumps(out))",
+        pairs.join(", ")
+    );
+    let found: serde_json::Map<String, serde_json::Value> = Command::new(python).no_window()
+        .args(["-c", &script]).output().ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).lines()
+            .find_map(|l| l.strip_prefix("FT_DEPS ").map(|j| j.to_string())))
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    packages.iter().map(|p| match found.get(*p).and_then(|v| v.as_str()) {
+        Some(v) => status_for(p, v.to_string()),
+        None => DependencyStatus { package: p.to_string(), installed: false, version: None },
+    }).collect()
+}
+
+fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
+    let import_name = import_name_of(package);
     // Nicht nur Metadaten lesen, sondern auch echten Import versuchen.
     // Faengt binaere Inkompatibilitaeten ab (z.B. numpy/pandas ABI-Mismatch),
     // die importlib.metadata nicht erkennt weil das Paket "installiert" aber kaputt ist.
@@ -181,18 +272,11 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
         .output();
     match check {
         Ok(out) if out.status.success() => {
-            let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            // Versions-Obergrenze pruefen: z.B. numpy>=2.0 gilt als "nicht korrekt installiert",
-            // weil andere Pakete (pandas etc.) noch gegen numpy<2.0 kompiliert sein koennen.
-            // Ein erfolgreicher eigener Import reicht hier nicht -- die Versionsnummer entscheidet.
-            if let Some(&(_, max_major, max_minor)) = VERSION_CEILINGS.iter().find(|(p, _, _)| *p == package) {
-                if version_exceeds_max(&version, max_major, max_minor) {
-                    eprintln!("[Deps] {} Version {} ueberschreitet Obergrenze {}.{} -- wird neu installiert",
-                        package, version, max_major, max_minor);
-                    return DependencyStatus { package: package.to_string(), installed: false, version: Some(version) };
-                }
-            }
-            DependencyStatus { package: package.to_string(), installed: true, version: Some(version) }
+            // Letzte Zeile: manche Pakete (bitsandbytes) schreiben beim Import
+            // Warnungen nach stdout, die sonst als "Version" galten.
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let version = stdout.lines().last().unwrap_or("").trim().to_string();
+            status_for(package, version)
         }
         Ok(out) => {
             // Import ist fehlgeschlagen -- Paket gilt als nicht (korrekt) installiert,
@@ -261,7 +345,7 @@ fn find_valid_python() -> (Option<String>, Option<String>, bool) {
     let (path, version) = crate::python_env::resolve_python_with_version();
     let ok = version.as_deref()
         .and_then(parse_python_version)
-        .map(|(major, minor)| major == 3 && minor >= 8)
+        .map(|(major, minor)| crate::python_env::is_supported((major, minor, 0)))
         .unwrap_or(false);
     (path, version, ok)
 }
@@ -449,12 +533,14 @@ pub async fn run_preflight_check() -> Result<PreFlightCheck, String> {
     let python_found = python_exe.is_some();
 
     if !python_found {
-        errors.push("Python wurde nicht gefunden. Bitte installiere Python 3.8+ von python.org".to_string());
+        errors.push(format!("Python wurde nicht gefunden. {}", crate::python_env::install_hint()));
     } else if !python_ver_ok {
         let ver = python_ver.as_deref().unwrap_or("?");
+        // torch, transformers 5, peft, accelerate und datasets gibt es nur noch
+        // fuer 3.10+; mit 3.9 kaemen alte Versionen, die nie getestet wurden.
         errors.push(format!(
-            "Python {} ist zu alt. FrameTrain benötigt Python 3.8 oder neuer.",
-            ver
+            "Python {} ist zu alt. FrameTrain benötigt Python 3.10 bis 3.13. {}",
+            ver, crate::python_env::install_hint()
         ));
     }
 
@@ -465,7 +551,8 @@ pub async fn run_preflight_check() -> Result<PreFlightCheck, String> {
 
     if python_found && python_ver_ok && !pip_found {
         errors.push(
-            "pip ist nicht verfügbar. Führe aus: python3 -m ensurepip --upgrade".to_string()
+            format!("pip ist nicht verfügbar. Führe im Terminal aus: \"{}\" -m ensurepip --upgrade",
+                python_exe.as_deref().unwrap_or("python3"))
         );
     }
 
@@ -580,6 +667,54 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     Ok(vec![nlp_plugin, yolo_plugin, llm_plugin, gen_plugin])
 }
 
+/// Welche Paketgruppe (Erststart-Plugin) und welche Pakete eine Aufgabe braucht.
+/// Die Gruppe ist die ID, die `install_plugins` versteht.
+pub fn packages_for_task(task_type: &str) -> (&'static str, Vec<&'static str>) {
+    let hf = vec!["torch", "transformers", "datasets", "accelerate", "numpy"];
+    let with = |extra: &[&'static str]| { let mut v = hf.clone(); v.extend_from_slice(extra); v };
+    match task_type {
+        "causal_lm" => ("llm", { let mut v = hf.clone(); v.extend(llm_package_list()); v }),
+        "text_to_image_lora" => ("generative", with(&["diffusers", "peft", "pillow"])),
+        "vision_language" => ("generative", with(&["peft", "pillow"])),
+        "detect" => ("yolo", vec!["torch", "ultralytics", "numpy", "pillow", "opencv-python"]),
+        "token_classification" => ("seq_classification", with(&["seqeval", "scikit-learn"])),
+        "sentence_embedding" => ("seq_classification", with(&["sentence-transformers"])),
+        "speech_recognition" => ("seq_classification", with(&["librosa", "soundfile", "jiwer"])),
+        "audio_classification" => ("seq_classification", with(&["librosa", "soundfile", "scikit-learn"])),
+        "video_classification" => ("seq_classification", with(&["opencv-python", "scikit-learn"])),
+        "seq2seq" => ("seq_classification", with(&["rouge-score", "sacrebleu"])),
+        "hf_image_classification" | "image_classification" => ("seq_classification", with(&["pillow", "scikit-learn"])),
+        "canvas" => ("seq_classification", vec!["torch", "numpy", "pandas", "pyarrow"]),
+        _ => ("seq_classification", with(&["scikit-learn"])),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskPackageStatus {
+    /// ID fuer install_plugins ("llm", "generative", "yolo", "seq_classification")
+    pub group: String,
+    /// Fehlende oder zu alte Pakete (version gesetzt = installiert, aber zu alt)
+    pub missing: Vec<DependencyStatus>,
+    /// Der Interpreter, in den installiert wird — fuer ehrliche Hinweise.
+    pub python: String,
+}
+
+/// Vor dem Training: hat der Interpreter der App alles, was diese Aufgabe
+/// braucht? Die neuen Gruppen (LLM, Generativ) sind im Erststart optional;
+/// ohne diese Pruefung scheiterte ein Training erst im Python mit ImportError.
+#[tauri::command]
+pub async fn check_task_packages(task_type: String) -> Result<TaskPackageStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let python = get_python_executable();
+        let (group, pkgs) = packages_for_task(&task_type);
+        let missing = check_packages_batch(&python, &pkgs)
+            .into_iter()
+            .filter(|s| !s.installed)
+            .collect();
+        TaskPackageStatus { group: group.to_string(), missing, python }
+    }).await.map_err(|e| e.to_string())
+}
+
 /// Kleine Zusatzpakete des HF-Stacks: NER-Metriken (seqeval), Embeddings
 /// (sentence-transformers), Spracherkennung (jiwer: WER/CER) und
 /// Seq2Seq-Metriken (rouge-score, sacrebleu). Ohne sie brechen diese Plugins
@@ -677,6 +812,12 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
         ]);
         if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             packages.push(("mlx-lm", "MLX-LM (Apple Silicon)"));
+        }
+        // QLoRA (4/8 bit) mit PyTorch laeuft nur auf NVIDIA-Karten. Auf allen
+        // anderen Rechnern waere bitsandbytes nur Ballast (und auf dem Mac
+        // ohne GPU-Unterstuetzung gebaut).
+        if preflight.gpu_info.has_nvidia_gpu && !cfg!(target_os = "macos") {
+            packages.push(("bitsandbytes", "bitsandbytes (QLoRA, NVIDIA)"));
         }
     }
     if plugin_ids.iter().any(|id| id == "generative") {
@@ -842,26 +983,8 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
                 current_pct,
             );
 
-            // Versionsconstraints
-            let install_spec = match *package {
-                "transformers"    => "transformers>=4.35.0",
-                "datasets"        => "datasets>=2.14.0",
-                "huggingface_hub" => "huggingface_hub>=0.19.0",
-                "scikit-learn"    => "scikit-learn>=1.3.0",
-                // Keine Obergrenze: pip nimmt das neueste numpy-Wheel (2.x auf
-                // aktuellem Python). Ein Cap <2.0 erzwaenge sonst einen Downgrade
-                // ohne Wheel -> Quellcode-Build -> Fehlschlag auf Windows.
-                "numpy"           => "numpy>=1.26.0",
-                "pandas"          => "pandas>=2.2.0",  // 2.2+ ist numpy-2-kompatibel und hat Wheels bis Py3.13
-                "pyarrow"         => "pyarrow>=14.0.0",
-                "accelerate"      => "accelerate>=0.24.0",
-                "ultralytics"     => "ultralytics>=8.0.0",
-                "pillow"          => "pillow>=9.0.0",
-                "librosa"         => "librosa>=0.10.0",
-                "soundfile"       => "soundfile>=0.12.0",
-                "opencv-python"   => "opencv-python>=4.8.0",
-                other             => other,
-            };
+            // Mindestversion (MIN_VERSIONS) — hebt zu alte Pakete an.
+            let install_spec = install_spec(package);
 
             let pip_args = vec!["-m".to_string(), "pip".to_string(),
                 "install".to_string(), "--progress-bar".to_string(), "off".to_string(),
@@ -1327,5 +1450,59 @@ mod yolo_error_tests {
         let long = "x".repeat(500);
         let out = last_meaningful_line(&long);
         assert_eq!(out.chars().count(), 301, "300 Zeichen plus Auslassungszeichen");
+    }
+}
+
+#[cfg(test)]
+mod dependency_version_tests {
+    use super::*;
+
+    #[test]
+    fn untergrenze_hebt_alte_pakete_an() {
+        assert!(below_min_version("peft", "0.7.1"));
+        assert!(!below_min_version("peft", "0.21.0"));
+        assert!(!below_min_version("peft", "0.17.0"));
+        assert!(below_min_version("transformers", "4.35.2"));
+        assert!(!below_min_version("transformers", "5.12.1"));
+        assert!(!below_min_version("irgendwas", "0.0.1"));
+        assert_eq!(install_spec("peft"), "peft>=0.17.0");
+        assert_eq!(install_spec("irgendwas"), "irgendwas");
+    }
+
+    #[test]
+    fn aufgaben_haben_ihre_gruppe() {
+        assert_eq!(packages_for_task("causal_lm").0, "llm");
+        assert!(packages_for_task("causal_lm").1.contains(&"peft"));
+        assert_eq!(packages_for_task("text_to_image_lora").0, "generative");
+        assert!(packages_for_task("text_to_image_lora").1.contains(&"diffusers"));
+        assert_eq!(packages_for_task("detect").0, "yolo");
+        assert!(packages_for_task("sentence_embedding").1.contains(&"sentence-transformers"));
+        assert!(packages_for_task("speech_recognition").1.contains(&"jiwer"));
+    }
+
+    #[test]
+    fn alle_gruppen_pakete_haben_import_namen() {
+        for t in ["causal_lm", "text_to_image_lora", "detect", "token_classification", "seq2seq"] {
+            for p in packages_for_task(t).1 {
+                assert!(!import_name_of(p).contains('-'), "{}", p);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dependency_real_python_tests {
+    /// Nur manuell: `cargo test -- --ignored gegen_echtes_python`
+    #[test]
+    #[ignore]
+    fn gegen_echtes_python() {
+        let py = crate::python_env::resolve_python();
+        let r = super::check_packages_batch(&py, &["torch", "peft", "mlx-lm", "gibt-es-nicht", "bitsandbytes"]);
+        println!("{} -> {:?}", py, r);
+        assert!(r[0].installed && r[1].installed);
+        assert!(!r[3].installed);
+        let s = super::check_package_installed(&py, "bitsandbytes");
+        println!("einzeln: {:?}", s);
+        assert!(!s.version.unwrap_or_default().contains(' '));
     }
 }

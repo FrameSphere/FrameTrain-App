@@ -330,7 +330,8 @@ def score_sequences(true_tags: List[List[str]], pred_tags: List[List[str]]) -> D
         try:
             from seqeval.metrics import f1_score, precision_score, recall_score
         except ImportError:
-            raise ImportError("seqeval fehlt. Installiere: pip install seqeval")
+            from ft_data.deps import missing
+            raise missing("seqeval", what="Die NER-Auswertung")
         # Vorhergesagte Tags ohne Praefix (kommt bei einem frischen Kopf vor)
         # wuerde seqeval mit einer Warnung ueberspringen — als O werten.
         pred_clean = [[p if (p == "O" or p.startswith(BIO_PREFIXES)) else "O" for p in s] for s in pred_tags]

@@ -46,6 +46,7 @@ from core.protocol import MessageProtocol
 from core import hf_training as hft
 
 from ft_data import llm as D  # noqa: E402  (gemeinsam mit dem Test-Plugin)
+from ft_data import deps as D_deps  # noqa: E402
 
 SUPPORTED_ARCHITECTURES = {
     "llama", "mistral", "mixtral", "qwen2", "qwen2_moe", "qwen3", "qwen3_moe",
@@ -70,7 +71,7 @@ def _mlx_supports(model_path: Path) -> Optional[str]:
     try:
         from mlx_lm.utils import _get_classes, load_config
     except ImportError:
-        return "mlx-lm ist nicht installiert (pip install mlx-lm)"
+        return "mlx-lm ist nicht installiert (Einstellungen → Python-Pakete → „LLM Fine-Tuning“)"
     try:
         _get_classes(load_config(model_path))
     except Exception as exc:
@@ -179,7 +180,7 @@ class Plugin(TrainPlugin):
                     MessageProtocol.warning(
                         f"{want_quant}-bit-Quantisierung (QLoRA) geht mit PyTorch nur auf NVIDIA-GPUs "
                         "(bitsandbytes). Es wird mit normalem LoRA weitertrainiert."
-                        + (" Auf dem Mac: pip install mlx-lm, dann Backend 'auto' oder 'mlx'."
+                        + (" Auf dem Mac: Einstellungen → Python-Pakete → „LLM Fine-Tuning“ (installiert mlx-lm), dann Backend 'auto' oder 'mlx'."
                            if _is_apple_silicon() else ""))
         MessageProtocol.status(
             "init",
@@ -315,7 +316,7 @@ class Plugin(TrainPlugin):
                 from transformers import BitsAndBytesConfig
                 import bitsandbytes  # noqa: F401
             except ImportError:
-                raise ImportError("QLoRA braucht bitsandbytes: pip install bitsandbytes")
+                raise D_deps.missing("bitsandbytes", what="QLoRA (4/8 bit) auf NVIDIA")
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=self.quant_bits == 4, load_in_8bit=self.quant_bits == 8,
                 bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=kwargs["dtype"],
@@ -331,7 +332,7 @@ class Plugin(TrainPlugin):
             try:
                 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
             except ImportError:
-                raise ImportError("LoRA braucht peft: pip install peft")
+                raise D_deps.missing("peft", what="LoRA")
             if self.quant_bits:
                 model = prepare_model_for_kbit_training(
                     model, use_gradient_checkpointing=self.config.gradient_checkpointing)

@@ -109,9 +109,9 @@ class Plugin(TrainPlugin):
             import diffusers  # noqa: F401
             import peft  # noqa: F401
         except ImportError as exc:
-            raise ImportError(
-                f"{exc}. Fuer Diffusion-LoRA fehlen Pakete. Installiere: pip install diffusers peft safetensors"
-            )
+            from ft_data.deps import install_hint
+            raise ImportError(f"{exc}. Fuer Diffusion-LoRA fehlen Pakete.\n\n"
+                              + install_hint("diffusers", "peft", "safetensors"))
         model_path = Path(self.config.model_path)
         index = read_model_index(model_path)
         if not index:

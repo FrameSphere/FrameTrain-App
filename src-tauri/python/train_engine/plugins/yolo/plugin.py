@@ -226,8 +226,8 @@ class YOLOPlugin(TrainPlugin):
         try:
             from ultralytics import YOLO  # noqa
         except ImportError:
-            MessageProtocol.error("Ultralytics nicht installiert",
-                "pip install ultralytics>=8.0.0")
+            from ft_data.deps import install_hint
+            MessageProtocol.error("Ultralytics nicht installiert", install_hint("ultralytics"))
             return False
         dsp = self.config.dataset_path
         if not dsp or not Path(dsp).exists():

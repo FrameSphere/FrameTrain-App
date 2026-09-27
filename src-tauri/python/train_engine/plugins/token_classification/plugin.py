@@ -75,7 +75,7 @@ class Plugin(TrainPlugin):
                 "Tokenizer ohne Wortzuordnung",
                 f"Fuer {self.model_type or 'dieses Modell'} gibt es nur einen langsamen Tokenizer. "
                 "Token-Klassifikation braucht einen 'Fast'-Tokenizer (tokenizer.json).\n"
-                "Installiere ggf.: pip install tokenizers sentencepiece protobuf",
+                + __import__("ft_data.deps", fromlist=["install_hint"]).install_hint("tokenizers", "sentencepiece", "protobuf"),
             )
             return False
         MessageProtocol.status("init", "Tokenizer geladen ✓")

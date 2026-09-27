@@ -86,8 +86,8 @@ class Plugin(TrainPlugin):
         except ImportError:
             MessageProtocol.error(
                 "sentence-transformers fehlt",
-                "Das Embedding-Plugin braucht das Paket sentence-transformers.\n"
-                "Installiere: pip install sentence-transformers",
+                "Das Embedding-Plugin braucht das Paket sentence-transformers.\n\n"
+                + __import__("ft_data.deps", fromlist=["install_hint"]).install_hint("sentence-transformers"),
             )
             return False
         root = Path(self.config.model_path)

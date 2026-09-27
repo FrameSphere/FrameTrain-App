@@ -51,7 +51,8 @@ class Plugin(TrainPlugin):
         try:
             import cv2  # noqa: F401
         except ImportError:
-            raise ImportError("OpenCV fehlt. Installiere: pip install opencv-python")
+            from ft_data.deps import missing
+            raise missing("opencv-python", what="Videoklassifikation")
 
         cfg_path = Path(self.config.model_path) / "config.json"
         cfg = {}

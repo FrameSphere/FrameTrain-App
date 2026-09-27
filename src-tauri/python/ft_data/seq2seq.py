@@ -147,10 +147,10 @@ def generation_scores(predictions: Sequence[str], references: Sequence[Optional[
                 sums[key] += val.fmeasure
         scores.update({k: v / len(pairs) for k, v in sums.items()})
     except ImportError:
-        notes.append("ROUGE nicht berechnet: Paket fehlt (pip install rouge-score).")
+        notes.append("ROUGE nicht berechnet: Paket rouge-score fehlt (Einstellungen → Python-Pakete → „HuggingFace-Stack“).")
     try:
         import sacrebleu
         scores["bleu"] = float(sacrebleu.corpus_bleu([p for p, _ in pairs], [[r for _, r in pairs]]).score)
     except ImportError:
-        notes.append("BLEU nicht berechnet: Paket fehlt (pip install sacrebleu).")
+        notes.append("BLEU nicht berechnet: Paket sacrebleu fehlt (Einstellungen → Python-Pakete → „HuggingFace-Stack“).")
     return scores, notes

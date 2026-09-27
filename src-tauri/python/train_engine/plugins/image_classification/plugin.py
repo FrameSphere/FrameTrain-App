@@ -48,7 +48,8 @@ def _build_backbone(arch: str, num_classes: int, pretrained: bool) -> nn.Module:
             m.classifier[3] = nn.Linear(m.classifier[3].in_features, num_classes); return m
         raise ValueError(f"Unbekannte Architektur: '{arch}'. Unterstuetzt: resnet18, resnet50, efficientnet_b0, efficientnet_b4, vit_b_16, mobilenet_v3_small, mobilenet_v3_large")
     except ImportError:
-        raise ImportError("torchvision nicht installiert. pip install torchvision")
+        from ft_data.deps import missing
+        raise missing("torchvision", what="Bildklassifikation (torchvision)")
 
 
 def _freeze_base(model: nn.Module, arch: str) -> None:

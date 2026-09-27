@@ -73,7 +73,8 @@ class Plugin(TrainPlugin):
         try:
             import peft  # noqa: F401
         except ImportError:
-            raise ImportError("peft fehlt (LoRA). Installiere: pip install peft")
+            from ft_data.deps import missing
+            raise missing("peft", what="Vision-Language-Training (LoRA)")
         from transformers import AutoConfig, AutoProcessor
 
         cfg = AutoConfig.from_pretrained(self.config.model_path)

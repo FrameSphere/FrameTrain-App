@@ -265,10 +265,14 @@ def handle_exception(exc: Exception) -> None:
         return
 
     if isinstance(exc, (ImportError, ModuleNotFoundError)):
-        MessageProtocol.error(
-            "Fehlendes Python-Paket",
-            f"{exc}\n\nInstalliere mit:\n  pip install transformers datasets torch scikit-learn\n\n{tb}"
-        )
+        # Plugins bringen den Hinweis schon mit (ft_data.deps.missing); sonst
+        # aus dem Modulnamen ableiten. Nie ein nacktes "pip install": das pip im
+        # Terminal gehoert oft zu einem anderen Python als FrameTrain.
+        from ft_data.deps import hint_for_exception, install_hint
+        text = str(exc)
+        if "In FrameTrain:" not in text:
+            text += "\n\n" + (hint_for_exception(exc) or install_hint("transformers", "datasets", "torch"))
+        MessageProtocol.error("Fehlendes Python-Paket", f"{text}\n\n{tb}")
         return
 
     if isinstance(exc, FileNotFoundError):
@@ -444,7 +448,8 @@ def main():
     except ImportError:
         MessageProtocol.error(
             "PyTorch nicht installiert",
-            "Installiere mit: pip install torch transformers datasets scikit-learn"
+            "FrameTrain hat in diesem Python kein PyTorch gefunden: " + sys.executable + "\n"
+            "In FrameTrain: Einstellungen → Python-Pakete → „HuggingFace-Stack“ installieren."
         )
         sys.exit(0)
 

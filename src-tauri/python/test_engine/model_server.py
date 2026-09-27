@@ -190,9 +190,8 @@ class ModelServer:
             import torch
             import numpy as np
         except ImportError as e:
-            raise ImportError(
-                f"Fehlende Pakete: {e}. Installiere: pip install torch transformers"
-            )
+            from ft_data.deps import install_hint
+            raise ImportError(f"Fehlende Pakete: {e}.\n\n" + install_hint("torch", "transformers"))
 
         self._torch = torch
         self._np    = np
@@ -376,9 +375,8 @@ class ModelServer:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
-            raise ImportError(
-                "sentence-transformers fehlt. Installiere: pip install sentence-transformers"
-            )
+            from ft_data.deps import missing
+            raise missing("sentence-transformers", what="Das Embedding-Modell")
         dev = self.device.type if self.device is not None else "cpu"
         self.model = SentenceTransformer(str(self.model_path), device=dev, local_files_only=True)
 
@@ -534,7 +532,8 @@ class ModelServer:
         try:
             from PIL import Image
         except ImportError:
-            raise ImportError("Pillow fehlt. Installiere: pip install pillow")
+            from ft_data.deps import missing
+            raise missing("pillow", what="Die Bildeingabe")
 
         with Image.open(path) as img:
             img = img.convert("RGB")
@@ -673,10 +672,9 @@ class ModelServer:
                 try:
                     import torchaudio
                 except ImportError:
-                    raise ImportError(
-                        "Zum Laden von Audio fehlt librosa, soundfile oder torchaudio. "
-                        "Installiere: pip install librosa"
-                    )
+                    from ft_data.deps import install_hint
+                    raise ImportError("Zum Laden von Audio fehlt librosa, soundfile oder torchaudio.\n\n"
+                                      + install_hint("librosa", "soundfile"))
                 tensor, sr = torchaudio.load(str(path))
                 data = tensor.mean(dim=0).numpy()
 
