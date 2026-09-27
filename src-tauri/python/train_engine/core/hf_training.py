@@ -343,3 +343,72 @@ def resume_checkpoint(config) -> Optional[str]:
         pass
     MessageProtocol.status("training", f"Setze Training fort ab Schritt {step} ({ckpt})")
     return ckpt
+
+
+def repair_uninitialized_params(model) -> list:
+    """Parameter, die beim Laden neu angelegt, aber nie initialisiert wurden.
+
+    Viele Audio-Checkpoints (z. B. facebook/wav2vec2-base-960h) enthalten
+    `masked_spec_embed` nicht. transformers 5 legt den Parameter dann mit
+    uninitialisiertem Speicher an — NaN und Werte bis 1e37. Benutzt wird er nur
+    im Trainingsmodus (SpecAugment-Maskierung): Loss und Gradienten wurden NaN,
+    jeder Schritt verworfen, das Modell trainierte gar nicht. Im Eval-Modus
+    faellt es nicht auf. Initialisiert wird wie in transformers (_init_weights:
+    uniform 0..1); jeder andere nicht-endliche Parameter wird gemeldet.
+    """
+    import torch
+    fixed = []
+    with torch.no_grad():
+        for name, p in model.named_parameters():
+            finite = bool(torch.isfinite(p).all())
+            if name.endswith("masked_spec_embed"):
+                if not finite or float(p.abs().max()) > 1e3:
+                    p.uniform_()
+                    fixed.append(name)
+            elif not finite:
+                MessageProtocol.warning(f"Parameter {name} enthaelt NaN/Inf direkt nach dem Laden — Checkpoint pruefen.")
+    if fixed:
+        MessageProtocol.status("building_model", f"Nicht initialisierte Parameter repariert: {', '.join(fixed)}")
+    return fixed
+
+
+def sanitize_nan_grads(trainer, model) -> bool:
+    """Nach backward, VOR dem Gradient-Clipping: vereinzelte NaN/Inf auf 0.
+
+    Auf Apple MPS liefert der Rueckweg durch wav2vec2/HuBERT sporadisch NaN im
+    Gradienten von feature_projection.layer_norm.bias, alle anderen Parameter
+    bleiben sauber. Das Clipping teilt danach durch eine NaN-Norm — dann waeren
+    ALLE Gradienten NaN und nach dem Schritt alle Gewichte. Einzelne Parameter
+    werden bereinigt; sind viele betroffen, wird der Schritt verworfen.
+    Rueckgabe: True, wenn der Schritt verworfen wurde.
+    """
+    import torch
+    params = [(n, p) for n, p in model.named_parameters() if p.grad is not None]
+    bad = [(n, p) for n, p in params if not torch.isfinite(p.grad).all()]
+    if not bad:
+        return False
+    if len(bad) <= max(2, len(params) // 50):
+        for _, p in bad:
+            torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+        trainer._patched_nan = getattr(trainer, "_patched_nan", 0) + 1
+        if trainer._patched_nan in (1, 10, 100) or trainer._patched_nan % 500 == 0:
+            MessageProtocol.status(
+                "training",
+                f"Ungueltige Gradienten in {', '.join(n for n, _ in bad)} auf 0 gesetzt "
+                f"({trainer._patched_nan}x) — bekannter MPS-Effekt, der Schritt laeuft weiter.")
+        return False
+    model.zero_grad(set_to_none=True)
+    trainer._skipped_nan = getattr(trainer, "_skipped_nan", 0) + 1
+    MessageProtocol.warning(
+        f"Schritt mit ungueltigen Gradienten in {len(bad)} Parametern verworfen ({trainer._skipped_nan}x).")
+    return True
+
+
+def nan_safe_trainer(trainer_cls):
+    """Trainer-Unterklasse mit sanitize_nan_grads nach jedem Schritt."""
+    class _NanSafe(trainer_cls):
+        def training_step(self, model, inputs, num_items_in_batch=None):
+            loss = super().training_step(model, inputs, num_items_in_batch)
+            return loss.detach() if sanitize_nan_grads(self, model) else loss
+    _NanSafe.__name__ = f"NanSafe{trainer_cls.__name__}"
+    return _NanSafe

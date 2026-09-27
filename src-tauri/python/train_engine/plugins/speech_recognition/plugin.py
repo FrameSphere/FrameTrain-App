@@ -82,20 +82,10 @@ def _ctc_trainer_class():
             return (loss, outputs) if return_outputs else loss
 
         def training_step(self, model, inputs, num_items_in_batch=None):
-            import torch
+            # Vereinzelte NaN-Gradienten (MPS) bereinigen statt den Schritt zu
+            # verwerfen — Details in hf_training.sanitize_nan_grads.
             loss = super().training_step(model, inputs, num_items_in_batch)
-            # Auf MPS lieferte der Rueckweg durch wav2vec2 bei einzelnen Batches
-            # NaN-Gradienten, obwohl Loss und Logit-Gradient endlich waren. Ein
-            # einziger solcher Schritt macht alle Gewichte NaN — danach meldete
-            # der Lauf Loss 0 und leere Transkripte. Solche Schritte verwerfen.
-            grads = [p.grad for p in model.parameters() if p.grad is not None]
-            if grads and not all(torch.isfinite(g).all() for g in grads):
-                model.zero_grad(set_to_none=True)
-                self._skipped_nan = getattr(self, "_skipped_nan", 0) + 1
-                MessageProtocol.warning(
-                    f"Schritt mit ungueltigen Gradienten (NaN) verworfen ({self._skipped_nan}x).")
-                return loss.detach()
-            return loss
+            return loss.detach() if hft.sanitize_nan_grads(self, model) else loss
 
     return _CtcTrainer
 
@@ -299,6 +289,7 @@ class Plugin(TrainPlugin):
             )
             if self.freeze_encoder and hasattr(self.model, "freeze_feature_encoder"):
                 self.model.freeze_feature_encoder()
+        hft.repair_uninitialized_params(self.model)
         params = sum(p.numel() for p in self.model.parameters())
         MessageProtocol.status("building_model", f"✓ Modell geladen | Parameter: {params/1e6:.1f}M")
 
@@ -407,7 +398,11 @@ class Plugin(TrainPlugin):
         if isinstance(preds, tuple):
             preds = preds[0]
         if self.mode == "ctc":
-            pred_text = self.tokenizer.batch_decode(np.asarray(preds))
+            # Der Trainer fuellt Vorhersagen verschieden langer Aufnahmen mit -100
+            # auf. Dekodiert wurde daraus "<unk>" am Satzende — jede Aufnahme galt
+            # dann als falsch und die WER war deutlich zu hoch. -100 = Blank.
+            preds = np.where(np.asarray(preds) < 0, self.tokenizer.pad_token_id, preds)
+            pred_text = self.tokenizer.batch_decode(preds)
             labels = np.where(np.asarray(labels) < 0, self.tokenizer.pad_token_id, labels)
             # group_tokens=False: im Label sind doppelte Buchstaben ("ll") echt.
             ref_text = self.tokenizer.batch_decode(labels, group_tokens=False)
@@ -465,7 +460,9 @@ class Plugin(TrainPlugin):
                 callbacks=callbacks,
             )
 
-        if self.mode == "seq2seq" and self.eval_before and len(self.eval_dataset):
+        # Vorher-Wert fuer beide Wege — auch beim CTC-Nachtraining will man sehen,
+        # ob die Wortfehlerrate wirklich sinkt.
+        if self.eval_before and len(self.eval_dataset):
             self._measure_baseline()
 
         self._start_time = time.time()
