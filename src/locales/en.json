@@ -462,12 +462,20 @@
     },
     "pluginRegistry": {
       "seq_classification": {
-        "name": "HuggingFace stack (text, image, audio, seq2seq)",
-        "description": "Trains and tests HuggingFace models: text classification (BERT, XLM-RoBERTa, DeBERTa), image classification (ViT, ResNet, ConvNeXt), audio classification (Wav2Vec2, HuBERT) and seq2seq (T5, BART)."
+        "name": "HuggingFace stack (text, image, audio, video, seq2seq)",
+        "description": "Trains and tests HuggingFace models: text classification, NER, embeddings (BERT, XLM-RoBERTa, DeBERTa, Sentence-Transformers), image and video classification (ViT, ConvNeXt, VideoMAE), audio and speech recognition (Wav2Vec2, Whisper) and seq2seq (T5, BART)."
       },
       "yolo": {
         "name": "YOLO Object Detection (Ultralytics)",
         "description": "Trains YOLOv5/v8/v9/YOLO11 models for bounding box detection. Requires Ultralytics."
+      },
+      "llm": {
+        "name": "LLM fine-tuning (LoRA / QLoRA)",
+        "description": "Fine-tunes language models such as Llama, Qwen, Mistral, Gemma and Phi with LoRA, including DPO. On Apple Silicon also MLX: faster and with 4-bit quantization."
+      },
+      "generative": {
+        "name": "Generative models (diffusion, image+text)",
+        "description": "Trains custom styles and subjects for Stable Diffusion (LoRA) and vision-language models that answer questions about images. Requires diffusers."
       }
     },
     "preflight": {

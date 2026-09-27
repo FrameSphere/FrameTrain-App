@@ -165,6 +165,9 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
         "scikit-learn"    => "sklearn",
         "opencv-python"   => "cv2",
         "pillow"          => "PIL",
+        "rouge-score"     => "rouge_score",
+        "sentence-transformers" => "sentence_transformers",
+        "mlx-lm"          => "mlx_lm",
         other             => other,
     };
     // Nicht nur Metadaten lesen, sondern auch echten Import versuchen.
@@ -526,9 +529,38 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
         description: "firstLaunch.pluginRegistry.seq_classification.description".to_string(),
         category: "NLP".to_string(), icon: String::new(), built_in: true,   // Symbol kommt aus der UI (lucide)
         required_packages: nlp_packages.iter().map(|s| s.to_string()).collect(),
-        optional_packages: vec!["peft".to_string()],
+        optional_packages: NLP_EXTRA_PACKAGES.iter().map(|s| s.to_string()).collect(),
         estimated_size_mb: 2800, install_time_minutes: 4, priority: 1,
         is_selected: true, is_installed: nlp_installed,
+    };
+
+    // LLM-Fine-Tuning (causal_lm): LoRA ueber peft; auf Apple Silicon zusaetzlich
+    // MLX — dort schneller und das einzige lokale 4-bit-QLoRA.
+    let llm_packages = llm_package_list();
+    let llm_installed = llm_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let llm_plugin = PluginInfo {
+        id: "llm".to_string(),
+        name: "firstLaunch.pluginRegistry.llm.name".to_string(),
+        description: "firstLaunch.pluginRegistry.llm.description".to_string(),
+        category: "LLM".to_string(), icon: String::new(), built_in: true,
+        required_packages: llm_packages.iter().map(|s| s.to_string()).collect(),
+        optional_packages: vec!["bitsandbytes".to_string()],
+        estimated_size_mb: 350, install_time_minutes: 2, priority: 3,
+        is_selected: false, is_installed: llm_installed,
+    };
+
+    // Generativ: Diffusion-LoRA (Stable Diffusion) und Vision-Language-Modelle.
+    let gen_packages = vec!["diffusers", "peft", "transformers", "accelerate", "pillow"];
+    let gen_installed = gen_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let gen_plugin = PluginInfo {
+        id: "generative".to_string(),
+        name: "firstLaunch.pluginRegistry.generative.name".to_string(),
+        description: "firstLaunch.pluginRegistry.generative.description".to_string(),
+        category: "Generative".to_string(), icon: String::new(), built_in: true,
+        required_packages: gen_packages.iter().map(|s| s.to_string()).collect(),
+        optional_packages: vec![],
+        estimated_size_mb: 250, install_time_minutes: 2, priority: 4,
+        is_selected: false, is_installed: gen_installed,
     };
 
     // YOLO-Stack
@@ -545,7 +577,22 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
         is_selected: false, is_installed: yolo_installed,
     };
 
-    Ok(vec![nlp_plugin, yolo_plugin])
+    Ok(vec![nlp_plugin, yolo_plugin, llm_plugin, gen_plugin])
+}
+
+/// Kleine Zusatzpakete des HF-Stacks: NER-Metriken (seqeval), Embeddings
+/// (sentence-transformers), Spracherkennung (jiwer: WER/CER) und
+/// Seq2Seq-Metriken (rouge-score, sacrebleu). Ohne sie brechen diese Plugins
+/// nicht ab, melden aber weniger Kennzahlen bzw. fordern das Paket an.
+const NLP_EXTRA_PACKAGES: [&str; 5] = ["sentence-transformers", "seqeval", "jiwer", "rouge-score", "sacrebleu"];
+
+/// Pakete fuer das LLM-Plugin; mlx-lm nur dort, wo MLX laeuft.
+fn llm_package_list() -> Vec<&'static str> {
+    let mut v = vec!["peft", "transformers", "accelerate"];
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        v.push("mlx-lm");
+    }
+    v
 }
 
 #[tauri::command]
@@ -554,7 +601,7 @@ pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> 
     let python = get_python_executable();
     let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
                         "numpy", "pandas", "pyarrow", "accelerate", "librosa", "soundfile",
-                        "pillow", "ultralytics"];
+                        "pillow", "ultralytics", "peft", "sentence-transformers"];
     let status: Vec<DependencyStatus> = packages.iter().map(|p| check_package_installed(&python, p)).collect();
     let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
     if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
@@ -614,6 +661,31 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
             ("pillow",          "Pillow (Bild)"),
             ("librosa",         "Librosa (Audio)"),
             ("soundfile",       "SoundFile (Audio)"),
+            // NER, Embeddings, Spracherkennung, Seq2Seq-Metriken
+            ("sentence-transformers", "Sentence-Transformers (Embeddings)"),
+            ("seqeval",         "seqeval (NER-Metriken)"),
+            ("jiwer",           "jiwer (WER/CER)"),
+            ("rouge-score",     "ROUGE"),
+            ("sacrebleu",       "SacreBLEU"),
+        ]);
+    }
+    if plugin_ids.iter().any(|id| id == "llm") {
+        packages.extend([
+            ("transformers", "Transformers"),
+            ("accelerate",   "Accelerate"),
+            ("peft",         "PEFT (LoRA)"),
+        ]);
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            packages.push(("mlx-lm", "MLX-LM (Apple Silicon)"));
+        }
+    }
+    if plugin_ids.iter().any(|id| id == "generative") {
+        packages.extend([
+            ("transformers", "Transformers"),
+            ("accelerate",   "Accelerate"),
+            ("peft",         "PEFT (LoRA)"),
+            ("diffusers",    "Diffusers (Stable Diffusion)"),
+            ("pillow",       "Pillow"),
         ]);
     }
     if plugin_ids.iter().any(|id| id == "yolo") {
@@ -623,7 +695,11 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
             ("opencv-python",  "OpenCV"),
         ]);
     }
-    packages.dedup_by_key(|(p, _)| *p);
+    // dedup_by_key entfernt nur direkt aufeinanderfolgende Duplikate — mit
+    // mehreren Gruppen (HF-Stack, LLM, Generativ) stand transformers sonst
+    // mehrfach in der Liste und wurde mehrfach installiert.
+    let mut seen = std::collections::HashSet::new();
+    packages.retain(|(p, _)| seen.insert(*p));
 
     // Torch-Args nach GPU-Typ
     let gpu_info = preflight.gpu_info.clone();

@@ -462,12 +462,20 @@
     },
     "pluginRegistry": {
       "seq_classification": {
-        "name": "HuggingFace-Stack (Text, Bild, Audio, Seq2Seq)",
-        "description": "Trainiert und testet HuggingFace-Modelle: Textklassifikation (BERT, XLM-RoBERTa, DeBERTa), Bildklassifikation (ViT, ResNet, ConvNeXt), Audioklassifikation (Wav2Vec2, HuBERT) und Seq2Seq (T5, BART)."
+        "name": "HuggingFace-Stack (Text, Bild, Audio, Video, Seq2Seq)",
+        "description": "Trainiert und testet HuggingFace-Modelle: Textklassifikation, NER, Embeddings (BERT, XLM-RoBERTa, DeBERTa, Sentence-Transformers), Bild- und Videoklassifikation (ViT, ConvNeXt, VideoMAE), Audio und Spracherkennung (Wav2Vec2, Whisper) und Seq2Seq (T5, BART)."
       },
       "yolo": {
         "name": "YOLO Objekterkennung (Ultralytics)",
         "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
+      },
+      "llm": {
+        "name": "LLM Fine-Tuning (LoRA / QLoRA)",
+        "description": "Feinjustiert Sprachmodelle wie Llama, Qwen, Mistral, Gemma und Phi mit LoRA, auch per DPO. Auf Apple Silicon zusätzlich MLX: schneller und mit 4-bit-Quantisierung."
+      },
+      "generative": {
+        "name": "Generative Modelle (Diffusion, Bild+Text)",
+        "description": "Trainiert eigene Stile und Motive für Stable Diffusion (LoRA) und Vision-Language-Modelle für Fragen zu Bildern. Benötigt diffusers."
       }
     },
     "preflight": {
