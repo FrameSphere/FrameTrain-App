@@ -13,6 +13,7 @@ import yoloPlugin from './yolo';
 import imageClassificationPlugin from './image-classification';
 import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
+import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
@@ -24,6 +25,7 @@ const PLUGINS: ModelPlugin[] = [
   hfImageClassificationPlugin,
   imageClassificationPlugin,  // torchvision-Backbones (ohne HF-Gewichte)
   audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
+  videoClassificationPlugin,  // VideoMAE / TimeSformer / ViViT
   seq2seqPlugin,              // T5 / BART / Pegasus / Marian
   xlmRobertaPlugin,
   hfEncoderPlugin,

@@ -324,10 +324,12 @@ fn make_info(
 
 const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp", "gif"];
 const AUDIO_EXTS: &[&str] = &["wav", "mp3", "flac", "ogg", "m4a", "aac", "opus"];
+const VIDEO_EXTS: &[&str] = &["mp4", "mov", "m4v", "webm", "mkv", "avi"];
 const FLAT_EXTS:  &[&str] = &["jsonl", "json", "csv", "tsv", "parquet", "arrow", "txt"];
 
 fn is_image(ext: &str) -> bool { IMAGE_EXTS.contains(&ext.to_lowercase().as_str()) }
 fn is_audio(ext: &str) -> bool { AUDIO_EXTS.contains(&ext.to_lowercase().as_str()) }
+fn is_video(ext: &str) -> bool { VIDEO_EXTS.contains(&ext.to_lowercase().as_str()) }
 fn is_flat(ext: &str)  -> bool { FLAT_EXTS.contains(&ext.to_lowercase().as_str())  }
 
 fn get_basename(path: &Path) -> String {
@@ -664,12 +666,14 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
             let sample_files = list_files_in_dir(&path.join(&dir_names[0]));
             let has_img = sample_files.iter().any(|f| f.extension().and_then(|e| e.to_str()).map(|e| is_image(e)).unwrap_or(false));
             let has_aud = sample_files.iter().any(|f| f.extension().and_then(|e| e.to_str()).map(|e| is_audio(e)).unwrap_or(false));
-            if has_img || has_aud {
+            // Videoclips je Klasse (Videoklassifikation, z. B. aus der Datensatz-Werkstatt).
+            let has_vid = sample_files.iter().any(|f| f.extension().and_then(|e| e.to_str()).map(|e| is_video(e)).unwrap_or(false));
+            if has_img || has_aud || has_vid {
                 let classes: Vec<&str> = dir_names.iter().map(String::as_str).take(10).collect();
                 return DatasetAnalysis { detected_type: DatasetType::FolderClass, confidence: 92,
                     pairing_status: None, warnings: vec![], file_count: total_file_count,
                     dir_count: dir_names.len(), extensions: all_extensions,
-                    schema_hint: Some(serde_json::json!({ "class_count": dir_names.len(), "classes": classes, "media_type": if has_img { "image" } else { "audio" } })) };
+                    schema_hint: Some(serde_json::json!({ "class_count": dir_names.len(), "classes": classes, "media_type": if has_img { "image" } else if has_vid { "video" } else { "audio" } })) };
             }
         }
     }
@@ -2333,6 +2337,10 @@ pub async fn read_dataset_file(file_path: String) -> Result<String, String> {
             let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
             Ok(format!("[Audio] {}.{} -- {} bytes", path.file_stem().unwrap_or_default().to_string_lossy(), ext, size))
         }
+        "mp4"|"mov"|"m4v"|"webm"|"mkv"|"avi" => {
+            let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            Ok(format!("[Video] {}.{} -- {} bytes", path.file_stem().unwrap_or_default().to_string_lossy(), ext, size))
+        }
         "parquet" => {
             let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
             Ok(format!("[Parquet] {} bytes -- Binärformat, kein Preview.", size))
@@ -3587,6 +3595,18 @@ mod split_layout_tests {
         assert!(detect_split_layout(dir.path()).is_none());
         let a = detect_dataset_type(dir.path());
         assert!(matches!(a.detected_type, DatasetType::FlatFile), "erkannt als {:?}", a.detected_type);
+    }
+
+    #[test]
+    fn videoclips_je_klasse_sind_ordner_klassifikation() {
+        let dir = TempDir::new("videoklassen");
+        for cls in ["springt", "faellt"] {
+            fs::create_dir_all(dir.path().join(cls)).unwrap();
+            fs::write(dir.path().join(cls).join("a.mp4"), b"x").unwrap();
+        }
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::FolderClass), "erkannt als {:?}", a.detected_type);
+        assert_eq!(a.schema_hint.unwrap()["media_type"], "video");
     }
 
     #[test]

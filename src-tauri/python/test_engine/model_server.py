@@ -7,11 +7,12 @@ via stdin/stdout JSON-Protokoll.
 
 Protokoll:
   Rust -> Python (stdin):   {"text": "..."}\n                (Text / Seq2Seq)
-                            {"file_path": "/pfad/bild.png"}\n (Bild / Audio)
+                            {"file_path": "/pfad/bild.png"}\n (Bild / Audio / ASR)
+                            {"file_path": "/v.mp4", "start": 2.0, "end": 6.0}\n (Video)
   Python -> Rust (stdout):  {"predicted": "...", "confidence": 0.95, ...}\n
 
 Startup:
-  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq",
+  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video",
                     "input_kind": "text|image|audio"}\n
   Python -> Rust:  {"type": "error", "message": "..."}\n  (bei Fehler)
 """
@@ -54,10 +55,19 @@ IMAGE_MODEL_TYPES = {
 }
 
 
+# Videoklassifikatoren (VideoMAE, TimeSformer, ViViT)
+VIDEO_MODEL_TYPES = {"videomae", "timesformer", "vivit"}
+
+# Spracherkennung: Audio rein, Text raus. Whisper meldet sich als
+# ...ForConditionalGeneration und wurde deshalb frueher als Text-Seq2Seq
+# geladen — und scheiterte dann an der ersten Anfrage ohne Text.
+ASR_MODEL_TYPES = {"whisper", "speech_to_text", "speech-encoder-decoder", "moonshine"}
+
+
 def detect_modality(model_cfg: dict) -> str:
     """Bestimmt aus config.json, welche Auto-Klasse und welche Eingabe passt.
 
-    Rueckgabe: "text" | "image" | "audio" | "seq2seq"
+    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video"
     """
     archs = [a for a in (model_cfg.get("architectures") or []) if isinstance(a, str)]
     arch = archs[0] if archs else ""
@@ -67,6 +77,12 @@ def detect_modality(model_cfg: dict) -> str:
         return "image"
     if arch.endswith("ForAudioClassification") or arch.endswith("ForAudioFrameClassification"):
         return "audio"
+    if arch.endswith("ForVideoClassification"):
+        return "video"
+    if arch.endswith("ForCTC") or arch.endswith("ForSpeechSeq2Seq"):
+        return "asr"
+    if model_type in ASR_MODEL_TYPES and (not arch or arch.endswith("ForConditionalGeneration")):
+        return "asr"
     if arch.endswith("ForConditionalGeneration") or arch.endswith("ForSeq2SeqLM"):
         return "seq2seq"
     if arch.endswith("ForSequenceClassification"):
@@ -78,6 +94,8 @@ def detect_modality(model_cfg: dict) -> str:
         return "text"
 
     # Kein (bekannter) Architektur-Eintrag: ueber model_type entscheiden
+    if model_type in VIDEO_MODEL_TYPES:
+        return "video"
     if model_type in AUDIO_MODEL_TYPES:
         return "audio"
     if model_type in IMAGE_MODEL_TYPES:
@@ -95,6 +113,8 @@ INPUT_KIND = {
     "seq2seq": "text",
     "image":   "image",
     "audio":   "audio",
+    "asr":     "audio",
+    "video":   "video",
 }
 
 
@@ -142,6 +162,8 @@ class ModelServer:
         loader = {
             "image":   self._load_image,
             "audio":   self._load_audio,
+            "asr":     self._load_asr,
+            "video":   self._load_video,
             "seq2seq": self._load_seq2seq,
             "text":    self._load_text,
         }[self.modality]
@@ -230,6 +252,29 @@ class ModelServer:
             str(self.model_path), local_files_only=True
         )
 
+    def _load_asr(self):
+        """Spracherkennung ueber die pipeline — sie zerlegt lange Aufnahmen in
+        30-Sekunden-Stuecke, sonst schneidet Whisper nach 30 s einfach ab."""
+        from transformers import pipeline
+        dev = self.device
+        device_arg = 0 if dev.type == "cuda" else ("mps" if dev.type == "mps" else -1)
+        self.pipe = pipeline(
+            "automatic-speech-recognition", model=str(self.model_path), device=device_arg,
+        )
+        self.model = self.pipe.model
+        fe = getattr(self.pipe, "feature_extractor", None)
+        self.sampling_rate = int(getattr(fe, "sampling_rate", 16000) or 16000)
+
+    def _load_video(self):
+        from transformers import AutoImageProcessor, AutoModelForVideoClassification
+        self.processor = AutoImageProcessor.from_pretrained(
+            str(self.model_path), local_files_only=True
+        )
+        self.model = AutoModelForVideoClassification.from_pretrained(
+            str(self.model_path), local_files_only=True
+        )
+        self.num_frames = int(getattr(self.model.config, "num_frames", 16) or 16)
+
     def _load_audio(self):
         from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
         self.processor = AutoFeatureExtractor.from_pretrained(
@@ -247,6 +292,10 @@ class ModelServer:
             return self._infer_image(self._require_file(req, "Bild"))
         if self.modality == "audio":
             return self._infer_audio(self._require_file(req, "Audio"))
+        if self.modality == "asr":
+            return self._infer_asr(self._require_file(req, "Audio"))
+        if self.modality == "video":
+            return self._infer_video(self._require_file(req, "Video"), req.get("start"), req.get("end"))
         if self.modality == "seq2seq":
             return self._infer_seq2seq(self._require_text(req))
         return self._infer_text(self._require_text(req))
@@ -333,7 +382,30 @@ class ModelServer:
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         return self._classify(inputs, time.time())
 
-    def _read_audio(self, path: Path):
+    def _infer_asr(self, path: Path) -> dict:
+        t0 = time.time()
+        wave = self._read_audio(path, cap=False)
+        out = self.pipe(
+            {"raw": wave, "sampling_rate": self.sampling_rate},
+            chunk_length_s=30, batch_size=4,
+        )
+        text = (out.get("text") if isinstance(out, dict) else str(out)) or ""
+        # Keine confidence: eine ehrliche Wahrscheinlichkeit fuer einen ganzen
+        # Satz gibt es nicht, und eine erfundene wuerde "Unsicherste zuerst" verfaelschen.
+        return {"predicted": text.strip(), "inference_time": time.time() - t0}
+
+    def _infer_video(self, path: Path, start=None, end=None) -> dict:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            from ft_data.video import read_clip_frames
+        except ImportError as e:
+            raise ImportError(f"Video-Hilfen fehlen: {e}")
+        frames = read_clip_frames(path, self.num_frames, start, end)
+        inputs = self.processor(list(frames), return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        return self._classify(inputs, time.time())
+
+    def _read_audio(self, path: Path, cap: bool = True):
         """Laedt eine Audiodatei als Mono-Wellenform in der Modell-Samplerate.
 
         Gleiche Vorverarbeitung wie das Test-Plugin (librosa, 10s-Kappung),
@@ -375,7 +447,7 @@ class ModelServer:
                 )
 
         max_len = int(MAX_AUDIO_SECONDS * self.sampling_rate)
-        if data.shape[0] > max_len:
+        if cap and data.shape[0] > max_len:
             data = data[:max_len]
 
         return data.astype("float32")

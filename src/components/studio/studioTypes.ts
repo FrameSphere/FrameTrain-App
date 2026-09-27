@@ -24,9 +24,15 @@ export interface StudioSample {
   /** Bei Text steht der Inhalt hier statt in einer Datei. */
   content?: string | null;
   status:   SampleStatus;
-  ann:      { boxes: StudioBox[]; label?: string | null; target?: string | null };
-  src:      { kind: string; origin?: string | null; license?: string | null; at: string };
-  meta:     { w: number; h: number; group?: string | null };
+  ann:      { boxes: StudioBox[]; label?: string | null; target?: string | null;
+              /** Sicherheit des Modells beim Vorschlag (0..1). */
+              confidence?: number | null };
+  src:      { kind: string; origin?: string | null; license?: string | null; at: string;
+              /** Seite, auf der eine Datei aus dem Netz gefunden wurde. */
+              page?: string | null };
+  meta:     { w: number; h: number; group?: string | null;
+              /** Videoabschnitt in Sekunden. */
+              start?: number | null; end?: number | null };
   abs_path: string;
   doubt?:   Doubt | null;
 }
@@ -56,3 +62,28 @@ export interface StudioStats {
   empty_confirmed: number;
   doubts:          number;
 }
+
+/** Bericht eines Exports — Gegenstueck zu quality::ExportReport. */
+export interface ExportReport {
+  total:                  number;
+  per_class:              [string, number][];
+  per_split:              [string, number][];
+  groups:                 number;
+  group_leaks:            string[];
+  near_duplicates:        number;
+  near_duplicates_across: number;
+  near_checked:           boolean;
+  licenses:               [string, number][];
+  without_license:        number;
+  sources:                [string, number][];
+  warnings:               string[];
+}
+
+export interface ExportResult {
+  dataset: { id: string; name: string };
+  report:  ExportReport;
+  path:    string;
+}
+
+/** Filter der Sample-Liste. "uncertain": Vorschlaege, unsicherste zuerst. */
+export type SampleFilter = 'all' | 'open' | 'confirmed' | 'doubt' | 'uncertain';

@@ -683,14 +683,9 @@ pub async fn lab_delete_session(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn lab_export_as_dataset(
-    _app_handle: tauri::AppHandle,
-    _session_id: String,
-    _name: Option<String>,
-) -> Result<serde_json::Value, String> {
-    Err("Noch nicht implementiert".to_string())
-}
+// Frueher stand hier lab_export_as_dataset, ein Platzhalter ohne Aufrufer
+// ("Noch nicht implementiert"). Korrekturen als Datensatz: lab_export_corrections.
+// Ergebnisse in ein Werkstatt-Projekt: studio_manager::transfer::studio_add_from_lab.
 
 #[tauri::command]
 pub async fn lab_get_stats(_app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {

@@ -15,7 +15,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
   Trash2, Plus, AlertTriangle, ImageOff, Info, Wand2, ShieldQuestion, Copy, Undo2, Film, Database,
-  ChevronDown, Globe, Tag, CopyPlus, ClipboardPaste, SquarePlus, Eye, EyeOff, ZoomOut, ListEnd,
+  ChevronDown, Globe, Tag, CopyPlus, ClipboardPaste, SquarePlus, Eye, EyeOff, ZoomOut, ListEnd, CopyCheck,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -29,10 +29,14 @@ import {
   type PixelBox, type Handle,
 } from './studioBoxes';
 import { useStudioModels, StudioModelSelect } from './studioModels';
-import { statsNachAenderung } from './studioStats';
+import { statsNachAenderung, balanceWarnungen } from './studioStats';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
+  SampleFilter, ExportResult,
 } from './studioTypes';
+import NearDupDialog from './NearDupDialog';
+import ExportReportView from './ExportReportView';
+import { BalanceHinweise } from './MediaWorkbench';
 import ModelRunDialog, { type ModelWithVersionTree } from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
 import ModalPortal from '../ui/ModalPortal';
@@ -89,7 +93,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(true);
   const [index, setIndex]       = useState(0);
-  const [filter, setFilter]     = useState<'all' | 'open' | 'confirmed' | 'doubt'>('all');
+  const [filter, setFilter]     = useState<SampleFilter>('all');
+  const [showNearDup, setShowNearDup] = useState(false);
   const [boxes, setBoxes]       = useState<PixelBox[]>([]);
   const [selected, setSelected] = useState(-1);
   const [activeClass, setActiveClass] = useState(0);
@@ -422,7 +427,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     if (next >= 0) goTo(next);
   };
 
-  const dialogOffen = !!(showExport || modelRun || importPlan || showSource || videoPath || showFetch);
+  const dialogOffen = !!(showExport || modelRun || importPlan || showSource || videoPath || showFetch || showNearDup);
 
   // ── Rechtsklick-Menue ───────────────────────────────────────────────────
   //
@@ -487,6 +492,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
         disabled: !!running || total === 0, onSelect: () => setModelRun('suggest') },
       { id: 'st-prj-review', group: gProjekt, label: t('studio.menu.review'), icon: ShieldQuestion,
         disabled: !!running || confirmed === 0, onSelect: () => setModelRun('review') },
+      { id: 'st-prj-neardup', group: gProjekt, label: t('studio.menu.nearDup'), icon: CopyCheck,
+        disabled: total < 2, onSelect: () => setShowNearDup(true) },
       { id: 'st-prj-export', group: gProjekt, label: t('studio.menu.export'), icon: Download,
         disabled: confirmed === 0, onSelect: () => setShowExport(true) },
     );
@@ -808,15 +815,17 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
         <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
           {/* Warteschlange */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden flex flex-col">
-            <div className="flex text-[11px] border-b border-white/10">
+            <div className="grid grid-cols-3 text-[11px] border-b border-white/10">
               {([
                 ['all', t('studio.filter.all')],
                 ['open', t('studio.filter.open')],
                 ['confirmed', t('studio.filter.confirmed')],
+                ['uncertain', t('studio.filter.uncertain')],
                 ['doubt', stats?.doubts ? `${t('studio.filter.doubt')} ${stats.doubts}` : t('studio.filter.doubt')],
-              ] as const).map(([val, label]) => (
+              ] as [SampleFilter, string][]).map(([val, label]) => (
                 <button key={val} onClick={() => setFilter(val)}
-                  className={`flex-1 py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                  title={val === 'uncertain' ? t('studio.filter.uncertainHint') : undefined}
+                  className={`py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
                   {label}
                 </button>
               ))}
@@ -1079,7 +1088,15 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                     {t('studio.stats.emptyConfirmed', { count: stats.empty_confirmed })}
                   </p>
                 )}
+                <button onClick={() => setShowNearDup(true)} disabled={total < 2}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[11px] inline-flex items-center justify-center gap-1 disabled:opacity-40">
+                  <CopyCheck className="w-3.5 h-3.5" /> {t('studio.media.nearDupButton')}
+                </button>
               </div>
+            )}
+
+            {stats && stats.confirmed > 0 && (
+              <BalanceHinweise warnungen={balanceWarnungen(stats.per_class, classes)} />
             )}
 
             <div className="rounded-xl border border-white/10 bg-white/[0.03]">
@@ -1155,8 +1172,13 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           confirmed={confirmed}
           suggested={stats?.suggested ?? 0}
           onClose={() => setShowExport(false)}
-          onDone={() => { setShowExport(false); void loadStats(); }}
+          onDone={() => { void loadStats(); }}
         />
+      )}
+
+      {showNearDup && (
+        <NearDupDialog project={project} onClose={() => setShowNearDup(false)}
+          onDone={() => { setShowNearDup(false); void loadSamples(0, true).then(() => setLadeStand(n => n + 1)); void loadStats(); }} />
       )}
     </div>
   );
@@ -1177,16 +1199,17 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
   const [trainPct, setTrainPct] = useState(70);
   const [valPct, setValPct] = useState(20);
   const [busy, setBusy] = useState(false);
+  const [ergebnis, setErgebnis] = useState<ExportResult | null>(null);
 
   const run = async () => {
     if (!modelId) return;
     setBusy(true);
     try {
-      await invoke('studio_export', {
+      setErgebnis(await invoke<ExportResult>('studio_export', {
         projectId: project.id, modelId, datasetName: name, includeSuggested,
         trainRatio: split ? trainPct / 100 : 0,
         valRatio:   split ? valPct / 100 : 0,
-      });
+      }));
       // Wer die Aufteilung schon hier gewaehlt hat, soll nicht lesen, er
       // muesse sie noch im Dataset-Bereich vornehmen.
       success(t('studio.export.doneTitle'),
@@ -1206,6 +1229,14 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
+        {ergebnis ? (<>
+          <h3 className="text-white font-semibold">{t('studio.report.title')}</h3>
+          <ExportReportView report={ergebnis.report} />
+          <button onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm">
+            {t('studio.suggest.report.close')}
+          </button>
+        </>) : (<>
         <div>
           <h3 className="text-white font-semibold">{t('studio.export.title')}</h3>
           <p className="text-gray-500 text-xs mt-1">{t('studio.export.subtitle')}</p>
@@ -1287,6 +1318,7 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
             {t('studio.export.confirmButton')}
           </button>
         </div>
+        </>)}
       </div>
     </div></ModalPortal>
   );

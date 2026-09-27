@@ -11,7 +11,7 @@ import {
   Trash2, RotateCcw, Download, Eye, Sparkles, Terminal,
   ThumbsUp, ThumbsDown, Minus, TrendingUp, TrendingDown,
   ClipboardList, Save, FolderOpen, Bot, Send, Pencil,
-  Check, Wand2, Copy, Maximize2, Minimize2, Zap, Database,
+  Check, Wand2, Copy, Maximize2, Minimize2, Zap, Database, Boxes,
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import {
@@ -35,6 +35,7 @@ import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { dateLocale } from '../utils/dateLocale';
 import { parseDelimitedRows } from './csvRows';
 import ModalPortal from './ui/ModalPortal';
+import LabToStudioDialog from './studio/LabToStudioDialog';
 
 // ── Eigene Dev-Scripts (DevTrain + DevTest) — strikt user-getrennt ───────────
 interface LabSavedScript { id: string; name: string; script: string; savedAt: string; source: 'train' | 'test'; }
@@ -626,6 +627,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
   const { t } = useLanguage();
   const { success, error, warning } = useNotification();
   const [exporting, setExporting] = useState(false);
+  const [toStudio, setToStudio] = useState(false);
 
   /**
    * Korrekturen als neues Dataset – der eigentliche Zweck des Labors.
@@ -735,7 +737,17 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
             {t('laboratoryPanel.analysis.exportDatasetButton')}
           </button>
+          <button onClick={() => setToStudio(true)} disabled={session.results.length === 0}
+            title={t('studio.fromLab.buttonHint')}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-gray-300 hover:text-white text-sm transition-all">
+            <Boxes className="w-4 h-4" /> {t('studio.fromLab.button')}
+          </button>
         </div>
+        {toStudio && (
+          <LabToStudioDialog name={session.name} ergebnisse={session.results}
+            bboxModell={session.results.some(r => r.correction?.kind === 'boxes')}
+            onClose={() => setToStudio(false)} />
+        )}
       </div>
 
       {/* Stats Overview */}

@@ -493,11 +493,13 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     verify_python_available()?;
     let python = get_python_executable();
 
-    // HuggingFace-Stack: deckt Text, Bild, Audio und Seq2Seq ab.
+    // HuggingFace-Stack: deckt Text, Bild, Audio, Video und Seq2Seq ab.
     // librosa/soundfile (Audio) und pillow (Bild) gehoeren dazu — ohne sie
-    // brechen Audio-Training, Audio-Test und die Bild-Vorlagen ab.
+    // brechen Audio-Training, Audio-Test und die Bild-Vorlagen ab. OpenCV
+    // liest die Einzelbilder der Videoclips (ft_data/video.py) und schneidet
+    // Abschnitte beim Export der Werkstatt.
     let nlp_packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
-                            "numpy", "accelerate", "librosa", "soundfile", "pillow"];
+                            "numpy", "accelerate", "librosa", "soundfile", "pillow", "opencv-python"];
     let nlp_installed = nlp_packages.iter().all(|p| check_package_installed(&python, p).installed);
     let nlp_plugin = PluginInfo {
         id: "seq_classification".to_string(),

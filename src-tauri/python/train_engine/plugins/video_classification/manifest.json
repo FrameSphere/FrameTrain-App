@@ -1,0 +1,11 @@
+{
+  "task_type": "video_classification",
+  "name": "Video Classification (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert Videomodelle für Klassifikation (VideoMAE, TimeSformer, ViViT). Ordner pro Klasse mit Videoclips.",
+  "supported_architectures": ["videomae", "timesformer", "vivit"],
+  "dataset_formats": ["folder_class", "pre_split"],
+  "metrics": ["train_loss", "val_loss", "accuracy", "f1", "precision", "recall"]
+}

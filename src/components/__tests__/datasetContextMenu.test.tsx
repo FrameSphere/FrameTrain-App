@@ -75,6 +75,8 @@ describe('Dataset-Bereich: Rechtsklick und Kuerzel', { timeout: 15000 }, () => {
     const aktionen = collectContextMenuActions({ target: document.body });
     expect(aktionen.map(a => a.id)).toEqual(['ds-import', 'ds-build', 'ds-refresh']);
     expect(aktionen.map(a => a.shortcut)).toEqual(['⌘N', '⌘B', undefined]);
+    // Nicht der Text aus dem leeren Zustand ("ersten Datensatz") — es gibt ja schon welche.
+    expect(aktionen[0].label).toBe('Dataset hinzufügen');
   });
 
   it('oeffnet mit Cmd+B die Werkstatt und mit Cmd+N den Import', async () => {

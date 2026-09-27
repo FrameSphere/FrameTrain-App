@@ -20,6 +20,10 @@ export function passendeAufgaben(project: Pick<StudioProject, 'modality' | 'task
   if (project.modality === 'text') {
     return project.task === 'pairs' ? ['seq2seq'] : ['seq_classification'];
   }
+  if (project.modality === 'video') return ['video_classification'];
+  if (project.modality === 'image' && project.task === 'classify') {
+    return ['hf_image_classification', 'image_classification'];
+  }
   if (project.modality === 'audio') {
     // Transkripte trainieren Sprach-zu-Text-Modelle, die in der Registry als
     // seq2seq gefuehrt sind.

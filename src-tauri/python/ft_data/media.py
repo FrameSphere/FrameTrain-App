@@ -27,6 +27,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}
+VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 
 SPLIT_ALIASES = {
     "train": ("train", "training"),
@@ -41,6 +42,8 @@ Item = Tuple[Path, int]
 
 
 def exts_for(kind: str) -> set:
+    if kind == "video":
+        return VIDEO_EXTS
     return IMAGE_EXTS if kind == "image" else AUDIO_EXTS
 
 

@@ -662,7 +662,7 @@ export default function DatasetUpload() {
     aktionen.push(
       {
         id: 'ds-import', group: t('sidebar.nav.datasets'),
-        label: t('datasetUpload.emptyState.noDatasets.addButton'), icon: Upload, shortcut: '⌘N',
+        label: t('datasetUpload.header.addButton'), icon: Upload, shortcut: '⌘N',
         disabled: !selectedModelId,
         onSelect: () => setShowImportModal(true),
       },

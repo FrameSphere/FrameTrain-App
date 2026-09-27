@@ -25,6 +25,8 @@ export function detectScriptModality(model: ModelLike | null): ScriptModality {
   switch (r.plugin.taskType) {
     case 'hf_image_classification':
     case 'image_classification':
+    // Video: Einzelbilder durch einen Bild-Prozessor — die Bildvorlage passt am ehesten.
+    case 'video_classification':
       return 'image';
     case 'audio_classification':
       return 'audio';

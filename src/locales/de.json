@@ -3110,7 +3110,9 @@
       "audioPlaceholder": "Vollständiger Pfad zu einer Audiodatei, z.B. /Users/du/toene/probe.wav",
       "imageLabel": "Einzelnes Bild",
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
-      "detectedClass": "Erkannte Klasse"
+      "detectedClass": "Erkannte Klasse",
+      "videoLabel": "Einzelnes Video",
+      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4"
     }
   },
   "studio": {
@@ -3131,7 +3133,8 @@
       "cardMetaText": "{samples} Texte · {confirmed} bestätigt · {classes} Klassen",
       "cardMetaAudio": "{samples} Aufnahmen · {confirmed} bestätigt · {classes} Klassen",
       "cardMetaTranscript": "{samples} Aufnahmen · {confirmed} transkribiert",
-      "cardMetaPairs": "{samples} Paare · {confirmed} bestätigt"
+      "cardMetaPairs": "{samples} Paare · {confirmed} bestätigt",
+      "cardMetaVideo": "{samples} Clips · {confirmed} bestätigt · {classes} Klassen"
     },
     "create": {
       "title": "Neues Projekt",
@@ -3152,14 +3155,20 @@
         "text": "Jeder Zeile eine Klasse geben, Export als CSV",
         "pairs": "Zu jedem Text die gewünschte Antwort schreiben, Export als JSONL",
         "audio": "Jeder Aufnahme eine Klasse geben, Export als Klassenordner",
-        "transcript": "Zu jeder Aufnahme den Wortlaut schreiben, Export als Audio mit .txt"
+        "transcript": "Zu jeder Aufnahme den Wortlaut schreiben, Export als Audio mit .txt",
+        "imageClassify": "Jedem Bild eine Klasse geben, Export als Ordner je Klasse",
+        "video": "Jedem Videoabschnitt eine Klasse geben, Export als Clips je Klasse"
       },
       "formatNote_text": "Export als daten.csv mit den Spalten text und label — das Format, das die Klassifikation liest.",
       "formatNote_pairs": "Export als daten.jsonl mit source und target — das Format, das Seq2Seq liest.",
       "kindAudio": "Audio",
       "kindTranscript": "Transkript",
       "formatNote_audio": "Export als ein Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
-      "formatNote_transcript": "Export als Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription."
+      "formatNote_transcript": "Export als Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription.",
+      "kindImageClassify": "Bildklassen",
+      "kindVideo": "Video",
+      "formatNote_imageClassify": "Export als ein Ordner je Klasse, auf Wunsch schon aufgeteilt in train, val und test – das Layout, das die Bildklassifikation liest.",
+      "formatNote_video": "Export als Videoclips, ein Ordner je Klasse. Lange Videos lassen sich beim Einlesen in Abschnitte zerlegen; geschnitten wird erst beim Export."
     },
     "workbench": {
       "back": "Zurück zur Projektliste",
@@ -3192,7 +3201,11 @@
       "all": "Alle",
       "open": "Offen",
       "confirmed": "Fertig",
-      "doubt": "Zweifel"
+      "doubt": "Zweifel",
+      "uncertain": "Unsicher",
+      "uncertainHint": "Vorschläge des Modells, die unsichersten zuerst – dort bringt dein Urteil am meisten.",
+      "uncertainEmpty": "Keine Vorschläge. Erst „Vorschlagen“ laufen lassen.",
+      "empty": "Nichts in diesem Filter."
     },
     "stats": {
       "title": "Stand",
@@ -3227,7 +3240,10 @@
       "generateTexts": "G — Texte erzeugen lassen",
       "play": "Leertaste — abspielen und anhalten",
       "seek": "[ und ] — 5 Sekunden zurück und vor",
-      "record": "R — aufnehmen und stoppen"
+      "record": "R — aufnehmen und stoppen",
+      "paste": "Cmd+V – Bild aus der Zwischenablage",
+      "seekVideo": "[ und ] – 1 Sekunde zurück und vor",
+      "split": "X – Abschnitt an der aktuellen Stelle teilen"
     },
     "import": {
       "dialogTitle": "Bildordner wählen",
@@ -3299,7 +3315,7 @@
       "hint": "Vorschlag des Modells — Enter übernimmt, Boxen lassen sich vorher ändern",
       "errorTitle": "Vorschlagen fehlgeschlagen",
       "report": {
-        "withBoxes": "Bilder mit Vorschlag",
+        "withBoxes": "Mit Vorschlag",
         "boxes": "Vorgeschlagene Boxen",
         "withoutBoxes": "Ohne Fund, bleiben offen",
         "leftConfirmed": "Bestätigt, nicht angefasst",
@@ -3307,12 +3323,16 @@
         "unmappedTitle": "Klassen ohne Entsprechung im Projekt",
         "unmappedHint": "Diese Boxen wurden weggelassen. Lege die Klasse im Projekt an oder starte erneut mit der Option oben.",
         "classesAdded": "Neu angelegt",
-        "close": "Fertig"
+        "close": "Fertig",
+        "uncertainHint": "Der Filter „Unsicher“ zeigt die Vorschläge, bei denen das Modell am wenigsten sicher war, zuerst."
       },
       "scopeLabel": "Wie viele?",
       "scopeAll": "Alle offenen",
       "scopeNext": "Die nächsten {count}",
-      "starting": "Modell wird geladen…"
+      "starting": "Modell wird geladen…",
+      "subtitle_classes": "Ein trainiertes Modell ordnet die offenen Samples einer Klasse zu. Bestätigen ist schneller als zuordnen.",
+      "subtitle_transcript": "Ein Spracherkennungs-Modell (etwa Whisper) schreibt einen Entwurf des Wortlauts. Du korrigierst und bestätigst.",
+      "subtitle_pairs": "Ein Text-zu-Text-Modell schreibt einen Entwurf der Antwort. Du korrigierst und bestätigst."
     },
     "review": {
       "title": "Labels prüfen lassen",
@@ -3323,11 +3343,12 @@
       "missing": "Modell sieht zusätzlich: {classes}",
       "extra": "im Label, aber nicht gefunden: {classes}",
       "report": {
-        "checked": "Geprüfte Bilder",
+        "checked": "Geprüft",
         "doubts": "Widersprüche",
         "agree": "Einig",
         "hint": "Die Bilder mit Widerspruch stehen jetzt im Filter „Zweifel“ in der Warteschlange."
-      }
+      },
+      "subtitleClasses": "Das Modell sieht sich die bestätigten Samples an. Wo es eine andere Klasse sagt, steckt oft ein Fehler im Label."
     },
     "video": {
       "title": "Einzelbilder aus Video",
@@ -3443,12 +3464,12 @@
     },
     "fetch": {
       "title": "Aus dem Netz holen",
-      "subtitleImage": "Eine Liste von Bildadressen — jede Datei bekommt ihre Herkunft mit.",
-      "subtitleText": "Eine Liste von Seitenadressen — der sichtbare Text wird übernommen, mit Herkunft.",
+      "subtitleImage": "Bildadressen oder Seiten, auf denen Bilder stehen – jede Datei bekommt Adresse, Fundseite und Lizenz mit.",
+      "subtitleText": "Seiten oder Textdateien – der sichtbare Text wird übernommen, auf Wunsch in Absätzen, mit Herkunft.",
       "urlsLabel": "Adressen (eine je Zeile)",
       "licenseLabel": "Lizenz (optional)",
       "licenseHint": "Steht später in PROVENANCE.csv neben jeder Datei. Ohne Angabe bleibt das Feld leer — und der Datensatz ist nicht weitergebbar.",
-      "manners": "robots.txt wird gelesen und befolgt, je Server wird eine Sekunde gewartet. Was untersagt ist, wird nicht geholt und im Bericht genannt.",
+      "manners": "robots.txt wird gelesen und befolgt, samt Crawl-delay; je Server wird mindestens eine Sekunde gewartet. Was untersagt ist, wird nicht geholt und im Bericht genannt.",
       "count": "{count} gültige Adressen erkannt",
       "progress": "{current} von {total}",
       "runButton": "Holen",
@@ -3459,8 +3480,44 @@
         "duplicates": "Schon vorhanden",
         "blocked": "Untersagt",
         "failed": "Nicht erreichbar",
-        "skippedType": "Falscher Inhaltstyp"
-      }
+        "skippedType": "Falscher Inhaltstyp",
+        "pagesVisited": "Seiten gelesen",
+        "tooLarge": "Zu groß",
+        "tooSmall": "Zu klein (Symbole)",
+        "outsideAllowlist": "Außerhalb der Allowlist",
+        "limitReached": "Die Grenze ist erreicht – es gäbe noch mehr.",
+        "cancelled": "Angehalten. Was bis dahin geholt war, bleibt im Projekt."
+      },
+      "subtitleAudio": "Audioadressen oder Seiten, auf denen Audio eingebettet ist – mit Herkunft je Datei.",
+      "subtitleVideo": "Videoadressen oder Seiten, auf denen Videos eingebettet sind – mit Herkunft je Datei.",
+      "mode": {
+        "urls": "Adressen",
+        "crawl": "Website",
+        "sitemap": "Sitemap"
+      },
+      "modeHint": {
+        "urls": "Jede Adresse einzeln. Eine Seite wird nach dem durchsucht, was das Projekt braucht.",
+        "crawl": "Von den Startseiten aus Links folgen – nur auf denselben Domains, bis zur eingestellten Tiefe.",
+        "sitemap": "Die Seiten aus der sitemap.xml einer Website (auch aus robots.txt)."
+      },
+      "startLabel": "Startseiten (eine je Zeile)",
+      "sitemapLabel": "Website oder Adresse der Sitemap",
+      "paragraphsLabel": "In Absätze zerlegen – Navigation, Kopf und Fuß der Seite fallen weg",
+      "limitsTitle": "Grenzen",
+      "limitsSummary": "{pages} Seiten · {files} Dateien · {mb} MB",
+      "depthLabel": "Tiefe (Klicks)",
+      "maxPagesLabel": "Höchstens Seiten",
+      "maxFilesLabel": "Höchstens Dateien",
+      "maxMbLabel": "MB je Datei",
+      "minSideLabel": "Mindestgröße (px)",
+      "minCharsLabel": "Zeichen je Absatz",
+      "allowlistLabel": "Nur diese Domains (Allowlist)",
+      "allowlistHint": "Leer: nur die Domains der Startadressen. Subdomains zählen mit.",
+      "allowlistHintUrls": "Leer: jede angegebene Adresse. Sonst werden nur Dateien von diesen Domains geholt.",
+      "progressDetail": "{pages} Seiten gelesen · {files} übernommen",
+      "stopButton": "Anhalten",
+      "stopping": "Wird angehalten…",
+      "tooLargeTitle": "Über {mb} MB, nicht geladen"
     },
     "generate": {
       "title": "Texte erzeugen lassen",
@@ -3537,12 +3594,126 @@
       "startRecording": "Aufnehmen",
       "stopRecording": "Aufnahme stoppen",
       "openProject": "Öffnen",
-      "deleteProject": "Löschen …"
+      "deleteProject": "Löschen …",
+      "getFromWeb": "Aus dem Netz holen …",
+      "importFolder": "Ordner einlesen …",
+      "importVideos": "Videos einlesen …",
+      "nearDup": "Beinahe-Dubletten suchen …",
+      "removeSample": "Entfernen …",
+      "splitSegment": "Abschnitt hier teilen",
+      "video": "Video"
     },
     "keys": {
       "copiedTitle": "Boxen kopiert",
       "copiedDetail": "{count} Box(en) in der Zwischenablage – mit Cmd+V auf einem anderen Bild einfügen.",
       "boxesHidden": "{count} Boxen ausgeblendet – H blendet sie wieder ein"
+    },
+    "balance": {
+      "title": "Verteilung",
+      "leer": "„{klasse}“ hat noch keine Beispiele.",
+      "wenig": "„{klasse}“ hat erst {anzahl} (empfohlen: mindestens 10).",
+      "schief": "„{gross}“ hat {grossN}, „{klein}“ nur {kleinN} – das Modell lernt dann vor allem die große Klasse."
+    },
+    "fromLab": {
+      "button": "In die Werkstatt",
+      "buttonHint": "Falsche und unsichere Ergebnisse als Arbeit in ein Werkstatt-Projekt übernehmen",
+      "title": "In die Werkstatt übernehmen",
+      "subtitle": "Wo das Modell falsch lag oder zögerte, lernt es am meisten. Diese Samples kommen in ein Projekt, dort beschriftest du sie und trainierst neu.",
+      "whichLabel": "Welche Ergebnisse",
+      "which": {
+        "wrong": "Falsch oder korrigiert",
+        "uncertain": "Unsicher (unter 60 %)",
+        "all": "Alle"
+      },
+      "projectLabel": "Projekt",
+      "newProject": "Neues Projekt",
+      "rule": "Korrekturen und als richtig Bewertetes kommen bestätigt an, alles andere als Vorschlag des Modells.",
+      "runButton": "{count} übernehmen",
+      "doneTitle": "In die Werkstatt übernommen",
+      "doneDetail": "{added} Samples neu im Projekt",
+      "errorTitle": "Übernehmen fehlgeschlagen",
+      "next": "Im Projekt zeigt der Filter „Unsicher“ die Vorschläge mit der geringsten Sicherheit zuerst.",
+      "report": {
+        "added": "Neu im Projekt",
+        "confirmed": "Davon bestätigt",
+        "suggested": "Davon als Vorschlag",
+        "duplicates": "Schon vorhanden",
+        "skipped": "Übersprungen (Datei fehlt oder passt nicht)"
+      }
+    },
+    "media": {
+      "getFromWeb": "Aus dem Netz",
+      "nearDupButton": "Dubletten",
+      "pastedTitle": "Bild eingefügt",
+      "split": {
+        "none": "Nicht aufteilen",
+        "8020": "80 / 20",
+        "701515": "70 / 15 / 15"
+      },
+      "splitHint": "Teilt den Abschnitt an der aktuellen Stelle (X)",
+      "splitDone": "Abschnitt geteilt",
+      "splitError": "Teilen fehlgeschlagen",
+      "splitGroupNote": "Samples derselben Gruppe (Video, Seite, Aufnahme) bleiben im selben Teil.",
+      "suggestedHint": "Vorschlag des Modells ({conf}) – Enter übernimmt, eine Zahl wählt eine andere Klasse.",
+      "doubt": "Das Modell sagt „{model}“, im Label steht „{label}“.",
+      "exportImageClasses": "Schreibt einen Ordner je Klasse – das Layout, das die Bildklassifikation liest.",
+      "exportVideo": "Schneidet die Abschnitte zu Clips und schreibt einen Ordner je Klasse – das Layout, das die Videoklassifikation liest.",
+      "summaryImage": "{confirmed} bestätigte Bilder werden exportiert.",
+      "summaryVideo": "{confirmed} bestätigte Clips werden exportiert.",
+      "videoImportButton": "Videos",
+      "videoImport": {
+        "title": "Videos einlesen",
+        "subtitle": "Ein Ordner je Klasse wird als Klasse übernommen. Einzelne Dateien kommen ohne Klasse an.",
+        "clipLabel": "In Abschnitte zerlegen",
+        "clipNone": "Ganzes Video",
+        "clipSeconds": "{s} Sekunden",
+        "clipHint": "Ein Abschnitt verweist nur auf Start und Ende im Video – geschnitten wird erst beim Export. Alle Abschnitte eines Videos bleiben beim Aufteilen zusammen.",
+        "folder": "Ordner mit Videos wählen",
+        "files": "Videos wählen",
+        "folderButton": "Ordner",
+        "filesButton": "Dateien",
+        "doneTitle": "Videos übernommen",
+        "doneDetail": "{added} Abschnitte neu, {duplicates} doppelt, {labels} mit Klasse"
+      },
+      "wavConvertedTitle": "Aufnahmen umgewandelt",
+      "wavConverted": "{count} Aufnahmen liegen jetzt als WAV vor – so liest sie das Training auf jedem System.",
+      "empty": {
+        "audioTitle": "Noch keine Aufnahmen",
+        "audioDetail": "Direkt aufnehmen, einen Ordner einlesen oder aus dem Netz holen – Unterordner gelten als Klasse, eine .txt neben der Datei als Transkript.",
+        "imageTitle": "Noch keine Bilder",
+        "imageDetail": "Einen Ordner einlesen – Unterordner gelten als Klasse. Bilder lassen sich auch mit Cmd+V einfügen oder aus dem Netz holen.",
+        "videoTitle": "Noch keine Videos",
+        "videoDetail": "Videos einlesen – Unterordner gelten als Klasse. Lange Videos lassen sich dabei in Abschnitte zerlegen."
+      },
+      "splitHere": "Hier teilen"
+    },
+    "nearDup": {
+      "title": "Beinahe-Dubletten",
+      "subtitle": "Fast gleiche Samples. Liegen sie später in Training und Validierung, misst die Validierung Wiedererkennen statt Können. Je Gruppe bleibt das erste.",
+      "checking": "Wird geprüft…",
+      "hashing": "Bilder werden verglichen: {done} von {total}",
+      "exactOnly": "Bei Audio und Video werden nur exakte Kopien erkannt – die fängt schon der Import ab.",
+      "none": "Keine Beinahe-Dubletten unter {count} Samples.",
+      "found": "{groups} Gruppen unter {checked} Samples.",
+      "markRemove": "Zum Entfernen vormerken",
+      "keep": "bleibt",
+      "removeButton": "{count} entfernen",
+      "removedTitle": "Dubletten entfernt",
+      "removedDetail": "{count} Samples entfernt",
+      "errorTitle": "Prüfung fehlgeschlagen"
+    },
+    "report": {
+      "title": "Export-Bericht",
+      "total": "Samples",
+      "split": "Teil {split}",
+      "groupLeaks": "Gruppen in mehreren Teilen",
+      "nearDuplicates": "Beinahe-Dubletten (Paare)",
+      "notChecked": "nicht geprüft",
+      "nearAcross": "davon über Teilgrenzen",
+      "withoutLicense": "Aus dem Netz, ohne Lizenz",
+      "classes": "Je Klasse",
+      "allGood": "Keine Auffälligkeiten.",
+      "fileHint": "Steht auch als EXPORT_REPORT.md neben dem Datensatz."
     }
   }
 }

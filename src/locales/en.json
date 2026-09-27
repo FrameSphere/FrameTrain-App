@@ -3110,7 +3110,9 @@
       "audioPlaceholder": "Full path to an audio file, e.g. /Users/you/sounds/sample.wav",
       "imageLabel": "Single image",
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
-      "detectedClass": "Detected class"
+      "detectedClass": "Detected class",
+      "videoLabel": "Single video",
+      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4"
     }
   },
   "studio": {
@@ -3131,7 +3133,8 @@
       "cardMetaText": "{samples} texts · {confirmed} confirmed · {classes} classes",
       "cardMetaAudio": "{samples} recordings · {confirmed} confirmed · {classes} classes",
       "cardMetaTranscript": "{samples} recordings · {confirmed} transcribed",
-      "cardMetaPairs": "{samples} pairs · {confirmed} confirmed"
+      "cardMetaPairs": "{samples} pairs · {confirmed} confirmed",
+      "cardMetaVideo": "{samples} clips · {confirmed} confirmed · {classes} classes"
     },
     "create": {
       "title": "New project",
@@ -3152,14 +3155,20 @@
         "text": "Give each row a class, export as CSV",
         "pairs": "Write the wanted answer for each text, export as JSONL",
         "audio": "Give each recording a class, export as class folders",
-        "transcript": "Write the wording for each recording, export as audio with .txt"
+        "transcript": "Write the wording for each recording, export as audio with .txt",
+        "imageClassify": "Give each image a class, export as one folder per class",
+        "video": "Give each video segment a class, export as clips per class"
       },
       "formatNote_text": "Exports daten.csv with the columns text and label — the format classification reads.",
       "formatNote_pairs": "Exports daten.jsonl with source and target — the format seq2seq reads.",
       "kindAudio": "Audio",
       "kindTranscript": "Transcript",
       "formatNote_audio": "Exports one folder per class — the layout the app recognises as classification.",
-      "formatNote_transcript": "Exports the recording with a matching .txt next to it — the layout for transcription."
+      "formatNote_transcript": "Exports the recording with a matching .txt next to it — the layout for transcription.",
+      "kindImageClassify": "Image classes",
+      "kindVideo": "Video",
+      "formatNote_imageClassify": "Exported as one folder per class, optionally already split into train, val and test – the layout image classification reads.",
+      "formatNote_video": "Exported as video clips, one folder per class. Long videos can be cut into segments on import; clips are cut only on export."
     },
     "workbench": {
       "back": "Back to project list",
@@ -3192,7 +3201,11 @@
       "all": "All",
       "open": "Open",
       "confirmed": "Done",
-      "doubt": "Doubt"
+      "doubt": "Doubt",
+      "uncertain": "Unsure",
+      "uncertainHint": "Model suggestions, least certain first – that is where your judgment helps most.",
+      "uncertainEmpty": "No suggestions. Run “Suggest” first.",
+      "empty": "Nothing in this filter."
     },
     "stats": {
       "title": "State",
@@ -3227,7 +3240,10 @@
       "generateTexts": "G — have texts written",
       "play": "Space — play and pause",
       "seek": "[ and ] — 5 seconds back and forward",
-      "record": "R — record and stop"
+      "record": "R — record and stop",
+      "paste": "Cmd+V – image from the clipboard",
+      "seekVideo": "[ and ] – 1 second back and forward",
+      "split": "X – split segment at the current position"
     },
     "import": {
       "dialogTitle": "Choose image folder",
@@ -3299,7 +3315,7 @@
       "hint": "Model suggestion — Enter accepts it, boxes can be adjusted first",
       "errorTitle": "Suggesting failed",
       "report": {
-        "withBoxes": "Images with a suggestion",
+        "withBoxes": "With suggestion",
         "boxes": "Suggested boxes",
         "withoutBoxes": "Nothing found, still open",
         "leftConfirmed": "Confirmed, left untouched",
@@ -3307,12 +3323,16 @@
         "unmappedTitle": "Classes with no match in the project",
         "unmappedHint": "Those boxes were left out. Add the class to the project, or run again with the option above.",
         "classesAdded": "Newly created",
-        "close": "Done"
+        "close": "Done",
+        "uncertainHint": "The “Unsure” filter shows the suggestions the model was least sure about first."
       },
       "scopeLabel": "How many?",
       "scopeAll": "All open",
       "scopeNext": "The next {count}",
-      "starting": "Loading model…"
+      "starting": "Loading model…",
+      "subtitle_classes": "A trained model assigns the open samples to a class. Confirming is faster than assigning.",
+      "subtitle_transcript": "A speech recognition model (such as Whisper) writes a draft of the words. You correct and confirm.",
+      "subtitle_pairs": "A text-to-text model writes a draft answer. You correct and confirm."
     },
     "review": {
       "title": "Have the labels checked",
@@ -3323,11 +3343,12 @@
       "missing": "model also sees: {classes}",
       "extra": "in the label but not found: {classes}",
       "report": {
-        "checked": "Images checked",
+        "checked": "Checked",
         "doubts": "Disagreements",
         "agree": "In agreement",
         "hint": "The images with a disagreement are now under the „Doubt“ filter in the queue."
-      }
+      },
+      "subtitleClasses": "The model looks at the confirmed samples. Where it says a different class, the label is often wrong."
     },
     "video": {
       "title": "Frames from video",
@@ -3443,12 +3464,12 @@
     },
     "fetch": {
       "title": "Fetch from the web",
-      "subtitleImage": "A list of image addresses — every file carries its origin along.",
-      "subtitleText": "A list of page addresses — the visible text is taken, with its origin.",
+      "subtitleImage": "Image addresses or pages that contain images – each file keeps its address, source page and license.",
+      "subtitleText": "Pages or text files – the visible text is taken over, optionally split into paragraphs, with its origin.",
       "urlsLabel": "Addresses (one per line)",
       "licenseLabel": "Licence (optional)",
       "licenseHint": "Ends up in PROVENANCE.csv next to every file. Left empty the field stays empty — and the dataset cannot be passed on.",
-      "manners": "robots.txt is read and obeyed, and each server gets a second between requests. What is disallowed is not fetched and is named in the report.",
+      "manners": "robots.txt is read and followed, including crawl-delay; each server gets at least one second between requests. Anything disallowed is not fetched and is listed in the report.",
       "count": "{count} valid addresses recognised",
       "progress": "{current} of {total}",
       "runButton": "Fetch",
@@ -3459,8 +3480,44 @@
         "duplicates": "Already present",
         "blocked": "Disallowed",
         "failed": "Unreachable",
-        "skippedType": "Wrong content type"
-      }
+        "skippedType": "Wrong content type",
+        "pagesVisited": "Pages read",
+        "tooLarge": "Too large",
+        "tooSmall": "Too small (icons)",
+        "outsideAllowlist": "Outside the allowlist",
+        "limitReached": "The limit was reached – there would be more.",
+        "cancelled": "Stopped. Whatever was fetched until then stays in the project."
+      },
+      "subtitleAudio": "Audio addresses or pages with embedded audio – with origin per file.",
+      "subtitleVideo": "Video addresses or pages with embedded videos – with origin per file.",
+      "mode": {
+        "urls": "Addresses",
+        "crawl": "Website",
+        "sitemap": "Sitemap"
+      },
+      "modeHint": {
+        "urls": "Each address on its own. A page is searched for what the project needs.",
+        "crawl": "Follow links from the start pages – only on the same domains, up to the set depth.",
+        "sitemap": "The pages listed in a website's sitemap.xml (also found via robots.txt)."
+      },
+      "startLabel": "Start pages (one per line)",
+      "sitemapLabel": "Website or sitemap address",
+      "paragraphsLabel": "Split into paragraphs – navigation, header and footer are dropped",
+      "limitsTitle": "Limits",
+      "limitsSummary": "{pages} pages · {files} files · {mb} MB",
+      "depthLabel": "Depth (clicks)",
+      "maxPagesLabel": "Max pages",
+      "maxFilesLabel": "Max files",
+      "maxMbLabel": "MB per file",
+      "minSideLabel": "Min size (px)",
+      "minCharsLabel": "Chars per paragraph",
+      "allowlistLabel": "Only these domains (allowlist)",
+      "allowlistHint": "Empty: only the domains of the start addresses. Subdomains count too.",
+      "allowlistHintUrls": "Empty: every given address. Otherwise only files from these domains are fetched.",
+      "progressDetail": "{pages} pages read · {files} taken over",
+      "stopButton": "Stop",
+      "stopping": "Stopping…",
+      "tooLargeTitle": "Over {mb} MB, not loaded"
     },
     "generate": {
       "title": "Have texts written",
@@ -3537,12 +3594,126 @@
       "startRecording": "Record",
       "stopRecording": "Stop recording",
       "openProject": "Open",
-      "deleteProject": "Delete …"
+      "deleteProject": "Delete …",
+      "getFromWeb": "Fetch from the web …",
+      "importFolder": "Import folder …",
+      "importVideos": "Import videos …",
+      "nearDup": "Find near-duplicates …",
+      "removeSample": "Remove …",
+      "splitSegment": "Split segment here",
+      "video": "Video"
     },
     "keys": {
       "copiedTitle": "Boxes copied",
       "copiedDetail": "{count} box(es) on the clipboard – paste them on another image with Cmd+V.",
       "boxesHidden": "{count} boxes hidden – H shows them again"
+    },
+    "balance": {
+      "title": "Distribution",
+      "leer": "“{klasse}” has no examples yet.",
+      "wenig": "“{klasse}” has only {anzahl} (recommended: at least 10).",
+      "schief": "“{gross}” has {grossN}, “{klein}” only {kleinN} – the model will mostly learn the large class."
+    },
+    "fromLab": {
+      "button": "To the studio",
+      "buttonHint": "Take wrong and uncertain results into a studio project as work to do",
+      "title": "Take into the studio",
+      "subtitle": "Where the model was wrong or hesitated, it learns the most. These samples go into a project where you label them and train again.",
+      "whichLabel": "Which results",
+      "which": {
+        "wrong": "Wrong or corrected",
+        "uncertain": "Uncertain (below 60 %)",
+        "all": "All"
+      },
+      "projectLabel": "Project",
+      "newProject": "New project",
+      "rule": "Corrections and results rated correct arrive confirmed, everything else as the model's suggestion.",
+      "runButton": "Take {count}",
+      "doneTitle": "Taken into the studio",
+      "doneDetail": "{added} new samples in the project",
+      "errorTitle": "Taking over failed",
+      "next": "In the project, the “Unsure” filter shows the least certain suggestions first.",
+      "report": {
+        "added": "New in project",
+        "confirmed": "Confirmed",
+        "suggested": "As suggestion",
+        "duplicates": "Already there",
+        "skipped": "Skipped (file missing or not fitting)"
+      }
+    },
+    "media": {
+      "getFromWeb": "From the web",
+      "nearDupButton": "Duplicates",
+      "pastedTitle": "Image pasted",
+      "split": {
+        "none": "Don't split",
+        "8020": "80 / 20",
+        "701515": "70 / 15 / 15"
+      },
+      "splitHint": "Splits the segment at the current position (X)",
+      "splitDone": "Segment split",
+      "splitError": "Split failed",
+      "splitGroupNote": "Samples of the same group (video, page, recording) stay in the same part.",
+      "suggestedHint": "Model suggestion ({conf}) – Enter accepts, a number picks another class.",
+      "doubt": "The model says “{model}”, the label says “{label}”.",
+      "exportImageClasses": "Writes one folder per class – the layout image classification reads.",
+      "exportVideo": "Cuts the segments into clips and writes one folder per class – the layout video classification reads.",
+      "summaryImage": "{confirmed} confirmed images will be exported.",
+      "summaryVideo": "{confirmed} confirmed clips will be exported.",
+      "videoImportButton": "Videos",
+      "videoImport": {
+        "title": "Import videos",
+        "subtitle": "A folder per class is taken as the class. Single files arrive without a class.",
+        "clipLabel": "Cut into segments",
+        "clipNone": "Whole video",
+        "clipSeconds": "{s} seconds",
+        "clipHint": "A segment only points to start and end in the video – clips are cut on export. All segments of one video stay together when splitting.",
+        "folder": "Choose a folder with videos",
+        "files": "Choose videos",
+        "folderButton": "Folder",
+        "filesButton": "Files",
+        "doneTitle": "Videos imported",
+        "doneDetail": "{added} new segments, {duplicates} duplicates, {labels} with class"
+      },
+      "wavConvertedTitle": "Recordings converted",
+      "wavConverted": "{count} recordings are now WAV – training reads them on every system.",
+      "empty": {
+        "audioTitle": "No recordings yet",
+        "audioDetail": "Record directly, import a folder or fetch from the web – subfolders are classes, a .txt next to a file is its transcript.",
+        "imageTitle": "No images yet",
+        "imageDetail": "Import a folder – subfolders are classes. Images can also be pasted with Cmd+V or fetched from the web.",
+        "videoTitle": "No videos yet",
+        "videoDetail": "Import videos – subfolders are classes. Long videos can be cut into segments on import."
+      },
+      "splitHere": "Split here"
+    },
+    "nearDup": {
+      "title": "Near-duplicates",
+      "subtitle": "Almost identical samples. If they end up in training and validation, validation measures recognition instead of skill. The first of each group stays.",
+      "checking": "Checking…",
+      "hashing": "Comparing images: {done} of {total}",
+      "exactOnly": "For audio and video only exact copies are detected – the import already catches those.",
+      "none": "No near-duplicates among {count} samples.",
+      "found": "{groups} groups among {checked} samples.",
+      "markRemove": "Mark for removal",
+      "keep": "stays",
+      "removeButton": "Remove {count}",
+      "removedTitle": "Duplicates removed",
+      "removedDetail": "{count} samples removed",
+      "errorTitle": "Check failed"
+    },
+    "report": {
+      "title": "Export report",
+      "total": "Samples",
+      "split": "Part {split}",
+      "groupLeaks": "Groups in several parts",
+      "nearDuplicates": "Near-duplicates (pairs)",
+      "notChecked": "not checked",
+      "nearAcross": "across parts",
+      "withoutLicense": "From the web, without license",
+      "classes": "Per class",
+      "allGood": "Nothing unusual.",
+      "fileHint": "Also saved as EXPORT_REPORT.md next to the dataset."
     }
   }
 }

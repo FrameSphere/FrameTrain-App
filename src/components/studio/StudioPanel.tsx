@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Plus, Loader2, Trash2, Boxes, Image as ImageIcon, X, FileText, AudioLines, FolderOpen,
+  Film, LayoutGrid,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -15,7 +16,7 @@ import { navigateTo } from '../../ui/navigationEvents';
 import { dateLocale } from '../../utils/dateLocale';
 import ImageWorkbench from './ImageWorkbench';
 import TextWorkbench from './TextWorkbench';
-import AudioWorkbench from './AudioWorkbench';
+import MediaWorkbench from './MediaWorkbench';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
 import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextMenuRegistry';
@@ -33,15 +34,38 @@ export function cardMetaKey(p: Pick<StudioProject, 'modality' | 'task'>): string
   if (p.modality === 'text') {
     return p.task === 'pairs' ? 'studio.projects.cardMetaPairs' : 'studio.projects.cardMetaText';
   }
+  if (p.modality === 'video') return 'studio.projects.cardMetaVideo';
   return 'studio.projects.cardMeta';
 }
 
-function ProjectIcon({ modality }: { modality: string }) {
+function ProjectIcon({ modality, task }: { modality: string; task?: string }) {
   const cls = 'w-4 h-4 text-gray-300';
   if (modality === 'audio') return <AudioLines className={cls} aria-label="audio" />;
   if (modality === 'text') return <FileText className={cls} aria-label="text" />;
+  if (modality === 'video') return <Film className={cls} aria-label="video" />;
+  if (task === 'classify') return <LayoutGrid className={cls} aria-label="image-classes" />;
   return <ImageIcon className={cls} aria-label="image" />;
 }
+
+/// Welche Werkbank ein Projekt oeffnet. Boxen haben ihre eigene; alles, was
+/// je Sample eine Klasse oder einen Wortlaut bekommt, teilt sich die Medien-Werkbank.
+export function werkbankFuer(p: Pick<StudioProject, 'modality' | 'task'>): 'text' | 'media' | 'boxes' {
+  if (p.modality === 'text') return 'text';
+  if (p.modality === 'audio' || p.modality === 'video') return 'media';
+  return p.task === 'classify' ? 'media' : 'boxes';
+}
+
+/// Projektarten im Anlegen-Dialog und was daraus wird.
+export const PROJEKTARTEN = {
+  image:         { modality: 'image', task: 'bbox',           targetFormat: 'yolo_bbox',        classes: true },
+  imageClassify: { modality: 'image', task: 'classify',       targetFormat: 'folder_class',     classes: true },
+  video:         { modality: 'video', task: 'classify',       targetFormat: 'folder_class',     classes: true },
+  text:          { modality: 'text',  task: 'classification', targetFormat: 'flat_file',        classes: true },
+  pairs:         { modality: 'text',  task: 'pairs',          targetFormat: 'flat_file',        classes: false },
+  audio:         { modality: 'audio', task: 'classification', targetFormat: 'folder_class',     classes: true },
+  transcript:    { modality: 'audio', task: 'transcript',     targetFormat: 'audio_transcript', classes: false },
+} as const;
+export type Projektart = keyof typeof PROJEKTARTEN;
 
 export default function StudioPanel() {
   const { t, language } = useLanguage();
@@ -105,9 +129,8 @@ export default function StudioPanel() {
     // Die Werkbank richtet sich nach der Modalitaet des Projekts. Fehlt diese
     // Weiche, landet auch ein Textprojekt im Bild-Editor und meldet "Noch
     // keine Bilder" — ohne dass irgendetwas fehlschlaegt.
-    const Werkbank = openProject.modality === 'text' ? TextWorkbench
-      : openProject.modality === 'audio' ? AudioWorkbench
-        : ImageWorkbench;
+    const art = werkbankFuer(openProject);
+    const Werkbank = art === 'text' ? TextWorkbench : art === 'media' ? MediaWorkbench : ImageWorkbench;
     return (
       <Werkbank
         project={openProject}
@@ -172,7 +195,7 @@ export default function StudioPanel() {
               <button onClick={() => setOpenId(p.id)} className="w-full text-left p-5">
                 <div className="flex items-start gap-3">
                   <span className="p-2 rounded-lg bg-white/5 border border-white/10">
-                    <ProjectIcon modality={p.modality} />
+                    <ProjectIcon modality={p.modality} task={p.task} />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-white font-medium truncate">{p.name}</p>
@@ -247,7 +270,8 @@ function CreateDialog({ onClose, onCreated }: {
   const { error } = useNotification();
   const [name, setName] = useState('');
   const [classText, setClassText] = useState('');
-  const [kind, setKind] = useState<'image' | 'text' | 'pairs' | 'audio' | 'transcript'>('image');
+  const [kind, setKind] = useState<Projektart>('image');
+  const art = PROJEKTARTEN[kind];
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
@@ -256,16 +280,10 @@ function CreateDialog({ onClose, onCreated }: {
     try {
       const project = await invoke<StudioProject>('studio_create_project', {
         name: name.trim(),
-        modality: kind === 'image' ? 'image'
-          : kind === 'audio' || kind === 'transcript' ? 'audio' : 'text',
-        task: kind === 'image' ? 'bbox'
-          : kind === 'pairs' ? 'pairs'
-            : kind === 'transcript' ? 'transcript' : 'classification',
-        targetFormat: kind === 'image' ? 'yolo_bbox'
-          : kind === 'audio' ? 'folder_class'
-            : kind === 'transcript' ? 'audio_transcript' : 'flat_file',
-        classes: kind === 'pairs' || kind === 'transcript'
-          ? [] : classText.split(/[,\n]/).map(c => c.trim()).filter(Boolean),
+        modality: art.modality,
+        task: art.task,
+        targetFormat: art.targetFormat,
+        classes: art.classes ? classText.split(/[,\n]/).map(c => c.trim()).filter(Boolean) : [],
       });
       onCreated(project);
     } catch (err: unknown) {
@@ -297,6 +315,8 @@ function CreateDialog({ onClose, onCreated }: {
           <div className="mt-1.5 grid grid-cols-3 gap-1.5">
             {([
               ['image', t('studio.create.kindImage')],
+              ['imageClassify', t('studio.create.kindImageClassify')],
+              ['video', t('studio.create.kindVideo')],
               ['text', t('studio.create.kindText')],
               ['pairs', t('studio.create.kindPairs')],
               ['audio', t('studio.create.kindAudio')],
@@ -317,7 +337,7 @@ function CreateDialog({ onClose, onCreated }: {
             className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/25" />
         </label>
 
-        {kind !== 'pairs' && kind !== 'transcript' && <label className="block">
+        {art.classes && <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.create.classesLabel')}</span>
           <textarea value={classText} onChange={e => setClassText(e.target.value)} rows={3}
             placeholder={t('studio.create.classesPlaceholder')}

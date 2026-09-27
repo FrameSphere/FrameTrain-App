@@ -60,3 +60,34 @@ export function statsNachAenderung(
   }
   return next;
 }
+
+/// Unter so vielen bestaetigten Beispielen lernt eine Klasse kaum etwas —
+/// dieselben Grenzen wie quality::balance_warnungen im Backend.
+export const MIN_JE_KLASSE = 10;
+export const MAX_VERHAELTNIS = 5;
+
+export type BalanceWarnung =
+  | { art: 'leer'; klasse: string }
+  | { art: 'wenig'; klasse: string; anzahl: number }
+  | { art: 'schief'; gross: string; grossN: number; klein: string; kleinN: number };
+
+/** Was an der Verteilung der Klassen nicht stimmt. Erst ab einem ersten
+ *  bestaetigten Sample — ein leeres Projekt ist kein Warnfall. */
+export function balanceWarnungen(perClass: number[], classes: string[]): BalanceWarnung[] {
+  const paare = classes.map((k, i) => [k, perClass[i] ?? 0] as const);
+  if (paare.every(([, n]) => n === 0)) return [];
+  const out: BalanceWarnung[] = [];
+  for (const [klasse, n] of paare) {
+    if (n === 0) out.push({ art: 'leer', klasse });
+    else if (n < MIN_JE_KLASSE) out.push({ art: 'wenig', klasse, anzahl: n });
+  }
+  const belegt = paare.filter(([, n]) => n > 0);
+  if (belegt.length >= 2) {
+    const gross = belegt.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const klein = belegt.reduce((a, b) => (b[1] < a[1] ? b : a));
+    if (gross[1] / klein[1] > MAX_VERHAELTNIS) {
+      out.push({ art: 'schief', gross: gross[0], grossN: gross[1], klein: klein[0], kleinN: klein[1] });
+    }
+  }
+  return out;
+}

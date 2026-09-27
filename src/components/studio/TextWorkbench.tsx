@@ -12,13 +12,16 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
   Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine, Globe, Sparkles,
-  Tag, ListEnd, Trash2,
+  Tag, ListEnd, Trash2, CopyCheck,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { classColor } from '../labGroundTruth';
 import { useStudioModels, StudioModelSelect } from './studioModels';
-import { statsNachAenderung } from './studioStats';
+import { statsNachAenderung, balanceWarnungen } from './studioStats';
+import NearDupDialog from './NearDupDialog';
+import ExportReportView from './ExportReportView';
+import { BalanceHinweise } from './MediaWorkbench';
 import { nextOpenIndex } from './studioBoxes';
 import ModelRunDialog from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
@@ -26,6 +29,7 @@ import GenerateDialog from './GenerateDialog';
 import type { GeneratedItem } from './generatedTexts';
 import type {
   StudioProject, StudioSample, SamplePage, ImportReport, StudioStats, SampleStatus,
+  SampleFilter, ExportResult,
 } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
@@ -58,7 +62,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   const [total, setTotal]     = useState(0);
   const [loading, setLoading] = useState(true);
   const [index, setIndex]     = useState(0);
-  const [filter, setFilter]   = useState<'all' | 'open' | 'confirmed'>('all');
+  const [filter, setFilter]   = useState<SampleFilter>('all');
+  const [showNearDup, setShowNearDup] = useState(false);
   const [stats, setStats]     = useState<StudioStats | null>(null);
   const [newClass, setNewClass] = useState('');
   const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
@@ -176,7 +181,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
 
   // ── Rechtsklick-Menue ───────────────────────────────────────────────────
   useContextMenuActions(() => {
-    if (showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate) return [];
+    if (showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate || showNearDup) return [];
     const gText = t('studio.menu.text');
     const gProjekt = t('studio.menu.project');
     const aktionen: ContextMenuAction[] = [];
@@ -213,14 +218,17 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
       { id: 'st-txt-generate', group: gProjekt, label: t('studio.text.sourceGenerate'), icon: Sparkles, shortcut: 'G',
         onSelect: () => setShowGenerate(true) },
     );
+    // Vorschlagen geht auch bei Paaren: ein Text-zu-Text-Modell schreibt den Entwurf der Antwort.
+    aktionen.push({ id: 'st-txt-suggest', group: gProjekt, label: t('studio.menu.suggest'), icon: Wand2,
+      disabled: !!running || total === 0, onSelect: () => setModelRun('suggest') });
     if (!paare) {
       aktionen.push(
-        { id: 'st-txt-suggest', group: gProjekt, label: t('studio.menu.suggest'), icon: Wand2,
-          disabled: !!running || total === 0, onSelect: () => setModelRun('suggest') },
         { id: 'st-txt-review', group: gProjekt, label: t('studio.menu.review'), icon: ShieldQuestion,
           disabled: !!running || (stats?.confirmed ?? 0) === 0, onSelect: () => setModelRun('review') },
       );
     }
+    aktionen.push({ id: 'st-txt-neardup', group: gProjekt, label: t('studio.menu.nearDup'), icon: CopyCheck,
+      disabled: total < 2, onSelect: () => setShowNearDup(true) });
     aktionen.push({ id: 'st-txt-export', group: gProjekt, label: t('studio.menu.export'), icon: Download,
       disabled: (stats?.confirmed ?? 0) === 0, onSelect: () => setShowExport(true) });
     return aktionen;
@@ -286,7 +294,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   tastenRef.current = (e: KeyboardEvent) => {
     const el = e.target as HTMLElement | null;
     const imFeld = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-    if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate || entwurf !== null) return;
+    if (!current || showExport || plan || modelRun || showWrite || showFetch || showSource || showGenerate || showNearDup || entwurf !== null) return;
 
     // Im Zieltext-Feld gilt nur Cmd+Enter, sonst tippt man Kuerzel in den Text.
     if (imFeld) {
@@ -448,15 +456,15 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
               ? t('studio.import.progress', { current: importing.cur, total: importing.total })
               : t('studio.text.addButton')}
           </button>
+          <button onClick={() => setModelRun('suggest')} disabled={!!running || total === 0}
+            className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
+            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+            {running && running.total > 0
+              ? t('studio.suggest.progress', { current: running.cur, total: running.total })
+              : t('studio.workbench.suggestButton')}
+          </button>
           {!paare && (
             <>
-              <button onClick={() => setModelRun('suggest')} disabled={!!running || total === 0}
-                className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
-                {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                {running && running.total > 0
-                  ? t('studio.suggest.progress', { current: running.cur, total: running.total })
-                  : t('studio.workbench.suggestButton')}
-              </button>
               <button onClick={() => setModelRun('review')} disabled={!!running || confirmed === 0}
                 className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50"
                 title={confirmed === 0 ? t('studio.review.needsConfirmed') : undefined}>
@@ -488,11 +496,13 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
       ) : (
         <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
           <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden flex flex-col">
-            <div className="flex text-[11px] border-b border-white/10">
+            <div className="grid grid-cols-3 text-[11px] border-b border-white/10">
               {([['all', t('studio.filter.all')], ['open', t('studio.filter.open')],
-                 ['confirmed', t('studio.filter.confirmed')]] as const).map(([val, label]) => (
+                 ['confirmed', t('studio.filter.confirmed')], ['uncertain', t('studio.filter.uncertain')],
+                 ...(paare ? [] : [['doubt', stats?.doubts ? `${t('studio.filter.doubt')} ${stats.doubts}` : t('studio.filter.doubt')]])] as [SampleFilter, string][]).map(([val, label]) => (
                 <button key={val} onClick={() => setFilter(val)}
-                  className={`flex-1 py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                  title={val === 'uncertain' ? t('studio.filter.uncertainHint') : undefined}
+                  className={`py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
                   {label}
                 </button>
               ))}
@@ -677,8 +687,14 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                     <span className="text-gray-200 tabular-nums">{val}</span>
                   </div>
                 ))}
+                <button onClick={() => setShowNearDup(true)} disabled={total < 2}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[11px] inline-flex items-center justify-center gap-1 disabled:opacity-40">
+                  <CopyCheck className="w-3.5 h-3.5" /> {t('studio.media.nearDupButton')}
+                </button>
               </div>
             )}
+
+            {!paare && stats && <BalanceHinweise warnungen={balanceWarnungen(stats.per_class, classes)} />}
 
             <div className="rounded-xl border border-white/10 bg-white/[0.03]">
               <button onClick={() => setShowKeys(v => !v)}
@@ -781,8 +797,13 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           project={project}
           confirmed={confirmed}
           onClose={() => setShowExport(false)}
-          onDone={() => { setShowExport(false); void loadStats(); }}
+          onDone={() => { void loadStats(); }}
         />
+      )}
+
+      {showNearDup && (
+        <NearDupDialog project={project} onClose={() => setShowNearDup(false)}
+          onDone={() => { setShowNearDup(false); void loadSamples(0, true).then(() => setLadeStand(n => n + 1)); void loadStats(); }} />
       )}
     </div>
   );
@@ -889,15 +910,16 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
   const { models, modelId, setModelId } = useStudioModels(project);
   const [name, setName] = useState(project.name);
   const [busy, setBusy] = useState(false);
+  const [ergebnis, setErgebnis] = useState<ExportResult | null>(null);
 
   const run = async () => {
     if (!modelId) return;
     setBusy(true);
     try {
-      await invoke('studio_export', {
+      setErgebnis(await invoke<ExportResult>('studio_export', {
         projectId: project.id, modelId, datasetName: name,
         includeSuggested: false, trainRatio: 0, valRatio: 0,
-      });
+      }));
       success(t('studio.export.doneTitle'), t('studio.export.doneDetail', { name }));
       onDone();
     } catch (err: unknown) {
@@ -914,6 +936,14 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
       onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
         onClick={e => e.stopPropagation()}>
+        {ergebnis ? (<>
+          <h3 className="text-white font-semibold">{t('studio.report.title')}</h3>
+          <ExportReportView report={ergebnis.report} />
+          <button onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm">
+            {t('studio.suggest.report.close')}
+          </button>
+        </>) : (<>
         <div>
           <h3 className="text-white font-semibold">{t('studio.export.title')}</h3>
           <p className="text-gray-500 text-xs mt-1">
@@ -945,6 +975,7 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
             {t('studio.export.confirmButton')}
           </button>
         </div>
+        </>)}
       </div>
     </div></ModalPortal>
   );

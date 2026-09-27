@@ -567,3 +567,54 @@ gelten jetzt nur ohne Cmd. Und der Tasten-Handler wurde per useEffect neu
 angemeldet, das laeuft erst nach dem Zeichnen; ein Tastendruck direkt nach
 dem Laden erreichte manchmal noch den alten Handler. Jetzt ruft ein einziger
 Listener immer den aktuellen Handler.
+
+## 20. Die offenen Stufen des Plans (1.3.3)
+
+Abgleich nach 1.3.2 ergab: S1–S3 fertig, S4 (Assist-Modelle), S5 (aktives
+Lernen) und die Web-Erfassung nur als Grundbaustein. Dazu kam Video.
+
+**Web (web.rs).** Drei Wege statt einer Adressliste: Adressen (eine
+Seitenadresse wird nach dem durchsucht, was das Projekt braucht — Bilder mit
+srcset/lazy/og:image, Audio, Video, Absaetze), Website (Links folgen, Tiefe
+und Seitengrenze, ohne Allowlist nur auf den Domains der Startadressen) und
+Sitemap (auch Verzeichnisse und "Sitemap:" aus robots.txt). Groessenlimit
+wird beim Laden gemessen, nicht nur am Content-Length-Kopf; Crawl-delay wird
+befolgt (gedeckelt auf 10 s); Bilder unter der Mindestgroesse sind Symbole.
+Text kommt in Absaetzen ohne Navigation, Kopf und Fuss. Gruppe ist jetzt die
+Fundseite statt der Domain — bei einem Crawl einer Website lag sonst alles in
+einer Gruppe und der Split steckte alles in train. Abbrechen jederzeit.
+
+**Aufnahmen als WAV.** WebM (Windows) liest das Training ohne ffmpeg nicht.
+Jede Aufnahme wird im Webview dekodiert und als 16-kHz-Mono-WAV gespeichert;
+alte M4A/WebM-Aufnahmen werden beim Oeffnen umgewandelt (studio_replace_audio).
+
+**Bild-Klassifikation und Video.** Neue Projektarten, beide in der
+Medien-Werkbank (vormals Audio-Werkbank). Ordnername = Klasse beim Einlesen.
+Videos lassen sich in Abschnitte fester Laenge zerlegen; ein Abschnitt ist
+Start/Ende im Originalvideo, X teilt ihn, geschnitten wird erst beim Export
+(python/studio/video_tools.py, OpenCV). Alle Abschnitte eines Videos teilen
+eine Gruppe. Export fuer Bildklassen, Audioklassen und Video: ein Ordner je
+Klasse, optional schon in train/val/test (write_class_export). Neues Plugin
+video_classification (VideoMAE, TimeSformer, ViViT) fuer Training, Test und
+Modell-Server; die Bildauswahl je Clip steckt in ft_data/video.py.
+
+**Qualitaet (quality.rs).** Beinahe-Dubletten: Texte ueber MinHash/LSH mit
+Jaccard-Bestaetigung, Bilder ueber dHash (vom Webview gerechnet, in
+hashes.json). Balance-Warnung in jeder Werkbank. Jeder Export schreibt
+EXPORT_REPORT.md und export_report.json: Verteilung, Teile, Gruppen in
+mehreren Teilen, Dubletten ueber Teilgrenzen, fehlende Lizenzen — und zeigt
+den Bericht im Dialog.
+
+**Assist-Modelle und aktives Lernen.** Vorschlagen laeuft fuer jede
+Projektart: Boxen, Klassen (Text, Bild, Audio, Video), Transkripte ueber ein
+Spracherkennungs-Modell (Whisper, CTC — der Modell-Server kennt dafuer die
+Modalitaet "asr"; Whisper lief vorher als Text-Seq2Seq und scheiterte) und
+Zieltexte fuer Paare. Passt das Modell nicht, sagt die App, welches es
+braucht. Vorschlaege tragen die Sicherheit des Modells; der Filter
+"Unsicher" zeigt die unsichersten zuerst. Aus dem Labor uebernimmt "In die
+Werkstatt" falsche und unsichere Ergebnisse in ein Projekt (Korrekturen
+bestaetigt, sonst Vorschlag). Der tote Platzhalter lab_export_as_dataset ist weg.
+
+**Weiter offen:** SAM/CLIP als Assist, Spans (NER), Kamera und Bildschirm
+als Quelle, Augmentierung beim Export, COCO-Export, Seiten, die ihren Inhalt
+erst per JavaScript bauen.

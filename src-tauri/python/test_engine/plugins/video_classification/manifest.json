@@ -1,0 +1,10 @@
+{
+  "task_type": "video_classification",
+  "name": "Video Classification",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz für trainierte Videoklassifikations-Modelle.",
+  "input_type": "video",
+  "output_format": "classification"
+}

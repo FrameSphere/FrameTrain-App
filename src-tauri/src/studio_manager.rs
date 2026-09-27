@@ -91,6 +91,11 @@ pub struct Annotation {
     /// Seq2Seq: der Zieltext.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Wie sicher sich das Modell beim Vorschlag war (0..1). Nur bei
+    /// Vorschlaegen gesetzt; daran haengt "Unsicherste zuerst" — die Stellen,
+    /// an denen ein Mensch am meisten beitraegt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +109,11 @@ pub struct SampleSource {
     #[serde(default)]
     pub license: Option<String>,
     pub at:      String,
+    /// Die Seite, auf der eine Datei gefunden wurde — bei direkt angegebenen
+    /// Adressen leer. Ohne sie weiss spaeter niemand mehr, in welchem
+    /// Zusammenhang ein Bild stand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page:    Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -117,6 +127,13 @@ pub struct SampleMeta {
     /// aber ab jetzt mitgeschrieben, damit alte Projekte ihn spaeter bekommen.
     #[serde(default)]
     pub group: Option<String>,
+    /// Abschnitt eines Videos in Sekunden. Ein langes Video wird nicht in
+    /// Dateien zerschnitten, solange gelabelt wird: der Abschnitt verweist auf
+    /// dieselbe Datei, geschnitten wird erst beim Export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end:   Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +197,8 @@ struct AnnEvent {
     label:     Option<String>,
     #[serde(default)]
     target:    Option<String>,
+    #[serde(default)]
+    confidence: Option<f64>,
     at:        String,
 }
 
@@ -350,6 +369,7 @@ fn load_samples(dir: &Path) -> Vec<StudioSample> {
             samples[i].ann.boxes = ev.boxes;
             samples[i].ann.label = ev.label;
             samples[i].ann.target = ev.target;
+            samples[i].ann.confidence = ev.confidence;
         }
     }
     samples
@@ -707,6 +727,17 @@ fn mime_for(ext: &str) -> String {
     }.to_string()
 }
 
+/// Endung eines Bildes aus seinen ersten Bytes (nach image_dimensions geprueft).
+fn image_ext_from_bytes(bytes: &[u8]) -> &'static str {
+    match bytes.get(..4) {
+        Some([0x89, b'P', b'N', b'G']) => "png",
+        Some([0xFF, 0xD8, _, _])       => "jpg",
+        Some([b'G', b'I', b'F', _])    => "gif",
+        Some([b'B', b'M', _, _])       => "bmp",
+        _                              => "webp",
+    }
+}
+
 fn collect_images(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -808,9 +839,11 @@ pub async fn studio_import_folder(
         .filter(|c| !c.is_empty())
         .unwrap_or_else(|| read_source_classes(src));
 
+    let klassifikation = project.task == "classify";
+
     // Labels ohne Namensliste: nicht raten. Eine 0 in der Labeldatei ist eine
     // Aussage ueber eine fremde Klassenliste — fehlt sie, fehlt die Bedeutung.
-    if !ignore_labels && source_classes.is_empty() {
+    if !ignore_labels && !klassifikation && source_classes.is_empty() {
         let hat_labels = files.iter().take(200).any(|f| {
             label_paths_for_image(f).iter().any(|lp| {
                 fs::read_to_string(lp).map(|t| !parse_yolo_label(&t).is_empty()).unwrap_or(false)
@@ -825,7 +858,7 @@ pub async fn studio_import_folder(
     }
 
     let mut classes_added: Vec<String> = Vec::new();
-    if project.classes.is_empty() && !source_classes.is_empty() {
+    if project.classes.is_empty() && !source_classes.is_empty() && !klassifikation {
         project.classes = source_classes.clone();
         classes_added = source_classes.clone();
     }
@@ -857,6 +890,30 @@ pub async fn studio_import_folder(
         // Liegt eine YOLO-Labeldatei daneben, ist das Bild bereits gelabelt.
         // Ein halb fertiges Dataset laesst sich damit weiterbearbeiten, statt
         // bei null anzufangen.
+        // Bild-Klassifikation: der Ordnername ist die Klasse, Boxen gibt es nicht.
+        if klassifikation {
+            let label = if ignore_labels { None } else {
+                klasse_aus_ordner(file, src).map(|l| match class_index_for(&l, &project.classes) {
+                    Some(idx) => project.classes[idx].clone(),
+                    None => { project.classes.push(l.clone()); classes_added.push(l.clone()); l }
+                })
+            };
+            if label.is_some() { report.with_labels += 1; }
+            append_jsonl(&samples_path(&dir), &StudioSample {
+                id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
+                media: rel.clone(), mime: mime_for(&ext), content: None,
+                status: if label.is_some() { "confirmed".to_string() } else { "new".to_string() },
+                ann: Annotation { confidence: None, boxes: vec![], label, target: None },
+                src: SampleSource { page: None, kind: "import".to_string(),
+                    origin: Some(file.to_string_lossy().to_string()), license: None, at: now.clone() },
+                meta: SampleMeta { start: None, end: None, w, h, group: None },
+                abs_path: String::new(), doubt: None,
+            })?;
+            known.insert(rel);
+            report.added += 1;
+            continue;
+        }
+
         let mut roh: Vec<BoxAnn> = Vec::new();
         for lp in label_paths_for_image(file) {
             if let Ok(text) = fs::read_to_string(&lp) {
@@ -886,14 +943,14 @@ pub async fn studio_import_folder(
             mime: mime_for(&ext),
             content: None,
             status: if has_labels { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { boxes, label: None, target: None },
-            src: SampleSource {
+            ann: Annotation { confidence: None, boxes, label: None, target: None },
+            src: SampleSource { page: None,
                 kind: "import".to_string(),
                 origin: Some(file.to_string_lossy().to_string()),
                 license: None,
                 at: now.clone(),
             },
-            meta: SampleMeta { w, h, group: None },
+            meta: SampleMeta { start: None, end: None, w, h, group: None },
             abs_path: String::new(),
             doubt: None,
         };
@@ -913,7 +970,12 @@ pub async fn studio_import_folder(
 
 /// Pfad zum Skript, das Einzelbilder aus einem Video schreibt.
 fn frames_script(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let rel = Path::new("python").join("studio").join("extract_frames.py");
+    studio_script(app_handle, "extract_frames.py")
+}
+
+/// Ein Hilfsskript aus python/studio — im Bundle, sonst im Quellbaum.
+fn studio_script(app_handle: &tauri::AppHandle, datei: &str) -> Result<PathBuf, String> {
+    let rel = Path::new("python").join("studio").join(datei);
     let kandidaten = [
         app_handle.path().resource_dir().ok().map(|p| p.join(&rel)),
         Some(PathBuf::from("src-tauri").join(&rel)),
@@ -922,7 +984,7 @@ fn frames_script(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     for p in kandidaten.into_iter().flatten() {
         if p.exists() { return Ok(p); }
     }
-    Err("extract_frames.py nicht gefunden".to_string())
+    Err(format!("{} nicht gefunden", datei))
 }
 
 /// Einzelbilder aus einem Video ins Projekt holen.
@@ -1024,14 +1086,14 @@ pub async fn studio_import_video(
             content: None,
             status: "new".to_string(),
             ann: Annotation::default(),
-            src: SampleSource {
+            src: SampleSource { page: None,
                 kind: "video".to_string(),
                 origin: Some(format!("{} ({})", video_path,
                     file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())),
                 license: None,
                 at: now.clone(),
             },
-            meta: SampleMeta { w, h, group: Some(gruppe.clone()) },
+            meta: SampleMeta { start: None, end: None, w, h, group: Some(gruppe.clone()) },
             abs_path: String::new(),
             doubt: None,
         })?;
@@ -1067,6 +1129,7 @@ pub async fn studio_list_samples(
         None | Some("") | Some("all") => all.iter().collect(),
         Some("open") => all.iter().filter(|s| s.status == "new" || s.status == "suggested").collect(),
         Some("doubt") => all.iter().filter(|s| doubts.contains_key(&s.id)).collect(),
+        Some("uncertain") => unsicherste_zuerst(&all),
         Some(st) => all.iter().filter(|s| s.status == st).collect(),
     };
     let total = filtered.len();
@@ -1081,6 +1144,32 @@ pub async fn studio_list_samples(
     Ok(SamplePage { total, items })
 }
 
+/// Aktives Lernen: die Vorschlaege, bei denen das Modell am wenigsten sicher
+/// war, zuerst. Dort traegt ein Mensch am meisten bei — ein Vorschlag mit 98 %
+/// ist fast immer richtig, einer mit 31 % oft nicht. Vorschlaege ohne
+/// Sicherheitswert (aeltere Laeufe) kommen ans Ende.
+fn unsicherste_zuerst(all: &[StudioSample]) -> Vec<&StudioSample> {
+    let mut v: Vec<&StudioSample> = all.iter().filter(|s| s.status == "suggested").collect();
+    v.sort_by(|a, b| {
+        let ka = a.ann.confidence.unwrap_or(f64::INFINITY);
+        let kb = b.ann.confidence.unwrap_or(f64::INFINITY);
+        ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    v
+}
+
+/// Klasse aus dem Ordner, in dem eine Datei liegt — "Ordnername = Klasse".
+/// Split-Ordner (train, val, test) sind keine Klasse; liegt die Datei direkt
+/// im gewaehlten Ordner, hat sie keine.
+fn klasse_aus_ordner(datei: &Path, wurzel: &Path) -> Option<String> {
+    let parent = datei.parent().filter(|p| *p != wurzel)?;
+    let name = parent.file_name()?.to_string_lossy().to_string();
+    let klein = name.to_lowercase();
+    if ["train", "training", "val", "valid", "validation", "test", "testing", "dev", "images"]
+        .contains(&klein.as_str()) { return None; }
+    Some(name)
+}
+
 #[tauri::command]
 pub async fn studio_set_annotation(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
@@ -1092,7 +1181,7 @@ pub async fn studio_set_annotation(
     }
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
-    let event = AnnEvent {
+    let event = AnnEvent { confidence: None,
         sample_id, status, label, target,
         boxes: boxes.into_iter()
             .map(|b| BoxAnn { cls: b.cls, x: clamp01(b.x), y: clamp01(b.y), w: clamp01(b.w), h: clamp01(b.h) })
@@ -1118,7 +1207,9 @@ pub async fn studio_stats(
 /// Die Zahlen rechts in der Werkbank. Das Frontend fuehrt sie nach jeder
 /// Aenderung selbst nach (studioStats.ts) und muss dabei genau so zaehlen.
 fn compute_stats(project: &StudioProject, samples: &[StudioSample], doubts: usize) -> StudioStats {
-    let bild = project.modality != "text" && project.modality != "audio";
+    // Nur Boxenprojekte kennen "bestaetigt, aber leer". Bei Klassifikation
+    // (Bild, Video) haengt am Sample ein Label, nie eine Box.
+    let bild = project.modality == "image" && project.task != "classify";
     let mut stats = StudioStats {
         total: samples.len(), new: 0, suggested: 0, confirmed: 0, skipped: 0,
         boxes_total: 0, per_class: vec![0; project.classes.len()], empty_confirmed: 0,
@@ -1420,14 +1511,14 @@ pub async fn studio_import_text(
             mime: "text/plain".to_string(),
             content: Some(row.text.clone()),
             status: if label.is_some() { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { boxes: vec![], label, target: None },
-            src: SampleSource {
+            ann: Annotation { confidence: None, boxes: vec![], label, target: None },
+            src: SampleSource { page: None,
                 kind: "import".to_string(),
                 origin: Some(row.origin.clone()),
                 license: None,
                 at: now.clone(),
             },
-            meta: SampleMeta { w: 0, h: 0, group: None },
+            meta: SampleMeta { start: None, end: None, w: 0, h: 0, group: None },
             abs_path: String::new(),
             doubt: None,
         })?;
@@ -1443,318 +1534,13 @@ pub async fn studio_import_text(
     Ok(report)
 }
 
-// ══════════════════════════════════════════════════════════════════
-// WEB
-//
-// Kein Knopf, der das Netz absaugt. Was hier geht, ist eine Liste von
-// Adressen zu holen — und zwar mit Anstand:
-//
-//   * robots.txt wird gelesen und befolgt,
-//   * je Server wird gewartet statt geprasselt,
-//   * jede Datei traegt ihre Herkunft und die angegebene Lizenz mit.
-//
-// Der dritte Punkt ist kein Beiwerk: ein gesammelter Datensatz ohne Herkunft
-// darf dieses Geraet nie verlassen, und das merkt man erst, wenn es zu spaet
-// ist.
-// ══════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone, Serialize)]
-pub struct FetchReport {
-    pub fetched:        usize,
-    pub duplicates:     usize,
-    /// Von robots.txt untersagt — mit der Adresse, damit es nachvollziehbar ist.
-    pub blocked:        Vec<String>,
-    pub failed:         Vec<String>,
-    pub skipped_type:   Vec<String>,
-}
-
-/// Die Regeln einer robots.txt, soweit sie uns betreffen.
-///
-/// Gelesen werden die Gruppen "User-agent: *" und die auf unseren Namen. Eine
-/// laengere Uebereinstimmung gewinnt, "Allow" schlaegt "Disallow" gleicher
-/// Laenge — so steht es im Entwurf des Standards und so verhalten sich die
-/// grossen Crawler.
-pub fn robots_erlaubt(robots: &str, agent: &str, pfad: &str) -> bool {
-    let agent = agent.to_lowercase();
-
-    // Erst in Gruppen zerlegen: mehrere User-agent-Zeilen hintereinander
-    // gehoeren zu denselben Regeln.
-    let mut gruppen: Vec<(Vec<String>, Vec<(String, bool)>)> = Vec::new();
-    let mut namen: Vec<String> = Vec::new();
-    let mut regeln: Vec<(String, bool)> = Vec::new();
-    let mut zuletzt_regel = false;
-
-    let abschliessen = |gruppen: &mut Vec<(Vec<String>, Vec<(String, bool)>)>,
-                        namen: &mut Vec<String>, regeln: &mut Vec<(String, bool)>| {
-        if !namen.is_empty() {
-            gruppen.push((std::mem::take(namen), std::mem::take(regeln)));
-        } else {
-            regeln.clear();
-        }
-    };
-
-    for zeile in robots.lines() {
-        let zeile = zeile.split('#').next().unwrap_or("").trim();
-        if zeile.is_empty() { continue; }
-        let Some((schluessel, wert)) = zeile.split_once(':') else { continue };
-        let schluessel = schluessel.trim().to_lowercase();
-        let wert = wert.trim().to_string();
-
-        match schluessel.as_str() {
-            "user-agent" => {
-                if zuletzt_regel { abschliessen(&mut gruppen, &mut namen, &mut regeln); }
-                zuletzt_regel = false;
-                namen.push(wert.to_lowercase());
-            }
-            "disallow" | "allow" => {
-                zuletzt_regel = true;
-                regeln.push((wert, schluessel == "allow"));
-            }
-            _ => {}
-        }
-    }
-    abschliessen(&mut gruppen, &mut namen, &mut regeln);
-
-    // Die passendste Gruppe gewinnt: ein Eintrag auf unseren Namen schlaegt
-    // den Stern. Nur diese eine Gruppe gilt dann, nicht beide zusammen.
-    let eigene = gruppen.iter()
-        .find(|(namen, _)| namen.iter().any(|n| n != "*" && agent.contains(n.as_str())));
-    let stern = gruppen.iter().find(|(namen, _)| namen.iter().any(|n| n == "*"));
-    let Some((_, regeln)) = eigene.or(stern) else { return true };
-
-    // Innerhalb der Gruppe gewinnt die laengste Uebereinstimmung; bei gleicher
-    // Laenge das erlaubende Allow.
-    let mut treffer: Vec<(usize, bool)> = Vec::new();
-    for (wert, erlaubt) in regeln {
-        if wert.is_empty() {
-            // "Disallow:" ohne Wert erlaubt alles.
-            if !*erlaubt { treffer.push((0, true)); }
-            continue;
-        }
-        if pfad.starts_with(wert.as_str()) { treffer.push((wert.len(), *erlaubt)); }
-    }
-    match treffer.iter().max_by_key(|(len, erlaubt)| (*len, *erlaubt)) {
-        Some((_, erlaubt)) => *erlaubt,
-        None => true,
-    }
-}
-
-/// Dateiendung aus dem Content-Type, sonst aus der Adresse.
-fn ext_aus_typ(content_type: &str, url: &str) -> Option<String> {
-    let t = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
-    let aus_typ = match t.as_str() {
-        "image/jpeg" | "image/jpg" => Some("jpg"),
-        "image/png"  => Some("png"),
-        "image/webp" => Some("webp"),
-        "image/gif"  => Some("gif"),
-        "image/bmp"  => Some("bmp"),
-        _ => None,
-    };
-    if let Some(e) = aus_typ { return Some(e.to_string()); }
-    let pfad = url.split('?').next().unwrap_or(url);
-    let e = Path::new(pfad).extension()?.to_str()?.to_lowercase();
-    if IMAGE_EXTS.contains(&e.as_str()) { Some(e) } else { None }
-}
-
-/// Sichtbarer Text aus HTML.
-///
-/// Bewusst grob: Skript- und Stilbloecke raus, Tags raus, Entities fuer die
-/// haeufigsten Faelle. Das reicht fuer einen Artikel und ist ehrlicher als
-/// eine halbe HTML-Bibliothek, die bei verschachtelten Seiten doch scheitert.
-pub fn html_zu_text(html: &str) -> String {
-    let mut out = String::with_capacity(html.len() / 2);
-    let mut in_tag = false;
-    let mut ueberspringen: Option<&str> = None;
-    let bytes: Vec<char> = html.chars().collect();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        let rest_lc: String = bytes[i..(i + 9).min(bytes.len())].iter().collect::<String>().to_lowercase();
-        if let Some(tag) = ueberspringen {
-            let ende = format!("</{}", tag);
-            if rest_lc.starts_with(&ende) { ueberspringen = None; }
-            i += 1;
-            continue;
-        }
-        if rest_lc.starts_with("<script") { ueberspringen = Some("script"); i += 1; continue; }
-        if rest_lc.starts_with("<style")  { ueberspringen = Some("style");  i += 1; continue; }
-
-        let c = bytes[i];
-        if c == '<' { in_tag = true; out.push(' '); }
-        else if c == '>' { in_tag = false; }
-        else if !in_tag { out.push(c); }
-        i += 1;
-    }
-
-    let out = out
-        .replace("&nbsp;", " ").replace("&amp;", "&")
-        .replace("&lt;", "<").replace("&gt;", ">")
-        .replace("&quot;", "\"").replace("&#39;", "'");
-
-    // Mehrfache Leerzeichen und Leerzeilen zusammenfassen.
-    let mut zeilen: Vec<String> = Vec::new();
-    for zeile in out.lines() {
-        let z = zeile.split_whitespace().collect::<Vec<_>>().join(" ");
-        if !z.is_empty() { zeilen.push(z); }
-    }
-    zeilen.join("\n")
-}
-
-fn host_von(url: &str) -> Option<String> {
-    let ohne = url.split("://").nth(1)?;
-    let host = ohne.split('/').next()?;
-    if host.is_empty() { None } else { Some(host.to_string()) }
-}
-
-fn pfad_von(url: &str) -> String {
-    match url.split("://").nth(1).and_then(|r| r.find('/').map(|i| r[i..].to_string())) {
-        Some(p) => p,
-        None => "/".to_string(),
-    }
-}
-
-const AGENT: &str = "FrameTrain-DatasetStudio";
-
-#[tauri::command]
-pub async fn studio_fetch_urls(
-    app_handle: tauri::AppHandle, state: State<'_, AppState>,
-    project_id: String, urls: Vec<String>, license: Option<String>,
-) -> Result<FetchReport, String> {
-    let user_id = get_user_id(&state)?;
-    let dir = project_dir(&app_handle, &user_id, &project_id)?;
-    let project = load_project(&dir)?;
-    let ist_text = project.modality == "text";
-
-    let adressen: Vec<String> = urls.into_iter()
-        .map(|u| u.trim().to_string())
-        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
-        .collect();
-    if adressen.is_empty() { return Err("Keine gültigen Adressen (http:// oder https://)".to_string()); }
-
-    let client = reqwest::Client::builder()
-        .user_agent(format!("{}/1.0 (lokales Werkzeug)", AGENT))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP-Client: {}", e))?;
-
-    let existing = load_samples(&dir);
-    let mut bekannte_medien: std::collections::HashSet<String> =
-        existing.iter().map(|s| s.media.clone()).collect();
-    let mut bekannte_texte: std::collections::HashSet<String> = existing.iter()
-        .filter_map(|s| s.content.as_ref().map(|c| sha256_hex(c.as_bytes())))
-        .collect();
-
-    let mut robots_cache: HashMap<String, String> = HashMap::new();
-    let mut zuletzt: HashMap<String, std::time::Instant> = HashMap::new();
-    let mut report = FetchReport { fetched: 0, duplicates: 0, blocked: vec![], failed: vec![], skipped_type: vec![] };
-    let gesamt = adressen.len();
-    let now = Utc::now().to_rfc3339();
-
-    for (i, url) in adressen.iter().enumerate() {
-        let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({
-            "project_id": project_id, "current": i, "total": gesamt,
-        }));
-
-        let Some(host) = host_von(url) else { report.failed.push(url.clone()); continue };
-
-        // robots.txt einmal je Server.
-        if !robots_cache.contains_key(&host) {
-            let robots_url = format!("{}://{}/robots.txt",
-                if url.starts_with("https") { "https" } else { "http" }, host);
-            let text = match client.get(&robots_url).send().await {
-                Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
-                _ => String::new(),   // keine robots.txt = keine Einschraenkung
-            };
-            robots_cache.insert(host.clone(), text);
-        }
-        if !robots_erlaubt(&robots_cache[&host], AGENT, &pfad_von(url)) {
-            report.blocked.push(url.clone());
-            continue;
-        }
-
-        // Nicht prasseln: je Server mindestens eine Sekunde Abstand.
-        if let Some(t) = zuletzt.get(&host) {
-            let vergangen = t.elapsed();
-            if vergangen < Duration::from_millis(1000) {
-                tokio::time::sleep(Duration::from_millis(1000) - vergangen).await;
-            }
-        }
-        zuletzt.insert(host.clone(), std::time::Instant::now());
-
-        let antwort = match client.get(url).send().await {
-            Ok(r) if r.status().is_success() => r,
-            _ => { report.failed.push(url.clone()); continue; }
-        };
-        let content_type = antwort.headers().get("content-type")
-            .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-
-        if ist_text {
-            let Ok(inhalt) = antwort.text().await else { report.failed.push(url.clone()); continue };
-            let text = if content_type.contains("html") { html_zu_text(&inhalt) } else { inhalt };
-            let text = text.trim().to_string();
-            if text.is_empty() { report.skipped_type.push(url.clone()); continue; }
-            let hash = sha256_hex(text.as_bytes());
-            if bekannte_texte.contains(&hash) { report.duplicates += 1; continue; }
-
-            append_jsonl(&samples_path(&dir), &StudioSample {
-                id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
-                media: String::new(),
-                mime: "text/plain".to_string(),
-                content: Some(text),
-                status: "new".to_string(),
-                ann: Annotation::default(),
-                src: SampleSource { kind: "web".to_string(), origin: Some(url.clone()),
-                    license: license.clone(), at: now.clone() },
-                meta: SampleMeta { w: 0, h: 0, group: Some(host.clone()) },
-                abs_path: String::new(),
-                doubt: None,
-            })?;
-            bekannte_texte.insert(hash);
-            report.fetched += 1;
-            continue;
-        }
-
-        let Some(ext) = ext_aus_typ(&content_type, url) else {
-            report.skipped_type.push(url.clone());
-            continue;
-        };
-        let Ok(bytes) = antwort.bytes().await else { report.failed.push(url.clone()); continue };
-        let bytes = bytes.to_vec();
-        if image_dimensions(&bytes).is_none() { report.skipped_type.push(url.clone()); continue; }
-        let (w, h) = image_dimensions(&bytes).unwrap();
-
-        let hash = sha256_hex(&bytes);
-        let rel = format!("{}/{}.{}", &hash[..2], &hash, ext);
-        if bekannte_medien.contains(&rel) { report.duplicates += 1; continue; }
-
-        let ziel = dir.join("media").join(&rel);
-        if let Some(parent) = ziel.parent() { fs::create_dir_all(parent).ok(); }
-        fs::write(&ziel, &bytes).map_err(|e| format!("Speichern: {}", e))?;
-
-        append_jsonl(&samples_path(&dir), &StudioSample {
-            id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
-            media: rel.clone(),
-            mime: mime_for(&ext),
-            content: None,
-            status: "new".to_string(),
-            ann: Annotation::default(),
-            src: SampleSource { kind: "web".to_string(), origin: Some(url.clone()),
-                license: license.clone(), at: now.clone() },
-            // Die Quelldomain ist die Gruppe: Bilder einer Seite gehoeren
-            // zusammen und duerfen beim Split nicht auseinanderfallen.
-            meta: SampleMeta { w, h, group: Some(host.clone()) },
-            abs_path: String::new(),
-            doubt: None,
-        })?;
-        bekannte_medien.insert(rel);
-        report.fetched += 1;
-    }
-
-    let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({
-        "project_id": project_id, "current": gesamt, "total": gesamt, "done": true,
-    }));
-    Ok(report)
-}
+// Web-Erfassung: eigenes Modul (studio_manager/web.rs).
+pub mod web;
+pub mod video;
+pub mod quality;
+pub mod transfer;
+#[cfg(test)]
+use web::{robots_erlaubt, html_zu_text, ext_aus_typ};
 
 // ══════════════════════════════════════════════════════════════════
 // AUDIO
@@ -1843,6 +1629,40 @@ fn audio_mime(ext: &str) -> String {
     }.to_string()
 }
 
+// ══════════════════════════════════════════════════════════════════
+// VIDEO — Erkennung an den Bytes
+// ══════════════════════════════════════════════════════════════════
+
+const VIDEO_EXTS: &[&str] = &["mp4", "mov", "m4v", "webm", "mkv", "avi"];
+
+/// Was fuer ein Video in den Bytes steht. MP4 und MOV teilen sich den
+/// ftyp-Kasten; "qt  " als Marke ist QuickTime. WebM und Matroska teilen sich
+/// EBML, der Doctype sagt, welches.
+fn video_ext_from_bytes(bytes: &[u8]) -> Option<&'static str> {
+    let at = |off: usize, tag: &[u8]| {
+        bytes.len() >= off + tag.len() && &bytes[off..off + tag.len()] == tag
+    };
+    if at(4, b"ftyp") { return Some(if at(8, b"qt  ") { "mov" } else { "mp4" }); }
+    if at(0, &[0x1A, 0x45, 0xDF, 0xA3]) {
+        let kopf = &bytes[..bytes.len().min(64)];
+        let ist_webm = kopf.windows(4).any(|w| w == b"webm");
+        return Some(if ist_webm { "webm" } else { "mkv" });
+    }
+    if at(0, b"RIFF") && at(8, b"AVI ") { return Some("avi"); }
+    None
+}
+
+fn video_mime(ext: &str) -> String {
+    match ext {
+        "mp4" | "m4v" => "video/mp4",
+        "mov"         => "video/quicktime",
+        "webm"        => "video/webm",
+        "mkv"         => "video/x-matroska",
+        "avi"         => "video/x-msvideo",
+        _             => "application/octet-stream",
+    }.to_string()
+}
+
 fn collect_audio(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -1924,11 +1744,7 @@ pub async fn studio_import_audio(
         let (mut label, mut target) = if transkript {
             (None, transcript_for(datei))
         } else {
-            let klasse = datei.parent()
-                .filter(|parent| *parent != src)
-                .and_then(|parent| parent.file_name())
-                .map(|n| n.to_string_lossy().to_string());
-            (klasse, None)
+            (klasse_aus_ordner(datei, src), None)
         };
         if ignore_labels { label = None; target = None; }
 
@@ -1950,8 +1766,8 @@ pub async fn studio_import_audio(
             mime: audio_mime(&ext),
             content: None,
             status: if fertig { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { boxes: vec![], label, target },
-            src: SampleSource {
+            ann: Annotation { confidence: None, boxes: vec![], label, target },
+            src: SampleSource { page: None,
                 kind: "import".to_string(),
                 origin: Some(datei.to_string_lossy().to_string()),
                 license: None,
@@ -2026,8 +1842,8 @@ pub async fn studio_add_audio(
         mime: audio_mime(&ext),
         content: None,
         status: if label.is_some() { "confirmed".to_string() } else { "new".to_string() },
-        ann: Annotation { boxes: vec![], label, target: None },
-        src: SampleSource {
+        ann: Annotation { confidence: None, boxes: vec![], label, target: None },
+        src: SampleSource { page: None,
             kind: "record".to_string(),
             origin: Some("Aufnahme".to_string()),
             license: None,
@@ -2205,8 +2021,8 @@ pub async fn studio_add_texts(
             mime: "text/plain".to_string(),
             content: Some(item.text),
             status: if fertig { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { boxes: vec![], label, target: item.target },
-            src: SampleSource {
+            ann: Annotation { confidence: None, boxes: vec![], label, target: item.target },
+            src: SampleSource { page: None,
                 kind: "create".to_string(),
                 origin: Some(origin.clone()),
                 license: None,
@@ -2240,13 +2056,7 @@ pub async fn studio_add_image(
     let Some((w, h)) = image_dimensions(&bytes) else {
         return Err("Das ist kein lesbares Bild (PNG, JPEG, GIF, BMP oder WebP).".to_string());
     };
-    let ext = match &bytes[..4] {
-        [0x89, b'P', b'N', b'G'] => "png",
-        [0xFF, 0xD8, _, _]       => "jpg",
-        [b'G', b'I', b'F', _]    => "gif",
-        [b'B', b'M', _, _]       => "bmp",
-        _                        => "webp",
-    };
+    let ext = image_ext_from_bytes(&bytes);
 
     let existing = load_samples(&dir);
     let hash = sha256_hex(&bytes);
@@ -2269,13 +2079,13 @@ pub async fn studio_add_image(
         content: None,
         status: "new".to_string(),
         ann: Annotation::default(),
-        src: SampleSource {
+        src: SampleSource { page: None,
             kind: "create".to_string(),
             origin: origin.or_else(|| Some("Zwischenablage".to_string())),
             license: None,
             at: Utc::now().to_rfc3339(),
         },
-        meta: SampleMeta { w, h, group: None },
+        meta: SampleMeta { start: None, end: None, w, h, group: None },
         abs_path: String::new(),
         doubt: None,
     })?;
@@ -2456,6 +2266,70 @@ fn fuer_vorschlag(samples: &[StudioSample], limit: Option<usize>) -> Vec<&Studio
     offen
 }
 
+/// Was ein Modell zu einem Projekt beitragen kann.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Vorschlagsart {
+    /// Objekterkennung: Boxen auf Bildern.
+    Boxen,
+    /// Eine Klasse je Sample: Text, Bild-, Audio- und Videoklassifikation.
+    Klasse,
+    /// Ein Zieltext: Transkript (Whisper & Co.) oder Seq2Seq-Paar.
+    Ziel,
+}
+
+fn vorschlagsart(project: &StudioProject) -> Vorschlagsart {
+    match (project.modality.as_str(), project.task.as_str()) {
+        ("text", "pairs") | ("audio", "transcript") => Vorschlagsart::Ziel,
+        ("image", t) if t != "classify" => Vorschlagsart::Boxen,
+        _ => Vorschlagsart::Klasse,
+    }
+}
+
+/// Passt das Modell zum Projekt? Der Server nennt seine Modalitaet beim
+/// Start. Ohne diese Pruefung lief ein Bildklassifikator ueber ein
+/// Boxenprojekt, lieferte keine einzige Box und meldete "0 Vorschlaege" —
+/// ohne zu sagen, warum.
+fn modell_passt(art: Vorschlagsart, project: &StudioProject, modalitaet: &str) -> Result<(), String> {
+    let ok = match art {
+        Vorschlagsart::Boxen => modalitaet == "detect",
+        Vorschlagsart::Ziel if project.modality == "audio" => modalitaet == "asr",
+        Vorschlagsart::Ziel => modalitaet == "seq2seq",
+        Vorschlagsart::Klasse => modalitaet == project.modality,
+    };
+    if ok { return Ok(()); }
+    let was = match modalitaet {
+        "detect" => "ein Objekterkennungs-Modell (Boxen)",
+        "asr" => "ein Spracherkennungs-Modell (Transkripte)",
+        "seq2seq" => "ein Text-zu-Text-Modell",
+        "image" => "ein Bildklassifikator",
+        "audio" => "ein Audioklassifikator",
+        "video" => "ein Videoklassifikator",
+        _ => "ein Textklassifikator",
+    };
+    let braucht = match art {
+        Vorschlagsart::Boxen => "ein Objekterkennungs-Modell wie YOLO",
+        Vorschlagsart::Ziel if project.modality == "audio" => "ein Spracherkennungs-Modell wie Whisper",
+        Vorschlagsart::Ziel => "ein Text-zu-Text-Modell wie T5",
+        Vorschlagsart::Klasse => match project.modality.as_str() {
+            "image" => "ein Bildklassifikator", "audio" => "ein Audioklassifikator",
+            "video" => "ein Videoklassifikator", _ => "ein Textklassifikator",
+        },
+    };
+    Err(format!("Das gewählte Modell ist {}. Dieses Projekt braucht {}.", was, braucht))
+}
+
+/// Die Anfrage an den Server: Text schickt den Inhalt, alles andere den Pfad —
+/// Videoabschnitte zusaetzlich Start und Ende.
+fn anfrage_fuer(sample: &StudioSample, media_dir: &Path) -> Option<serde_json::Value> {
+    if sample.media.is_empty() {
+        return sample.content.as_ref().map(|t| serde_json::json!({ "text": t }));
+    }
+    let mut v = serde_json::json!({ "file_path": media_dir.join(&sample.media).to_string_lossy() });
+    if let Some(a) = sample.meta.start { v["start"] = serde_json::json!(a); }
+    if let Some(e) = sample.meta.end { v["end"] = serde_json::json!(e); }
+    Some(v)
+}
+
 #[tauri::command]
 pub async fn studio_suggest(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
@@ -2467,15 +2341,19 @@ pub async fn studio_suggest(
     let mut project = load_project(&dir)?;
     let samples = load_samples(&dir);
     let media_dir = dir.join("media");
+    let art = vorschlagsart(&project);
 
     let left_confirmed = samples.iter().filter(|s| s.status == "confirmed").count();
     let offen = fuer_vorschlag(&samples, limit);
     if offen.is_empty() {
-        return Err("Alle Bilder sind bereits bestätigt — es gibt nichts vorzuschlagen.".to_string());
+        return Err("Alles ist bereits bestätigt — es gibt nichts vorzuschlagen.".to_string());
     }
 
-    let (mut server, model_classes, _modalitaet) = start_inference_server(&app_handle, &version_id)?;
-    let ist_text = project.modality == "text";
+    let (mut server, model_classes, modalitaet) = start_inference_server(&app_handle, &version_id)?;
+    if let Err(e) = modell_passt(art, &project, &modalitaet) {
+        server.shutdown();
+        return Err(e);
+    }
 
     let mut report = SuggestReport {
         processed: 0, with_boxes: 0, boxes_total: 0, left_confirmed,
@@ -2489,20 +2367,13 @@ pub async fn studio_suggest(
             "project_id": project_id, "current": i, "total": total,
         }));
 
-        // Text schickt den Inhalt, Bild den Pfad — beides derselbe Server-Weg.
-        let anfrage = if ist_text {
-            match sample.content.as_ref() {
-                Some(text) => serde_json::json!({ "text": text }),
-                None => { report.failed += 1; continue; }
-            }
-        } else {
-            serde_json::json!({ "file_path": media_dir.join(&sample.media).to_string_lossy() })
-        };
+        let Some(anfrage) = anfrage_fuer(sample, &media_dir) else { report.failed += 1; continue };
         if server.send(&anfrage).is_err() {
             report.failed += 1;
             continue;
         }
-        let answer = match server.next_json(Duration::from_secs(120)) {
+        // Whisper auf einer langen Aufnahme oder ein Video brauchen laenger als ein Bild.
+        let answer = match server.next_json(Duration::from_secs(300)) {
             Ok(v) => v,
             Err(_) => { report.failed += 1; continue; }
         };
@@ -2511,95 +2382,105 @@ pub async fn studio_suggest(
             continue;
         }
         report.processed += 1;
+        let konfidenz = answer.get("confidence").and_then(|v| v.as_f64());
 
-        if ist_text {
-            // Klassifikation: eine Vorhersage, ein Label.
-            let konfidenz = answer.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            let Some(vorhersage) = answer.get("predicted").and_then(|v| v.as_str()) else {
-                report.without_boxes += 1; continue;
-            };
-            if konfidenz < min_confidence { report.without_boxes += 1; continue; }
+        match art {
+            Vorschlagsart::Ziel => {
+                let text = answer.get("predicted").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+                if text.is_empty() { report.without_boxes += 1; continue; }
+                report.with_boxes += 1;
+                append_jsonl(&events_path(&dir), &AnnEvent {
+                    sample_id: sample.id.clone(), status: "suggested".to_string(),
+                    boxes: vec![], label: None, target: Some(text), confidence: konfidenz,
+                    at: Utc::now().to_rfc3339(),
+                })?;
+            }
+            Vorschlagsart::Klasse => {
+                let konfidenz = konfidenz.unwrap_or(1.0);
+                let Some(vorhersage) = answer.get("predicted").and_then(|v| v.as_str()) else {
+                    report.without_boxes += 1; continue;
+                };
+                if konfidenz < min_confidence { report.without_boxes += 1; continue; }
 
-            let name = match class_index_for(vorhersage, &project.classes) {
-                Some(i) => project.classes[i].clone(),
-                None if add_unknown_classes => {
-                    project.classes.push(vorhersage.to_string());
-                    report.classes_added.push(vorhersage.to_string());
-                    vorhersage.to_string()
-                }
-                None => {
-                    if !report.unmapped_classes.iter().any(|c| c == vorhersage) {
-                        report.unmapped_classes.push(vorhersage.to_string());
+                let name = match class_index_for(vorhersage, &project.classes) {
+                    Some(i) => project.classes[i].clone(),
+                    None if add_unknown_classes => {
+                        project.classes.push(vorhersage.to_string());
+                        report.classes_added.push(vorhersage.to_string());
+                        vorhersage.to_string()
                     }
-                    report.without_boxes += 1;
-                    continue;
-                }
-            };
-
-            report.with_boxes += 1;
-            append_jsonl(&events_path(&dir), &AnnEvent {
-                sample_id: sample.id.clone(),
-                status:    "suggested".to_string(),
-                boxes:     vec![],
-                label:     Some(name),
-                target:    None,
-                at:        Utc::now().to_rfc3339(),
-            })?;
-            continue;
-        }
-
-        // Die Masse des Servers zaehlen; kennt er sie nicht, die aus dem Import.
-        let width  = answer.get("image_width").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
-            .unwrap_or(sample.meta.w as f64);
-        let height = answer.get("image_height").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
-            .unwrap_or(sample.meta.h as f64);
-
-        let mut boxes: Vec<BoxAnn> = Vec::new();
-        for b in answer.get("boxes").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
-            let conf = b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            if conf < min_confidence { continue; }
-            let Some(label) = b.get("label").and_then(|v| v.as_str()) else { continue; };
-
-            let cls = match class_index_for(label, &project.classes) {
-                Some(idx) => idx,
-                None if add_unknown_classes => {
-                    project.classes.push(label.to_string());
-                    report.classes_added.push(label.to_string());
-                    project.classes.len() - 1
-                }
-                None => {
-                    if !report.unmapped_classes.iter().any(|c| c == label) {
-                        report.unmapped_classes.push(label.to_string());
+                    None => {
+                        if !report.unmapped_classes.iter().any(|c| c == vorhersage) {
+                            report.unmapped_classes.push(vorhersage.to_string());
+                        }
+                        report.without_boxes += 1;
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
-            let (x1, y1, x2, y2) = (
-                b.get("x1").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                b.get("y1").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                b.get("x2").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                b.get("y2").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            );
-            if let Some(n) = crate::yolo_export::normalize_box(cls, x1, y1, x2, y2, width, height) {
-                boxes.push(BoxAnn { cls: n.cls, x: n.x, y: n.y, w: n.w, h: n.h });
+                report.with_boxes += 1;
+                append_jsonl(&events_path(&dir), &AnnEvent {
+                    sample_id: sample.id.clone(), status: "suggested".to_string(),
+                    boxes: vec![], label: Some(name), target: None, confidence: Some(konfidenz),
+                    at: Utc::now().to_rfc3339(),
+                })?;
+            }
+            Vorschlagsart::Boxen => {
+                // Die Masse des Servers zaehlen; kennt er sie nicht, die aus dem Import.
+                let width  = answer.get("image_width").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
+                    .unwrap_or(sample.meta.w as f64);
+                let height = answer.get("image_height").and_then(|v| v.as_f64()).filter(|v| *v > 0.0)
+                    .unwrap_or(sample.meta.h as f64);
+
+                let mut boxes: Vec<BoxAnn> = Vec::new();
+                // Die unsicherste uebernommene Box bestimmt die Sicherheit des
+                // Bildes: dort lohnt der Blick eines Menschen.
+                let mut unsicherste: Option<f64> = None;
+                for b in answer.get("boxes").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+                    let conf = b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    if conf < min_confidence { continue; }
+                    let Some(label) = b.get("label").and_then(|v| v.as_str()) else { continue; };
+
+                    let cls = match class_index_for(label, &project.classes) {
+                        Some(idx) => idx,
+                        None if add_unknown_classes => {
+                            project.classes.push(label.to_string());
+                            report.classes_added.push(label.to_string());
+                            project.classes.len() - 1
+                        }
+                        None => {
+                            if !report.unmapped_classes.iter().any(|c| c == label) {
+                                report.unmapped_classes.push(label.to_string());
+                            }
+                            continue;
+                        }
+                    };
+
+                    let (x1, y1, x2, y2) = (
+                        b.get("x1").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        b.get("y1").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        b.get("x2").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        b.get("y2").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    );
+                    if let Some(n) = crate::yolo_export::normalize_box(cls, x1, y1, x2, y2, width, height) {
+                        boxes.push(BoxAnn { cls: n.cls, x: n.x, y: n.y, w: n.w, h: n.h });
+                        unsicherste = Some(unsicherste.map_or(conf, |u: f64| u.min(conf)));
+                    }
+                }
+
+                // Ohne Fund bleibt das Bild offen. Es als "Vorschlag: nichts drauf" zu
+                // markieren wuerde dazu einladen, ein uebersehenes Objekt wegzudruecken.
+                if boxes.is_empty() { report.without_boxes += 1; continue; }
+
+                report.with_boxes += 1;
+                report.boxes_total += boxes.len();
+                append_jsonl(&events_path(&dir), &AnnEvent {
+                    sample_id: sample.id.clone(), status: "suggested".to_string(),
+                    boxes, label: None, target: None, confidence: unsicherste,
+                    at: Utc::now().to_rfc3339(),
+                })?;
             }
         }
-
-        // Ohne Fund bleibt das Bild offen. Es als "Vorschlag: nichts drauf" zu
-        // markieren wuerde dazu einladen, ein uebersehenes Objekt wegzudruecken.
-        if boxes.is_empty() { report.without_boxes += 1; continue; }
-
-        report.with_boxes += 1;
-        report.boxes_total += boxes.len();
-        append_jsonl(&events_path(&dir), &AnnEvent {
-            sample_id: sample.id.clone(),
-            status:    "suggested".to_string(),
-            boxes,
-            label:     None,
-            target:    None,
-            at:        Utc::now().to_rfc3339(),
-        })?;
     }
 
     server.shutdown();
@@ -2629,14 +2510,21 @@ pub async fn studio_review(
     let project = load_project(&dir)?;
     let samples = load_samples(&dir);
     let media_dir = dir.join("media");
+    let art = vorschlagsart(&project);
+    if art == Vorschlagsart::Ziel {
+        return Err("Prüfen vergleicht Klassen und Boxen. Bei Transkripten und Paaren gibt es keine eindeutige Antwort, gegen die sich prüfen ließe.".to_string());
+    }
 
     let bestaetigt: Vec<&StudioSample> = samples.iter().filter(|s| s.status == "confirmed").collect();
     if bestaetigt.is_empty() {
-        return Err("Es gibt noch keine bestätigten Bilder zum Prüfen.".to_string());
+        return Err("Es gibt noch nichts Bestätigtes zum Prüfen.".to_string());
     }
 
-    let (mut server, _model_classes, _modalitaet) = start_inference_server(&app_handle, &version_id)?;
-    let ist_text = project.modality == "text";
+    let (mut server, _model_classes, modalitaet) = start_inference_server(&app_handle, &version_id)?;
+    if let Err(e) = modell_passt(art, &project, &modalitaet) {
+        server.shutdown();
+        return Err(e);
+    }
     let mut doubts: HashMap<String, Doubt> = HashMap::new();
     let mut report = ReviewReport { checked: 0, doubts: 0, agree: 0, failed: 0 };
     let total = bestaetigt.len();
@@ -2647,19 +2535,12 @@ pub async fn studio_review(
             "project_id": project_id, "current": i, "total": total,
         }));
 
-        let anfrage = if ist_text {
-            match sample.content.as_ref() {
-                Some(text) => serde_json::json!({ "text": text }),
-                None => { report.failed += 1; continue; }
-            }
-        } else {
-            serde_json::json!({ "file_path": media_dir.join(&sample.media).to_string_lossy() })
-        };
+        let Some(anfrage) = anfrage_fuer(sample, &media_dir) else { report.failed += 1; continue };
         if server.send(&anfrage).is_err() {
             report.failed += 1;
             continue;
         }
-        let answer = match server.next_json(Duration::from_secs(120)) {
+        let answer = match server.next_json(Duration::from_secs(300)) {
             Ok(v) => v,
             Err(_) => { report.failed += 1; continue; }
         };
@@ -2669,7 +2550,7 @@ pub async fn studio_review(
         }
         report.checked += 1;
 
-        if ist_text {
+        if art == Vorschlagsart::Klasse {
             // Klassifikation: das Modell sagt eine Klasse, im Label steht eine.
             let vorhersage = answer.get("predicted").and_then(|v| v.as_str()).unwrap_or("");
             let konfidenz = answer.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);
@@ -2745,7 +2626,7 @@ fn csv_field(v: &str) -> String {
 fn write_yolo_export(
     project: &StudioProject, samples: &[&StudioSample], media_dir: &Path, out: &Path,
     train_ratio: f64, val_ratio: f64,
-) -> Result<(), String> {
+) -> Result<Vec<Option<String>>, String> {
     // Gruppenbewusst aufteilen: Einzelbilder eines Videos duerfen nicht
     // gleichzeitig in Train und Val landen. Ohne Gruppe steht jedes Bild fuer
     // sich, dann ist es ein gewoehnlicher Zufallssplit.
@@ -2759,7 +2640,7 @@ fn write_yolo_export(
         vec![None; samples.len()]
     };
 
-    let items: Vec<crate::yolo_export::ExportItem> = samples.iter().zip(splits)
+    let items: Vec<crate::yolo_export::ExportItem> = samples.iter().zip(splits.clone())
         .map(|(s, split)| crate::yolo_export::ExportItem {
             source: media_dir.join(&s.media),
             stem:   s.id.clone(),
@@ -2817,7 +2698,119 @@ Herkunft je Bild steht in PROVENANCE.csv.
             "Aufteilung in train/val/test ist noch nicht erfolgt — dafür den Split im\nDataset-Bereich nutzen, er hält Bild- und Labelpaare zusammen."
         });
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
-    Ok(())
+    Ok(splits)
+}
+
+/// Aufteilung nach Gruppen, oder keine, wenn alles in train soll.
+fn gruppen_splits(samples: &[&StudioSample], train_ratio: f64, val_ratio: f64) -> Vec<Option<String>> {
+    if train_ratio > 0.0 && train_ratio < 1.0 {
+        let gruppen: Vec<String> = samples.iter()
+            .map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
+            .collect();
+        crate::yolo_export::assign_splits(&gruppen, train_ratio, val_ratio)
+            .into_iter().map(Some).collect()
+    } else {
+        vec![None; samples.len()]
+    }
+}
+
+/// Ein Ordner je Klasse — fuer Bild-Klassifikation, Audio-Klassen und Video.
+///
+/// Mit Aufteilung liegt darunter train/, val/ und test/ (vom Dataset-Import
+/// als bereits geteilt erkannt), sonst direkt die Klassenordner. Beides steht
+/// in `<out>/dataset/`, die Beipackzettel eine Ebene darueber: im Wurzelordner
+/// eines Klassen-Datasets darf keine Datei liegen, sonst kippt die Erkennung
+/// auf "flat_file".
+///
+/// Videoabschnitte werden hier erst zu eigenen Dateien geschnitten.
+/// Rueckgabe: registrierter Ordner, exportierte Samples mit ihrem Teil, Hinweise.
+fn write_class_export<'a>(
+    app_handle: Option<&tauri::AppHandle>, project: &StudioProject, samples: &[&'a StudioSample],
+    media_dir: &Path, out: &Path, train_ratio: f64, val_ratio: f64,
+) -> Result<(PathBuf, Vec<&'a StudioSample>, Vec<Option<String>>, Vec<String>), String> {
+    let mit_label: Vec<&StudioSample> = samples.iter().copied().filter(|s| s.ann.label.is_some()).collect();
+    let splits = gruppen_splits(&mit_label, train_ratio, val_ratio);
+    let daten = out.join("dataset");
+    fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
+
+    let mut jobs: Vec<serde_json::Value> = Vec::new();
+    let mut ziele: Vec<(PathBuf, String)> = Vec::new();   // (Datei, Name fuer PROVENANCE)
+    for (s, split) in mit_label.iter().zip(&splits) {
+        let klasse = s.ann.label.as_deref().unwrap_or("").replace(['/', '\\', ':'], "_");
+        let mut ordner = daten.clone();
+        if let Some(sp) = split { ordner = ordner.join(sp); }
+        let ordner = ordner.join(&klasse);
+        fs::create_dir_all(&ordner).map_err(|e| format!("mkdir: {}", e))?;
+        let quelle = media_dir.join(&s.media);
+        let abschnitt = s.mime.starts_with("video/") && (s.meta.start.is_some() || s.meta.end.is_some());
+        let ext = if abschnitt { "mp4".to_string() } else {
+            Path::new(&s.media).extension().and_then(|e| e.to_str()).unwrap_or("bin").to_string()
+        };
+        let ziel = ordner.join(format!("{}.{}", s.id, ext));
+        if abschnitt {
+            jobs.push(serde_json::json!({
+                "src": quelle.to_string_lossy(), "start": s.meta.start.unwrap_or(0.0),
+                "end": s.meta.end.unwrap_or(0.0), "out": ziel.to_string_lossy(),
+            }));
+        } else {
+            fs::copy(&quelle, &ziel).map_err(|e| format!("Kopieren: {}", e))?;
+        }
+        let name = ziel.strip_prefix(&daten).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        ziele.push((ziel, name));
+    }
+
+    let mut hinweise = Vec::new();
+    let fehlgeschlagen: std::collections::HashSet<String> = match app_handle {
+        Some(h) => video::clips_schneiden(h, &jobs, out)?.into_iter().collect(),
+        None if jobs.is_empty() => Default::default(),
+        None => return Err("Videoabschnitte brauchen zum Schneiden die App".to_string()),
+    };
+    if !fehlgeschlagen.is_empty() {
+        hinweise.push(format!("{} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export.", fehlgeschlagen.len()));
+    }
+
+    let mut provenance = String::from("sample_id,datei,teil,herkunft,fundseite,lizenz,status,label,start,ende\n");
+    let mut exportiert: Vec<&StudioSample> = Vec::new();
+    let mut exp_splits: Vec<Option<String>> = Vec::new();
+    for ((s, split), (ziel, name)) in mit_label.iter().zip(&splits).zip(&ziele) {
+        if fehlgeschlagen.contains(&ziel.to_string_lossy().to_string()) { continue; }
+        provenance.push_str(&format!("{},{},{},{},{},{},{},{},{},{}\n",
+            csv_field(&s.id), csv_field(name), split.as_deref().unwrap_or(""),
+            csv_field(s.src.origin.as_deref().unwrap_or("")),
+            csv_field(s.src.page.as_deref().unwrap_or("")),
+            csv_field(s.src.license.as_deref().unwrap_or("")),
+            csv_field(&s.status), csv_field(s.ann.label.as_deref().unwrap_or("")),
+            s.meta.start.map(|v| format!("{:.3}", v)).unwrap_or_default(),
+            s.meta.end.map(|v| format!("{:.3}", v)).unwrap_or_default()));
+        exportiert.push(s);
+        exp_splits.push(split.clone());
+    }
+    fs::write(out.join("PROVENANCE.csv"), provenance).map_err(|e| format!("PROVENANCE.csv: {}", e))?;
+
+    let was = match project.modality.as_str() { "audio" => "Aufnahmen", "video" => "Videoclips", _ => "Bilder" };
+    let card = format!(
+"# {name}
+
+Erzeugt vom FrameTrain Dataset Studio am {date}.
+
+- {was}: {count}
+- Klassen: {classes}
+- Form: dataset/{form}<klasse>/<datei>
+
+{split}
+
+Herkunft je Datei steht in PROVENANCE.csv, Verteilung und Prüfungen in EXPORT_REPORT.md.
+",
+        name = project.name, date = Utc::now().format("%Y-%m-%d"), was = was,
+        count = exportiert.len(), classes = project.classes.join(", "),
+        form = if exp_splits.iter().any(|s| s.is_some()) { "<teil>/" } else { "" },
+        split = if exp_splits.iter().any(|s| s.is_some()) {
+            "Aufgeteilt in train/val/test. Samples derselben Gruppe (Video, Seite, Aufnahme)\nliegen immer im selben Teil."
+        } else {
+            "Noch nicht aufgeteilt — dafür den Split im Dataset-Bereich nutzen."
+        });
+    fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
+    Ok((daten, exportiert, exp_splits, hinweise))
 }
 
 /// Schreibt das Projekt als Textdatensatz.
@@ -2961,12 +2954,21 @@ Herkunft je Aufnahme steht in PROVENANCE.csv.
     Ok(daten)
 }
 
+/// Was ein Export zurueckgibt: der registrierte Datensatz und sein Bericht.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportResult {
+    pub dataset: crate::dataset_manager::DatasetInfo,
+    pub report:  quality::ExportReport,
+    /// Ordner mit PROVENANCE.csv, DATA_CARD.md und EXPORT_REPORT.md.
+    pub path:    String,
+}
+
 #[tauri::command]
 pub async fn studio_export(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, model_id: String, dataset_name: String, include_suggested: bool,
     train_ratio: f64, val_ratio: f64,
-) -> Result<crate::dataset_manager::DatasetInfo, String> {
+) -> Result<ExportResult, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let project = load_project(&dir)?;
@@ -2981,28 +2983,47 @@ pub async fn studio_export(
     if selected.is_empty() {
         return Err("Keine bestätigten Samples — es gibt nichts zu exportieren".to_string());
     }
-    let ist_text  = project.modality == "text";
-    let ist_audio = project.modality == "audio";
 
     let stamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let out = dir.join("exports").join(&stamp);
     fs::create_dir_all(&out).map_err(|e| format!("mkdir export: {}", e))?;
+    let media_dir = dir.join("media");
+
     // Welcher Ordner am Ende registriert wird, entscheidet der Writer: bei
     // Klassenordnern muss die Wurzel dateifrei bleiben, sonst wird der Typ
     // falsch erkannt.
-    let zu_registrieren = if ist_text {
-        write_text_export(&project, &selected, &out)?
-    } else if ist_audio {
-        write_audio_export(&project, &selected, &dir.join("media"), &out)?
-    } else {
-        write_yolo_export(&project, &selected, &dir.join("media"), &out, train_ratio, val_ratio)?;
-        out.clone()
-    };
+    let (zu_registrieren, exportiert, splits, hinweise): (PathBuf, Vec<&StudioSample>, Vec<Option<String>>, Vec<String>) =
+        match (project.modality.as_str(), project.task.as_str()) {
+            ("text", _) => {
+                let d = write_text_export(&project, &selected, &out)?;
+                (d, selected.clone(), vec![None; selected.len()], vec![])
+            }
+            ("audio", "transcript") => {
+                let d = write_audio_export(&project, &selected, &media_dir, &out)?;
+                (d, selected.clone(), vec![None; selected.len()], vec![])
+            }
+            ("image", t) if t != "classify" => {
+                let sp = write_yolo_export(&project, &selected, &media_dir, &out, train_ratio, val_ratio)?;
+                (out.clone(), selected.clone(), sp, vec![])
+            }
+            _ => write_class_export(Some(&app_handle), &project, &selected, &media_dir, &out, train_ratio, val_ratio)?,
+        };
+    if exportiert.is_empty() {
+        return Err("Keines der Samples ließ sich exportieren".to_string());
+    }
+
+    let mut report = quality::baue_report(&project, &exportiert, &splits, &quality::load_hashes(&dir));
+    report.warnings.extend(hinweise);
+    fs::write(out.join("EXPORT_REPORT.md"), quality::report_markdown(&project, &report))
+        .map_err(|e| format!("EXPORT_REPORT.md: {}", e))?;
+    fs::write(out.join("export_report.json"), serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("export_report.json: {}", e))?;
 
     let name = if dataset_name.trim().is_empty() { project.name.clone() } else { dataset_name };
-    crate::dataset_manager::import_local_dataset(
+    let dataset = crate::dataset_manager::import_local_dataset(
         app_handle, state, zu_registrieren.to_string_lossy().to_string(), name, model_id,
-    ).await
+    ).await?;
+    Ok(ExportResult { dataset, report, path: out.to_string_lossy().to_string() })
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3104,9 +3125,9 @@ mod tests {
         StudioSample {
             id: id.to_string(), media: format!("ab/{}.jpg", id), mime: "image/jpeg".to_string(),
             content: None, status: status.to_string(), ann: Annotation::default(),
-            src: SampleSource { kind: "import".to_string(), origin: Some(format!("/daten/{}.jpg", id)),
+            src: SampleSource { page: None, kind: "import".to_string(), origin: Some(format!("/daten/{}.jpg", id)),
                 license: None, at: "2026-09-16T08:00:00Z".to_string() },
-            meta: SampleMeta { w: 1000, h: 500, group: None },
+            meta: SampleMeta { start: None, end: None, w: 1000, h: 500, group: None },
             abs_path: String::new(), doubt: None,
         }
     }
@@ -3119,7 +3140,7 @@ mod tests {
         let dir = TempDir::new("events");
         append_jsonl(&samples_path(dir.path()), &sample("s_1", "new")).unwrap();
         append_jsonl(&samples_path(dir.path()), &sample("s_2", "new")).unwrap();
-        append_jsonl(&events_path(dir.path()), &AnnEvent {
+        append_jsonl(&events_path(dir.path()), &AnnEvent { confidence: None,
             sample_id: "s_2".to_string(), status: "confirmed".to_string(),
             boxes: vec![BoxAnn { cls: 1, x: 0.5, y: 0.5, w: 0.2, h: 0.2 }],
             label: None, target: None,
@@ -3138,7 +3159,7 @@ mod tests {
         let dir = TempDir::new("letztes");
         append_jsonl(&samples_path(dir.path()), &sample("s_1", "new")).unwrap();
         for status in ["confirmed", "skipped"] {
-            append_jsonl(&events_path(dir.path()), &AnnEvent {
+            append_jsonl(&events_path(dir.path()), &AnnEvent { confidence: None,
                 sample_id: "s_1".to_string(), status: status.to_string(),
                 boxes: vec![], label: None, target: None,
                 at: "2026-09-16T09:00:00Z".to_string(),
@@ -3163,8 +3184,8 @@ mod tests {
         StudioSample {
             id: id.to_string(), media: String::new(), mime: "text/plain".to_string(),
             content: Some(text.to_string()), status: "confirmed".to_string(),
-            ann: Annotation { boxes: vec![], label: label.map(str::to_string), target: None },
-            src: SampleSource { kind: "import".to_string(), origin: Some("/daten/x.csv".to_string()),
+            ann: Annotation { confidence: None, boxes: vec![], label: label.map(str::to_string), target: None },
+            src: SampleSource { page: None, kind: "import".to_string(), origin: Some("/daten/x.csv".to_string()),
                 license: None, at: "2026-09-20T08:00:00Z".to_string() },
             meta: SampleMeta::default(), abs_path: String::new(), doubt: None,
         }
@@ -3174,9 +3195,9 @@ mod tests {
         StudioSample {
             id: id.to_string(), media: format!("ab/{}.wav", id), mime: "audio/wav".to_string(),
             content: None, status: "confirmed".to_string(),
-            ann: Annotation { boxes: vec![], label: label.map(str::to_string),
+            ann: Annotation { confidence: None, boxes: vec![], label: label.map(str::to_string),
                 target: ziel.map(str::to_string) },
-            src: SampleSource { kind: "record".to_string(), origin: Some("Aufnahme".to_string()),
+            src: SampleSource { page: None, kind: "record".to_string(), origin: Some("Aufnahme".to_string()),
                 license: None, at: "2026-09-20T08:00:00Z".to_string() },
             meta: SampleMeta::default(), abs_path: String::new(), doubt: None,
         }
@@ -3731,7 +3752,7 @@ mod tests {
         fs::write(d.join("media/ab/s_2.jpg"), b"y").unwrap();
         write_jsonl(&samples_path(d), &[sample("s_1", "new"), sample("s_2", "confirmed")]).unwrap();
         // Ein spaeteres Ereignis zum entfernten Sample darf es nicht zurueckholen.
-        append_jsonl(&events_path(d), &AnnEvent {
+        append_jsonl(&events_path(d), &AnnEvent { confidence: None,
             sample_id: "s_1".to_string(), status: "confirmed".to_string(),
             boxes: vec![], label: None, target: None, at: "x".to_string(),
         }).unwrap();
@@ -3780,5 +3801,104 @@ mod tests {
         assert_eq!(csv_field("a,b"), "\"a,b\"");
         assert_eq!(csv_field("sagt \"hallo\""), "\"sagt \"\"hallo\"\"\"");
         assert_eq!(csv_field("schlicht"), "schlicht");
+    }
+
+    fn klassen_sample(id: &str, label: &str, group: &str) -> StudioSample {
+        let mut s = sample(id, "confirmed");
+        s.ann.label = Some(label.to_string());
+        s.meta.group = Some(group.to_string());
+        s
+    }
+
+    #[test]
+    fn bildklassen_export_wird_mit_und_ohne_aufteilung_erkannt() {
+        let dir = TempDir::new("bildklassen");
+        let media = dir.path().join("media");
+        let mut samples = Vec::new();
+        for i in 0..20 {
+            let id = format!("s_{}", i);
+            fs::create_dir_all(media.join("ab")).unwrap();
+            fs::write(media.join(format!("ab/{}.jpg", id)), b"jpg").unwrap();
+            samples.push(klassen_sample(&id, if i % 2 == 0 { "katze" } else { "hund" }, &format!("g{}", i / 2)));
+        }
+        let p = StudioProject { id: "p".into(), name: "Tiere".into(), modality: "image".into(), task: "classify".into(),
+            target_format: "folder_class".into(), classes: vec!["katze".into(), "hund".into()],
+            created_at: String::new(), updated_at: String::new() };
+        let refs: Vec<&StudioSample> = samples.iter().collect();
+
+        let out = dir.path().join("ohne");
+        let (daten, exp, splits, _) = write_class_export(None, &p, &refs, &media, &out, 0.0, 0.0).unwrap();
+        assert_eq!(exp.len(), 20);
+        assert!(splits.iter().all(|s| s.is_none()));
+        let a = crate::dataset_manager::detect_dataset_type(&daten);
+        assert!(matches!(a.detected_type, crate::dataset_manager::DatasetType::FolderClass), "erkannt als {:?}", a.detected_type);
+        assert!(out.join("PROVENANCE.csv").exists() && !daten.join("PROVENANCE.csv").exists());
+
+        let out = dir.path().join("mit");
+        let (daten, _, splits, _) = write_class_export(None, &p, &refs, &media, &out, 0.6, 0.4).unwrap();
+        let a = crate::dataset_manager::detect_dataset_type(&daten);
+        assert!(matches!(a.detected_type, crate::dataset_manager::DatasetType::PreSplit), "erkannt als {:?}", a.detected_type);
+        // Beide Samples einer Gruppe liegen im selben Teil.
+        for g in 0..10 {
+            assert_eq!(splits[2 * g], splits[2 * g + 1], "Gruppe g{} zerrissen", g);
+        }
+        let r = quality::baue_report(&p, &refs, &splits, &HashMap::new());
+        assert!(r.group_leaks.is_empty());
+        assert_eq!(r.per_class, vec![("katze".to_string(), 10), ("hund".to_string(), 10)]);
+    }
+
+    #[test]
+    fn videoabschnitte_ohne_app_werden_nicht_still_verschluckt() {
+        let dir = TempDir::new("videoohneapp");
+        let media = dir.path().join("media");
+        fs::create_dir_all(media.join("ab")).unwrap();
+        fs::write(media.join("ab/v.mp4"), b"mp4").unwrap();
+        let mut s = klassen_sample("s_v", "springt", "video:ab");
+        s.media = "ab/v.mp4".into();
+        s.mime = "video/mp4".into();
+        s.meta.start = Some(1.0);
+        s.meta.end = Some(3.0);
+        let p = StudioProject { id: "p".into(), name: "V".into(), modality: "video".into(), task: "classify".into(),
+            target_format: "folder_class".into(), classes: vec!["springt".into()],
+            created_at: String::new(), updated_at: String::new() };
+        assert!(write_class_export(None, &p, &[&s], &media, &dir.path().join("o"), 0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn vorschlagsart_und_passendes_modell() {
+        let p = |m: &str, t: &str| StudioProject { id: "p".into(), name: "P".into(), modality: m.into(), task: t.into(),
+            target_format: String::new(), classes: vec![], created_at: String::new(), updated_at: String::new() };
+        assert_eq!(vorschlagsart(&p("image", "bbox")), Vorschlagsart::Boxen);
+        assert_eq!(vorschlagsart(&p("image", "classify")), Vorschlagsart::Klasse);
+        assert_eq!(vorschlagsart(&p("video", "classify")), Vorschlagsart::Klasse);
+        assert_eq!(vorschlagsart(&p("audio", "transcript")), Vorschlagsart::Ziel);
+        assert_eq!(vorschlagsart(&p("text", "pairs")), Vorschlagsart::Ziel);
+        assert!(modell_passt(Vorschlagsart::Boxen, &p("image", "bbox"), "detect").is_ok());
+        let e = modell_passt(Vorschlagsart::Boxen, &p("image", "bbox"), "image").unwrap_err();
+        assert!(e.contains("Bildklassifikator") && e.contains("YOLO"), "{}", e);
+        assert!(modell_passt(Vorschlagsart::Ziel, &p("audio", "transcript"), "asr").is_ok());
+        assert!(modell_passt(Vorschlagsart::Ziel, &p("audio", "transcript"), "audio").is_err());
+        assert!(modell_passt(Vorschlagsart::Klasse, &p("video", "classify"), "video").is_ok());
+        assert!(modell_passt(Vorschlagsart::Klasse, &p("image", "classify"), "detect").is_err());
+    }
+
+    #[test]
+    fn unsicherste_vorschlaege_zuerst() {
+        let mut a = sample("a", "suggested"); a.ann.confidence = Some(0.9);
+        let mut b = sample("b", "suggested"); b.ann.confidence = Some(0.3);
+        let c = sample("c", "suggested");
+        let d = sample("d", "confirmed");
+        let alle = vec![a, b, c, d];
+        let ids: Vec<&str> = unsicherste_zuerst(&alle).iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn ordnername_ist_klasse_aber_kein_split() {
+        let w = Path::new("/daten");
+        assert_eq!(klasse_aus_ordner(Path::new("/daten/katze/a.jpg"), w).as_deref(), Some("katze"));
+        assert_eq!(klasse_aus_ordner(Path::new("/daten/train/katze/a.jpg"), w).as_deref(), Some("katze"));
+        assert_eq!(klasse_aus_ordner(Path::new("/daten/train/a.jpg"), w), None);
+        assert_eq!(klasse_aus_ordner(Path::new("/daten/a.jpg"), w), None);
     }
 }

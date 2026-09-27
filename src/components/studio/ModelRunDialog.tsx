@@ -111,6 +111,10 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
   };
 
   const report = suggestReport || reviewReport;
+  // Was das Modell liefert: Boxen, eine Klasse oder einen Text.
+  const art = project.modality === 'image' && project.task !== 'classify' ? 'boxes'
+    : project.task === 'transcript' ? 'transcript'
+      : project.task === 'pairs' ? 'pairs' : 'classes';
 
   useEscape(onClose, !busy);
 
@@ -124,7 +128,8 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
             {t(suggest ? 'studio.suggest.title' : 'studio.review.title')}
           </h3>
           <p className="text-gray-500 text-xs mt-1">
-            {t(suggest ? 'studio.suggest.subtitle' : 'studio.review.subtitle')}
+            {t(suggest ? (art === 'boxes' ? 'studio.suggest.subtitle' : `studio.suggest.subtitle_${art}`)
+              : (art === 'boxes' ? 'studio.review.subtitle' : 'studio.review.subtitleClasses'))}
           </p>
         </div>
 
@@ -133,10 +138,10 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
             <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3 space-y-1.5">
               {suggestReport && ([
                 ['withBoxes', suggestReport.with_boxes],
-                ['boxes', suggestReport.boxes_total],
+                ...(art === 'boxes' ? [['boxes', suggestReport.boxes_total]] : []),
                 ['withoutBoxes', suggestReport.without_boxes],
                 ['leftConfirmed', suggestReport.left_confirmed],
-              ] as const).map(([key, val]) => (
+              ] as [string, number][]).map(([key, val]) => (
                 <div key={key} className="flex items-center justify-between text-xs">
                   <span className="text-gray-400">{t(`studio.suggest.report.${key}`)}</span>
                   <span className="text-gray-200 tabular-nums">{val}</span>
@@ -178,6 +183,10 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
               </p>
             )}
 
+            {suggestReport && suggestReport.with_boxes > 0 && art !== 'transcript' && art !== 'pairs' && (
+              <p className="text-gray-400 text-xs">{t('studio.suggest.report.uncertainHint')}</p>
+            )}
+
             {reviewReport && reviewReport.doubts > 0 && (
               <p className="text-gray-400 text-xs">{t('studio.review.report.hint')}</p>
             )}
@@ -206,16 +215,16 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
               </select>
             </label>
 
-            <label className="block">
+            {art !== 'transcript' && art !== 'pairs' && <label className="block">
               <span className="text-gray-400 text-xs">
                 {t('studio.suggest.confidenceLabel', { value: Math.round(minConfidence * 100) })}
               </span>
               <input type="range" min={5} max={95} step={5} value={Math.round(minConfidence * 100)}
                 onChange={e => setMinConfidence(Number(e.target.value) / 100)}
                 className="mt-2 w-full" />
-            </label>
+            </label>}
 
-            {suggest && (
+            {suggest && art !== 'transcript' && art !== 'pairs' && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <input type="checkbox" checked={addUnknown}
                   onChange={e => setAddUnknown(e.target.checked)} className="mt-0.5" />

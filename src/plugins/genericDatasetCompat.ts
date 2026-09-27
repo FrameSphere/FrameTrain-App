@@ -18,6 +18,7 @@ export interface CompatPluginInfo {
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff'];
 const AUDIO_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aiff', '.aif'];
+const VIDEO_EXTS = ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi'];
 const TABLE_EXTS = ['.csv', '.tsv', '.json', '.jsonl', '.parquet'];
 
 /** Welche Dateien braucht die Aufgabe mindestens? */
@@ -30,6 +31,8 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'Keine Bilddateien (oder Parquet mit Bildspalte) gefunden.' };
     case 'audio_classification':
       return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.' };
+    case 'video_classification':
+      return { exts: VIDEO_EXTS, missing: 'Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.' };
     case 'seq2seq':
     case 'seq_classification':
       return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.' };

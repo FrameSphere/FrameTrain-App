@@ -38,6 +38,7 @@ describe('FetchDialog', () => {
   it('schickt Adressen und Lizenz ans Backend und zeigt den Bericht', async () => {
     invokeMock.mockResolvedValue({
       fetched: 2, duplicates: 1, blocked: ['https://c.de/geheim.jpg'], failed: [], skipped_type: [],
+      pages_visited: 0, too_large: [], too_small: 0, outside_allowlist: 0, limit_reached: false, cancelled: false,
     });
     render(<FetchDialog project={PROJECT} onClose={vi.fn()} onDone={vi.fn()} />);
 
@@ -48,11 +49,11 @@ describe('FetchDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /Holen/ }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('studio_fetch_urls', {
+      expect(invokeMock).toHaveBeenCalledWith('studio_fetch_web', expect.objectContaining({
         projectId: 'sp_img',
         urls: ['https://a.de/1.jpg', 'https://b.de/2.png'],
-        license: 'CC0',
-      });
+        options: expect.objectContaining({ mode: 'urls', license: 'CC0', max_mb: 20 }),
+      }));
     });
 
     // Der Bericht muss das Untersagte benennen, nicht verschweigen.
@@ -63,5 +64,26 @@ describe('FetchDialog', () => {
   it('holt nichts ohne Adresse', () => {
     render(<FetchDialog project={PROJECT} onClose={vi.fn()} onDone={vi.fn()} />);
     expect(screen.getByRole('button', { name: /Holen/ })).toBeDisabled();
+  });
+
+  it('Website-Modus schickt Tiefe, Grenzen und Allowlist mit', async () => {
+    invokeMock.mockResolvedValue({
+      fetched: 12, duplicates: 0, blocked: [], failed: [], skipped_type: [], pages_visited: 5,
+      too_large: ['https://a.de/riesig.jpg'], too_small: 3, outside_allowlist: 7, limit_reached: true, cancelled: false,
+    });
+    render(<FetchDialog project={PROJECT} onClose={vi.fn()} onDone={vi.fn()} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Website' }));
+    fireEvent.change(screen.getByPlaceholderText(/https/), { target: { value: 'https://a.de/galerie' } });
+    fireEvent.click(screen.getByText('Grenzen'));
+    fireEvent.change(screen.getByPlaceholderText('example.org, wikimedia.org'), { target: { value: 'a.de, cdn.a.de' } });
+    fireEvent.click(screen.getByRole('button', { name: /Holen/ }));
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('studio_fetch_web', expect.objectContaining({
+      options: expect.objectContaining({ mode: 'crawl', max_depth: 1, max_pages: 30, allowlist: ['a.de', 'cdn.a.de'], min_side: 64 }),
+    })));
+    expect(await screen.findByText('Seiten gelesen')).toBeInTheDocument();
+    expect(screen.getByText('Außerhalb der Allowlist')).toBeInTheDocument();
+    expect(screen.getByText(/Die Grenze ist erreicht/)).toBeInTheDocument();
+    expect(screen.getByText(/riesig\.jpg/)).toBeInTheDocument();
   });
 });
