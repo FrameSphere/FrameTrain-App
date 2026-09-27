@@ -1,0 +1,11 @@
+{
+  "task_type": "text_to_image_lora",
+  "name": "Text-to-Image LoRA (Stable Diffusion)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert einen LoRA-Adapter fuer Stable Diffusion 1.x/2.x und SDXL (eigener Stil, eigenes Objekt, DreamBooth). Bilder mit Captions oder ein Instanz-Prompt.",
+  "supported_architectures": ["StableDiffusionPipeline", "StableDiffusionXLPipeline"],
+  "dataset_formats": ["image_caption_txt", "metadata_jsonl", "metadata_csv", "instance_prompt"],
+  "metrics": ["train_loss", "final_train_loss"]
+}

@@ -33,14 +33,19 @@ class TestProtocol:
     @staticmethod
     def complete_single(predicted: str, confidence: Optional[float],
                         top_predictions: List[Dict[str, Any]],
-                        inference_time: float) -> None:
-        TestProtocol._send("complete", {
+                        inference_time: float,
+                        extra: Optional[Dict[str, Any]] = None) -> None:
+        # extra: zusaetzliche Felder (z. B. output_kind="image" + image_path bei
+        # Bilderzeugung). Die Pflichtfelder bleiben unveraendert.
+        data = dict(extra or {})
+        data.update({
             "mode": "single",
             "predicted_output": predicted,
             "confidence": confidence,
             "top_predictions": top_predictions,
             "inference_time": inference_time,
         })
+        TestProtocol._send("complete", data)
 
     @staticmethod
     def complete_dataset(results_file: str, total_samples: int,
@@ -48,8 +53,10 @@ class TestProtocol:
                          average_loss: Optional[float],
                          average_inference_time: float,
                          samples_per_second: float,
-                         hard_examples_file: Optional[str] = None) -> None:
-        TestProtocol._send("complete", {
+                         hard_examples_file: Optional[str] = None,
+                         extra: Optional[Dict[str, Any]] = None) -> None:
+        data = dict(extra or {})
+        data.update({
             "mode": "dataset",
             "results_file": results_file,
             "total_samples": total_samples,
@@ -60,3 +67,4 @@ class TestProtocol:
             "samples_per_second": samples_per_second,
             "hard_examples_file": hard_examples_file,
         })
+        TestProtocol._send("complete", data)
