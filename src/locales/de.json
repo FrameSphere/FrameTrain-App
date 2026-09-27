@@ -2294,6 +2294,40 @@
       "title": "Detektions-Metriken",
       "map50": "mAP@50",
       "map5095": "mAP@50-95"
+    },
+    "taskMetrics": {
+      "title": "Aufgabenspezifische Kennzahlen",
+      "before": "vorher {value}",
+      "labels": {
+        "perplexity": "Perplexität",
+        "exact_match": "Exact Match",
+        "rougeL": "ROUGE-L",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "bleu": "BLEU",
+        "preference_accuracy": "Präferenz richtig",
+        "reward_margin": "Belohnungsabstand",
+        "wer": "Wortfehlerrate (WER)",
+        "cer": "Zeichenfehlerrate (CER)",
+        "trainable_params": "Trainierbare Parameter",
+        "total_params": "Parameter gesamt",
+        "mask_mAP50": "Masken-mAP50",
+        "mask_mAP50-95": "Masken-mAP50-95",
+        "pose_mAP50": "Keypoint-mAP50",
+        "pose_mAP50-95": "Keypoint-mAP50-95",
+        "top1_accuracy": "Top-1-Accuracy",
+        "top5_accuracy": "Top-5-Accuracy",
+        "mrr@10": "MRR@10",
+        "recall@1": "Recall@1",
+        "recall@5": "Recall@5",
+        "spearman": "Spearman",
+        "pearson": "Pearson",
+        "mse": "MSE",
+        "rmse": "RMSE",
+        "mae": "MAE",
+        "r2": "R²",
+        "token_accuracy": "Token-Accuracy"
+      }
     }
   },
   "datasetUpload": {
