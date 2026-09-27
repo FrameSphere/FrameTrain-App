@@ -58,6 +58,10 @@ SUPPORTED_ARCHITECTURES = {
 from ft_data.text import (
     class_label_names, detect_columns, display_label, is_unlabeled, label_value, safe_text,
 )
+from ft_data.text import (
+    MULTI_LABEL, REGRESSION, SINGLE_LABEL, as_float, multi_label_scores, regression_scores,
+    resolve_problem_type, split_multi_labels,
+)
 
 
 def _load(ext_key: str, data_files: dict):
@@ -83,6 +87,8 @@ class Plugin(TrainPlugin):
         self.label_col: str = "label"
         self.value_to_label: Dict[str, str] = {}
         self.num_labels: int = 2
+        self.problem_type: str = SINGLE_LABEL
+        self.threshold: float = float((config.plugin_config or {}).get("threshold", 0.5) or 0.5)
         self._start_time      = time.time()
         self._last_train_loss: float = 0.0
         self._last_lr:         float = 0.0
@@ -202,6 +208,15 @@ class Plugin(TrainPlugin):
                 "Lösung: Dataset mit dem train-Split neu importieren."
             )
 
+        # Multi-Label (Listen, "a;b") und Regression (Kommazahlen) laufen einen
+        # eigenen Weg. Alles andere geht exakt den bisherigen Single-Label-Pfad.
+        pc = self.config.plugin_config or {}
+        self.problem_type = resolve_problem_type(
+            [v for ds in splits.values() for v in ds[label_col]],
+            pc.get("multi_label", "auto"), pc.get("problem_type", "auto"))
+        if self.problem_type != SINGLE_LABEL:
+            return self._load_special(splits, names, columns)
+
         # Labels normalisieren — aus ALLEN Splits sammeln, nicht nur dem ersten.
         unique_labels = {}
         total_rows = 0
@@ -313,6 +328,97 @@ class Plugin(TrainPlugin):
         self.eval_dataset.set_format("torch")
 
         MessageProtocol.status("loading_data", "✓ Dataset tokenisiert")
+
+    def _load_special(self, splits: dict, names: List[str], columns: List[str]) -> None:
+        """Multi-Label (Multi-Hot, BCE) bzw. Regression (ein Ausgang, MSE)."""
+        from datasets import Sequence, Value
+
+        label_col = self.label_col
+        if self.problem_type == MULTI_LABEL:
+            labels = sorted({l for ds in splits.values() for v in ds[label_col]
+                             for l in split_multi_labels(v, names)})
+            if len(labels) < 2:
+                raise ValueError(
+                    f"Multi-Label: Spalte '{label_col}' enthaelt nur {labels or 'keine'} Labels — "
+                    "es braucht mindestens zwei.")
+            self.label2id = {l: i for i, l in enumerate(labels)}
+            self.id2label = {i: l for i, l in enumerate(labels)}
+            self.num_labels = len(labels)
+            label2id = self.label2id
+
+            def encode(value):
+                vec = [0.0] * len(label2id)
+                for l in split_multi_labels(value, names):
+                    vec[label2id[l]] = 1.0
+                return vec
+
+            feature = Sequence(Value("float32"))
+            MessageProtocol.status(
+                "loading_data",
+                f"Multi-Label erkannt: {self.num_labels} Labels {labels[:10]} | Schwelle {self.threshold}")
+        else:
+            bad = [v for ds in splits.values() for v in ds[label_col] if as_float(v) is None][:5]
+            if bad:
+                raise ValueError(
+                    f"Regression: Spalte '{label_col}' enthaelt Werte, die keine Zahlen sind (z.B. {bad}). "
+                    "Fuer Klassen problem_type auf 'auto' lassen.")
+            self.label2id = {label_col: 0}
+            self.id2label = {0: label_col}
+            self.num_labels = 1
+
+            def encode(value):
+                return as_float(value)
+
+            feature = Value("float32")
+            values = [as_float(v) for v in splits["train"][label_col]]
+            MessageProtocol.status(
+                "loading_data",
+                f"Regression erkannt: Zielwert '{label_col}' von {min(values):g} bis {max(values):g}")
+
+        # Train/Eval wie beim Single-Label-Pfad: validation vor test, sonst 10 %.
+        train_raw = splits["train"]
+        if "validation" in splits:
+            eval_raw = splits["validation"]
+        elif "test" in splits:
+            eval_raw = splits["test"]
+            MessageProtocol.status("loading_data", "Kein Validierungs-Split — test/ wird zur Evaluation genutzt.")
+        else:
+            split_ds = train_raw.train_test_split(test_size=0.1, seed=self.config.seed)
+            train_raw, eval_raw = split_ds["train"], split_ds["test"]
+        max_eval = int(getattr(self.config, "max_eval_samples", 0) or 0)
+        if 0 < max_eval < len(eval_raw):
+            eval_raw = eval_raw.shuffle(seed=self.config.seed).select(range(max_eval))
+
+        text_col, pair_col = self.text_col, self.text_pair_col
+
+        def tokenize_fn(batch):
+            first = [safe_text(t) for t in batch[text_col]]
+            second = [safe_text(t) for t in batch[pair_col]] if pair_col else None
+            tokens = self.tokenizer(first, second, truncation=True, padding="max_length",
+                                    max_length=self.config.max_seq_length)
+            tokens["labels"] = [encode(l) for l in batch[label_col]]
+            return tokens
+
+        def prepare(ds):
+            # float32 erzwingen: datasets legt Kommazahlen als float64 ab, und
+            # float64 gibt es auf MPS nicht (BCE/MSE brachen sonst ab).
+            out = ds.map(tokenize_fn, batched=True, remove_columns=ds.column_names)
+            out = out.cast_column("labels", feature)
+            out.set_format("torch")
+            return out
+
+        MessageProtocol.status("loading_data", f"Train: {len(train_raw)} | Eval: {len(eval_raw)} | Tokenisiere...")
+        self.train_dataset = prepare(train_raw)
+        self.eval_dataset = prepare(eval_raw)
+        MessageProtocol.status("loading_data", "✓ Dataset tokenisiert")
+
+    def _special_metrics(self, eval_pred):
+        logits, labels = eval_pred
+        logits = np.asarray(logits)
+        if self.problem_type == MULTI_LABEL:
+            probs = 1.0 / (1.0 + np.exp(-logits))
+            return multi_label_scores(labels, probs, self.threshold)
+        return regression_scores(labels, logits.reshape(-1))
 
     def _load_from_file(self, path: Path) -> dict:
         ext = path.suffix.lower()
@@ -428,6 +534,9 @@ class Plugin(TrainPlugin):
             label2id=self.label2id,
             local_files_only=True,
             ignore_mismatched_sizes=True,
+            # problem_type landet in der config.json — Test und Labor lesen dort,
+            # ob Sigmoid (Multi-Label) oder ein Zahlwert (Regression) gemeint ist.
+            **({"problem_type": self.problem_type} if self.problem_type != SINGLE_LABEL else {}),
         )
 
         param_count = sum(p.numel() for p in self.model.parameters()) / 1e6
@@ -666,6 +775,9 @@ class Plugin(TrainPlugin):
             )
             return {"accuracy": acc, "f1": f1, "precision": p, "recall": r}
 
+        if self.problem_type != SINGLE_LABEL:
+            compute_metrics = self._special_metrics
+
         self._trainer = Trainer(
             model=self.model,
             args=training_args,
@@ -715,7 +827,7 @@ class Plugin(TrainPlugin):
             else self.config.epochs
         )
 
-        return {
+        metrics = {
             "final_train_loss": float(train_loss),
             "final_val_loss":   float(eval_result.get("eval_loss", 0.0)),
             "accuracy":         float(eval_result.get("eval_accuracy", 0.0)),
@@ -734,6 +846,20 @@ class Plugin(TrainPlugin):
             "n_val":            int(len(self.eval_dataset)) if self.eval_dataset is not None else 0,
             "device":           getattr(self, "device_used", "cpu"),
         }
+        if self.problem_type == MULTI_LABEL:
+            for key in ("subset_accuracy", "micro_f1", "macro_f1"):
+                metrics[key] = float(eval_result.get(f"eval_{key}", 0.0))
+            metrics["threshold"] = self.threshold
+            metrics["problem_type"] = self.problem_type
+        elif self.problem_type == REGRESSION:
+            # Keine Klassen — accuracy/f1 waeren irrefuehrende Nullen.
+            for key in ("accuracy", "f1", "precision", "recall", "num_labels"):
+                metrics.pop(key, None)
+            for key in ("mse", "rmse", "mae", "r2", "pearson", "spearman"):
+                if f"eval_{key}" in eval_result:
+                    metrics[key] = float(eval_result[f"eval_{key}"])
+            metrics["problem_type"] = self.problem_type
+        return metrics
 
     # ─── 6. Export ─────────────────────────────────────────────────────────
 
@@ -754,6 +880,10 @@ class Plugin(TrainPlugin):
             "value_to_label": self.value_to_label,
             "columns": {"text": self.text_col, "text_pair": self.text_pair_col, "label": self.label_col},
         }
+        if self.problem_type != SINGLE_LABEL:
+            label_map["problem_type"] = self.problem_type
+            if self.problem_type == MULTI_LABEL:
+                label_map["threshold"] = self.threshold
         with open(output_path / "label_mapping.json", "w", encoding="utf-8") as f:
             json.dump(label_map, f, ensure_ascii=False, indent=2)
 

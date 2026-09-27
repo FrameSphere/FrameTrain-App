@@ -48,8 +48,13 @@ class TestProtocol:
                          average_loss: Optional[float],
                          average_inference_time: float,
                          samples_per_second: float,
-                         hard_examples_file: Optional[str] = None) -> None:
+                         hard_examples_file: Optional[str] = None,
+                         metrics: Optional[Dict[str, Any]] = None) -> None:
+        # metrics: aufgabenspezifische Kennzahlen (WER/CER, ROUGE/BLEU, MAE ...).
+        # Nur gesendet, wenn vorhanden — die bestehenden Felder bleiben unveraendert.
+        extra = {"metrics": metrics} if metrics else {}
         TestProtocol._send("complete", {
+            **extra,
             "mode": "dataset",
             "results_file": results_file,
             "total_samples": total_samples,

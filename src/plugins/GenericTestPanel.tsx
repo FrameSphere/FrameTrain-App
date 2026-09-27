@@ -14,6 +14,16 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface TopPred { label?: string; score?: number }
 
+/**
+ * Aufgabenspezifische Kennzahlen aus dem Testlauf (data.metrics). Fehlerraten
+ * und ROUGE sind Anteile (als % gezeigt), BLEU steht schon auf 0..100.
+ */
+const TEST_METRICS: Array<{ key: string; percent: boolean }> = [
+  { key: 'wer', percent: true }, { key: 'cer', percent: true },
+  { key: 'rouge1', percent: true }, { key: 'rouge2', percent: true }, { key: 'rougeL', percent: true },
+  { key: 'bleu', percent: false },
+];
+
 interface GenericTestPanelProps extends TestPluginProps {
   taskType: string;
   /** 'text' = Freitext-Feld, 'file' = Pfad zu einer Datei. */
@@ -45,7 +55,7 @@ export default function GenericTestPanel({
   const [maxSamples, setMaxSamples] = useState<number | ''>(50);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-  const [summary, setSummary] = useState<{ total: number; accuracy: number | null; correct: number | null } | null>(null);
+  const [summary, setSummary] = useState<{ total: number; accuracy: number | null; correct: number | null; metrics: Record<string, number> } | null>(null);
 
   const unlistenRef = useRef<Array<() => void>>([]);
   useEffect(() => () => { unlistenRef.current.forEach(fn => fn()); }, []);
@@ -108,13 +118,14 @@ export default function GenericTestPanel({
             setProgress({ current: d.current_sample, total: d.total_samples });
           }
         });
-      const offC = await listen<{ test_id?: string; data?: { total_samples?: number; accuracy?: number | null; correct_predictions?: number | null } }>(
+      const offC = await listen<{ test_id?: string; data?: { total_samples?: number; accuracy?: number | null; correct_predictions?: number | null; metrics?: Record<string, number> } }>(
         'test-complete', e => {
           const d = e.payload.data;
           setSummary({
             total: d?.total_samples ?? 0,
             accuracy: d?.accuracy ?? null,
             correct: d?.correct_predictions ?? null,
+            metrics: d?.metrics ?? {},
           });
           setStatus(null);
           setRunning(false);
@@ -258,6 +269,19 @@ export default function GenericTestPanel({
                 {summary.accuracy != null
                   ? <p className="text-white font-medium">{t('testPlugins.generic.hits', { value: (summary.accuracy * 100).toFixed(1), correct: summary.correct ?? 0 })}</p>
                   : <p className="text-gray-500">{t('testPlugins.generic.noExpected')}</p>}
+                {TEST_METRICS.some(m => typeof summary.metrics[m.key] === 'number') && (
+                  <div className="pt-2 space-y-1">
+                    <p className="text-gray-400 text-[11px]">{t('testPlugins.generic.metricsTitle')}</p>
+                    {TEST_METRICS.filter(m => typeof summary.metrics[m.key] === 'number').map(m => (
+                      <div key={m.key} className="flex items-center justify-between">
+                        <span>{t(`testPlugins.generic.metrics.${m.key}`)}</span>
+                        <span className="text-white tabular-nums">
+                          {m.percent ? `${(summary.metrics[m.key] * 100).toFixed(1)} %` : summary.metrics[m.key].toFixed(1)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </>

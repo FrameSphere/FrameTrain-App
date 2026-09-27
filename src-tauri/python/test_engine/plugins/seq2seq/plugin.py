@@ -12,7 +12,9 @@ from core.config import TestConfig
 from core.protocol import TestProtocol
 from _shared_classify import resolve_device
 from ft_data.media import sample as random_sample
-from ft_data.seq2seq import describe, file_split_name, load_spec, resolve_spec, row_texts
+from ft_data.seq2seq import (
+    describe, file_split_name, generation_scores, load_spec, resolve_spec, row_texts,
+)
 
 DATA_EXTS = (".json", ".jsonl", ".csv", ".tsv", ".parquet")
 
@@ -157,12 +159,31 @@ class Plugin:
             elapsed = max(time.time() - started, 1e-6)
             TestProtocol.progress(current=idx, total=len(rows), sps=idx / elapsed)
 
+        # ROUGE/BLEU gegen die Zieltexte — "Wort fuer Wort identisch" allein
+        # ist bei Zusammenfassungen fast immer 0 und sagt nichts ueber die Qualitaet.
+        scores, notes = generation_scores(
+            [r["predicted_output"] for r in results], [r["expected_output"] for r in results])
+        for note in notes:
+            TestProtocol.status("running", note)
+
+        elapsed = max(time.time() - started, 1e-6)
         out_dir = Path(self.config.output_path)
         out_dir.mkdir(parents=True, exist_ok=True)
         results_file = out_dir / "results.json"
-        results_file.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
-
-        elapsed = max(time.time() - started, 1e-6)
+        # Aufbau wie bei der Textklassifikation ({predictions, metrics}): nur so
+        # uebernimmt das Backend Vorhersagen und Kennzahlen in die Testhistorie.
+        results_file.write_text(json.dumps({
+            "predictions": results,
+            "metrics": {
+                **scores,
+                "accuracy": (exact / labelled) if labelled else None,
+                "correct_predictions": exact,
+                "total_samples": len(results),
+                "average_inference_time": total_time / max(len(results), 1),
+                "samples_per_second": len(results) / elapsed,
+                "total_time": elapsed,
+            },
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
         TestProtocol.complete_dataset(
             results_file=str(results_file),
             total_samples=len(results),
@@ -172,4 +193,5 @@ class Plugin:
             average_loss=None,
             average_inference_time=total_time / max(len(results), 1),
             samples_per_second=len(results) / elapsed,
+            metrics=scores or None,
         )

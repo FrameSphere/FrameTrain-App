@@ -80,7 +80,9 @@ describe('detectPluginForModel', () => {
   it.each([
     ['resnet18-transfer', 'hf-image-classification'],
     ['mein-bert-v2', 'hf-encoder'],
-    ['whisper-small-de', 'audio-classification'],
+    // Seit dem ASR-Plugin: Whisper ist Spracherkennung, nicht Audio-Klassifikation.
+    ['whisper-small-de', 'speech-recognition'],
+    ['wavlm-sprecher', 'audio-classification'],
     ['flan-t5-spellcheck', 'seq2seq'],
     ['yolo11n-custom', 'yolo'],
   ])('erkennt %s trotz model_type "pytorch"', (name, pluginId) => {

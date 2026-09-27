@@ -3112,7 +3112,17 @@
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
       "detectedClass": "Erkannte Klasse",
       "videoLabel": "Einzelnes Video",
-      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4"
+      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4",
+      "transcript": "Transkript",
+      "metricsTitle": "Kennzahlen",
+      "metrics": {
+        "wer": "Wortfehlerrate (WER)",
+        "cer": "Zeichenfehlerrate (CER)",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "rougeL": "ROUGE-L",
+        "bleu": "BLEU"
+      }
     }
   },
   "studio": {

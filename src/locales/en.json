@@ -3112,7 +3112,17 @@
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
       "detectedClass": "Detected class",
       "videoLabel": "Single video",
-      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4"
+      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4",
+      "transcript": "Transcript",
+      "metricsTitle": "Metrics",
+      "metrics": {
+        "wer": "Word error rate (WER)",
+        "cer": "Character error rate (CER)",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "rougeL": "ROUGE-L",
+        "bleu": "BLEU"
+      }
     }
   },
   "studio": {

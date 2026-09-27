@@ -43,5 +43,24 @@ class Seq2SeqSpecTest(unittest.TestCase):
             self.assertEqual(load_spec(Path(d) / "fehlt"), {})
 
 
+class GenerationScoresTest(unittest.TestCase):
+    def test_umlaute_zaehlen_als_woerter(self):
+        from ft_data.seq2seq import generation_scores
+        same = "Viele Grüße aus Köln an die Straße"   # BLEU braucht Satzlaenge >= 4-Gramm
+        scores, notes = generation_scores([same], [same])
+        self.assertEqual(notes, [])
+        self.assertAlmostEqual(scores["rouge1"], 1.0)
+        self.assertAlmostEqual(scores["rougeL"], 1.0)
+        self.assertGreater(scores["bleu"], 99.0)
+        # Der Standard-Tokenizer von rouge_score hielte "Grüße" und "Größe" fuer
+        # dasselbe Bruchstueck "gr e" — hier muessen sie verschieden sein.
+        scores, _ = generation_scores(["Größe"], ["Grüße"])
+        self.assertEqual(scores["rouge1"], 0.0)
+
+    def test_ohne_ziele_keine_kennzahlen(self):
+        from ft_data.seq2seq import generation_scores
+        self.assertEqual(generation_scores(["x"], [None]), ({}, []))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

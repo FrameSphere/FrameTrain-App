@@ -45,15 +45,26 @@ describe('Seq2Seq wird seit 1.2.17 unterstuetzt', () => {
 });
 
 describe('Audio wird seit 1.2.17 unterstuetzt', () => {
+  // Whisper und wav2vec2-…-960h standen hier bis zum ASR-Plugin ebenfalls als
+  // Audio-Klassifikation. Beide sind Spracherkenner (Transkript statt Klasse)
+  // und gehoeren seitdem zu speech-recognition — siehe den Block darunter.
   it.each([
-    'openai/whisper-tiny', 'facebook/wav2vec2-base-960h',
     'microsoft/wavlm-base', 'MIT/ast-finetuned-audioset-10-10-0.4593',
+    'facebook/wav2vec2-base', 'superb/hubert-base-superb-ks',
   ])('%s -> audio-classification', (id) => expect(pluginOf(id)).toBe('audio-classification'));
 
   it('Sprachsynthese bleibt abgelehnt – das ist kein Klassifikator', () => {
     expect(pluginOf('microsoft/speecht5_tts')).toBeNull();
     expect(pluginOf('suno/bark')).toBeNull();
   });
+});
+
+describe('Spracherkennung (ASR): Whisper und CTC-Modelle', () => {
+  it.each([
+    'openai/whisper-tiny', 'openai/whisper-large-v3', 'distil-whisper/distil-small.en',
+    'UsefulSensors/moonshine-tiny', 'facebook/wav2vec2-base-960h',
+    'jonatasgrosman/wav2vec2-large-xlsr-53-german-asr', 'facebook/s2t-small-librispeech-asr',
+  ])('%s -> speech-recognition', (id) => expect(pluginOf(id)).toBe('speech-recognition'));
 });
 
 describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {

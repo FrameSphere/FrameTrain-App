@@ -33,6 +33,10 @@ SUPPORTED_ARCHITECTURES = {
 
 # Spaltenerkennung, Satzpaare und Label-Regeln gemeinsam mit dem Training.
 from ft_data.text import detect_columns, expected_label, safe_text
+from ft_data.text import (
+    MULTI_LABEL, REGRESSION, SINGLE_LABEL, as_float, multi_label_scores, regression_scores,
+    split_multi_labels,
+)
 from ft_data.media import sample as random_sample
 
 
@@ -48,6 +52,11 @@ class Plugin:
         self.train_columns: Dict[str, Optional[str]] = {}
         self.device    = None
         self.is_stopped = False
+        # Multi-Label (Sigmoid, alle ueber der Schwelle) bzw. Regression (Zahlwert)
+        # — aus config.json des Modells, wie es das Training gespeichert hat.
+        self.problem_type = SINGLE_LABEL
+        self.threshold = 0.5
+        self.tolerance = float(config.plugin_config.get("tolerance", 0.5) or 0.5)
 
     def stop(self):
         self.is_stopped = True
@@ -85,11 +94,22 @@ class Plugin:
             self.id2label = {int(k): v for k, v in lm.get("id2label", {}).items()}
             self.value_to_label = {str(k): str(v) for k, v in (lm.get("value_to_label") or {}).items()}
             self.train_columns = lm.get("columns") or {}
+            if lm.get("threshold") is not None:
+                self.threshold = float(lm["threshold"])
         else:
             # Fallback: aus config.json
             raw_id2label = model_cfg.get("id2label", {})
             self.id2label = {int(k): v for k, v in raw_id2label.items()}
             self.label2id = {v: int(k) for k, v in raw_id2label.items()}
+
+        pt = str(model_cfg.get("problem_type") or "")
+        if pt in (MULTI_LABEL, REGRESSION):
+            self.problem_type = pt
+        if self.config.plugin_config.get("threshold") is not None:
+            self.threshold = float(self.config.plugin_config["threshold"])
+        if self.problem_type != SINGLE_LABEL:
+            TestProtocol.status("init", f"Aufgabe: {self.problem_type}"
+                                + (f" | Schwelle {self.threshold}" if self.problem_type == MULTI_LABEL else ""))
 
         # Gerät
         if torch.cuda.is_available():
@@ -142,6 +162,20 @@ class Plugin:
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits  = outputs.logits
+
+        if self.problem_type == REGRESSION:
+            value = float(logits.reshape(-1)[0].cpu())
+            # Ein Zahlwert hat keine Klassen-Wahrscheinlichkeit.
+            return f"{value:.3f}", None, []
+        if self.problem_type == MULTI_LABEL:
+            scores = torch.sigmoid(logits).reshape(-1).cpu().tolist()
+            chosen = [i for i, sc in enumerate(scores) if sc >= self.threshold]
+            order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+            predicted = ", ".join(self.id2label.get(i, str(i)) for i in sorted(chosen, key=lambda i: -scores[i]))
+            top = [{"label": self.id2label.get(i, str(i)), "score": float(scores[i])} for i in order]
+            return predicted, (float(scores[order[0]]) if order else None), top
+
+        with torch.no_grad():
             probs   = torch.softmax(logits, dim=-1).squeeze().cpu().tolist()
 
         if isinstance(probs, float):
@@ -202,7 +236,7 @@ class Plugin:
 
                 # Optional: Loss berechnen wenn Label vorhanden
                 sample_loss = None
-                if expected is not None and expected in self.label2id:
+                if self.problem_type == SINGLE_LABEL and expected is not None and expected in self.label2id:
                     label_id = self.label2id[str(expected)]
                     inputs = self.tokenizer(
                         text, text2, return_tensors="pt", truncation=True,
@@ -215,7 +249,7 @@ class Plugin:
                         sample_loss = float(out.loss.item())
                     total_loss += sample_loss
 
-                is_correct = (str(predicted) == str(expected)) if expected is not None else None
+                is_correct = self._is_correct(predicted, expected) if expected is not None else None
                 if expected is not None:
                     labelled += 1
                 if is_correct:
@@ -261,7 +295,14 @@ class Plugin:
         sps_final     = completed / max(elapsed_total, 1e-6)
         avg_infer     = elapsed_total / max(completed, 1)
         accuracy      = correct_count / labelled if labelled > 0 else None
-        avg_loss      = total_loss / labelled if labelled > 0 else None
+        # Loss nur beim Single-Label-Pfad gemessen — sonst keine 0.0 vortaeuschen.
+        avg_loss      = total_loss / labelled if labelled > 0 and self.problem_type == SINGLE_LABEL else None
+
+        special = self._special_scores(predictions)
+        if self.problem_type == REGRESSION:
+            # "Accuracy" waere bei Zahlwerten erfunden — Treffer innerhalb der
+            # Toleranz stehen als within_tolerance in den Kennzahlen.
+            accuracy = None
 
         hard_examples = [p for p in predictions if p["is_correct"] is False and p.get("expected_output")]
 
@@ -281,6 +322,7 @@ class Plugin:
                     "average_inference_time": avg_infer,
                     "samples_per_second":   sps_final,
                     "total_time":           elapsed_total,
+                    **special,
                 },
             }, f, ensure_ascii=False, indent=2, default=str)
 
@@ -300,7 +342,48 @@ class Plugin:
             average_inference_time=avg_infer,
             samples_per_second=sps_final,
             hard_examples_file=hard_file,
+            metrics=special or None,
         )
+
+    # ─── Multi-Label / Regression ─────────────────────────────────────────
+
+    def _expected_special(self, raw: Any) -> Optional[str]:
+        if raw is None:
+            return None
+        if self.problem_type == REGRESSION:
+            v = as_float(raw)
+            return None if v is None else f"{v:g}"
+        labels = [l for l in split_multi_labels(raw) if l in self.label2id]
+        return ", ".join(sorted(labels)) if labels or raw not in ("", None) else None
+
+    def _is_correct(self, predicted: str, expected: str) -> bool:
+        if self.problem_type == REGRESSION:
+            p, e = as_float(predicted), as_float(expected)
+            return p is not None and e is not None and abs(p - e) <= self.tolerance
+        if self.problem_type == MULTI_LABEL:
+            return set(split_multi_labels(predicted.replace(", ", ";"))) == set(split_multi_labels(expected.replace(", ", ";")))
+        return str(predicted) == str(expected)
+
+    def _special_scores(self, predictions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        rows = [p for p in predictions if p.get("expected_output") is not None and p["predicted_output"] != "ERROR"]
+        if self.problem_type == SINGLE_LABEL or not rows:
+            return {}
+        if self.problem_type == REGRESSION:
+            y = [as_float(r["expected_output"]) for r in rows]
+            p = [as_float(r["predicted_output"]) for r in rows]
+            out = regression_scores(y, p)
+            out["within_tolerance"] = sum(1 for r in rows if r["is_correct"]) / len(rows)
+            out["tolerance"] = self.tolerance
+            return out
+        names = [self.id2label[i] for i in sorted(self.id2label)]
+        def hot(text: str) -> List[float]:
+            got = set(split_multi_labels(str(text).replace(", ", ";")))
+            return [1.0 if n in got else 0.0 for n in names]
+        y = [hot(r["expected_output"]) for r in rows]
+        p = [hot(r["predicted_output"]) for r in rows]
+        out = multi_label_scores(y, p, 0.5)
+        out["threshold"] = self.threshold
+        return out
 
     # ─── Dataset-Loader ───────────────────────────────────────────────────
 
@@ -454,6 +537,9 @@ class Plugin:
             samples.append({
                 "text":      safe_text(row.get(text_col)),
                 "text_pair": safe_text(row.get(pair_col)) if pair_col else None,
-                "expected":  expected_label(row.get(label_col), self.value_to_label) if label_col else None,
+                "expected":  (None if not label_col
+                              else self._expected_special(row.get(label_col)) if self.problem_type != SINGLE_LABEL
+                              else expected_label(row.get(label_col), self.value_to_label)),
+                "raw_label": row.get(label_col) if label_col else None,
             })
         return samples

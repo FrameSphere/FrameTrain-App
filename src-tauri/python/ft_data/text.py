@@ -131,3 +131,148 @@ def expected_label(raw: Any, value_to_label: Dict[str, str]) -> Optional[str]:
         return None
     key = display_label(raw, [])
     return value_to_label.get(key, key)
+
+
+# ── Multi-Label und Regression ───────────────────────────────────────────────
+
+SINGLE_LABEL = "single_label_classification"
+MULTI_LABEL = "multi_label_classification"
+REGRESSION = "regression"
+MULTI_LABEL_SEPARATORS = (";", "|")
+
+
+def _setting(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value if value is not None else "auto").strip().lower() or "auto"
+
+
+def split_multi_labels(value: Any, names: Sequence[str] = ()) -> List[str]:
+    """Labels einer Zeile: Liste oder 'sport;politik' bzw. 'sport|politik'."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        parts = list(value)
+    else:
+        text = str(value)
+        parts = [text]
+        for sep in MULTI_LABEL_SEPARATORS:
+            if sep in text:
+                parts = text.split(sep)
+                break
+    out: List[str] = []
+    for p in parts:
+        if isinstance(p, str):
+            p = p.strip()
+            if not p:
+                continue
+        label = display_label(p, names)
+        if label not in out:
+            out.append(label)
+    return out
+
+
+def as_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return None if value != value else float(value)
+    try:
+        return float(str(value).strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _looks_multi_label(values: Sequence[Any]) -> bool:
+    for v in values:
+        if isinstance(v, (list, tuple)) and len(v) > 1:
+            return True
+        if isinstance(v, str):
+            for sep in MULTI_LABEL_SEPARATORS:
+                if sep in v and sum(1 for p in v.split(sep) if p.strip()) > 1:
+                    return True
+    return False
+
+
+def _looks_regression(values: Sequence[Any]) -> bool:
+    """Nur echte Kommazahlen mit vielen verschiedenen Werten.
+
+    Sterne 1-5 oder Klassen 0/1 bleiben Klassifikation wie bisher — eine
+    Regression muss man dort ausdruecklich waehlen (problem_type).
+    """
+    nums = [as_float(v) for v in values]
+    if not nums or any(n is None for n in nums):
+        return False
+    if all(float(n).is_integer() for n in nums):
+        return False
+    return len(set(nums)) >= 10
+
+
+def resolve_problem_type(values: Sequence[Any], multi_label: Any = "auto", problem_type: Any = "auto") -> str:
+    """single_label_classification | multi_label_classification | regression.
+
+    plugin_config problem_type hat Vorrang, dann multi_label (auto/true/false),
+    dann die Erkennung an den Werten. Ohne Treffer bleibt alles wie bisher.
+    """
+    pt = _setting(problem_type)
+    if pt in ("regression", "regress"):
+        return REGRESSION
+    if pt in ("multi_label_classification", "multi_label", "multilabel", "multi"):
+        return MULTI_LABEL
+    if pt in ("single_label_classification", "single_label", "single"):
+        return SINGLE_LABEL
+    ml = _setting(multi_label)
+    if ml in ("true", "1", "yes", "ja"):
+        return MULTI_LABEL
+    if ml not in ("false", "0", "no", "nein") and _looks_multi_label(values):
+        return MULTI_LABEL
+    if _looks_regression(values):
+        return REGRESSION
+    return SINGLE_LABEL
+
+
+def multi_label_scores(labels, probs, threshold: float = 0.5) -> Dict[str, float]:
+    """Micro/Macro-F1 und Subset-Accuracy (alle Labels einer Zeile richtig).
+
+    accuracy/f1/precision/recall werden zusaetzlich befuellt (Subset-Accuracy,
+    Micro-Werte), damit die bestehende Karte der Analyse-Seite etwas zeigt.
+    """
+    import numpy as np
+    from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support
+
+    y = np.asarray(labels) >= 0.5
+    pred = np.asarray(probs) >= float(threshold)
+    p, r, micro, _ = precision_recall_fscore_support(y, pred, average="micro", zero_division=0)
+    subset = float(accuracy_score(y, pred))
+    return {
+        "accuracy": subset, "f1": float(micro), "precision": float(p), "recall": float(r),
+        "subset_accuracy": subset, "micro_f1": float(micro),
+        "macro_f1": float(f1_score(y, pred, average="macro", zero_division=0)),
+    }
+
+
+def regression_scores(labels, preds) -> Dict[str, float]:
+    """MSE, RMSE, MAE, R², Pearson und Spearman."""
+    import numpy as np
+
+    y = np.asarray(labels, dtype=float).reshape(-1)
+    p = np.asarray(preds, dtype=float).reshape(-1)
+    if y.size == 0:
+        return {}
+    mse = float(np.mean((p - y) ** 2))
+    out = {"mse": mse, "rmse": float(np.sqrt(mse)), "mae": float(np.mean(np.abs(p - y)))}
+    var = float(np.sum((y - y.mean()) ** 2))
+    out["r2"] = float(1 - np.sum((p - y) ** 2) / var) if var > 0 else 0.0
+    # Bei konstanten Vorhersagen ist die Korrelation undefiniert — 0 statt NaN,
+    # NaN wuerde das JSON fuer die Analyse-Seite ungueltig machen.
+    if y.size > 1 and np.std(p) > 0 and np.std(y) > 0:
+        try:
+            from scipy.stats import pearsonr, spearmanr
+            out["pearson"] = float(pearsonr(y, p)[0])
+            out["spearman"] = float(spearmanr(y, p)[0])
+        except ImportError:
+            out["pearson"] = float(np.corrcoef(y, p)[0, 1])
+    else:
+        out["pearson"] = 0.0
+        out["spearman"] = 0.0
+    return out
