@@ -173,6 +173,22 @@ pub fn assign_splits(group_of: &[String], train_ratio: f64, val_ratio: f64) -> V
         vergeben += n;
     }
 
+    // Bei wenigen Gruppen (zwei Videos, drei Seiten) rundet die Quote leicht
+    // alles in train — die Validierung bleibt leer, und das Training misst
+    // nichts. Gewuenschte Teile bekommen deshalb mindestens eine Gruppe,
+    // solange train dabei nicht leer wird. Genommen wird die letzte Gruppe von
+    // train, also die, die der Grenze am naechsten lag.
+    let test_ratio = (1.0 - train_ratio - val_ratio).max(0.0);
+    for (teil, gewuenscht, mindest_gruppen) in [("val", val_ratio > 0.0, 2usize), ("test", test_ratio >= 0.05, 3usize)] {
+        if !gewuenscht || reihenfolge.len() < mindest_gruppen { continue; }
+        if split_der_gruppe.values().any(|s| *s == teil) { continue; }
+        let in_train: Vec<&String> = reihenfolge.iter().map(|(_, g)| *g)
+            .filter(|g| split_der_gruppe.get(g) == Some(&"train")).collect();
+        if in_train.len() >= 2 {
+            split_der_gruppe.insert(in_train[in_train.len() - 1], teil);
+        }
+    }
+
     group_of.iter()
         .map(|g| split_der_gruppe.get(g).copied().unwrap_or("train").to_string())
         .collect()
@@ -192,6 +208,25 @@ fn stabiler_hash(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wenige_gruppen_lassen_die_validierung_nicht_leer() {
+        // Zwei Videos mit 3 und 4 Clips: 80/20 rundete frueher alles in train.
+        let g: Vec<String> = ["a", "a", "a", "b", "b", "b", "b"].iter().map(|s| s.to_string()).collect();
+        let s = assign_splits(&g, 0.8, 0.2);
+        assert!(s.iter().any(|x| x == "val"), "{:?}", s);
+        assert!(s.iter().any(|x| x == "train"), "{:?}", s);
+        // Gruppen bleiben ganz.
+        assert!(s[0] == s[1] && s[1] == s[2] && s[3] == s[6]);
+        // Eine einzige Gruppe kann nicht geteilt werden — dann eben nur train.
+        let eine: Vec<String> = vec!["x".into(); 5];
+        assert!(assign_splits(&eine, 0.8, 0.2).iter().all(|x| x == "train"));
+        // 70/15/15 mit drei Gruppen: jeder Teil bekommt eine.
+        let drei: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let mut t = assign_splits(&drei, 0.7, 0.15);
+        t.sort();
+        assert_eq!(t, vec!["test", "train", "val"]);
+    }
 
     #[test]
     fn pixelbox_wird_normiert() {

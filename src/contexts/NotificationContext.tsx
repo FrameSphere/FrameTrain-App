@@ -16,7 +16,8 @@ import { useTheme } from './ThemeContext';
  *    const { notify, success, error, warning, info } = useNotification();
  * 
  * 3. Notification anzeigen:
- *    success('Erfolgreich gespeichert!');
+ *    success('Erfolgreich gespeichert!');            // nur Text
+ *    success('Gespeichert', 'Das Modell liegt jetzt …');  // Titel, Text
  *    error('Fehler beim Laden');
  *    warning('Achtung: Aktion wird überschrieben');
  *    info('Neue Version verfügbar');
@@ -58,10 +59,11 @@ interface Notification extends NotificationOptions {
 interface NotificationContextType {
   notifications: Notification[];
   notify: (options: NotificationOptions) => string;
-  success: (message: string, title?: string) => string;
-  error: (message: string, title?: string) => string;
-  warning: (message: string, title?: string) => string;
-  info: (message: string, title?: string) => string;
+  /** Ein Argument: Text. Zwei: Titel, dann Text. */
+  success: (titleOrMessage: string, message?: string) => string;
+  error: (titleOrMessage: string, message?: string) => string;
+  warning: (titleOrMessage: string, message?: string) => string;
+  info: (titleOrMessage: string, message?: string) => string;
   dismiss: (id: string) => void;
   dismissAll: () => void;
 }
@@ -103,22 +105,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     return id;
   }, [dismiss]);
 
-  // Shorthand-Funktionen für häufige Typen
-  const success = useCallback((message: string, title?: string) => {
-    return notify({ type: 'success', message, title });
-  }, [notify]);
-
-  const error = useCallback((message: string, title?: string) => {
-    return notify({ type: 'error', message, title, duration: 6000 }); // Errors länger anzeigen
-  }, [notify]);
-
-  const warning = useCallback((message: string, title?: string) => {
-    return notify({ type: 'warning', message, title, duration: 5000 });
-  }, [notify]);
-
-  const info = useCallback((message: string, title?: string) => {
-    return notify({ type: 'info', message, title });
-  }, [notify]);
+  // Shorthand-Funktionen für häufige Typen.
+  //
+  // Mit einem Argument ist es der Text. Mit zwei ist das erste der Titel und
+  // das zweite der Text — so ruft die ganze App sie auf ("Export fehlgeschlagen",
+  // Fehlermeldung). Die Signatur hiess frueher (message, title); damit stand in
+  // jeder Meldung der Titel klein unter dem langen Detailtext.
+  const kurz = (type: 'success' | 'error' | 'warning' | 'info', duration?: number) =>
+    (first: string, second?: string) => notify({
+      type,
+      ...(second === undefined ? { message: first } : { title: first, message: second }),
+      ...(duration ? { duration } : {}),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const success = useCallback(kurz('success'), [notify]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const error = useCallback(kurz('error', 6000), [notify]);   // Errors länger anzeigen
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const warning = useCallback(kurz('warning', 5000), [notify]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const info = useCallback(kurz('info'), [notify]);
 
   return (
     <NotificationContext.Provider

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -11,5 +11,8 @@ export default defineConfig({
     // Tests liefen knapp darueber, ohne dass etwas falsch war. Das Limit ist
     // eine Obergrenze fuer Haenger, keine Messung.
     testTimeout: 15000,
+    // Arbeitskopien paralleler Sitzungen liegen unter .claude/worktrees und
+    // bringen ihre eigenen (halbfertigen) Tests mit — nicht die dieses Stands.
+    exclude: [...configDefaults.exclude, '.claude/**'],
   },
 });

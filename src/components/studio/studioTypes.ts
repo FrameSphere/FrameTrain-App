@@ -77,6 +77,8 @@ export interface ExportReport {
   without_license:        number;
   sources:                [string, number][];
   warnings:               string[];
+  /** Dieselben Hinweise als Code mit Werten — hier uebersetzt. */
+  hints?:                 { code: string; params: Record<string, string | number> }[];
 }
 
 export interface ExportResult {

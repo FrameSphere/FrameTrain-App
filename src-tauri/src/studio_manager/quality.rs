@@ -231,14 +231,36 @@ pub const MIN_JE_KLASSE: usize = 10;
 /// Ab diesem Verhaeltnis groesste zu kleinster Klasse wird gewarnt.
 pub const MAX_VERHAELTNIS: f64 = 5.0;
 
-pub fn balance_warnungen(per_class: &[(String, usize)]) -> Vec<String> {
+/// Ein Hinweis mit Code und Werten, damit die Oberflaeche ihn in ihrer
+/// Sprache zeigt; `text` ist die deutsche Fassung fuer EXPORT_REPORT.md.
+#[derive(Debug, Clone, Serialize)]
+pub struct Hinweis {
+    pub code:   String,
+    pub params: serde_json::Value,
+    #[serde(skip)]
+    pub text:   String,
+}
+
+fn hinweis(code: &str, params: serde_json::Value, text: String) -> Hinweis {
+    Hinweis { code: code.to_string(), params, text }
+}
+
+/// Hinweis fuer Videoabschnitte, die sich nicht schneiden liessen.
+pub fn clips_fehlgeschlagen(n: usize) -> Hinweis {
+    hinweis("clips_failed", serde_json::json!({ "count": n }),
+        format!("{} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export.", n))
+}
+
+pub fn balance_hinweise(per_class: &[(String, usize)]) -> Vec<Hinweis> {
     let mut w = Vec::new();
     if per_class.is_empty() { return w; }
     for (name, n) in per_class {
         if *n == 0 {
-            w.push(format!("Klasse „{}“ hat keine Beispiele.", name));
+            w.push(hinweis("class_empty", serde_json::json!({ "klasse": name }),
+                format!("Klasse „{}“ hat keine Beispiele.", name)));
         } else if *n < MIN_JE_KLASSE {
-            w.push(format!("Klasse „{}“ hat nur {} Beispiele (empfohlen: mindestens {}).", name, n, MIN_JE_KLASSE));
+            w.push(hinweis("class_few", serde_json::json!({ "klasse": name, "anzahl": n, "min": MIN_JE_KLASSE }),
+                format!("Klasse „{}“ hat nur {} Beispiele (empfohlen: mindestens {}).", name, n, MIN_JE_KLASSE)));
         }
     }
     let belegt: Vec<&(String, usize)> = per_class.iter().filter(|(_, n)| *n > 0).collect();
@@ -246,11 +268,17 @@ pub fn balance_warnungen(per_class: &[(String, usize)]) -> Vec<String> {
         let gross = belegt.iter().max_by_key(|(_, n)| *n).unwrap();
         let klein = belegt.iter().min_by_key(|(_, n)| *n).unwrap();
         if gross.1 as f64 / klein.1 as f64 > MAX_VERHAELTNIS {
-            w.push(format!("Unausgewogen: „{}“ hat {} Beispiele, „{}“ nur {}. Ein Modell lernt dann vor allem, die große Klasse zu sagen.",
-                gross.0, gross.1, klein.0, klein.1));
+            w.push(hinweis("unbalanced",
+                serde_json::json!({ "gross": gross.0, "grossN": gross.1, "klein": klein.0, "kleinN": klein.1 }),
+                format!("Unausgewogen: „{}“ hat {} Beispiele, „{}“ nur {}. Ein Modell lernt dann vor allem, die große Klasse zu sagen.",
+                    gross.0, gross.1, klein.0, klein.1)));
         }
     }
     w
+}
+
+pub fn balance_warnungen(per_class: &[(String, usize)]) -> Vec<String> {
+    balance_hinweise(per_class).into_iter().map(|h| h.text).collect()
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -274,7 +302,17 @@ pub struct ExportReport {
     pub licenses:               Vec<(String, usize)>,
     pub without_license:        usize,
     pub sources:                Vec<(String, usize)>,
+    /// Deutsche Fassung der Hinweise (auch in EXPORT_REPORT.md).
     pub warnings:               Vec<String>,
+    /// Dieselben Hinweise als Code mit Werten — die Oberflaeche uebersetzt sie.
+    pub hints:                  Vec<Hinweis>,
+}
+
+impl ExportReport {
+    pub fn melde(&mut self, h: Hinweis) {
+        self.warnings.push(h.text.clone());
+        self.hints.push(h);
+    }
 }
 
 fn zaehle<I: IntoIterator<Item = String>>(it: I) -> Vec<(String, usize)> {
@@ -305,7 +343,7 @@ pub fn baue_report(
             }
         }
         r.per_class = project.classes.iter().cloned().zip(je).collect();
-        r.warnings.extend(balance_warnungen(&r.per_class));
+        for h in balance_hinweise(&r.per_class) { r.melde(h); }
     }
 
     let geteilt = splits.iter().any(|s| s.is_some());
@@ -320,7 +358,36 @@ pub fn baue_report(
         r.group_leaks = wo.into_iter().filter(|(_, v)| v.len() > 1).map(|(g, _)| g).collect();
         r.group_leaks.sort();
         if !r.group_leaks.is_empty() {
-            r.warnings.push(format!("{} Gruppe(n) liegen in mehr als einem Teil.", r.group_leaks.len()));
+            let n = r.group_leaks.len();
+            r.melde(hinweis("group_leaks", serde_json::json!({ "count": n }),
+                format!("{} Gruppe(n) liegen in mehr als einem Teil.", n)));
+        }
+        // Ein gewuenschter Teil ohne Samples, oder eine Klasse, die in einem
+        // Teil fehlt: dort misst die Validierung nichts bzw. nur einen Teil.
+        for teil in ["train", "val"] {
+            if !splits.iter().any(|s| s.as_deref() == Some(teil)) {
+                r.melde(hinweis("split_empty", serde_json::json!({ "split": teil }),
+                    format!("Der Teil „{}“ ist leer.", teil)));
+            }
+        }
+        if !boxen && !ohne_klassen {
+            for teil in ["train", "val"] {
+                if !splits.iter().any(|s| s.as_deref() == Some(teil)) { continue; }
+                for (k, n) in r.per_class.clone() {
+                    if n == 0 { continue; }
+                    let da = samples.iter().zip(splits).any(|(s, sp)| sp.as_deref() == Some(teil)
+                        && s.ann.label.as_deref().map(|l| l.trim().eq_ignore_ascii_case(k.trim())).unwrap_or(false));
+                    if !da {
+                        r.melde(hinweis("class_missing_in_split", serde_json::json!({ "klasse": k, "split": teil }),
+                            format!("Klasse „{}“ fehlt im Teil „{}“.", k, teil)));
+                    }
+                }
+            }
+        }
+        if r.groups < 5 {
+            let n = r.groups;
+            r.melde(hinweis("few_groups", serde_json::json!({ "count": n }),
+                format!("Nur {} Gruppe(n) (Videos, Seiten, Aufnahmen) — eine Aufteilung nach Gruppen ist dann grob. Mehr Quellen machen die Validierung verlässlicher.", n)));
         }
     } else {
         r.groups = samples.iter().map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
@@ -354,10 +421,13 @@ pub fn baue_report(
             }
         }
         if r.near_duplicates_across > 0 {
-            r.warnings.push(format!("{} Paar(e) beinahe gleicher Samples liegen in verschiedenen Teilen — die Validierung misst dort Wiedererkennen.",
-                r.near_duplicates_across));
+            let n = r.near_duplicates_across;
+            r.melde(hinweis("near_across", serde_json::json!({ "count": n }),
+                format!("{} Paar(e) beinahe gleicher Samples liegen in verschiedenen Teilen — die Validierung misst dort Wiedererkennen.", n)));
         } else if r.near_duplicates > 0 {
-            r.warnings.push(format!("{} Paar(e) beinahe gleicher Samples im Datensatz.", r.near_duplicates));
+            let n = r.near_duplicates;
+            r.melde(hinweis("near_within", serde_json::json!({ "count": n }),
+                format!("{} Paar(e) beinahe gleicher Samples im Datensatz.", n)));
         }
     }
 
@@ -366,7 +436,9 @@ pub fn baue_report(
         .filter(|s| s.src.kind == "web" && s.src.license.as_deref().map(|l| l.trim().is_empty()).unwrap_or(true))
         .count();
     if r.without_license > 0 {
-        r.warnings.push(format!("{} aus dem Netz geholte Samples ohne Lizenzangabe.", r.without_license));
+        let n = r.without_license;
+        r.melde(hinweis("without_license", serde_json::json!({ "count": n }),
+            format!("{} aus dem Netz geholte Samples ohne Lizenzangabe.", n)));
     }
     r.sources = zaehle(samples.iter().map(|s| s.src.kind.clone()));
     r
@@ -476,5 +548,27 @@ mod tests {
         assert!(r.warnings.iter().any(|w| w.contains("verschiedenen Teilen")), "{:?}", r.warnings);
         let md = report_markdown(&p, &r);
         assert!(md.contains("davon über Teilgrenzen: 1"), "{}", md);
+    }
+
+    #[test]
+    fn report_warnt_bei_leerer_validierung_und_fehlender_klasse() {
+        let p = StudioProject { id: "p".into(), name: "V".into(), modality: "video".into(), task: "classify".into(),
+            target_format: "folder_class".into(), classes: vec!["springt".into(), "steht".into()],
+            created_at: String::new(), updated_at: String::new() };
+        let a = sample("1", "springt", "video:a", "");
+        let b = sample("2", "steht", "video:b", "");
+        let refs = vec![&a, &b];
+        let nur_train = vec![Some("train".to_string()), Some("train".to_string())];
+        let r = baue_report(&p, &refs, &nur_train, &HashMap::new());
+        let codes: Vec<&str> = r.hints.iter().map(|h| h.code.as_str()).collect();
+        assert!(codes.contains(&"split_empty"), "{:?}", codes);
+        assert!(codes.contains(&"few_groups"), "{:?}", codes);
+        assert_eq!(r.hints.len(), r.warnings.len(), "jeder Hinweis auch als Text fuer die Datei");
+
+        let getrennt = vec![Some("train".to_string()), Some("val".to_string())];
+        let r = baue_report(&p, &refs, &getrennt, &HashMap::new());
+        let fehlt: Vec<String> = r.hints.iter().filter(|h| h.code == "class_missing_in_split")
+            .map(|h| format!("{}@{}", h.params["klasse"].as_str().unwrap(), h.params["split"].as_str().unwrap())).collect();
+        assert_eq!(fehlt, vec!["steht@train".to_string(), "springt@val".to_string()]);
     }
 }

@@ -59,14 +59,18 @@ pub struct WebOptions {
     pub paragraphs: bool,
     pub min_chars:  usize,
     pub license:    Option<String>,
+    /// Klasse fuer alles, was dieser Lauf holt — wer eine Seite voller Katzen
+    /// holt, will nicht 300 Mal "Katze" druecken. Die Samples kommen als
+    /// Vorschlag an, nicht bestaetigt: auf einer Seite steht auch anderes.
+    pub label:      Option<String>,
 }
 
 impl Default for WebOptions {
     fn default() -> Self {
         WebOptions {
-            mode: "urls".to_string(), max_depth: 1, max_pages: 30, max_files: 300,
-            allowlist: vec![], max_mb: 20.0, min_side: 64, paragraphs: true, min_chars: 40,
-            license: None,
+            mode: "urls".to_string(), max_depth: 1, max_pages: 50, max_files: 500,
+            allowlist: vec![], max_mb: 25.0, min_side: 64, paragraphs: true, min_chars: 40,
+            license: None, label: None,
         }
     }
 }
@@ -216,7 +220,11 @@ pub fn entities(s: &str) -> String {
     while let Some(pos) = rest.find('&') {
         out.push_str(&rest[..pos]);
         rest = &rest[pos..];
-        let ende = rest[..rest.len().min(12)].find(';');
+        // Das Semikolon in den naechsten 12 Zeichen suchen — Zeichen, nicht
+        // Bytes: ein Schnitt nach 12 Bytes traf auf gnu.org mitten in ein
+        // arabisches Zeichen ("&nbsp; العربية"), Rust brach ab und der Abruf
+        // hing ohne Meldung.
+        let ende = rest.char_indices().take(12).find(|(_, c)| *c == ';').map(|(i, _)| i);
         let ersetzt = ende.and_then(|e| {
             let name = &rest[1..e];
             let zeichen = match name {
@@ -255,7 +263,16 @@ pub fn tags(html: &str) -> Vec<Tag> {
             continue;
         }
         let mut j = i + 1;
-        if j < n && (b[j] == b'/' || b[j] == b'!' || b[j] == b'?') {
+        if j < n && b[j] == b'/' {
+            // Schliessendes Tag: nur der Name, damit funde() weiss, wann ein Link endet.
+            let s0 = j + 1;
+            let mut e = s0;
+            while e < n && (b[e].is_ascii_alphanumeric() || b[e] == b'-') { e += 1; }
+            if e > s0 { out.push(Tag { name: format!("/{}", html[s0..e].to_ascii_lowercase()), attrs: vec![] }); }
+            i = html[j..].find('>').map(|x| j + x + 1).unwrap_or(n);
+            continue;
+        }
+        if j < n && (b[j] == b'!' || b[j] == b'?') {
             i = html[j..].find('>').map(|e| j + e + 1).unwrap_or(n);
             continue;
         }
@@ -326,6 +343,10 @@ pub struct Funde {
     pub bilder: Vec<Url>,
     pub audio:  Vec<Url>,
     pub video:  Vec<Url>,
+    /// Das Bild, das die Seite selbst als ihres nennt (og:image) — auf einer
+    /// Detailseite meist das Original in voller Groesse.
+    pub og_bild:  Option<Url>,
+    pub og_video: Option<Url>,
 }
 
 fn endung(url: &Url) -> String {
@@ -372,16 +393,25 @@ pub fn funde(html: &str, seite: &Url) -> Funde {
 
     // Welches Medien-Tag gerade offen ist: <source> in <video> ist Video.
     let mut offen: Option<Art> = None;
+    // Ein Link, der wie eine Bilddatei aussieht und ein Vorschaubild umschliesst
+    // (Galerien: <a href="/wiki/File:Katze.jpg"><img src="120px-Katze.jpg"></a>).
+    // Dann zaehlt der Link, nicht das Vorschaubild — sonst landen 120-Pixel-
+    // Bildchen im Datensatz statt der Originale.
+    let mut bild_link = false;
     for t in &alle {
         match t.name.as_str() {
             "a" => {
+                bild_link = false;
                 if let Some(h) = t.attr("href") {
                     // rel=nofollow ist ein Wunsch des Betreibers — kein Verbot,
                     // aber ein Grund, dem Link nicht weiter zu folgen.
                     let nofollow = t.attr("rel").map(|r| r.contains("nofollow")).unwrap_or(false);
+                    bild_link = basis.join(h.trim()).ok().and_then(|u| art_nach_endung(&u)) == Some(Art::Bild);
                     if !nofollow { ablegen(&mut f, h, None); }
                 }
             }
+            "/a" => bild_link = false,
+            "img" if bild_link => {}
             "img" => {
                 for a in ["src", "data-src", "data-original", "data-lazy-src"] {
                     if let Some(v) = t.attr(a) { ablegen(&mut f, v, Some(Art::Bild)); }
@@ -411,6 +441,9 @@ pub fn funde(html: &str, seite: &Url) -> Funde {
             "meta" => {
                 let prop = t.attr("property").or_else(|| t.attr("name")).unwrap_or("").to_lowercase();
                 if let Some(c) = t.attr("content") {
+                    let aufgeloest = basis.join(c.trim()).ok();
+                    if matches!(prop.as_str(), "og:image" | "og:image:url") && f.og_bild.is_none() { f.og_bild = aufgeloest.clone(); }
+                    if matches!(prop.as_str(), "og:video" | "og:video:url") && f.og_video.is_none() { f.og_video = aufgeloest.clone(); }
                     match prop.as_str() {
                         "og:image" | "og:image:url" | "twitter:image" => ablegen(&mut f, c, Some(Art::Bild)),
                         "og:video" | "og:video:url"                   => ablegen(&mut f, c, Some(Art::Video)),
@@ -608,6 +641,78 @@ async fn hole(client: &reqwest::Client, url: &Url, max_bytes: u64) -> Result<(St
     Ok((typ, daten))
 }
 
+/// Was eine Adresse geliefert hat: eine Seite (klein, im Speicher) oder eine
+/// Datei (direkt auf die Platte gestreamt, samt Hash und Kopf).
+enum Geladen {
+    Seite(Vec<u8>),
+    Datei { pfad: PathBuf, hash: String, kopf: Vec<u8> },
+}
+
+/// Laedt eine Adresse und entscheidet an den ersten Bytes, ob es eine Seite
+/// ist. Dateien gehen Stueck fuer Stueck in eine Temp-Datei — ein Video von
+/// 3 GB stand frueher komplett im Arbeitsspeicher, deshalb musste das
+/// Groessenlimit so knapp sein. Jetzt begrenzt es nur noch den Plattenplatz.
+async fn lade(
+    client: &reqwest::Client, url: &Url, max_datei: u64, max_seite: u64, temp_dir: &Path,
+) -> Result<(String, Geladen), Holfehler> {
+    use std::io::Write as _;
+    let mut antwort = client.get(url.clone()).send().await.map_err(|_| Holfehler::Fehlgeschlagen)?;
+    if !antwort.status().is_success() { return Err(Holfehler::Fehlgeschlagen); }
+    let typ = antwort.headers().get("content-type")
+        .and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    let laenge = antwort.content_length();
+
+    // Den Kopf sammeln — genug, um HTML von einer Datei zu unterscheiden.
+    let mut kopf: Vec<u8> = Vec::new();
+    let mut fertig = false;
+    while kopf.len() < 1024 {
+        match antwort.chunk().await.map_err(|_| Holfehler::Fehlgeschlagen)? {
+            Some(st) => kopf.extend_from_slice(&st),
+            None => { fertig = true; break; }
+        }
+    }
+
+    if ist_html(&typ, &kopf) {
+        if laenge.map(|l| l > max_seite).unwrap_or(false) { return Err(Holfehler::ZuGross); }
+        let mut daten = kopf;
+        while !fertig {
+            match antwort.chunk().await.map_err(|_| Holfehler::Fehlgeschlagen)? {
+                Some(st) => {
+                    daten.extend_from_slice(&st);
+                    if daten.len() as u64 > max_seite { return Err(Holfehler::ZuGross); }
+                }
+                None => fertig = true,
+            }
+        }
+        return Ok((typ, Geladen::Seite(daten)));
+    }
+
+    if laenge.map(|l| l > max_datei).unwrap_or(false) || kopf.len() as u64 > max_datei {
+        return Err(Holfehler::ZuGross);
+    }
+    fs::create_dir_all(temp_dir).map_err(|_| Holfehler::Fehlgeschlagen)?;
+    let pfad = temp_dir.join(format!("{}.part", uuid::Uuid::new_v4()));
+    let mut datei = fs::File::create(&pfad).map_err(|_| Holfehler::Fehlgeschlagen)?;
+    let mut hasher = Sha256::new();
+    let mut geschrieben = kopf.len() as u64;
+    hasher.update(&kopf);
+    let fehler = |pfad: &Path, e: Holfehler| { let _ = fs::remove_file(pfad); e };
+    datei.write_all(&kopf).map_err(|_| fehler(&pfad, Holfehler::Fehlgeschlagen))?;
+    while !fertig {
+        match antwort.chunk().await {
+            Ok(Some(st)) => {
+                geschrieben += st.len() as u64;
+                if geschrieben > max_datei { drop(datei); return Err(fehler(&pfad, Holfehler::ZuGross)); }
+                hasher.update(&st);
+                datei.write_all(&st).map_err(|_| fehler(&pfad, Holfehler::Fehlgeschlagen))?;
+            }
+            Ok(None) => fertig = true,
+            Err(_) => { drop(datei); return Err(fehler(&pfad, Holfehler::Fehlgeschlagen)); }
+        }
+    }
+    Ok((typ, Geladen::Datei { pfad, hash: format!("{:x}", hasher.finalize()), kopf }))
+}
+
 /// robots.txt und Abstand je Server.
 struct Hoeflichkeit {
     robots:  HashMap<String, String>,
@@ -686,6 +791,14 @@ impl<'a> Ablage<'a> {
         }
     }
 
+    /// Status und Annotation eines neuen Samples: mit Klasse als Vorschlag.
+    fn anfang(&self) -> (String, Annotation) {
+        match self.opts.label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+            Some(l) => ("suggested".to_string(), Annotation { label: Some(l.to_string()), ..Default::default() }),
+            None => ("new".to_string(), Annotation::default()),
+        }
+    }
+
     fn neue_id() -> String {
         format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10])
     }
@@ -700,13 +813,54 @@ impl<'a> Ablage<'a> {
         if !self.bekannte_texte.insert(hash) { report.duplicates += 1; return Ok(()); }
         append_jsonl(&samples_path(self.dir), &StudioSample {
             id: Self::neue_id(), media: String::new(), mime: "text/plain".to_string(),
-            content: Some(text), status: "new".to_string(), ann: Annotation::default(),
+            content: Some(text), status: self.anfang().0, ann: self.anfang().1,
             src: self.quelle(url, seite),
             meta: SampleMeta { start: None, end: None, w: 0, h: 0, group: Some(seite.unwrap_or(url).to_string()) },
             abs_path: String::new(), doubt: None,
         })?;
         report.fetched += 1;
         Ok(())
+    }
+
+    /// Eine gestreamte Datei ablegen. Bilder sind klein und brauchen fuer
+    /// ihre Masse den ganzen Kopf — sie laufen ueber `datei`. Audio und Video
+    /// werden nur verschoben, nie ganz gelesen.
+    fn datei_aus(&mut self, pfad: &Path, hash: &str, kopf: &[u8], url: &str, seite: Option<&str>,
+                 report: &mut FetchReport) -> Result<(), String> {
+        let ergebnis = (|| {
+            let (ext, mime) = match self.art {
+                Art::Bild | Art::Text => {
+                    let bytes = fs::read(pfad).map_err(|e| format!("Lesen: {}", e))?;
+                    return self.datei(&bytes, url, seite, report);
+                }
+                Art::Audio => match audio_ext_from_bytes(kopf) {
+                    Some(e) => (e, audio_mime(e)),
+                    None => { report.skipped_type.push(url.to_string()); return Ok(()); }
+                },
+                Art::Video => match video_ext_from_bytes(kopf) {
+                    Some(e) => (e, video_mime(e)),
+                    None => { report.skipped_type.push(url.to_string()); return Ok(()); }
+                },
+            };
+            let rel = format!("{}/{}.{}", &hash[..2], hash, ext);
+            if !self.bekannte_medien.insert(rel.clone()) { report.duplicates += 1; return Ok(()); }
+            let ziel = self.dir.join("media").join(&rel);
+            if let Some(parent) = ziel.parent() { fs::create_dir_all(parent).ok(); }
+            if fs::rename(pfad, &ziel).is_err() {
+                fs::copy(pfad, &ziel).map_err(|e| format!("Speichern: {}", e))?;
+            }
+            append_jsonl(&samples_path(self.dir), &StudioSample {
+                id: Self::neue_id(), media: rel, mime: mime.to_string(), content: None,
+                status: self.anfang().0, ann: self.anfang().1,
+                src: self.quelle(url, seite),
+                meta: SampleMeta { start: None, end: None, w: 0, h: 0, group: Some(seite.unwrap_or(url).to_string()) },
+                abs_path: String::new(), doubt: None,
+            })?;
+            report.fetched += 1;
+            Ok(())
+        })();
+        let _ = fs::remove_file(pfad);   // nach dem Verschieben ohnehin weg
+        ergebnis
     }
 
     /// Eine Mediendatei. Was sie ist, sagen die Bytes, nicht die Adresse.
@@ -738,7 +892,7 @@ impl<'a> Ablage<'a> {
 
         append_jsonl(&samples_path(self.dir), &StudioSample {
             id: Self::neue_id(), media: rel, mime, content: None,
-            status: "new".to_string(), ann: Annotation::default(),
+            status: self.anfang().0, ann: self.anfang().1,
             src: self.quelle(url, seite),
             // Die Fundseite ist die Gruppe: Bilder einer Seite sind sich oft
             // aehnlich und duerfen beim Split nicht auseinanderfallen. Frueher
@@ -777,6 +931,26 @@ pub async fn studio_fetch_web(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let project = load_project(&dir)?;
+    let melden = |v: serde_json::Value| { let _ = app_handle.emit("studio-fetch-progress", v); };
+    // Ein Absturz beim Lesen einer fremden Seite darf den Dialog nicht haengen
+    // lassen: ohne das wartete die Oberflaeche ewig auf eine Antwort.
+    use futures_util::FutureExt;
+    let lauf = std::panic::AssertUnwindSafe(web_lauf(&dir, project, urls, options, &melden)).catch_unwind().await;
+    let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({ "project_id": project_id, "current": 0, "total": 0, "done": true }));
+    match lauf {
+        Ok(r) => r,
+        Err(_) => Err("Eine Seite ließ sich nicht verarbeiten, der Abruf wurde abgebrochen. Was bis dahin geholt war, bleibt im Projekt.".to_string()),
+    }
+}
+
+/// Der eigentliche Lauf — ohne Tauri, damit er gegen einen lokalen Server
+/// getestet werden kann.
+pub async fn web_lauf(
+    dir: &Path, project: StudioProject, urls: Vec<String>, options: Option<WebOptions>,
+    melden: &(dyn Fn(serde_json::Value) + Sync),
+) -> Result<FetchReport, String> {
+    let dir = dir.to_path_buf();
+    let project_id = project.id.clone();
     let mut opts = options.unwrap_or_default();
     opts.allowlist = allowlist_aus(&opts.allowlist);
     opts.max_pages = opts.max_pages.clamp(1, 5000);
@@ -784,6 +958,14 @@ pub async fn studio_fetch_web(
     opts.max_depth = opts.max_depth.min(5);
     let art = art_von(&project);
     ABBRUCH.store(false, Ordering::SeqCst);
+    // Die Klasse muss zum Projekt gehoeren — in seiner Schreibweise.
+    let mut project = project;
+    if let Some(l) = opts.label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        match class_index_for(l, &project.classes) {
+            Some(i) => opts.label = Some(project.classes[i].clone()),
+            None => { project.classes.push(l.to_string()); save_project(&dir, &project)?; }
+        }
+    }
 
     let startadressen: Vec<Url> = urls.iter()
         .flat_map(|u| u.split_whitespace())
@@ -829,9 +1011,10 @@ pub async fn studio_fetch_web(
     // Seiten selbst duerfen groesser sein als ein kleines Dateilimit — eine
     // Nachrichtenseite hat schnell 2 MB HTML.
     let max_seite = max_bytes.max(8 * 1024 * 1024);
+    let temp_dir = dir.join(".laden");
 
     let melde = |report: &FetchReport, url: &str| {
-        let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({
+        melden(serde_json::json!({
             "project_id": project_id,
             "current": report.fetched, "total": opts.max_files,
             "pages": report.pages_visited, "max_pages": opts.max_pages,
@@ -894,32 +1077,34 @@ pub async fn studio_fetch_web(
         hoeflich.warte(&url).await;
         melde(&report, url.as_str());
 
-        let (typ, bytes) = match hole(&client, &url, max_seite).await {
+        let (typ, geladen) = match lade(&client, &url, max_bytes, max_seite, &temp_dir).await {
             Ok(x) => x,
             Err(Holfehler::ZuGross) => { report.too_large.push(url.to_string()); continue; }
             Err(Holfehler::Fehlgeschlagen) => { report.failed.push(url.to_string()); continue; }
         };
 
-        if !ist_html(&typ, &bytes) {
-            // Eine Datei direkt: Text als Text, alles andere nach den Bytes.
-            if art == Art::Text {
-                if typ.starts_with("text/") || typ.is_empty() {
-                    let inhalt = String::from_utf8_lossy(&bytes).to_string();
-                    let teile: Vec<String> = if opts.paragraphs {
-                        inhalt.split("\n\n").map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
-                            .filter(|t| t.chars().count() >= opts.min_chars).collect()
-                    } else { vec![inhalt] };
-                    for t in teile { ablage.text(t, url.as_str(), None, &mut report)?; }
+        let bytes = match geladen {
+            Geladen::Seite(b) => b,
+            Geladen::Datei { pfad, hash, kopf } => {
+                // Eine Datei direkt: Text als Text, alles andere nach den Bytes.
+                if art == Art::Text {
+                    if typ.starts_with("text/") || typ.is_empty() {
+                        let inhalt = fs::read_to_string(&pfad).unwrap_or_default();
+                        let teile: Vec<String> = if opts.paragraphs {
+                            inhalt.split("\n\n").map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
+                                .filter(|t| t.chars().count() >= opts.min_chars).collect()
+                        } else { vec![inhalt] };
+                        for t in teile { ablage.text(t, url.as_str(), None, &mut report)?; }
+                    } else {
+                        report.skipped_type.push(url.to_string());
+                    }
+                    let _ = fs::remove_file(&pfad);
                 } else {
-                    report.skipped_type.push(url.to_string());
+                    ablage.datei_aus(&pfad, &hash, &kopf, url.as_str(), None, &mut report)?;
                 }
-            } else if bytes.len() as u64 > max_bytes {
-                report.too_large.push(url.to_string());
-            } else {
-                ablage.datei(&bytes, url.as_str(), None, &mut report)?;
+                continue;
             }
-            continue;
-        }
+        };
 
         // Eine Seite.
         report.pages_visited += 1;
@@ -955,8 +1140,28 @@ pub async fn studio_fetch_web(
             if !hoeflich.darf(&client, &datei).await { report.blocked.push(datei.to_string()); continue; }
             hoeflich.warte(&datei).await;
             melde(&report, datei.as_str());
-            match hole(&client, &datei, max_bytes).await {
-                Ok((_, b)) => ablage.datei(&b, datei.as_str(), Some(&seite), &mut report)?,
+            match lade(&client, &datei, max_bytes, max_seite, &temp_dir).await {
+                Ok((_, Geladen::Datei { pfad, hash, kopf })) =>
+                    ablage.datei_aus(&pfad, &hash, &kopf, datei.as_str(), Some(&seite), &mut report)?,
+                // Ein Link, der auf .jpg endet, aber eine Seite liefert: eine
+                // Detailseite (Commons, Galerien). Dort steht das Original als
+                // og:image — das holen, mit der Galerie als Fundseite.
+                Ok((_, Geladen::Seite(html))) => {
+                    let detail = funde(&String::from_utf8_lossy(&html), &datei);
+                    let original = match art { Art::Video => detail.og_video, _ => detail.og_bild };
+                    let Some(original) = original else { continue };
+                    if !dateien_gesehen.insert(original.to_string()) { continue; }
+                    if !datei_erlaubt(&original) { report.outside_allowlist += 1; continue; }
+                    if !hoeflich.darf(&client, &original).await { report.blocked.push(original.to_string()); continue; }
+                    hoeflich.warte(&original).await;
+                    match lade(&client, &original, max_bytes, max_seite, &temp_dir).await {
+                        Ok((_, Geladen::Datei { pfad, hash, kopf })) =>
+                            ablage.datei_aus(&pfad, &hash, &kopf, original.as_str(), Some(&seite), &mut report)?,
+                        Ok((_, Geladen::Seite(_))) => {}
+                        Err(Holfehler::ZuGross) => report.too_large.push(original.to_string()),
+                        Err(Holfehler::Fehlgeschlagen) => report.failed.push(original.to_string()),
+                    }
+                }
                 Err(Holfehler::ZuGross) => report.too_large.push(datei.to_string()),
                 Err(Holfehler::Fehlgeschlagen) => report.failed.push(datei.to_string()),
             }
@@ -975,7 +1180,8 @@ pub async fn studio_fetch_web(
         }
     }
 
-    let _ = app_handle.emit("studio-fetch-progress", serde_json::json!({
+    let _ = fs::remove_dir_all(&temp_dir);
+    melden(serde_json::json!({
         "project_id": project_id, "current": report.fetched, "total": opts.max_files,
         "pages": report.pages_visited, "max_pages": opts.max_pages, "done": true,
     }));
@@ -1106,5 +1312,195 @@ mod tests {
         assert!(ist_html("", b"  <!DOCTYPE html><html>"));
         assert!(!ist_html("image/jpeg", b"<html>"));
         assert!(!ist_html("", &[0xFF, 0xD8, 0xFF]));
+    }
+
+    // ── Ein echter Lauf gegen einen lokalen Server ─────────────────────────
+
+    fn png(w: u32, h: u32, salz: u8) -> Vec<u8> {
+        let mut b = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+        b.extend_from_slice(b"IHDR");
+        b.extend_from_slice(&w.to_be_bytes());
+        b.extend_from_slice(&h.to_be_bytes());
+        b.extend_from_slice(&[8, 2, 0, 0, 0, salz]);
+        b
+    }
+
+    fn mp4(groesse: usize) -> Vec<u8> {
+        let mut b = vec![0, 0, 0, 0x1c];
+        b.extend_from_slice(b"ftypisom");
+        b.resize(groesse, 7);
+        b
+    }
+
+    /// Minimaler HTTP-Server: je Verbindung eine Antwort aus der Tabelle.
+    /// `ohne_laenge` schickt keinen Content-Length-Kopf (Ende = Verbindungsende).
+    fn server(routen: Vec<(&'static str, &'static str, Vec<u8>, bool)>) -> String {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let adr = format!("http://{}", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for strom in l.incoming().flatten() {
+                let mut strom = strom;
+                let mut buf = [0u8; 4096];
+                let n = strom.read(&mut buf).unwrap_or(0);
+                let anfrage = String::from_utf8_lossy(&buf[..n]).to_string();
+                let pfad = anfrage.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let treffer = routen.iter().find(|(p, _, _, _)| *p == pfad);
+                let (status, typ, body, ohne) = match treffer {
+                    Some((_, t, b, o)) => ("200 OK", *t, b.clone(), *o),
+                    None => ("404 Not Found", "text/plain", b"nein".to_vec(), false),
+                };
+                let mut kopf = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nConnection: close\r\n", status, typ);
+                if !ohne { kopf.push_str(&format!("Content-Length: {}\r\n", body.len())); }
+                kopf.push_str("\r\n");
+                let _ = strom.write_all(kopf.as_bytes());
+                let _ = strom.write_all(&body);
+            }
+        });
+        adr
+    }
+
+    fn projekt(modality: &str) -> StudioProject {
+        StudioProject { id: "p_web".into(), name: "Web".into(), modality: modality.into(),
+            task: if modality == "image" { "bbox".into() } else { "classify".into() },
+            target_format: String::new(), classes: vec![], created_at: String::new(), updated_at: String::new() }
+    }
+
+    fn projektordner() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ft_web_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(d.join("media")).unwrap();
+        d
+    }
+
+    #[tokio::test]
+    async fn crawl_holt_bilder_folgt_links_und_befolgt_robots() {
+        let start = r#"<html><body><img src="/a.png"><img src="/icon.png">
+            <a href="/seite2.html">weiter</a><a href="/privat/geheim.html">intern</a>
+            <a href="https://anderswo.example/x">fremd</a></body></html>"#;
+        let seite2 = r#"<img srcset="/klein.png 100w, /b.png 800w"><a href="/tief.html">tiefer</a>"#;
+        let adr = server(vec![
+            ("/robots.txt", "text/plain", b"User-agent: *\nDisallow: /privat/\n".to_vec(), false),
+            ("/", "text/html", start.as_bytes().to_vec(), false),
+            ("/seite2.html", "text/html", seite2.as_bytes().to_vec(), true),
+            ("/tief.html", "text/html", b"<img src='/c.png'>".to_vec(), false),
+            ("/a.png", "image/png", png(200, 100, 1), false),
+            ("/b.png", "image/png", png(300, 300, 2), false),
+            ("/klein.png", "image/png", png(300, 300, 3), false),
+            ("/c.png", "image/png", png(300, 300, 4), false),
+            ("/icon.png", "image/png", png(16, 16, 5), false),
+        ]);
+        let dir = projektordner();
+        let opts = WebOptions { mode: "crawl".into(), max_depth: 1, ..Default::default() };
+        let r = web_lauf(&dir, projekt("image"), vec![format!("{}/", adr)], Some(opts), &|_| {}).await.unwrap();
+
+        assert_eq!(r.fetched, 2, "a.png und die groesste srcset-Variante b.png: {:?}", r);
+        assert_eq!(r.too_small, 1, "icon.png ist ein Symbol");
+        assert_eq!(r.pages_visited, 2, "Start und seite2 — tief.html liegt hinter der Tiefe");
+        assert!(r.blocked.iter().any(|b| b.contains("/privat/")), "robots.txt: {:?}", r.blocked);
+        assert!(r.outside_allowlist >= 1, "fremde Domain nicht besucht");
+        let s = load_samples(&dir);
+        assert!(s.iter().all(|x| x.src.kind == "web"));
+        let b = s.iter().find(|x| x.src.origin.as_deref().unwrap().ends_with("/b.png")).unwrap();
+        assert_eq!(b.src.page.as_deref(), Some(format!("{}/seite2.html", adr).as_str()), "Fundseite");
+        assert_eq!(b.meta.group.as_deref(), Some(format!("{}/seite2.html", adr).as_str()), "Gruppe = Fundseite");
+        assert!(!dir.join(".laden").exists(), "Temp-Ordner aufgeraeumt");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn grosse_videos_werden_gestreamt_und_das_limit_greift_auch_ohne_laengenangabe() {
+        let adr = server(vec![
+            ("/seite", "text/html", br#"<video><source src="/film.mp4" type="video/mp4"></video>
+                <video src="/riesig.mp4"></video>"#.to_vec(), false),
+            ("/film.mp4", "video/mp4", mp4(300_000), false),
+            // Kein Content-Length: das Limit muss beim Laden greifen.
+            ("/riesig.mp4", "video/mp4", mp4(3_000_000), true),
+        ]);
+        let dir = projektordner();
+        let opts = WebOptions { mode: "urls".into(), max_mb: 1.0, ..Default::default() };
+        let r = web_lauf(&dir, projekt("video"), vec![format!("{}/seite", adr)], Some(opts), &|_| {}).await.unwrap();
+        assert_eq!(r.fetched, 1, "{:?}", r);
+        assert_eq!(r.too_large.len(), 1);
+        assert!(r.too_large[0].ends_with("/riesig.mp4"));
+        let s = load_samples(&dir);
+        assert_eq!(s[0].mime, "video/mp4");
+        let datei = dir.join("media").join(&s[0].media);
+        assert_eq!(fs::metadata(&datei).unwrap().len(), 300_000, "vollstaendig auf der Platte");
+        assert!(!dir.join(".laden").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn text_in_absaetzen_ohne_navigation() {
+        let html = r#"<html><body><nav><a href="/">Startseite und alle Rubriken im Ueberblick</a></nav>
+            <p>Der Sessellift faehrt ab acht Uhr und bringt bis zu 2400 Personen je Stunde nach oben.</p>
+            <p>Bei Sturm bleibt die Anlage geschlossen, das zeigt die Tafel an der Talstation an.</p>
+            <footer><p>Impressum, Datenschutz und Kontakt der Musterfirma GmbH in Musterstadt</p></footer></body></html>"#;
+        let adr = server(vec![("/artikel", "text/html; charset=utf-8", html.as_bytes().to_vec(), false)]);
+        let dir = projektordner();
+        let r = web_lauf(&dir, projekt("text"), vec![format!("{}/artikel", adr)], None, &|_| {}).await.unwrap();
+        assert_eq!(r.fetched, 2, "{:?}", r);
+        let s = load_samples(&dir);
+        assert!(s[0].content.as_deref().unwrap().starts_with("Der Sessellift"));
+        assert!(s.iter().all(|x| !x.content.as_deref().unwrap().contains("Impressum")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn galerie_holt_das_original_von_der_detailseite_statt_des_vorschaubilds() {
+        let galerie = r#"<a href="/wiki/File:Katze.jpg"><img src="/thumb/120px-Katze.jpg" srcset="/thumb/240px-Katze.jpg 2x"></a>"#;
+        let detail = r#"<html><head><meta property="og:image" content="/original/Katze.jpg"></head><body>Katze</body></html>"#;
+        let adr = server(vec![
+            ("/galerie", "text/html", galerie.as_bytes().to_vec(), false),
+            ("/wiki/File:Katze.jpg", "text/html", detail.as_bytes().to_vec(), false),
+            ("/original/Katze.jpg", "image/png", png(1600, 1200, 9), false),
+            ("/thumb/120px-Katze.jpg", "image/png", png(120, 90, 1), false),
+            ("/thumb/240px-Katze.jpg", "image/png", png(240, 180, 2), false),
+        ]);
+        let dir = projektordner();
+        let r = web_lauf(&dir, projekt("image"), vec![format!("{}/galerie", adr)], None, &|_| {}).await.unwrap();
+        assert_eq!(r.fetched, 1, "{:?}", r);
+        assert!(r.skipped_type.is_empty(), "eine Detailseite ist kein Fehler: {:?}", r.skipped_type);
+        let s = load_samples(&dir);
+        assert_eq!((s[0].meta.w, s[0].meta.h), (1600, 1200), "das Original, nicht das Vorschaubild");
+        assert_eq!(s[0].src.page.as_deref(), Some(format!("{}/galerie", adr).as_str()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn schliessende_tags_werden_gemeldet() {
+        let t = tags("<a href='x'>y</a><img src='z'>");
+        assert_eq!(t.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["a", "/a", "img"]);
+    }
+
+    #[tokio::test]
+    async fn eine_klasse_fuer_alles_geholte_kommt_als_vorschlag() {
+        let adr = server(vec![
+            ("/katzen", "text/html", b"<img src='/k1.png'><img src='/k2.png'>".to_vec(), false),
+            ("/k1.png", "image/png", png(300, 200, 1), false),
+            ("/k2.png", "image/png", png(300, 200, 2), false),
+        ]);
+        let dir = projektordner();
+        let mut p = projekt("image");
+        p.task = "classify".into();
+        p.classes = vec!["Katze".into(), "Hund".into()];
+        save_project(&dir, &p).unwrap();
+        let opts = WebOptions { label: Some("katze".into()), ..Default::default() };
+        let r = web_lauf(&dir, p, vec![format!("{}/katzen", adr)], Some(opts), &|_| {}).await.unwrap();
+        assert_eq!(r.fetched, 2);
+        let s = load_samples(&dir);
+        assert!(s.iter().all(|x| x.status == "suggested" && x.ann.label.as_deref() == Some("Katze")),
+            "Schreibweise des Projekts, als Vorschlag: {:?}", s.iter().map(|x| (&x.status, &x.ann.label)).collect::<Vec<_>>());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn echte_seite_mit_umlauten_und_entities_stuerzt_nicht_ab() {
+        // gnu.org: viele Sprachen in der Fusszeile, "&" direkt vor Mehrbyte-Zeichen.
+        let html = "<p>Diese Seite gibt es auch auf &nbsp; العربية &nbsp; 简体中文 &amp; Deutsch, bitte waehlen.</p>";
+        assert_eq!(textbloecke(html, 10, true).len(), 1);
+        // Dasselbe ohne Netz: "&" und wenige Bytes spaeter ein Umlaut.
+        assert_eq!(entities("Tom &Jerry — ü&x äöü"), "Tom &Jerry — ü&x äöü");
+        assert_eq!(entities("&ääääääääääää;"), "&ääääääääääää;");
     }
 }

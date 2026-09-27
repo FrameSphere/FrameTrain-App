@@ -618,3 +618,42 @@ bestaetigt, sonst Vorschlag). Der tote Platzhalter lab_export_as_dataset ist weg
 **Weiter offen:** SAM/CLIP als Assist, Spans (NER), Kamera und Bildschirm
 als Quelle, Augmentierung beim Export, COCO-Export, Seiten, die ihren Inhalt
 erst per JavaScript bauen.
+
+## 21. Pruefung von 1.3.3 in der installierten App (1.3.4)
+
+Durchgespielt mit echten Daten: Katzenbilder von Wikimedia Commons, zwei
+Testvideos (H.264), eine echte Aufnahme, ein Vorschlagslauf mit ResNet-50,
+eine Labor-Sitzung und ein Crawl von gnu.org.
+
+**Funktionierte:** Web-Abruf mit Grenze, Video-Import mit Abschnitten und
+Dubletten-Erkennung, Abschnitt spielt nur seinen Teil und laesst sich teilen,
+Clips werden beim Export echt geschnitten (4,0 s, 60 Bilder), neue Aufnahmen
+landen als 16-kHz-WAV, Vorschlagslauf fuer Bildklassen, Labor -> Werkstatt,
+Text-Dubletten, Balance-Warnung, Export-Bericht.
+
+**Gefunden und behoben:**
+- Absturz bei jeder Seite mit "&" vor einem Mehrbyte-Zeichen (gnu.org:
+  "&nbsp; العربية"): die Entity-Aufloesung schnitt nach 12 Bytes. Der Abruf
+  hing danach ohne Meldung. Jetzt nach Zeichen; ein Absturz im Web-Lauf wird
+  ausserdem abgefangen und gemeldet.
+- CSP ohne asset: in connect-src: das Umwandeln alter Aufnahmen nach WAV und
+  jeder Bild-Hash scheiterten still ("keine Dubletten unter 0 Samples").
+  Hashes jetzt ueber fetch + createImageBitmap; die Pruefung meldet, wenn
+  Bilder nicht verglichen werden konnten.
+- Galerien lieferten 120-Pixel-Vorschaubilder; Links auf Dateiseiten zaehlten
+  als "falscher Inhaltstyp". Jetzt: Vorschaubild in einem Link auf eine
+  Dateiseite -> Original ueber og:image der Detailseite.
+- Grenzen: Downloads gehen als Stream auf die Platte statt in den Speicher;
+  Startwerte je Projektart (Video 100 Dateien, 4 GB je Datei).
+- Klasse fuer alles Geholte (kommt als Vorschlag).
+- 80/20 mit zwei Videos legte alles in train; gewuenschte Teile bekommen jetzt
+  mindestens eine Gruppe. Bericht warnt bei leerem Teil, fehlender Klasse in
+  einem Teil und wenigen Gruppen; Hinweise kommen als Code und werden in der
+  Sprache der Oberflaeche gezeigt.
+- Export warnt vorher bei nur einer Klasse und ohne passendes Modell (mit
+  Modell-Tipp); Vorschlagen sagt, wenn nichts offen ist.
+- Meldungen: Titel und Text waren app-weit vertauscht (success(message, title)
+  gegen Aufrufe (title, message)).
+- Verstaendlichkeit: Projektarten nach Datenart gruppiert ("Objekte markieren
+  (Boxen)" / "Klasse je Bild"), Texte ohne Box-Begriffe bei Klassen, kleine
+  Bilder fuellen die Flaeche.

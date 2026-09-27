@@ -34,18 +34,23 @@ export function hamming(a: string, b: string): number {
   return n;
 }
 
-/** dHash eines Bildes unter einer URL (convertFileSrc). */
+/** dHash eines Bildes unter einer URL (convertFileSrc).
+ *
+ *  Ueber fetch und createImageBitmap statt ueber ein <img>: ein Bild von der
+ *  asset:-Adresse gilt dem Webview als fremde Herkunft, und das Canvas darf
+ *  seine Pixel dann nicht herausgeben (getImageData wirft). In 1.3.3 scheiterte
+ *  deshalb jeder Hash still, und die Pruefung meldete "keine Dubletten unter 0". */
 export async function computeDHash(url: string): Promise<string> {
-  const img = new Image();
-  img.decoding = 'async';
-  img.src = url;
-  await img.decode();
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Bild nicht lesbar (${res.status})`);
+  const bitmap = await createImageBitmap(await res.blob());
   const canvas = document.createElement('canvas');
   canvas.width = 9;
   canvas.height = 8;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Kein Canvas-Kontext');
-  ctx.drawImage(img, 0, 0, 9, 8);
+  ctx.drawImage(bitmap, 0, 0, 9, 8);
+  bitmap.close?.();
   const rgba = ctx.getImageData(0, 0, 9, 8).data;
   const gray: number[] = [];
   for (let i = 0; i < rgba.length; i += 4) gray.push(0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2]);

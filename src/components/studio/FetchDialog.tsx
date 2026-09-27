@@ -44,12 +44,25 @@ export interface WebOptions {
   paragraphs: boolean;
   min_chars: number;
   license: string | null;
+  label: string | null;
 }
 
 /** Adressen aus einem Eingabefeld: je Zeile, mit Leerzeichen oder Komma getrennt. */
 export function adressenAus(text: string): string[] {
   return text.split(/[\s,]+/).map(u => u.trim())
     .filter(u => u.startsWith('http://') || u.startsWith('https://'));
+}
+
+/** Startwerte je Projektart. Videos sind gross und wenige, Bilder klein und
+ *  viele; Absaetze einer Website schnell ein paar tausend. Geladen wird als
+ *  Stream auf die Platte — das Groessenlimit schuetzt nur noch den Speicherplatz. */
+export function startGrenzen(modality: string): { files: number; mb: number; pages: number } {
+  switch (modality) {
+    case 'video': return { files: 100, mb: 4000, pages: 50 };
+    case 'audio': return { files: 300, mb: 200, pages: 50 };
+    case 'text':  return { files: 2000, mb: 25, pages: 50 };
+    default:      return { files: 500, mb: 25, pages: 50 };
+  }
 }
 
 type Fortschritt = { files: number; maxFiles: number; pages: number; maxPages: number; url?: string };
@@ -67,13 +80,19 @@ export default function FetchDialog({ project, onClose, onDone }: {
   const [license, setLicense] = useState('');
   const [allowlist, setAllowlist] = useState('');
   const [depth, setDepth] = useState(1);
-  const [maxPages, setMaxPages] = useState(30);
-  const [maxFiles, setMaxFiles] = useState(ist === 'video' ? 30 : 300);
-  const [maxMb, setMaxMb] = useState(ist === 'video' ? 200 : 20);
+  const start = startGrenzen(ist);
+  const [maxPages, setMaxPages] = useState(start.pages);
+  const [maxFiles, setMaxFiles] = useState(start.files);
+  const [maxMb, setMaxMb] = useState(start.mb);
   const [minSide, setMinSide] = useState(64);
   const [paragraphs, setParagraphs] = useState(true);
   const [minChars, setMinChars] = useState(40);
   const [showLimits, setShowLimits] = useState(false);
+  // Klasse fuer alles Geholte — nur wo es Klassen gibt (nicht bei Boxen,
+  // Paaren und Transkripten).
+  const klassenProjekt = project.classes.length > 0
+    && !['bbox', 'pairs', 'transcript'].includes(project.task);
+  const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [fortschritt, setFortschritt] = useState<Fortschritt | null>(null);
@@ -102,6 +121,7 @@ export default function FetchDialog({ project, onClose, onDone }: {
       allowlist: allowlist.split(/[\s,]+/).map(d => d.trim()).filter(Boolean),
       max_mb: maxMb, min_side: minSide, paragraphs, min_chars: minChars,
       license: license.trim() || null,
+      label: klassenProjekt && label ? label : null,
     };
     try {
       setReport(await invoke<FetchReport>('studio_fetch_web', {
@@ -120,7 +140,9 @@ export default function FetchDialog({ project, onClose, onDone }: {
     try { await invoke('studio_fetch_cancel'); } catch { /* der Lauf endet ohnehin */ }
   };
 
-  useEscape(onClose, !busy);
+  // Nach "Anhalten" darf man den Dialog schliessen, auch wenn der Lauf noch
+  // die aktuelle Datei fertig laedt — er endet ohnehin von selbst.
+  useEscape(onClose, !busy || stopping);
 
   const untertitel = ist === 'text' ? 'studio.fetch.subtitleText'
     : ist === 'audio' ? 'studio.fetch.subtitleAudio'
@@ -136,7 +158,7 @@ export default function FetchDialog({ project, onClose, onDone }: {
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
-      onClick={busy ? undefined : onClose}>
+      onClick={busy && !stopping ? undefined : onClose}>
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
         <div>
@@ -212,6 +234,18 @@ export default function FetchDialog({ project, onClose, onDone }: {
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-white/25 resize-none font-mono" />
             </label>
 
+            {klassenProjekt && (
+              <label className="block">
+                <span className="text-gray-400 text-xs">{t('studio.fetch.labelLabel')}</span>
+                <select value={label} onChange={e => setLabel(e.target.value)} disabled={busy}
+                  className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
+                  <option value="" className="bg-[#101218]">{t('studio.fetch.labelNone')}</option>
+                  {project.classes.map(c => <option key={c} value={c} className="bg-[#101218]">{c}</option>)}
+                </select>
+                <span className="text-gray-600 text-[11px]">{t('studio.fetch.labelHint')}</span>
+              </label>
+            )}
+
             {ist === 'text' && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <input type="checkbox" checked={paragraphs} onChange={e => setParagraphs(e.target.checked)} className="mt-0.5" disabled={busy} />
@@ -223,17 +257,22 @@ export default function FetchDialog({ project, onClose, onDone }: {
               <button onClick={() => setShowLimits(v => !v)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
                 <span className="text-gray-400 text-xs flex-1">{t('studio.fetch.limitsTitle')}</span>
                 <span className="text-gray-600 text-[11px]">
-                  {t('studio.fetch.limitsSummary', { pages: maxPages, files: maxFiles, mb: maxMb })}
+                  {[
+                    mode !== 'urls' ? t('studio.fetch.limitPages', { n: maxPages }) : null,
+                    t(ist === 'text' ? 'studio.fetch.limitParagraphs' : 'studio.fetch.limitFiles', { n: maxFiles }),
+                    ist !== 'text' ? t('studio.fetch.limitMb', { n: maxMb >= 1000 ? `${(maxMb / 1000).toLocaleString()} GB` : `${maxMb} MB` }) : null,
+                  ].filter(Boolean).join(' · ')}
                 </span>
                 <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showLimits ? 'rotate-180' : ''}`} />
               </button>
               {showLimits && (
                 <div className="px-3 pb-3 space-y-3">
+                  <p className="text-gray-500 text-[11px]">{t('studio.fetch.limitsWhy')}</p>
                   <div className="grid grid-cols-3 gap-2">
                     {mode === 'crawl' && zahl(t('studio.fetch.depthLabel'), depth, setDepth, 0, 5)}
                     {mode !== 'urls' && zahl(t('studio.fetch.maxPagesLabel'), maxPages, setMaxPages, 1, 5000)}
-                    {zahl(t('studio.fetch.maxFilesLabel'), maxFiles, setMaxFiles, 1, 20000)}
-                    {ist !== 'text' && zahl(t('studio.fetch.maxMbLabel'), maxMb, setMaxMb, 1, 4000)}
+                    {zahl(t(ist === 'text' ? 'studio.fetch.maxParagraphsLabel' : 'studio.fetch.maxFilesLabel'), maxFiles, setMaxFiles, 1, 20000)}
+                    {ist !== 'text' && zahl(t('studio.fetch.maxMbLabel'), maxMb, setMaxMb, 1, 50000)}
                     {ist === 'image' && zahl(t('studio.fetch.minSideLabel'), minSide, setMinSide, 0, 4000)}
                     {ist === 'text' && paragraphs && zahl(t('studio.fetch.minCharsLabel'), minChars, setMinChars, 1, 2000)}
                   </div>

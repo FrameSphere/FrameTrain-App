@@ -14,7 +14,7 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }));
 
-import FetchDialog from '../studio/FetchDialog';
+import FetchDialog, { startGrenzen } from '../studio/FetchDialog';
 
 const PROJECT = {
   id: 'sp_img', name: 'ski', modality: 'image', task: 'bbox',
@@ -52,7 +52,7 @@ describe('FetchDialog', () => {
       expect(invokeMock).toHaveBeenCalledWith('studio_fetch_web', expect.objectContaining({
         projectId: 'sp_img',
         urls: ['https://a.de/1.jpg', 'https://b.de/2.png'],
-        options: expect.objectContaining({ mode: 'urls', license: 'CC0', max_mb: 20 }),
+        options: expect.objectContaining({ mode: 'urls', license: 'CC0', max_mb: 25, max_files: 500 }),
       }));
     });
 
@@ -79,11 +79,37 @@ describe('FetchDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /Holen/ }));
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('studio_fetch_web', expect.objectContaining({
-      options: expect.objectContaining({ mode: 'crawl', max_depth: 1, max_pages: 30, allowlist: ['a.de', 'cdn.a.de'], min_side: 64 }),
+      options: expect.objectContaining({ mode: 'crawl', max_depth: 1, max_pages: 50, allowlist: ['a.de', 'cdn.a.de'], min_side: 64 }),
     })));
     expect(await screen.findByText('Seiten gelesen')).toBeInTheDocument();
     expect(screen.getByText('Außerhalb der Allowlist')).toBeInTheDocument();
     expect(screen.getByText(/Die Grenze ist erreicht/)).toBeInTheDocument();
     expect(screen.getByText(/riesig\.jpg/)).toBeInTheDocument();
+  });
+
+  it('Video bekommt Grenzen, die zu Videos passen', () => {
+    expect(startGrenzen('video')).toEqual({ files: 100, mb: 4000, pages: 50 });
+    render(<FetchDialog project={{ ...PROJECT, modality: 'video' }} onClose={vi.fn()} onDone={vi.fn()} />);
+    // Im Adressen-Modus zaehlen Seiten nicht — sie stehen auch nicht da.
+    expect(screen.getByText('bis 100 Dateien · je Datei bis 4 GB')).toBeInTheDocument();
+  });
+
+  it('eine Klasse fuer alles Geholte geht mit', async () => {
+    invokeMock.mockResolvedValue({
+      fetched: 1, duplicates: 0, blocked: [], failed: [], skipped_type: [], pages_visited: 1,
+      too_large: [], too_small: 0, outside_allowlist: 0, limit_reached: false, cancelled: false,
+    });
+    render(<FetchDialog project={{ ...PROJECT, task: 'classify', classes: ['Katze', 'Hund'] }} onClose={vi.fn()} onDone={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText(/https/), { target: { value: 'https://a.de/katzen' } });
+    fireEvent.change(screen.getByDisplayValue(/Keine/), { target: { value: 'Katze' } });
+    fireEvent.click(screen.getByRole('button', { name: /Holen/ }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('studio_fetch_web', expect.objectContaining({
+      options: expect.objectContaining({ label: 'Katze' }),
+    })));
+  });
+
+  it('bei Boxenprojekten gibt es keine Klasse fuer alles', () => {
+    render(<FetchDialog project={{ ...PROJECT, classes: ['Lift'] }} onClose={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.queryByDisplayValue(/Keine/)).toBeNull();
   });
 });

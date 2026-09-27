@@ -53,6 +53,8 @@ export default function NearDupDialog({ project, onClose, onDone, hash }: {
   const [weg, setWeg] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(true);
   const [hashing, setHashing] = useState<{ done: number; total: number } | null>(null);
+  // Bilder, die sich nicht vergleichen liessen — nie als "keine Dubletten" verbuchen.
+  const [nichtLesbar, setNichtLesbar] = useState(0);
 
   const pruefen = useCallback(async () => {
     setBusy(true);
@@ -63,6 +65,7 @@ export default function NearDupDialog({ project, onClose, onDone, hash }: {
         await hashesNachrechnen(project.id, r.missing, hash, (done, total) => setHashing({ done, total }));
         setHashing(null);
         r = await invoke<NearDupReport>('studio_near_duplicates', { projectId: project.id });
+        setNichtLesbar(r.missing.length);
       }
       // Die Samples der Gruppen fuer die Vorschau — seitenweise, bis alle da sind.
       const gesucht = new Set(r.groups.flat());
@@ -127,15 +130,21 @@ export default function NearDupDialog({ project, onClose, onDone, hash }: {
             <Loader2 className="w-4 h-4 animate-spin" />
             {hashing ? t('studio.nearDup.hashing', { done: hashing.done, total: hashing.total }) : t('studio.nearDup.checking')}
           </p>
+        ) : report && report.kind === 'image' && report.checked === 0 && nichtLesbar > 0 ? (
+          <p className="text-red-300 text-xs">{t('studio.nearDup.unreadableAll', { count: nichtLesbar })}</p>
         ) : report && report.kind === 'exact_only' ? (
           <p className="text-gray-400 text-xs">{t('studio.nearDup.exactOnly')}</p>
         ) : report && report.groups.length === 0 ? (
-          <p className="text-emerald-300/80 text-xs">{t('studio.nearDup.none', { count: report.checked })}</p>
+          <div className="space-y-1">
+            <p className="text-emerald-300/80 text-xs">{t('studio.nearDup.none', { count: report.checked })}</p>
+            {nichtLesbar > 0 && <p className="text-amber-300/80 text-xs">{t('studio.nearDup.unreadable', { count: nichtLesbar })}</p>}
+          </div>
         ) : report && (
           <div className="space-y-3">
             <p className="text-gray-400 text-xs">
               {t('studio.nearDup.found', { groups: report.groups.length, checked: report.checked })}
             </p>
+            {nichtLesbar > 0 && <p className="text-amber-300/80 text-xs">{t('studio.nearDup.unreadable', { count: nichtLesbar })}</p>}
             {report.groups.map((g, gi) => (
               <div key={gi} className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-2">
                 {g.map((id, i) => (

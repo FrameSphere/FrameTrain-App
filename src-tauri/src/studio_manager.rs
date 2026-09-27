@@ -2727,7 +2727,7 @@ fn gruppen_splits(samples: &[&StudioSample], train_ratio: f64, val_ratio: f64) -
 fn write_class_export<'a>(
     app_handle: Option<&tauri::AppHandle>, project: &StudioProject, samples: &[&'a StudioSample],
     media_dir: &Path, out: &Path, train_ratio: f64, val_ratio: f64,
-) -> Result<(PathBuf, Vec<&'a StudioSample>, Vec<Option<String>>, Vec<String>), String> {
+) -> Result<(PathBuf, Vec<&'a StudioSample>, Vec<Option<String>>, Vec<quality::Hinweis>), String> {
     let mit_label: Vec<&StudioSample> = samples.iter().copied().filter(|s| s.ann.label.is_some()).collect();
     let splits = gruppen_splits(&mit_label, train_ratio, val_ratio);
     let daten = out.join("dataset");
@@ -2759,14 +2759,14 @@ fn write_class_export<'a>(
         ziele.push((ziel, name));
     }
 
-    let mut hinweise = Vec::new();
+    let mut hinweise: Vec<quality::Hinweis> = Vec::new();
     let fehlgeschlagen: std::collections::HashSet<String> = match app_handle {
         Some(h) => video::clips_schneiden(h, &jobs, out)?.into_iter().collect(),
         None if jobs.is_empty() => Default::default(),
         None => return Err("Videoabschnitte brauchen zum Schneiden die App".to_string()),
     };
     if !fehlgeschlagen.is_empty() {
-        hinweise.push(format!("{} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export.", fehlgeschlagen.len()));
+        hinweise.push(quality::clips_fehlgeschlagen(fehlgeschlagen.len()));
     }
 
     let mut provenance = String::from("sample_id,datei,teil,herkunft,fundseite,lizenz,status,label,start,ende\n");
@@ -2992,7 +2992,7 @@ pub async fn studio_export(
     // Welcher Ordner am Ende registriert wird, entscheidet der Writer: bei
     // Klassenordnern muss die Wurzel dateifrei bleiben, sonst wird der Typ
     // falsch erkannt.
-    let (zu_registrieren, exportiert, splits, hinweise): (PathBuf, Vec<&StudioSample>, Vec<Option<String>>, Vec<String>) =
+    let (zu_registrieren, exportiert, splits, hinweise): (PathBuf, Vec<&StudioSample>, Vec<Option<String>>, Vec<quality::Hinweis>) =
         match (project.modality.as_str(), project.task.as_str()) {
             ("text", _) => {
                 let d = write_text_export(&project, &selected, &out)?;
@@ -3013,7 +3013,7 @@ pub async fn studio_export(
     }
 
     let mut report = quality::baue_report(&project, &exportiert, &splits, &quality::load_hashes(&dir));
-    report.warnings.extend(hinweise);
+    for h in hinweise { report.melde(h); }
     fs::write(out.join("EXPORT_REPORT.md"), quality::report_markdown(&project, &report))
         .map_err(|e| format!("EXPORT_REPORT.md: {}", e))?;
     fs::write(out.join("export_report.json"), serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)

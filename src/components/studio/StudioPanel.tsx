@@ -312,20 +312,25 @@ function CreateDialog({ onClose, onCreated }: {
 
         <div>
           <span className="text-gray-400 text-xs">{t('studio.create.kindLabel')}</span>
-          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+          {/* Je Zeile eine Datenart, daneben was gelabelt wird — "Bilder" und
+              "Bildklassen" nebeneinander liessen offen, was der Unterschied ist. */}
+          <div className="mt-1.5 grid grid-cols-[64px_1fr_1fr] gap-1.5 items-center">
             {([
-              ['image', t('studio.create.kindImage')],
-              ['imageClassify', t('studio.create.kindImageClassify')],
-              ['video', t('studio.create.kindVideo')],
-              ['text', t('studio.create.kindText')],
-              ['pairs', t('studio.create.kindPairs')],
-              ['audio', t('studio.create.kindAudio')],
-              ['transcript', t('studio.create.kindTranscript')],
-            ] as const).map(([val, label]) => (
-              <button key={val} onClick={() => setKind(val)}
-                className={`px-2 py-2 rounded-lg border text-xs transition-all ${kind === val ? 'bg-white/10 border-white/25 text-white' : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]'}`}>
-                {label}
-              </button>
+              [t('studio.create.rowImage'), [['image', t('studio.create.kindImage')], ['imageClassify', t('studio.create.kindImageClassify')]]],
+              [t('studio.create.rowText'), [['text', t('studio.create.kindText')], ['pairs', t('studio.create.kindPairs')]]],
+              [t('studio.create.rowAudio'), [['audio', t('studio.create.kindAudio')], ['transcript', t('studio.create.kindTranscript')]]],
+              [t('studio.create.rowVideo'), [['video', t('studio.create.kindVideo')]]],
+            ] as [string, [Projektart, string][]][]).map(([zeile, arten]) => (
+              <div key={zeile} className="contents">
+                <span className="text-gray-500 text-[11px]">{zeile}</span>
+                {arten.map(([val, label]) => (
+                  <button key={val} onClick={() => setKind(val)}
+                    className={`px-2 py-2 rounded-lg border text-xs transition-all ${kind === val ? 'bg-white/10 border-white/25 text-white' : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.06]'}`}>
+                    {label}
+                  </button>
+                ))}
+                {arten.length === 1 && <span />}
+              </div>
             ))}
           </div>
         </div>

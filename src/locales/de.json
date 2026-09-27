@@ -3147,9 +3147,9 @@
       "formatNote": "Export als YOLO: images/, labels/ und classes.txt. Aufteilen in Train, Val und Test geht direkt beim Export oder später mit dem Split im Dataset-Bereich — beide halten Bild und Label zusammen.",
       "confirmButton": "Anlegen",
       "kindLabel": "Was soll gelabelt werden?",
-      "kindImage": "Bilder",
-      "kindText": "Texte",
-      "kindPairs": "Textpaare",
+      "kindImage": "Objekte markieren (Boxen)",
+      "kindText": "Klasse je Text",
+      "kindPairs": "Text → Antwort",
       "kindHint": {
         "image": "Boxen ins Bild ziehen, Export als YOLO",
         "text": "Jeder Zeile eine Klasse geben, Export als CSV",
@@ -3161,14 +3161,18 @@
       },
       "formatNote_text": "Export als daten.csv mit den Spalten text und label — das Format, das die Klassifikation liest.",
       "formatNote_pairs": "Export als daten.jsonl mit source und target — das Format, das Seq2Seq liest.",
-      "kindAudio": "Audio",
-      "kindTranscript": "Transkript",
+      "kindAudio": "Klasse je Aufnahme",
+      "kindTranscript": "Wortlaut (Transkript)",
       "formatNote_audio": "Export als ein Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
       "formatNote_transcript": "Export als Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription.",
-      "kindImageClassify": "Bildklassen",
-      "kindVideo": "Video",
+      "kindImageClassify": "Klasse je Bild",
+      "kindVideo": "Klasse je Abschnitt",
       "formatNote_imageClassify": "Export als ein Ordner je Klasse, auf Wunsch schon aufgeteilt in train, val und test – das Layout, das die Bildklassifikation liest.",
-      "formatNote_video": "Export als Videoclips, ein Ordner je Klasse. Lange Videos lassen sich beim Einlesen in Abschnitte zerlegen; geschnitten wird erst beim Export."
+      "formatNote_video": "Export als Videoclips, ein Ordner je Klasse. Lange Videos lassen sich beim Einlesen in Abschnitte zerlegen; geschnitten wird erst beim Export.",
+      "rowImage": "Bilder",
+      "rowText": "Texte",
+      "rowAudio": "Audio",
+      "rowVideo": "Video"
     },
     "workbench": {
       "back": "Zurück zur Projektliste",
@@ -3296,7 +3300,9 @@
       "split_val": "Validierung",
       "split_test": "Test",
       "split_testHint": "der Rest",
-      "splitFewWarning": "Bei {count} Bildern bleiben Validierung oder Test womöglich leer."
+      "splitFewWarning": "Bei {count} Bildern bleiben Validierung oder Test womöglich leer.",
+      "noFittingModel": "Noch kein passendes Modell vorhanden. Unter Modelle eines herunterladen, zum Beispiel {model} – sonst hängt der Datensatz an einem Modell, das ihn nicht trainieren kann.",
+      "oneClassWarning": "Nur eine Klasse hat bestätigte Beispiele. Ein Klassifikator braucht mindestens zwei – sonst gibt es nichts zu unterscheiden."
     },
     "notifications": {
       "loadError": "Laden fehlgeschlagen",
@@ -3324,7 +3330,8 @@
         "unmappedHint": "Diese Boxen wurden weggelassen. Lege die Klasse im Projekt an oder starte erneut mit der Option oben.",
         "classesAdded": "Neu angelegt",
         "close": "Fertig",
-        "uncertainHint": "Der Filter „Unsicher“ zeigt die Vorschläge, bei denen das Modell am wenigsten sicher war, zuerst."
+        "uncertainHint": "Der Filter „Unsicher“ zeigt die Vorschläge, bei denen das Modell am wenigsten sicher war, zuerst.",
+        "unmappedHintClasses": "Das Modell kennt andere Klassen als dein Projekt (etwa ein allgemeines ImageNet-Modell). Entweder die Option oben nutzen, oder erst ein Modell auf deinen Klassen trainieren – ein paar Dutzend bestätigte Beispiele reichen für einen Anfang – und dann dieses vorschlagen lassen."
       },
       "scopeLabel": "Wie viele?",
       "scopeAll": "Alle offenen",
@@ -3332,7 +3339,10 @@
       "starting": "Modell wird geladen…",
       "subtitle_classes": "Ein trainiertes Modell ordnet die offenen Samples einer Klasse zu. Bestätigen ist schneller als zuordnen.",
       "subtitle_transcript": "Ein Spracherkennungs-Modell (etwa Whisper) schreibt einen Entwurf des Wortlauts. Du korrigierst und bestätigst.",
-      "subtitle_pairs": "Ein Text-zu-Text-Modell schreibt einen Entwurf der Antwort. Du korrigierst und bestätigst."
+      "subtitle_pairs": "Ein Text-zu-Text-Modell schreibt einen Entwurf der Antwort. Du korrigierst und bestätigst.",
+      "confidenceLabelClasses": "Ab welcher Sicherheit übernehmen: {value} Prozent",
+      "safetyNoteGeneric": "Bestätigtes wird nicht angefasst. Vorschläge gelten als ungeprüft, bis du sie mit Enter bestätigst.",
+      "nothingOpen": "Alles in diesem Projekt ist bestätigt – es gibt nichts vorzuschlagen. „Prüfen“ vergleicht Bestätigtes mit dem Modell."
     },
     "review": {
       "title": "Labels prüfen lassen",
@@ -3375,7 +3385,7 @@
       "videoHint": "Jedes n-te Bild wird übernommen",
       "back": "Zurück",
       "web": "Aus dem Netz",
-      "webHint": "Eine Liste von Adressen, mit Herkunft und robots.txt"
+      "webHint": "Seiten, ganze Websites oder Sitemaps – mit Herkunft und robots.txt"
     },
     "text": {
       "importFile": "Datei",
@@ -3383,7 +3393,7 @@
       "pickFile": "Textdatei wählen (CSV, JSONL, TXT)",
       "pickFolder": "Ordner mit Textdateien wählen",
       "emptyTitle": "Noch keine Texte",
-      "emptyDetail": "Eine CSV oder JSONL einlesen, oder einen Ordner mit .txt-Dateien — Unterordner gelten dabei als Klasse.",
+      "emptyDetail": "Texte selbst schreiben, vom KI-Assistenten erzeugen lassen, aus dem Netz holen oder eine CSV, JSONL oder einen Ordner mit .txt-Dateien einlesen – Unterordner gelten dabei als Klasse.",
       "noLabel": "ohne Klasse",
       "importTitle": "Texte einlesen",
       "importSummary": "{rows} Zeilen gefunden ({kind}).",
@@ -3504,7 +3514,6 @@
       "sitemapLabel": "Website oder Adresse der Sitemap",
       "paragraphsLabel": "In Absätze zerlegen – Navigation, Kopf und Fuß der Seite fallen weg",
       "limitsTitle": "Grenzen",
-      "limitsSummary": "{pages} Seiten · {files} Dateien · {mb} MB",
       "depthLabel": "Tiefe (Klicks)",
       "maxPagesLabel": "Höchstens Seiten",
       "maxFilesLabel": "Höchstens Dateien",
@@ -3517,7 +3526,16 @@
       "progressDetail": "{pages} Seiten gelesen · {files} übernommen",
       "stopButton": "Anhalten",
       "stopping": "Wird angehalten…",
-      "tooLargeTitle": "Über {mb} MB, nicht geladen"
+      "tooLargeTitle": "Über {mb} MB, nicht geladen",
+      "limitPages": "bis {n} Seiten",
+      "limitFiles": "bis {n} Dateien",
+      "limitParagraphs": "bis {n} Absätze",
+      "limitMb": "je Datei bis {n}",
+      "limitsWhy": "Grenzen schützen die besuchten Server und deine Festplatte. Für eine größere Sammlung einfach erhöhen – große Dateien werden direkt auf die Platte geladen, nicht in den Arbeitsspeicher.",
+      "maxParagraphsLabel": "Höchstens Absätze",
+      "labelLabel": "Klasse für alles, was geholt wird (optional)",
+      "labelNone": "Keine – jedes Sample selbst zuordnen",
+      "labelHint": "Die Dateien kommen als Vorschlag mit dieser Klasse an. Du siehst sie durch und bestätigst mit Enter – auf einer Seite steht oft auch anderes."
     },
     "generate": {
       "title": "Texte erzeugen lassen",
@@ -3639,7 +3657,9 @@
         "suggested": "Davon als Vorschlag",
         "duplicates": "Schon vorhanden",
         "skipped": "Übersprungen (Datei fehlt oder passt nicht)"
-      }
+      },
+      "defaultName": "{name} – Nacharbeit",
+      "nextConfirmed": "Sie stehen im Projekt bestätigt, mit der Korrektur oder dem Label aus dem Datensatz. Nach ein paar Runden neu exportieren und trainieren."
     },
     "media": {
       "getFromWeb": "Aus dem Netz",
@@ -3700,7 +3720,9 @@
       "removeButton": "{count} entfernen",
       "removedTitle": "Dubletten entfernt",
       "removedDetail": "{count} Samples entfernt",
-      "errorTitle": "Prüfung fehlgeschlagen"
+      "errorTitle": "Prüfung fehlgeschlagen",
+      "unreadable": "{count} Bilder ließen sich nicht lesen und wurden nicht verglichen.",
+      "unreadableAll": "Kein Bild ließ sich lesen ({count}) – es wurde nichts verglichen."
     },
     "report": {
       "title": "Export-Bericht",
@@ -3708,12 +3730,26 @@
       "split": "Teil {split}",
       "groupLeaks": "Gruppen in mehreren Teilen",
       "nearDuplicates": "Beinahe-Dubletten (Paare)",
-      "notChecked": "nicht geprüft",
+      "notChecked": "nicht geprüft – vorher „Dubletten“ in der Werkstatt ausführen",
       "nearAcross": "davon über Teilgrenzen",
       "withoutLicense": "Aus dem Netz, ohne Lizenz",
       "classes": "Je Klasse",
       "allGood": "Keine Auffälligkeiten.",
-      "fileHint": "Steht auch als EXPORT_REPORT.md neben dem Datensatz."
+      "fileHint": "Steht auch als EXPORT_REPORT.md neben dem Datensatz.",
+      "exactOnly": "nur exakte Kopien (beim Einlesen entfernt)",
+      "hint": {
+        "class_empty": "Klasse „{klasse}“ hat keine Beispiele – ein Modell kann sie nie vorhersagen.",
+        "class_few": "Klasse „{klasse}“ hat nur {anzahl} Beispiele (empfohlen: mindestens {min}).",
+        "unbalanced": "Unausgewogen: „{gross}“ hat {grossN} Beispiele, „{klein}“ nur {kleinN}. Das Modell lernt dann vor allem die große Klasse.",
+        "group_leaks": "{count} Gruppe(n) liegen in mehr als einem Teil.",
+        "split_empty": "Der Teil „{split}“ ist leer – ohne Validierung misst das Training nicht, wie gut das Modell ist.",
+        "class_missing_in_split": "Klasse „{klasse}“ fehlt im Teil „{split}“.",
+        "few_groups": "Nur {count} Gruppe(n) (Videos, Seiten, Aufnahmen). Samples einer Gruppe bleiben zusammen, die Aufteilung ist dann grob – mehr Quellen machen die Validierung verlässlicher.",
+        "near_across": "{count} Paar(e) fast gleicher Samples liegen in verschiedenen Teilen – die Validierung misst dort Wiedererkennen.",
+        "near_within": "{count} Paar(e) fast gleicher Samples im Datensatz.",
+        "without_license": "{count} aus dem Netz geholte Samples ohne Lizenzangabe – so nicht weitergeben.",
+        "clips_failed": "{count} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export."
+      }
     }
   }
 }

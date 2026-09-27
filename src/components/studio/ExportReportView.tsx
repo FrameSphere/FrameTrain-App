@@ -9,8 +9,15 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { ExportReport } from './studioTypes';
 
-export default function ExportReportView({ report }: { report: ExportReport }) {
+export default function ExportReportView({ report, modality }: { report: ExportReport; modality?: string }) {
   const { t } = useLanguage();
+  // Hinweise in der Sprache der Oberflaeche; aeltere Berichte ohne Codes
+  // zeigen die deutschen Texte.
+  const hinweise = report.hints?.length
+    ? report.hints.map(h => t(`studio.report.hint.${h.code}`, h.params))
+    : report.warnings;
+  const nichtGeprueft = modality === 'audio' || modality === 'video'
+    ? t('studio.report.exactOnly') : t('studio.report.notChecked');
   const zeile = (label: string, wert: string | number, warn = false) => (
     <div className="flex items-center justify-between text-xs">
       <span className="text-gray-400">{label}</span>
@@ -28,7 +35,7 @@ export default function ExportReportView({ report }: { report: ExportReport }) {
         ))}
         {report.per_split.length > 0 && zeile(t('studio.report.groupLeaks'), report.group_leaks.length, report.group_leaks.length > 0)}
         {zeile(t('studio.report.nearDuplicates'),
-          report.near_checked ? report.near_duplicates : t('studio.report.notChecked'), report.near_duplicates_across > 0)}
+          report.near_checked ? report.near_duplicates : nichtGeprueft, report.near_duplicates_across > 0)}
         {report.near_checked && report.per_split.length > 0 &&
           zeile(t('studio.report.nearAcross'), report.near_duplicates_across, report.near_duplicates_across > 0)}
         {report.without_license > 0 && zeile(t('studio.report.withoutLicense'), report.without_license, true)}
@@ -49,9 +56,9 @@ export default function ExportReportView({ report }: { report: ExportReport }) {
         </div>
       )}
 
-      {report.warnings.length > 0 ? (
+      {hinweise.length > 0 ? (
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 p-3 space-y-1">
-          {report.warnings.map(w => (
+          {hinweise.map(w => (
             <p key={w} className="text-amber-200/90 text-xs flex items-start gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> {w}
             </p>

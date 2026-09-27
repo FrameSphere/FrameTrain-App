@@ -37,8 +37,11 @@ export interface SuggestReport {
   failed:           number;
 }
 
-export default function ModelRunDialog({ mode, project, onClose, onDone }: {
+export default function ModelRunDialog({ mode, project, onClose, onDone, offen }: {
   mode: 'suggest' | 'review';
+  /** Wie viele Samples noch offen sind. 0: Vorschlagen hat nichts zu tun —
+   *  das soll im Dialog stehen, nicht erst als kurz sichtbare Fehlermeldung. */
+  offen?: number;
   project: StudioProject; onClose: () => void; onDone: () => void;
 }) {
   const { t } = useLanguage();
@@ -172,7 +175,7 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
                 </p>
                 <p className="text-amber-200/80 text-xs">{suggestReport.unmapped_classes.join(', ')}</p>
                 <p className="text-gray-400 text-[11px] mt-1.5">
-                  {t('studio.suggest.report.unmappedHint')}
+                  {t(art === 'boxes' ? 'studio.suggest.report.unmappedHint' : 'studio.suggest.report.unmappedHintClasses')}
                 </p>
               </div>
             )}
@@ -217,7 +220,7 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
 
             {art !== 'transcript' && art !== 'pairs' && <label className="block">
               <span className="text-gray-400 text-xs">
-                {t('studio.suggest.confidenceLabel', { value: Math.round(minConfidence * 100) })}
+                {t(art === 'boxes' ? 'studio.suggest.confidenceLabel' : 'studio.suggest.confidenceLabelClasses', { value: Math.round(minConfidence * 100) })}
               </span>
               <input type="range" min={5} max={95} step={5} value={Math.round(minConfidence * 100)}
                 onChange={e => setMinConfidence(Number(e.target.value) / 100)}
@@ -246,8 +249,11 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
               </div>
             )}
 
+            {suggest && offen === 0 && (
+              <p className="text-amber-300/90 text-xs" data-testid="nothing-open">{t('studio.suggest.nothingOpen')}</p>
+            )}
             <p className="text-gray-500 text-xs">
-              {t(suggest ? 'studio.suggest.safetyNote' : 'studio.review.safetyNote')}
+              {t(suggest ? (art === 'boxes' ? 'studio.suggest.safetyNote' : 'studio.suggest.safetyNoteGeneric') : 'studio.review.safetyNote')}
             </p>
 
             {busy && (
@@ -268,7 +274,7 @@ export default function ModelRunDialog({ mode, project, onClose, onDone }: {
                 className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm disabled:opacity-40">
                 {t('common.cancel', 'Abbrechen')}
               </button>
-              <button onClick={() => void run()} disabled={busy || !versionId}
+              <button onClick={() => void run()} disabled={busy || !versionId || (suggest && offen === 0)}
                 className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center justify-center gap-2 disabled:opacity-40">
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" />
                   : suggest ? <Wand2 className="w-4 h-4" /> : <ShieldQuestion className="w-4 h-4" />}

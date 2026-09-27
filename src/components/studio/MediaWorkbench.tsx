@@ -620,8 +620,10 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   const mitte = (s: StudioSample) => {
     const src = convertFileSrc(s.abs_path);
     if (medium === 'image') {
+      // Feste Flaeche mit object-contain: kleine Bilder (Vorschaubilder,
+      // Symbole) werden auf die Flaeche vergroessert statt als Briefmarke zu stehen.
       return <img key={s.id} src={src} alt={s.src.origin ?? s.id}
-        className="max-h-[440px] w-auto max-w-full mx-auto rounded-lg object-contain" />;
+        className="h-[420px] w-full rounded-lg object-contain" />;
     }
     if (medium === 'video') {
       return (
@@ -916,7 +918,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
 
       {dialog === 'export' && (
         <MediaExportDialog project={project} medium={medium} confirmed={confirmed}
-          suggested={stats?.suggested ?? 0}
+          suggested={stats?.suggested ?? 0} perClass={stats?.per_class ?? []}
           onClose={() => setDialog(null)} onDone={() => void loadStats()} />
       )}
       {dialog === 'fetch' && (
@@ -925,6 +927,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
       )}
       {(dialog === 'suggest' || dialog === 'review') && (
         <ModelRunDialog mode={dialog} project={project} onClose={() => setDialog(null)}
+          offen={stats ? stats.new + stats.suggested + stats.skipped : undefined}
           onDone={() => { setDialog(null); void neuLaden(); void refreshProject(); }} />
       )}
       {dialog === 'neardup' && (
@@ -1018,8 +1021,8 @@ export const SPLITS: { key: string; train: number; val: number }[] = [
   { key: '701515', train: 0.7, val: 0.15 },
 ];
 
-function MediaExportDialog({ project, medium, confirmed, suggested, onClose, onDone }: {
-  project: StudioProject; medium: Medium; confirmed: number; suggested: number;
+function MediaExportDialog({ project, medium, confirmed, suggested, perClass, onClose, onDone }: {
+  project: StudioProject; medium: Medium; confirmed: number; suggested: number; perClass: number[];
   onClose: () => void; onDone: () => void;
 }) {
   const { t } = useLanguage();
@@ -1071,7 +1074,7 @@ function MediaExportDialog({ project, medium, confirmed, suggested, onClose, onD
 
         {ergebnis ? (
           <>
-            <ExportReportView report={ergebnis.report} />
+            <ExportReportView report={ergebnis.report} modality={project.modality} />
             <button onClick={onClose}
               className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm">
               {t('studio.suggest.report.close')}
@@ -1113,6 +1116,9 @@ function MediaExportDialog({ project, medium, confirmed, suggested, onClose, onD
             )}
 
             <p className="text-gray-500 text-xs">{t(summe, { confirmed })}</p>
+            {!transkript && perClass.filter(n => n > 0).length < 2 && (
+              <p className="text-amber-300/90 text-xs" data-testid="one-class-warning">{t('studio.export.oneClassWarning')}</p>
+            )}
 
             <div className="flex gap-2">
               <button onClick={onClose}

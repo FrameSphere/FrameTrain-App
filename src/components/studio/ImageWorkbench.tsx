@@ -1155,6 +1155,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
         <ModelRunDialog
           mode={modelRun}
           project={project}
+          offen={stats ? stats.new + stats.suggested + stats.skipped : undefined}
           onClose={() => setModelRun(null)}
           onDone={async () => {
             setModelRun(null);
@@ -1231,7 +1232,7 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
         onClick={e => e.stopPropagation()}>
         {ergebnis ? (<>
           <h3 className="text-white font-semibold">{t('studio.report.title')}</h3>
-          <ExportReportView report={ergebnis.report} />
+          <ExportReportView report={ergebnis.report} modality={project.modality} />
           <button onClick={onClose}
             className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm">
             {t('studio.suggest.report.close')}

@@ -121,6 +121,18 @@ describe('MediaWorkbench', () => {
     expect(await screen.findByTestId('export-report')).toHaveTextContent('hat nur 2 Beispiele');
   });
 
+  it('Export warnt vorher: nur eine Klasse, kein passendes Modell', async () => {
+    antworten([sample('s_1')], {
+      studio_stats: { ...STATS, confirmed: 3, per_class: [3, 0] },
+      list_models: [{ id: 'y', name: 'yolo8n', source_path: 'yolo8n' }],
+    });
+    render(<MediaWorkbench project={projekt('video', 'classify')} onBack={vi.fn()} onProjectChanged={vi.fn()} />);
+    await screen.findByText('1 / 1');
+    fireEvent.click(screen.getByRole('button', { name: /Exportieren/ }));
+    expect(await screen.findByTestId('one-class-warning')).toBeInTheDocument();
+    expect(await screen.findByTestId('no-fitting-model')).toHaveTextContent('MCG-NJU/videomae-base');
+  });
+
   it('Abschnitte werden lesbar angezeigt', () => {
     expect(abschnittText(null, null)).toBeNull();
     expect(abschnittText(0, 4.25)).toBe('0,0–4,3 s');

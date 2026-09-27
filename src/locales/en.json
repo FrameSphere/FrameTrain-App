@@ -3147,9 +3147,9 @@
       "formatNote": "Exports as YOLO: images/, labels/ and classes.txt. Splitting into train, val and test happens right at export or later with the split in the dataset area — both keep image and label together.",
       "confirmButton": "Create",
       "kindLabel": "What will be labelled?",
-      "kindImage": "Images",
-      "kindText": "Texts",
-      "kindPairs": "Text pairs",
+      "kindImage": "Mark objects (boxes)",
+      "kindText": "Class per text",
+      "kindPairs": "Text → answer",
       "kindHint": {
         "image": "Drag boxes onto the image, export as YOLO",
         "text": "Give each row a class, export as CSV",
@@ -3161,14 +3161,18 @@
       },
       "formatNote_text": "Exports daten.csv with the columns text and label — the format classification reads.",
       "formatNote_pairs": "Exports daten.jsonl with source and target — the format seq2seq reads.",
-      "kindAudio": "Audio",
-      "kindTranscript": "Transcript",
+      "kindAudio": "Class per recording",
+      "kindTranscript": "Words (transcript)",
       "formatNote_audio": "Exports one folder per class — the layout the app recognises as classification.",
       "formatNote_transcript": "Exports the recording with a matching .txt next to it — the layout for transcription.",
-      "kindImageClassify": "Image classes",
-      "kindVideo": "Video",
+      "kindImageClassify": "Class per image",
+      "kindVideo": "Class per segment",
       "formatNote_imageClassify": "Exported as one folder per class, optionally already split into train, val and test – the layout image classification reads.",
-      "formatNote_video": "Exported as video clips, one folder per class. Long videos can be cut into segments on import; clips are cut only on export."
+      "formatNote_video": "Exported as video clips, one folder per class. Long videos can be cut into segments on import; clips are cut only on export.",
+      "rowImage": "Images",
+      "rowText": "Texts",
+      "rowAudio": "Audio",
+      "rowVideo": "Video"
     },
     "workbench": {
       "back": "Back to project list",
@@ -3296,7 +3300,9 @@
       "split_val": "Validation",
       "split_test": "Test",
       "split_testHint": "the rest",
-      "splitFewWarning": "With {count} images, validation or test may stay empty."
+      "splitFewWarning": "With {count} images, validation or test may stay empty.",
+      "noFittingModel": "No fitting model yet. Download one under Models, for example {model} – otherwise the dataset is attached to a model that cannot train it.",
+      "oneClassWarning": "Only one class has confirmed examples. A classifier needs at least two – otherwise there is nothing to tell apart."
     },
     "notifications": {
       "loadError": "Loading failed",
@@ -3324,7 +3330,8 @@
         "unmappedHint": "Those boxes were left out. Add the class to the project, or run again with the option above.",
         "classesAdded": "Newly created",
         "close": "Done",
-        "uncertainHint": "The “Unsure” filter shows the suggestions the model was least sure about first."
+        "uncertainHint": "The “Unsure” filter shows the suggestions the model was least sure about first.",
+        "unmappedHintClasses": "The model knows different classes than your project (such as a general ImageNet model). Either use the option above, or first train a model on your classes – a few dozen confirmed examples are enough to start – and let that one suggest."
       },
       "scopeLabel": "How many?",
       "scopeAll": "All open",
@@ -3332,7 +3339,10 @@
       "starting": "Loading model…",
       "subtitle_classes": "A trained model assigns the open samples to a class. Confirming is faster than assigning.",
       "subtitle_transcript": "A speech recognition model (such as Whisper) writes a draft of the words. You correct and confirm.",
-      "subtitle_pairs": "A text-to-text model writes a draft answer. You correct and confirm."
+      "subtitle_pairs": "A text-to-text model writes a draft answer. You correct and confirm.",
+      "confidenceLabelClasses": "Take suggestions from this confidence: {value} percent",
+      "safetyNoteGeneric": "Confirmed samples are left untouched. Suggestions count as unreviewed until you confirm them with Enter.",
+      "nothingOpen": "Everything in this project is confirmed – there is nothing to suggest. “Check” compares confirmed samples with the model."
     },
     "review": {
       "title": "Have the labels checked",
@@ -3375,7 +3385,7 @@
       "videoHint": "Every nth frame is taken",
       "back": "Back",
       "web": "From the web",
-      "webHint": "A list of addresses, with origin and robots.txt"
+      "webHint": "Pages, whole websites or sitemaps – with origin and robots.txt"
     },
     "text": {
       "importFile": "File",
@@ -3383,7 +3393,7 @@
       "pickFile": "Choose text file (CSV, JSONL, TXT)",
       "pickFolder": "Choose folder with text files",
       "emptyTitle": "No texts yet",
-      "emptyDetail": "Read a CSV or JSONL, or a folder of .txt files — subfolders count as the class.",
+      "emptyDetail": "Write texts yourself, let the AI assistant generate them, fetch them from the web, or read a CSV, JSONL or a folder of .txt files – subfolders count as the class.",
       "noLabel": "no class",
       "importTitle": "Read texts",
       "importSummary": "{rows} rows found ({kind}).",
@@ -3504,7 +3514,6 @@
       "sitemapLabel": "Website or sitemap address",
       "paragraphsLabel": "Split into paragraphs – navigation, header and footer are dropped",
       "limitsTitle": "Limits",
-      "limitsSummary": "{pages} pages · {files} files · {mb} MB",
       "depthLabel": "Depth (clicks)",
       "maxPagesLabel": "Max pages",
       "maxFilesLabel": "Max files",
@@ -3517,7 +3526,16 @@
       "progressDetail": "{pages} pages read · {files} taken over",
       "stopButton": "Stop",
       "stopping": "Stopping…",
-      "tooLargeTitle": "Over {mb} MB, not loaded"
+      "tooLargeTitle": "Over {mb} MB, not loaded",
+      "limitPages": "up to {n} pages",
+      "limitFiles": "up to {n} files",
+      "limitParagraphs": "up to {n} paragraphs",
+      "limitMb": "up to {n} per file",
+      "limitsWhy": "Limits protect the visited servers and your disk. Raise them for a larger collection – large files are streamed to disk, not held in memory.",
+      "maxParagraphsLabel": "Max paragraphs",
+      "labelLabel": "Class for everything fetched (optional)",
+      "labelNone": "None – assign each sample yourself",
+      "labelHint": "Files arrive as suggestions with this class. You go through them and confirm with Enter – a page often shows other things too."
     },
     "generate": {
       "title": "Have texts written",
@@ -3639,7 +3657,9 @@
         "suggested": "As suggestion",
         "duplicates": "Already there",
         "skipped": "Skipped (file missing or not fitting)"
-      }
+      },
+      "defaultName": "{name} – follow-up",
+      "nextConfirmed": "They are confirmed in the project, with the correction or the dataset's label. After a few rounds, export and train again."
     },
     "media": {
       "getFromWeb": "From the web",
@@ -3700,7 +3720,9 @@
       "removeButton": "Remove {count}",
       "removedTitle": "Duplicates removed",
       "removedDetail": "{count} samples removed",
-      "errorTitle": "Check failed"
+      "errorTitle": "Check failed",
+      "unreadable": "{count} images could not be read and were not compared.",
+      "unreadableAll": "No image could be read ({count}) – nothing was compared."
     },
     "report": {
       "title": "Export report",
@@ -3708,12 +3730,26 @@
       "split": "Part {split}",
       "groupLeaks": "Groups in several parts",
       "nearDuplicates": "Near-duplicates (pairs)",
-      "notChecked": "not checked",
+      "notChecked": "not checked – run “Duplicates” in the studio first",
       "nearAcross": "across parts",
       "withoutLicense": "From the web, without license",
       "classes": "Per class",
       "allGood": "Nothing unusual.",
-      "fileHint": "Also saved as EXPORT_REPORT.md next to the dataset."
+      "fileHint": "Also saved as EXPORT_REPORT.md next to the dataset.",
+      "exactOnly": "exact copies only (removed on import)",
+      "hint": {
+        "class_empty": "Class “{klasse}” has no examples – a model can never predict it.",
+        "class_few": "Class “{klasse}” has only {anzahl} examples (recommended: at least {min}).",
+        "unbalanced": "Unbalanced: “{gross}” has {grossN} examples, “{klein}” only {kleinN}. The model will mostly learn the large class.",
+        "group_leaks": "{count} group(s) lie in more than one part.",
+        "split_empty": "The part “{split}” is empty – without validation, training cannot measure how good the model is.",
+        "class_missing_in_split": "Class “{klasse}” is missing from part “{split}”.",
+        "few_groups": "Only {count} group(s) (videos, pages, recordings). Samples of a group stay together, so the split is coarse – more sources make validation more reliable.",
+        "near_across": "{count} pair(s) of near-identical samples lie in different parts – validation measures recognition there.",
+        "near_within": "{count} pair(s) of near-identical samples in the dataset.",
+        "without_license": "{count} samples fetched from the web without a license – don't pass the dataset on like this.",
+        "clips_failed": "{count} video segment(s) could not be cut and are missing from the export."
+      }
     }
   }
 }

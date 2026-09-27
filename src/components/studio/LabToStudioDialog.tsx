@@ -23,7 +23,7 @@ export default function LabToStudioDialog({ name, ergebnisse, bboxModell, onClos
   const modalitaet = labModalitaet(ergebnisse);
   const [projekte, setProjekte] = useState<StudioProject[]>([]);
   const [ziel, setZiel] = useState<string>('new');
-  const [neuName, setNeuName] = useState(`${name} – Nacharbeit`);
+  const [neuName, setNeuName] = useState(t('studio.fromLab.defaultName', { name }));
   const [wie, setWie] = useState<LabAuswahl>('wrong');
   const [busy, setBusy] = useState(false);
   const [bericht, setBericht] = useState<Bericht | null>(null);
@@ -84,7 +84,9 @@ export default function LabToStudioDialog({ name, ergebnisse, bboxModell, onClos
                 </div>
               ))}
             </div>
-            <p className="text-gray-500 text-xs">{t('studio.fromLab.next')}</p>
+            <p className="text-gray-500 text-xs">
+              {t(bericht.suggested > 0 ? 'studio.fromLab.next' : 'studio.fromLab.nextConfirmed')}
+            </p>
             <button onClick={onClose}
               className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm">
               {t('studio.suggest.report.close')}
