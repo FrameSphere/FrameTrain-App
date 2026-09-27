@@ -609,7 +609,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     // Abschnitte beim Export der Werkstatt.
     let nlp_packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
                             "numpy", "accelerate", "librosa", "soundfile", "pillow", "opencv-python"];
-    let nlp_installed = nlp_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let nlp_installed = all_installed(&python, &nlp_packages);
     let nlp_plugin = PluginInfo {
         id: "seq_classification".to_string(),
         name: "firstLaunch.pluginRegistry.seq_classification.name".to_string(),
@@ -624,7 +624,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     // LLM-Fine-Tuning (causal_lm): LoRA ueber peft; auf Apple Silicon zusaetzlich
     // MLX — dort schneller und das einzige lokale 4-bit-QLoRA.
     let llm_packages = llm_package_list();
-    let llm_installed = llm_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let llm_installed = all_installed(&python, &llm_packages);
     let llm_plugin = PluginInfo {
         id: "llm".to_string(),
         name: "firstLaunch.pluginRegistry.llm.name".to_string(),
@@ -638,7 +638,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 
     // Generativ: Diffusion-LoRA (Stable Diffusion) und Vision-Language-Modelle.
     let gen_packages = vec!["diffusers", "peft", "transformers", "accelerate", "pillow"];
-    let gen_installed = gen_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let gen_installed = all_installed(&python, &gen_packages);
     let gen_plugin = PluginInfo {
         id: "generative".to_string(),
         name: "firstLaunch.pluginRegistry.generative.name".to_string(),
@@ -652,7 +652,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 
     // YOLO-Stack
     let yolo_packages = vec!["ultralytics", "torch", "numpy", "pillow", "opencv-python"];
-    let yolo_installed = yolo_packages.iter().all(|p| check_package_installed(&python, p).installed);
+    let yolo_installed = all_installed(&python, &yolo_packages);
     let yolo_plugin = PluginInfo {
         id: "yolo".to_string(),
         name: "firstLaunch.pluginRegistry.yolo.name".to_string(),
@@ -665,6 +665,11 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     };
 
     Ok(vec![nlp_plugin, yolo_plugin, llm_plugin, gen_plugin])
+}
+
+/// Alle Pakete da und neu genug? Ein Python-Prozess je Gruppe statt je Paket.
+fn all_installed(python: &str, packages: &[&str]) -> bool {
+    check_packages_batch(python, packages).iter().all(|s| s.installed)
 }
 
 /// Welche Paketgruppe (Erststart-Plugin) und welche Pakete eine Aufgabe braucht.
@@ -715,6 +720,29 @@ pub async fn check_task_packages(task_type: String) -> Result<TaskPackageStatus,
     }).await.map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PythonInfo {
+    pub path: Option<String>,
+    pub version: Option<String>,
+    /// 3.10 bis 3.13 (siehe python_env::MIN_SUPPORTED)
+    pub supported: bool,
+    pub install_hint: String,
+}
+
+/// Welches Python nutzt die App? Fuer die Einstellungen — bei Problemen muss
+/// der Nutzer (oder der Support) genau diesen Interpreter kennen.
+#[tauri::command]
+pub async fn get_python_info() -> Result<PythonInfo, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let (path, version) = crate::python_env::resolve_python_with_version();
+        let supported = version.as_deref()
+            .and_then(|v| crate::python_env::parse_version(&format!("Python {}", v)))
+            .map(crate::python_env::is_supported)
+            .unwrap_or(false);
+        PythonInfo { path, version, supported, install_hint: crate::python_env::install_hint() }
+    }).await.map_err(|e| e.to_string())
+}
+
 /// Kleine Zusatzpakete des HF-Stacks: NER-Metriken (seqeval), Embeddings
 /// (sentence-transformers), Spracherkennung (jiwer: WER/CER) und
 /// Seq2Seq-Metriken (rouge-score, sacrebleu). Ohne sie brechen diese Plugins
@@ -723,7 +751,8 @@ const NLP_EXTRA_PACKAGES: [&str; 5] = ["sentence-transformers", "seqeval", "jiwe
 
 /// Pakete fuer das LLM-Plugin; mlx-lm nur dort, wo MLX laeuft.
 fn llm_package_list() -> Vec<&'static str> {
-    let mut v = vec!["peft", "transformers", "accelerate"];
+    // sentencepiece: Tokenizer von Llama/Mistral/Gemma und die GGUF-Konvertierung.
+    let mut v = vec!["peft", "transformers", "accelerate", "sentencepiece"];
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         v.push("mlx-lm");
     }
@@ -736,7 +765,10 @@ pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> 
     let python = get_python_executable();
     let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
                         "numpy", "pandas", "pyarrow", "accelerate", "librosa", "soundfile",
-                        "pillow", "ultralytics", "peft", "sentence-transformers"];
+                        "pillow", "ultralytics", "sentence-transformers"];
+    // peft gehoert zu den Gruppen LLM/Generativ (Einstellungen → Paketgruppen);
+    // hier stuende es sonst als "fehlend", ohne dass "Fehlende installieren" es
+    // installiert (das installiert nur den HuggingFace-Stack).
     let status: Vec<DependencyStatus> = packages.iter().map(|p| check_package_installed(&python, p)).collect();
     let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
     if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
@@ -809,6 +841,7 @@ pub async fn install_plugins(_app_handle: AppHandle, plugin_ids: Vec<String>, wi
             ("transformers", "Transformers"),
             ("accelerate",   "Accelerate"),
             ("peft",         "PEFT (LoRA)"),
+            ("sentencepiece", "SentencePiece (Tokenizer, GGUF)"),
         ]);
         if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             packages.push(("mlx-lm", "MLX-LM (Apple Silicon)"));

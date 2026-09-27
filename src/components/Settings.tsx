@@ -280,6 +280,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [systemInstalling, setSystemInstalling] = useState(false);
   const [systemInstallProgress, setSystemInstallProgress] = useState<Map<string, InstallProgress>>(new Map());
   const [systemInstallError, setSystemInstallError] = useState<string>('');
+  // Paketgruppen (HF-Stack, YOLO, LLM, Generativ) und das Python der App
+  const [pluginGroups, setPluginGroups] = useState<{ id: string; name: string; description: string; is_installed: boolean; required_packages: string[] }[] | null>(null);
+  const [pythonInfo, setPythonInfo] = useState<{ path?: string | null; version?: string | null; supported: boolean; install_hint: string } | null>(null);
 
   const { getAll } = useStoredTickets(userData.userId);
 
@@ -294,6 +297,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       setSystemDeps(deps);
       setSystemReqs(reqs);
       setPreventSleepActive(sleep);
+      // Gruppen und Python-Pfad getrennt: ein Fehler hier soll die Paketliste nicht verdecken.
+      invoke<typeof pluginGroups>('get_available_plugins').then(setPluginGroups).catch(() => setPluginGroups(null));
+      invoke<NonNullable<typeof pythonInfo>>('get_python_info').then(setPythonInfo).catch(() => setPythonInfo(null));
     } catch {
       // ignore
     } finally {
@@ -301,12 +307,12 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     }
   }, []);
 
-  const installMissingDeps = useCallback(async () => {
+  const installMissingDeps = useCallback(async (groups: string[] = []) => {
     setSystemInstallError('');
     setSystemInstallProgress(new Map());
     setSystemInstalling(true);
     try {
-      await invoke('install_plugins', { pluginIds: [] });
+      await invoke('install_plugins', { pluginIds: groups });
     } catch (e) {
       setSystemInstallError(String(e));
       setSystemInstalling(false);
@@ -2115,7 +2121,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           <h3 className="text-lg font-semibold text-white">{t('settings.system.packagesTitle')}</h3>
           <div className="flex items-center gap-2">
             <button
-              onClick={installMissingDeps}
+              onClick={() => void installMissingDeps()}
               disabled={systemLoading || systemInstalling || !(systemDeps?.some(d => !d.installed))}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-emerald-300 hover:text-emerald-200 text-sm transition-all disabled:opacity-50 disabled:hover:bg-emerald-500/10"
               title={t('settings.system.installMissingTooltip')}
@@ -2169,20 +2175,56 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 {t('settings.system.installRunning')}
               </span>
               <span className="font-mono">
-                {(systemInstallProgress.get('seq_classification')?.progress ?? 0)}%
+                {(systemInstallProgress.get('system')?.progress ?? 0)}%
               </span>
             </div>
             <div className="h-2 rounded-full bg-white/10 overflow-hidden">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-500 transition-all"
-                style={{ width: `${Math.min(systemInstallProgress.get('seq_classification')?.progress ?? 0, 100)}%` }}
+                style={{ width: `${Math.min(systemInstallProgress.get('system')?.progress ?? 0, 100)}%` }}
               />
             </div>
             <div className="text-[11px] text-gray-500 font-mono break-words">
-              {systemInstallProgress.get('seq_classification')?.message ?? t('settings.system.pipStarting')}
+              {systemInstallProgress.get('system')?.message ?? t('settings.system.pipStarting')}
             </div>
           </div>
         )}
+      </div>
+
+      {/* Paketgruppen: LLM und Generativ sind im Erststart optional und
+          liessen sich bisher nirgends nachinstallieren. */}
+      <div className="bg-white/5 rounded-xl p-6 border border-white/10 space-y-3">
+        <h3 className="text-lg font-semibold text-white">{t('settings.system.groupsTitle')}</h3>
+        {pythonInfo && (
+          <div className={`text-xs rounded-lg px-3 py-2 border ${pythonInfo.supported ? 'border-white/10 bg-white/[0.03] text-gray-400' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
+            <span className="font-mono break-all">{t('settings.system.pythonUsed').replace('{path}', pythonInfo.path ?? '—').replace('{version}', pythonInfo.version ?? '?')}</span>
+            {!pythonInfo.supported && <p className="mt-1">{t('settings.system.pythonUnsupported')} {pythonInfo.install_hint}</p>}
+          </div>
+        )}
+        {!pluginGroups ? (
+          <div className="text-gray-500 text-sm">{t('settings.system.statusNotLoaded')}</div>
+        ) : pluginGroups.map(g => (
+          <div key={g.id} className="flex items-start justify-between gap-3 px-4 py-3 bg-white/[0.03] rounded-xl border border-white/10">
+            <div className="flex items-start gap-3 min-w-0">
+              {g.is_installed
+                ? <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                : <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />}
+              <div className="min-w-0">
+                <p className="text-white text-sm font-medium">{t(g.name)}</p>
+                <p className="text-gray-500 text-xs">{t(g.description)}</p>
+                <p className="text-gray-600 text-[11px] font-mono break-words">{g.required_packages.join(', ')}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => void installMissingDeps([g.id])}
+              disabled={systemLoading || systemInstalling}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-emerald-300 text-xs transition-all disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              {g.is_installed ? t('settings.system.groupUpdate') : t('settings.system.groupInstall')}
+            </button>
+          </div>
+        ))}
       </div>
 
       {systemReqs && (

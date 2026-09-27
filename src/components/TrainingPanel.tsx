@@ -134,6 +134,7 @@ import { findLastJsonObject } from '../ai/jsonBlock';
 import { MarkdownText } from './ui/MarkdownText';
 import { dateLocale } from '../utils/dateLocale';
 import ModalPortal from './ui/ModalPortal';
+import PackageCheckBanner from './PackageCheckBanner';
 
 /**
  * Gemeinsamer Einstieg fuer Training, Labor und die Dev-Panels.
@@ -2148,6 +2149,13 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               {progress && <div className="h-2 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${progress.progress_percent}%` }} /></div>}
               {lossPoints.length > 1 && <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3"><p className="text-xs text-gray-500 mb-2">{t('trainingPanel.progress.lossHistory')}</p><LossChart points={lossPoints} /></div>}
             </div>
+          )}
+
+          {/* Fehlen Python-Pakete fuer diese Aufgabe (z. B. LLM-Gruppe nicht
+              installiert oder peft zu alt)? Dann hier nachinstallieren statt
+              erst im Training an einem ImportError zu scheitern. */}
+          {!isRunning && selectedModelId && (
+            <PackageCheckBanner taskType={isCanvasSelected ? 'canvas' : detection?.supported === true ? detection.plugin.taskType : null} />
           )}
 
           {/* Start / Stop */}

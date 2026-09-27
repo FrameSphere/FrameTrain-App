@@ -272,6 +272,7 @@ fn main() {
             plugin_commands::check_first_launch,
             plugin_commands::install_plugins,
             plugin_commands::check_task_packages,
+            plugin_commands::get_python_info,
             plugin_commands::handle_plugin_approval,
             plugin_commands::run_preflight_check,
             plugin_commands::run_yolo_inference,

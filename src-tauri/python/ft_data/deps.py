@@ -38,6 +38,7 @@ MIN_VERSIONS = {
 # Paket → Gruppe, wie sie in Einstellungen → Python-Pakete heisst
 GROUP_OF = {
     "peft": "LLM Fine-Tuning", "mlx-lm": "LLM Fine-Tuning", "bitsandbytes": "LLM Fine-Tuning",
+    "sentencepiece": "LLM Fine-Tuning",
     "diffusers": "Generative Modelle",
     "ultralytics": "YOLO",
 }

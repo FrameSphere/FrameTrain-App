@@ -306,7 +306,12 @@
       "installFailed": "Installation failed",
       "pipStarting": "Starting pip…",
       "installed": "installed",
-      "missing": "missing"
+      "missing": "missing",
+      "groupsTitle": "Package groups",
+      "pythonUsed": "FrameTrain uses: {path} (Python {version})",
+      "pythonUnsupported": "This Python version is not supported (required: 3.10 to 3.13).",
+      "groupInstall": "Install",
+      "groupUpdate": "Check / update"
     },
     "updates": {
       "checking": "Checking for updates...",
@@ -3799,6 +3804,20 @@
       "classes": "Per class",
       "allGood": "Nothing unusual.",
       "fileHint": "Also saved as EXPORT_REPORT.md next to the dataset."
+    }
+  },
+  "packageCheck": {
+    "title": "Python packages are missing for this task ({group})",
+    "missing": "Missing or too old: {list}",
+    "tooOld": "too old",
+    "python": "Installing into: {path}",
+    "install": "Install “{group}” now",
+    "installing": "Installing …",
+    "groups": {
+      "seq_classification": "HuggingFace stack",
+      "yolo": "YOLO",
+      "llm": "LLM fine-tuning",
+      "generative": "Generative models"
     }
   }
 }

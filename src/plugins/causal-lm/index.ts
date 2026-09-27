@@ -17,11 +17,13 @@ const causalLMPlugin: ModelPlugin = {
   // backend: auto = MLX auf Apple Silicon (schneller, 4-bit moeglich), sonst PyTorch.
   // eval_samples: so viele Val-Beispiele werden vor/nach dem Training generiert
   // und mit der Referenz verglichen (Exact Match, ROUGE-L).
+  // export_gguf: zusaetzlich GGUF + Ollama-Modelfile (llama.cpp-Konvertierung wird
+  // bei Bedarf einmalig geladen); gguf_type: q8_0 | f16 | bf16.
   // dpo_*: greifen nur bei Praeferenzdaten (chosen/rejected). dpo_sft_weight
   // haelt das Antwortformat stabil — reines DPO (0) zerlegte es im Test.
   defaultPluginConfig: {
     backend: 'auto', system_prompt: '', eval_samples: 10, eval_baseline: true,
-    max_new_tokens: 256, export_gguf: false, dpo_beta: 0.1, dpo_sft_weight: 1.0,
+    max_new_tokens: 256, export_gguf: false, gguf_type: 'q8_0', dpo_beta: 0.1, dpo_sft_weight: 1.0,
   },
   hiddenTrainingFields: ['label_smoothing', 'group_by_length'],
   detect: detectCausalLM,

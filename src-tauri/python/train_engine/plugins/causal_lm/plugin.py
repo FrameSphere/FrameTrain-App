@@ -25,6 +25,7 @@ plugin_config:
   max_new_tokens    Laenge der Antworten in dieser Auswertung
   lora_layers       MLX: wie viele Bloecke (von hinten) LoRA bekommen, -1 = alle
   export_gguf       zusaetzlich eine GGUF-Datei fuer Ollama / LM Studio schreiben
+  gguf_type         q8_0 (Standard, halbe Groesse) | f16 | bf16 | f32
   dpo_beta          DPO (Daten mit chosen/rejected): Staerke der Praeferenz, Standard 0.1
   dpo_sft_weight    DPO: Anteil SFT-Loss auf der guten Antwort (RPO), 0 = reines DPO
 """
@@ -833,32 +834,17 @@ class Plugin(TrainPlugin):
             self.tokenizer.save_pretrained(str(out))
 
     def _export_gguf(self, out: Path) -> None:
-        """GGUF fuer Ollama / LM Studio — ueber llama.cpp, wenn vorhanden."""
-        import shutil
-        import subprocess
-        import os
-        candidates = []
-        for base in filter(None, [os.environ.get("LLAMA_CPP_DIR"), str(Path.home() / "llama.cpp"),
-                                  "/opt/homebrew/share/llama.cpp", "/usr/local/share/llama.cpp"]):
-            candidates.append(Path(base) / "convert_hf_to_gguf.py")
-        exe = shutil.which("convert_hf_to_gguf.py") or shutil.which("convert-hf-to-gguf")
-        script = next((c for c in candidates if c.exists()), None)
+        """GGUF fuer Ollama / LM Studio (ft_data.gguf_export) plus Ollama-Modelfile."""
+        from ft_data import gguf_export
+        outtype = str(self.pc.get("gguf_type", "q8_0") or "q8_0")
         target = out / "model.gguf"
-        cmd = [exe] if exe else ([sys.executable, str(script)] if script else None)
-        if cmd is None:
-            MessageProtocol.warning(
-                "GGUF-Export uebersprungen: llama.cpp nicht gefunden. Installieren mit "
-                "'brew install llama.cpp' oder 'git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp' "
-                "(dann pip install -r ~/llama.cpp/requirements.txt). Das Modell liegt im HF-Format vor "
-                "und laesst sich spaeter konvertieren.")
+        ok, msg = gguf_export.convert(out, target, outtype,
+                                      status=lambda m: MessageProtocol.status("export", m))
+        if not ok:
+            MessageProtocol.warning(msg)
             return
-        MessageProtocol.status("export", "Schreibe GGUF (llama.cpp) ...")
-        res = subprocess.run(cmd + [str(out), "--outfile", str(target), "--outtype", "f16"],
-                             capture_output=True, text=True)
-        if res.returncode != 0 or not target.exists():
-            MessageProtocol.warning(f"GGUF-Export fehlgeschlagen: {(res.stderr or res.stdout)[-800:]}")
-        else:
-            MessageProtocol.status("export", f"GGUF gespeichert: {target} ({target.stat().st_size/1e6:.0f} MB)")
+        gguf_export.write_modelfile(out, target.name, str(self.pc.get("system_prompt") or ""))
+        MessageProtocol.status("export", msg + " — für Ollama: ollama create mein-modell -f Modelfile")
 
     def get_metrics(self) -> Dict[str, Any]:
         return {"architecture": self.model_type, "device": self.device_used}
