@@ -15,11 +15,17 @@ import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
 import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
+import textToImageLoraPlugin from './text-to-image-lora';
+import visionLanguagePlugin from './vision-language';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
   canvasPlugin,               // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
   yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11)
+  // Generative Bildmodelle vor den Klassifikatoren: "blip-image-captioning"
+  // oder "stable-diffusion" sollen nicht an einer Bild-Heuristik haengen bleiben.
+  textToImageLoraPlugin,      // Stable Diffusion 1.x/2.x, SDXL (LoRA)
+  visionLanguagePlugin,       // SmolVLM / Qwen2-VL / PaliGemma / LLaVA / BLIP (LoRA)
   // Vor dem torchvision-Plugin: ein heruntergeladenes HuggingFace-Bildmodell
   // soll auch wirklich trainiert werden, nicht durch ein resnet18 ersetzt.
   hfImageClassificationPlugin,
@@ -136,10 +142,11 @@ const KNOWN_UNSUPPORTED: Record<string, string> = {
   falcon: 'Falcon ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
   speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
   detr: 'DETR ist ein Objekterkennungs-Modell, kein Bildklassifikator — für Objekterkennung nutze ein YOLO-Modell.',
-  blip: 'BLIP ist ein multimodales Bild-Text-Modell, kein Bildklassifikator.',
   segformer: 'SegFormer ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   sam: 'SAM (Segment Anything) ist ein Segmentierungs-Modell, kein Bildklassifikator.',
-  clip: 'CLIP ist ein multimodales Embedding-Modell.',
+  // BLIP (Captioning) laeuft seit dem Plugin vision-language. CLIP erzeugt
+  // keinen Text, sondern Vektoren — dafuer gibt es weiterhin kein Plugin.
+  clip: 'CLIP ist ein multimodales Embedding-Modell (Bild und Text als Vektoren), es erzeugt keinen Text. Für Bild + Frage -> Antwort ein VLM wie SmolVLM nutzen.',
 };
 
 /** Minimal-Shape für die Modell-Vorauswahl – deckt ModelInfo aus den Panels ab. */

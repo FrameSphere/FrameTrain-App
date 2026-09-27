@@ -33,6 +33,10 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.' };
     case 'video_classification':
       return { exts: VIDEO_EXTS, missing: 'Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.' };
+    case 'text_to_image_lora':
+      return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'Keine Bilddateien gefunden — für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).' };
+    case 'vision_language':
+      return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'Keine Bilddateien gefunden — ein VLM lernt aus Bild + Frage + Antwort.' };
     case 'seq2seq':
     case 'seq_classification':
       return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.' };

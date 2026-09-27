@@ -6,7 +6,7 @@
 // identisch und liegt deshalb hier statt dreimal kopiert.
 
 import { useEffect, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { AlertTriangle, Loader2, Play, Square } from 'lucide-react';
 import type { TestPluginProps } from './types';
@@ -24,15 +24,27 @@ interface GenericTestPanelProps extends TestPluginProps {
   /** Seq2Seq liefert freien Text statt Klassen — dann keine Konfidenz zeigen. */
   showConfidence?: boolean;
   pluginConfig?: Record<string, unknown>;
+  /**
+   * 'image': das Ergebnis ist der Pfad eines erzeugten Bildes (Text-to-Image)
+   * und wird als Bild angezeigt statt als Text.
+   */
+  resultKind?: 'text' | 'image';
+  /**
+   * Optionales zweites Feld (z. B. die Frage zum Bild bei VLMs). Der Wert geht
+   * als plugin_config[configKey] an die Engine — single_input bleibt der Pfad,
+   * Rust und die anderen Plugins merken davon nichts.
+   */
+  secondaryInput?: { label: string; placeholder: string; configKey: string };
 }
 
 export default function GenericTestPanel({
   versionId, modelId, modelName, versionName, datasets,
   taskType, inputKind, singleLabel, singlePlaceholder, resultLabel,
-  showConfidence = true, pluginConfig = {},
+  showConfidence = true, pluginConfig = {}, resultKind = 'text', secondaryInput,
 }: GenericTestPanelProps) {
   const { t } = useLanguage();
   const [input, setInput] = useState('');
+  const [secondary, setSecondary] = useState('');
   const [singleBusy, setSingleBusy] = useState(false);
   const [single, setSingle] = useState<{ predicted: string; confidence?: number; top: TopPred[]; ms: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +57,10 @@ export default function GenericTestPanel({
   const [maxSamples, setMaxSamples] = useState<number | ''>(50);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-  const [summary, setSummary] = useState<{ total: number; accuracy: number | null; correct: number | null } | null>(null);
+  const [summary, setSummary] = useState<{
+    total: number; accuracy: number | null; correct: number | null;
+    metrics?: Record<string, number>; images?: string[];
+  } | null>(null);
 
   const unlistenRef = useRef<Array<() => void>>([]);
   useEffect(() => () => { unlistenRef.current.forEach(fn => fn()); }, []);
@@ -59,7 +74,9 @@ export default function GenericTestPanel({
         singleInput: input.trim(),
         singleInputType: inputKind,
         taskType,
-        pluginConfig,
+        pluginConfig: secondaryInput && secondary.trim()
+          ? { ...pluginConfig, [secondaryInput.configKey]: secondary.trim() }
+          : pluginConfig,
       });
       const off = await listen<{ test_id: string; data?: { predicted_output?: string; confidence?: number; top_predictions?: TopPred[]; inference_time?: number } }>(
         'test-single-complete', e => {
@@ -108,13 +125,22 @@ export default function GenericTestPanel({
             setProgress({ current: d.current_sample, total: d.total_samples });
           }
         });
-      const offC = await listen<{ test_id?: string; data?: { total_samples?: number; accuracy?: number | null; correct_predictions?: number | null } }>(
+      const offC = await listen<{ test_id?: string; data?: {
+        total_samples?: number; accuracy?: number | null; correct_predictions?: number | null;
+        metrics?: Record<string, unknown>; images?: string[];
+      } }>(
         'test-complete', e => {
           const d = e.payload.data;
+          // Zusatzkennzahlen (z. B. ROUGE-L bei VLMs) — nur Zahlen uebernehmen.
+          const metrics = Object.fromEntries(
+            Object.entries(d?.metrics ?? {}).filter(([, v]) => typeof v === 'number'),
+          ) as Record<string, number>;
           setSummary({
             total: d?.total_samples ?? 0,
             accuracy: d?.accuracy ?? null,
             correct: d?.correct_predictions ?? null,
+            metrics,
+            images: Array.isArray(d?.images) ? d.images : undefined,
           });
           setStatus(null);
           setRunning(false);
@@ -152,6 +178,18 @@ export default function GenericTestPanel({
           rows={inputKind === 'text' ? 3 : 1}
           className="w-full px-3 py-2 bg-slate-900/60 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50"
         />
+        {secondaryInput && (
+          <div className="space-y-1">
+            <p className="text-gray-400 text-[11px]">{secondaryInput.label}</p>
+            <input
+              value={secondary}
+              onChange={e => setSecondary(e.target.value)}
+              placeholder={secondaryInput.placeholder}
+              aria-label={secondaryInput.label}
+              className="w-full px-3 py-2 bg-slate-900/60 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
+        )}
         <button
           onClick={runSingle}
           disabled={singleBusy}
@@ -170,7 +208,18 @@ export default function GenericTestPanel({
         {single && (
           <div className="rounded-xl bg-slate-900/60 border border-white/10 p-4 space-y-2">
             <p className="text-gray-400 text-[11px]">{resultLabel}</p>
-            <p className="text-white text-sm break-words">{single.predicted}</p>
+            {resultKind === 'image' && single.predicted !== '—' ? (
+              <div className="space-y-1">
+                <img
+                  src={convertFileSrc(single.predicted)}
+                  alt={input}
+                  className="max-h-80 w-auto rounded-lg border border-white/10"
+                />
+                <p className="text-gray-500 text-[11px] break-all">{single.predicted}</p>
+              </div>
+            ) : (
+              <p className="text-white text-sm break-words">{single.predicted}</p>
+            )}
             <p className="text-gray-500 text-[11px]">
               {showConfidence && single.confidence != null
                 ? t('testPlugins.generic.confidence', { value: (single.confidence * 100).toFixed(1) })
@@ -258,6 +307,20 @@ export default function GenericTestPanel({
                 {summary.accuracy != null
                   ? <p className="text-white font-medium">{t('testPlugins.generic.hits', { value: (summary.accuracy * 100).toFixed(1), correct: summary.correct ?? 0 })}</p>
                   : <p className="text-gray-500">{t('testPlugins.generic.noExpected')}</p>}
+                {summary.metrics && Object.keys(summary.metrics).length > 0 && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-[11px] text-gray-400">
+                    {Object.entries(summary.metrics).map(([k, v]) => (
+                      <span key={k} className="tabular-nums">{k}: {v <= 1 ? v.toFixed(3) : v}</span>
+                    ))}
+                  </div>
+                )}
+                {summary.images && summary.images.length > 0 && (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-2">
+                    {summary.images.slice(0, 12).map(p => (
+                      <img key={p} src={convertFileSrc(p)} alt="" className="w-full rounded-md border border-white/10" />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </>

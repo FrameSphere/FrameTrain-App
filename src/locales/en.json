@@ -3112,7 +3112,15 @@
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
       "detectedClass": "Detected class",
       "videoLabel": "Single video",
-      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4"
+      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4",
+      "t2iLabel": "Prompt",
+      "t2iPlaceholder": "Describe the image, e.g. a photo of sks dog on the beach",
+      "t2iResult": "Generated image",
+      "vlmImageLabel": "Image",
+      "vlmImagePlaceholder": "Full path to an image, e.g. /Users/you/pictures/invoice.png",
+      "vlmQuestionLabel": "Question about the image (optional)",
+      "vlmQuestionPlaceholder": "e.g. What colour is the shape? Empty = default prompt from training",
+      "vlmResult": "Model answer"
     }
   },
   "studio": {

@@ -3112,7 +3112,15 @@
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
       "detectedClass": "Erkannte Klasse",
       "videoLabel": "Einzelnes Video",
-      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4"
+      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4",
+      "t2iLabel": "Prompt",
+      "t2iPlaceholder": "Beschreibung des Bildes, z.B. a photo of sks dog on the beach",
+      "t2iResult": "Erzeugtes Bild",
+      "vlmImageLabel": "Bild",
+      "vlmImagePlaceholder": "Vollständiger Pfad zu einem Bild, z.B. /Users/du/bilder/rechnung.png",
+      "vlmQuestionLabel": "Frage zum Bild (optional)",
+      "vlmQuestionPlaceholder": "z.B. Welche Farbe hat die Form? Leer = Standardprompt aus dem Training",
+      "vlmResult": "Antwort des Modells"
     }
   },
   "studio": {
