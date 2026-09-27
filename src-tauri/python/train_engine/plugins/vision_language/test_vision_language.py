@@ -112,6 +112,31 @@ class LayoutTest(unittest.TestCase):
         s = resolve_image_text(self.root, "vlm", val_fraction=0.0)
         self.assertEqual(sorted(x.answer for x in s.train), ["text 0", "text 1", "text 2"])
 
+    def test_hf_parquet_mit_bildbytes_wird_entpackt(self):
+        import io
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        def png():
+            buf = io.BytesIO()
+            Image.new("RGB", (8, 8), (255, 0, 0)).save(buf, format="PNG")
+            return buf.getvalue()
+
+        table = pa.table({
+            "image": [{"bytes": png(), "path": None} for _ in range(3)],
+            "question": ["Farbe?"] * 3,
+            "answer": ["rot", "rot", "rot"],
+        })
+        (self.root / "data").mkdir()
+        pq.write_table(table, self.root / "data" / "train-00000-of-00001.parquet")
+        pq.write_table(table, self.root / "train.parquet")
+        s = resolve_image_text(self.root, "vlm", val_fraction=0.0)
+        self.assertEqual(len(s.train), 3)
+        self.assertEqual({(x.prompt, x.answer) for x in s.train}, {("Farbe?", "rot")})
+        self.assertTrue(all(x.image.exists() for x in s.train))
+        # Zweiter Aufruf nutzt den Cache (gleiche Signatur).
+        self.assertEqual(len(resolve_image_text(self.root, "vlm", val_fraction=0.0).train), 3)
+
     def test_leerer_ordner_klare_meldung(self):
         with self.assertRaises(ValueError) as ctx:
             resolve_image_text(self.root, "vlm")

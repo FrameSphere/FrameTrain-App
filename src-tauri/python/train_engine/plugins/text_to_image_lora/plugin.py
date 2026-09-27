@@ -99,6 +99,7 @@ class Plugin(TrainPlugin):
         self.total_steps = 0
         self.epochs_done = 0
         self.samples_written: List[str] = []
+        self.fixed_loss_before: Optional[float] = None
         self._embed_cache: Dict[str, Any] = {}
         self._start_time = time.time()
 
@@ -299,6 +300,58 @@ class Plugin(TrainPlugin):
             model_pred = self.pipe.unet(noisy, timesteps, hidden, return_dict=False, **kwargs)[0]
         return F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
+    def _fixed_noise_loss(self) -> Optional[float]:
+        """Loss mit festem Rauschen und festen Timesteps auf bis zu 8 Trainingsbildern.
+
+        Der Schritt-Loss springt je nach zufaellig gezogenem Timestep um Faktor
+        zehn und zeigt Lernfortschritt kaum. Mit festem Seed ist der Wert vor
+        und nach dem Training direkt vergleichbar.
+        """
+        import torch
+        import torch.nn.functional as F
+
+        samples = self.train_dataset[:8]
+        if not samples:
+            return None
+        unet = self.pipe.unet
+        was_training = unet.training
+        unet.eval()
+        gen = torch.Generator(device="cpu").manual_seed(1234)
+        rng = random.Random(1234)
+        flip, self.random_flip = self.random_flip, False
+        total, n = 0.0, 0
+        try:
+            with torch.no_grad():
+                for s in samples:
+                    pixels, time_ids = self._load_pixels(s, rng)
+                    pixels = pixels.unsqueeze(0).to(self.device, dtype=torch.float32)
+                    lat = self.pipe.vae.encode(pixels).latent_dist.mean
+                    lat = (lat * self.pipe.vae.config.scaling_factor).to(self.weight_dtype)
+                    emb, pooled = self._encode_prompt(s.answer)
+                    kwargs: Dict[str, Any] = {}
+                    if self.kind == "sdxl":
+                        kwargs["added_cond_kwargs"] = {
+                            "text_embeds": pooled,
+                            "time_ids": torch.tensor([time_ids], device=self.device, dtype=self.weight_dtype)}
+                    for t in (100, 300, 500, 800):
+                        t = min(t, self.noise_scheduler.config.num_train_timesteps - 1)
+                        noise = torch.randn(lat.shape, generator=gen).to(lat.device, dtype=lat.dtype)
+                        ts = torch.tensor([t], device=lat.device).long()
+                        noisy = self.noise_scheduler.add_noise(lat, noise, ts)
+                        target = noise if self.noise_scheduler.config.prediction_type == "epsilon" \
+                            else self.noise_scheduler.get_velocity(lat, noise, ts)
+                        pred = unet(noisy, ts, emb, return_dict=False, **kwargs)[0]
+                        total += float(F.mse_loss(pred.float(), target.float()).item())
+                        n += 1
+        except Exception as exc:
+            MessageProtocol.warning(f"Loss mit festem Rauschen nicht berechenbar: {exc}")
+            return None
+        finally:
+            self.random_flip = flip
+            if was_training:
+                unet.train()
+        return total / max(n, 1)
+
     def _write_samples(self, tag: str) -> None:
         """Beispielbilder mit festem Seed — vorher/nachher direkt vergleichbar."""
         if self.num_validation_images <= 0 or not self.validation_prompt:
@@ -362,6 +415,7 @@ class Plugin(TrainPlugin):
         rng = random.Random(self.config.seed)
         if self.sample_before:
             self._write_samples("before")
+        self.fixed_loss_before = self._fixed_noise_loss()
         self._add_lora()
         unet = self.pipe.unet
         unet.train()
@@ -455,6 +509,7 @@ class Plugin(TrainPlugin):
     # ── 5. Validierung ──────────────────────────────────────────────────────
     def validate(self) -> Dict[str, float]:
         self._write_samples("after")
+        fixed_after = self._fixed_noise_loss()
         n = len(self.losses)
         tail = self.losses[-max(1, n // 10):] if n else [0.0]
         head = self.losses[:max(1, n // 10)] if n else [0.0]
@@ -474,6 +529,9 @@ class Plugin(TrainPlugin):
             "resolution": self.resolution,
             "lora_r": int(self.config.lora_r),
             "num_samples_written": len(self.samples_written),
+            # Paar fuer die Analyse-Seite: <key> und <key>_before.
+            **({"fixed_noise_loss": fixed_after} if fixed_after is not None else {}),
+            **({"fixed_noise_loss_before": self.fixed_loss_before} if self.fixed_loss_before is not None else {}),
         }
 
     # ── 6. Export ───────────────────────────────────────────────────────────
