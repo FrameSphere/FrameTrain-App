@@ -15,6 +15,7 @@ import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
 import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
+import causalLMPlugin from './causal-lm';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
@@ -27,6 +28,7 @@ const PLUGINS: ModelPlugin[] = [
   audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
   videoClassificationPlugin,  // VideoMAE / TimeSformer / ViViT
   seq2seqPlugin,              // T5 / BART / Pegasus / Marian
+  causalLMPlugin,             // Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi) mit LoRA
   xlmRobertaPlugin,
   hfEncoderPlugin,
 ];
@@ -69,7 +71,7 @@ export function detectPlugin(
     // Der Hinweis auf Text-Encoder gehoert nur zu Textmodellen. Bei einem
     // Bildmodell wie DETR stand er sinnlos daneben.
     const textHint = TEXT_DOMAIN_KEYS.has(knownKey)
-      ? ' FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte).'
+      ? ' Für Text trainiert FrameTrain Encoder (BERT & Co.), Seq2Seq-Modelle (T5, BART) und Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi).'
       : '';
     return {
       supported: false,
@@ -126,14 +128,8 @@ const TEXT_DOMAIN_KEYS = new Set([
  * und "geht nicht, weil …, nimm stattdessen …".
  */
 const KNOWN_UNSUPPORTED: Record<string, string> = {
-  gpt2: 'GPT-2 ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  gptj: 'GPT-J ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  gpt_neo: 'GPT-Neo ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  gpt_neox: 'GPT-NeoX ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  llama: 'Llama ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  mistral: 'Mistral ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  qwen2: 'Qwen ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  falcon: 'Falcon ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  // Decoder-LLMs (gpt2, llama, mistral, qwen2, falcon …) trainiert seit dem
+  // causal-lm-Plugin FrameTrain selbst — sie stehen deshalb nicht mehr hier.
   speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
   detr: 'DETR ist ein Objekterkennungs-Modell, kein Bildklassifikator — für Objekterkennung nutze ein YOLO-Modell.',
   blip: 'BLIP ist ein multimodales Bild-Text-Modell, kein Bildklassifikator.',

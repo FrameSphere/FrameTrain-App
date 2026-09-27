@@ -216,6 +216,12 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
             else:
                 if "loss" not in logs and "train_loss" not in logs:
                     return
+                if "train_runtime" in logs:
+                    # Abschluss-Zusammenfassung des Trainers: train_loss ist dort der
+                    # MITTELWERT ueber den ganzen Lauf. Als letzter Kurvenpunkt sprang
+                    # die Kurve damit am Ende hoch, und final_train_loss zeigte
+                    # z. B. 1.04 statt der zuletzt gemessenen 0.09.
+                    return
                 t_loss = logs.get("loss", logs.get("train_loss"))
                 lr = logs.get("learning_rate", getattr(plugin, "_last_lr", plugin.config.learning_rate))
                 plugin._last_train_loss = t_loss

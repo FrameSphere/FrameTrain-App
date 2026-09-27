@@ -495,8 +495,10 @@ pub fn lab_infer_sample(
         writeln!(server.stdin, "{}", req).map_err(|e| format!("Schreibfehler: {}", e))?;
         server.stdin.flush().map_err(|e| format!("Flush-Fehler: {}", e))?;
 
-        // Auf Antwort warten (max. 30s)
-        server.receiver.recv_timeout(Duration::from_secs(30))
+        // Auf Antwort warten. Ein LLM schreibt Token fuer Token — 256 Tokens
+        // eines 7B-Modells brauchen auf dem Mac leicht ueber 30 s.
+        let warten = if server.modality == "causal_lm" { 180 } else { 30 };
+        server.receiver.recv_timeout(Duration::from_secs(warten))
     }; // server-Borrow endet hier
 
     match recv_result {

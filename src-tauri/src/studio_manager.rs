@@ -2293,7 +2293,8 @@ fn modell_passt(art: Vorschlagsart, project: &StudioProject, modalitaet: &str) -
     let ok = match art {
         Vorschlagsart::Boxen => modalitaet == "detect",
         Vorschlagsart::Ziel if project.modality == "audio" => modalitaet == "asr",
-        Vorschlagsart::Ziel => modalitaet == "seq2seq",
+        // Zieltexte schreibt ein Seq2Seq-Modell ebenso wie ein Decoder-LLM.
+        Vorschlagsart::Ziel => modalitaet == "seq2seq" || modalitaet == "causal_lm",
         Vorschlagsart::Klasse => modalitaet == project.modality,
     };
     if ok { return Ok(()); }
@@ -2301,6 +2302,7 @@ fn modell_passt(art: Vorschlagsart, project: &StudioProject, modalitaet: &str) -
         "detect" => "ein Objekterkennungs-Modell (Boxen)",
         "asr" => "ein Spracherkennungs-Modell (Transkripte)",
         "seq2seq" => "ein Text-zu-Text-Modell",
+        "causal_lm" => "ein Sprachmodell (LLM)",
         "image" => "ein Bildklassifikator",
         "audio" => "ein Audioklassifikator",
         "video" => "ein Videoklassifikator",
@@ -3877,6 +3879,8 @@ mod tests {
         let e = modell_passt(Vorschlagsart::Boxen, &p("image", "bbox"), "image").unwrap_err();
         assert!(e.contains("Bildklassifikator") && e.contains("YOLO"), "{}", e);
         assert!(modell_passt(Vorschlagsart::Ziel, &p("audio", "transcript"), "asr").is_ok());
+        assert!(modell_passt(Vorschlagsart::Ziel, &p("text", "pairs"), "causal_lm").is_ok());
+        assert!(modell_passt(Vorschlagsart::Klasse, &p("text", "classify"), "causal_lm").is_err());
         assert!(modell_passt(Vorschlagsart::Ziel, &p("audio", "transcript"), "audio").is_err());
         assert!(modell_passt(Vorschlagsart::Klasse, &p("video", "classify"), "video").is_ok());
         assert!(modell_passt(Vorschlagsart::Klasse, &p("image", "classify"), "detect").is_err());

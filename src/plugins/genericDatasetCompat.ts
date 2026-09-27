@@ -36,6 +36,9 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
     case 'seq2seq':
     case 'seq_classification':
       return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.' };
+    case 'causal_lm':
+      // Chat-/Frage-Antwort-Tabellen oder reiner Text fuer weiteres Vortraining.
+      return { exts: [...TABLE_EXTS, '.txt', '.md'], missing: 'Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext).' };
     default:
       return null;
   }

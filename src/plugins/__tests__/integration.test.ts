@@ -154,7 +154,8 @@ describe('Registry-Priorität – Überschneidung xlm-roberta / hf-encoder', () 
   });
 
   it('reason bei unsupported enthält ALLE Plugin-Namen', () => {
-    const result = detectPlugin('llama-3-70b');
+    // Llama ist seit dem LLM-Plugin unterstuetzt — ein wirklich unbekanntes Modell nehmen.
+    const result = detectPlugin('irgendwer/voellig-unbekannt-3000');
     expect(result.supported).toBe(false);
     if (!result.supported) {
       for (const plugin of PLUGINS) {

@@ -201,13 +201,14 @@ describe('detectPlugin – Priorität & Routing', () => {
     if (result.supported) expect(result.plugin.id).toBe('hf-encoder');
   });
 
-  it('"gpt2" → supported: false', () => {
+  it('"gpt2" → causal-lm (Decoder-LLM, seit dem LLM-Plugin trainierbar)', () => {
     const result = detectPlugin('gpt2');
-    expect(result.supported).toBe(false);
+    expect(result.supported).toBe(true);
+    if (result.supported) expect(result.plugin.id).toBe('causal-lm');
   });
 
-  it('"gpt2" → reason nennt verfügbare Plugins', () => {
-    const result = detectPlugin('gpt2');
+  it('unbekanntes Modell → reason nennt verfügbare Plugins', () => {
+    const result = detectPlugin('irgendwer/voellig-unbekannt');
     expect(result.supported).toBe(false);
     expect('reason' in result).toBe(true);
     if (!result.supported && 'reason' in result) {
@@ -265,10 +266,10 @@ describe('Decoder-Modelle werden nicht als Encoder erkannt', () => {
     expect(detectHFEncoder('meine-bert-modelle/checkpoint', { model_type: 'llama' })).toBe(false);
   });
 
-  it('detectPlugin nennt bei gpt2 den Grund', () => {
+  it('detectPlugin gibt gpt2 an das LLM-Plugin statt an einen Encoder', () => {
     const result = detectPlugin('distilbert/distilgpt2', { model_type: 'gpt2' });
-    expect(result.supported).toBe(false);
-    expect((result as { supported: false; reason: string }).reason).toMatch(/Decoder/i);
+    expect(result.supported).toBe(true);
+    if (result.supported) expect(result.plugin.id).toBe('causal-lm');
   });
 
   it('Encoder in Unterordner-Layout bleibt erkannt', () => {

@@ -90,10 +90,16 @@ describe('detectPluginForModel', () => {
 
   it('laesst einen echten model_type weiter entscheiden', () => {
     // Nicht jede Architektur ist trainierbar – das darf der Name nicht aushebeln.
+    // (gpt2 war hier das Beispiel, ist aber seit dem LLM-Plugin trainierbar –
+    // dann muss es eben dort landen und nicht beim Encoder aus dem Namen.)
     const r = detectPluginForModel({
-      id: 'x', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'gpt2',
+      id: 'x', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'speecht5',
     });
     expect(r.supported).toBe(false);
+    const g = detectPluginForModel({
+      id: 'y', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'gpt2',
+    });
+    expect(g.supported && g.plugin.id).toBe('causal-lm');
   });
 
   it('nennt den erkannten Typ in der Begruendung', () => {

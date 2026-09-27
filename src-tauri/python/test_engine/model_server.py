@@ -67,7 +67,7 @@ ASR_MODEL_TYPES = {"whisper", "speech_to_text", "speech-encoder-decoder", "moons
 def detect_modality(model_cfg: dict) -> str:
     """Bestimmt aus config.json, welche Auto-Klasse und welche Eingabe passt.
 
-    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video"
+    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video" | "causal_lm"
     """
     archs = [a for a in (model_cfg.get("architectures") or []) if isinstance(a, str)]
     arch = archs[0] if archs else ""
@@ -85,6 +85,10 @@ def detect_modality(model_cfg: dict) -> str:
         return "asr"
     if arch.endswith("ForConditionalGeneration") or arch.endswith("ForSeq2SeqLM"):
         return "seq2seq"
+    if arch.endswith("ForCausalLM") or arch.endswith("LMHeadModel"):
+        # Decoder-LLMs (Llama, Qwen, GPT-2 …). Frueher fielen sie ans Ende
+        # auf "text" und wurden als Klassifikator mit Zufallskopf geladen.
+        return "causal_lm"
     if arch.endswith("ForSequenceClassification"):
         # wav2vec2 & Co. melden ForSequenceClassification, erwarten aber Audio
         if model_type in AUDIO_MODEL_TYPES:
@@ -111,6 +115,7 @@ MAX_AUDIO_SECONDS = 10.0
 INPUT_KIND = {
     "text":    "text",
     "seq2seq": "text",
+    "causal_lm": "text",
     "image":   "image",
     "audio":   "audio",
     "asr":     "audio",
@@ -165,6 +170,7 @@ class ModelServer:
             "asr":     self._load_asr,
             "video":   self._load_video,
             "seq2seq": self._load_seq2seq,
+            "causal_lm": self._load_causal_lm,
             "text":    self._load_text,
         }[self.modality]
         loader()
@@ -236,6 +242,25 @@ class ModelServer:
             str(self.model_path), local_files_only=True
         )
 
+    def _load_causal_lm(self):
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from ft_data import llm as llm_data
+        self._llm = llm_data
+        self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), local_files_only=True)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        # Basismodelle ohne Template bekommen dasselbe Ersatzformat wie im Training.
+        llm_data.ensure_chat_template(self.tokenizer)
+        self.model = AutoModelForCausalLM.from_pretrained(str(self.model_path), local_files_only=True)
+        self.system_prompt = ""
+        meta = self.model_path / "frametrain_llm.json"
+        if meta.exists():
+            try:
+                self.system_prompt = json.loads(meta.read_text(encoding="utf-8")).get("system_prompt", "")
+            except Exception:
+                pass
+
     def _load_image(self):
         from transformers import AutoModelForImageClassification
         try:
@@ -298,6 +323,8 @@ class ModelServer:
             return self._infer_video(self._require_file(req, "Video"), req.get("start"), req.get("end"))
         if self.modality == "seq2seq":
             return self._infer_seq2seq(self._require_text(req))
+        if self.modality == "causal_lm":
+            return self._infer_causal_lm(self._require_text(req), req)
         return self._infer_text(self._require_text(req))
 
     def _require_text(self, req: dict) -> str:
@@ -451,6 +478,21 @@ class ModelServer:
             data = data[:max_len]
 
         return data.astype("float32")
+
+    def _infer_causal_lm(self, text: str, req: dict) -> dict:
+        torch = self._torch
+        msgs = [{"role": "user", "content": text}]
+        if self.system_prompt:
+            msgs.insert(0, {"role": "system", "content": self.system_prompt})
+        prompt = self._llm.render_chat(self.tokenizer, msgs, add_generation_prompt=True)
+        enc = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+        enc = {k: v.to(self.device) for k, v in enc.items()}
+        t0 = time.time()
+        with torch.no_grad():
+            out = self.model.generate(**enc, max_new_tokens=int(req.get("max_new_tokens", 256)),
+                                      do_sample=False, pad_token_id=self.tokenizer.pad_token_id)
+        answer = self.tokenizer.decode(out[0][enc["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+        return {"predicted": answer, "inference_time": time.time() - t0}
 
     def _infer_seq2seq(self, text: str) -> dict:
         torch = self._torch

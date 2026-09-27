@@ -18,7 +18,8 @@ export type StudioModel = ModelDetectionInfo;
 /** Welche Plugin-Aufgaben aus diesem Projekt trainieren koennen. */
 export function passendeAufgaben(project: Pick<StudioProject, 'modality' | 'task'>): string[] {
   if (project.modality === 'text') {
-    return project.task === 'pairs' ? ['seq2seq'] : ['seq_classification'];
+    // Paare (source/target) trainieren Seq2Seq-Modelle und ebenso Decoder-LLMs.
+    return project.task === 'pairs' ? ['seq2seq', 'causal_lm'] : ['seq_classification'];
   }
   if (project.modality === 'video') return ['video_classification'];
   if (project.modality === 'image' && project.task === 'classify') {

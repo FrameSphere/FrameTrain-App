@@ -30,11 +30,19 @@ describe('Text-Encoder werden erkannt', () => {
   });
 });
 
-describe('Decoder-Modelle werden abgelehnt – dafuer gibt es kein Plugin', () => {
+// Bis 1.3.3 wurden Decoder-Modelle abgelehnt. Seit dem causal-lm-Plugin
+// (LoRA/QLoRA, PyTorch oder MLX) sind sie trainierbar.
+describe('Decoder-LLMs laufen ueber das causal-lm-Plugin', () => {
   it.each([
     'gpt2', 'distilbert/distilgpt2', 'meta-llama/Llama-3.2-1B',
-    'Qwen/Qwen2.5-0.5B', 'mistralai/Mistral-7B-v0.1',
-  ])('%s', (id) => expect(pluginOf(id)).toBeNull());
+    'Qwen/Qwen2.5-0.5B', 'mistralai/Mistral-7B-v0.1', 'HuggingFaceTB/SmolLM2-135M-Instruct',
+    'google/gemma-2-2b-it', 'microsoft/Phi-3-mini-4k-instruct',
+  ])('%s -> causal-lm', (id) => expect(pluginOf(id)).toBe('causal-lm'));
+
+  it.each([
+    'Qwen/Qwen2-VL-2B-Instruct', 'Qwen/Qwen3-Embedding-0.6B',
+    'TheBloke/Llama-2-7B-GGUF', 'TheBloke/Mistral-7B-Instruct-v0.2-AWQ',
+  ])('%s ist keine trainierbare Text-LLM-Variante', (id) => expect(pluginOf(id)).not.toBe('causal-lm'));
 });
 
 describe('Seq2Seq wird seit 1.2.17 unterstuetzt', () => {
@@ -106,7 +114,6 @@ describe('Ablehnungen nennen den Grund, auch ohne config.json', () => {
     ['microsoft/speecht5_tts', /Text-to-Speech|Sprachsynthese/i],
     ['facebook/detr-resnet-50', /Objekterkennung/i],
     ['openai/clip-vit-base-patch32', /multimodal/i],
-    ['meta-llama/Llama-3.2-1B', /Decoder/i],
   ])('%s', (id, muster) => expect(reasonOf(id)).toMatch(muster));
 
   it('unbekannte Modelle bekommen weiterhin den allgemeinen Hinweis', () => {
