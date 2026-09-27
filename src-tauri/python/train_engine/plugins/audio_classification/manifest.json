@@ -7,7 +7,7 @@
   "description": "Trainiert Audiomodelle für Klassifikation (Wav2Vec2, HuBERT, WavLM, AST, Whisper-Encoder). Ordner pro Klasse mit Audiodateien.",
   "supported_architectures": [
     "wav2vec2", "wav2vec2-bert", "hubert", "wavlm", "unispeech",
-    "unispeech-sat", "sew", "sew-d", "audio-spectrogram-transformer", "ast", "whisper"
+    "unispeech-sat", "sew", "sew-d", "audio-spectrogram-transformer", "whisper"
   ],
   "dataset_formats": ["folder_class", "pre_split"],
   "metrics": ["train_loss", "val_loss", "accuracy", "f1", "precision", "recall"]

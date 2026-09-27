@@ -18,6 +18,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 from core.config import TrainingConfig
+from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 
 # Sibling imports (train_engine loads this file via importlib, not as package)
@@ -31,7 +32,9 @@ from model_builder import build_model_from_graph  # noqa: E402
 from shape_propagate import ShapeValidationError  # noqa: E402
 
 
-class CanvasPlugin:
+class CanvasPlugin(TrainPlugin):
+    # Eigenes __init__ ohne super(): Verhalten unveraendert, TrainPlugin
+    # dient als Vertrag (Pflichtmethoden, stop()).
     def __init__(self, config: TrainingConfig):
         self.config = config
         # Fix 1.2: MPS-Support für Apple Silicon
@@ -70,10 +73,10 @@ class CanvasPlugin:
     def stop(self) -> None:
         """Abbruch aus der Oberflaeche.
 
-        Diese Klasse erbt nicht von TrainPlugin, wo stop() definiert ist.
-        Ohne die Methode lief der Signal-Handler der Engine in einen
+        Ohne die Methode lief der Signal-Handler der Engine frueher in einen
         AttributeError: "Stoppen" blieb wirkungslos und das Training lief
         bis zur letzten Epoche weiter, obwohl is_stopped ueberall geprueft wird.
+        (TrainPlugin.stop() taete dasselbe; die Methode bleibt ausdruecklich.)
         """
         self.is_stopped = True
 

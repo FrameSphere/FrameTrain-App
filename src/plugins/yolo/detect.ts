@@ -3,11 +3,14 @@
 
 import type { ModelConfig } from '../types';
 
+/** model_type-Werte fuer YOLO — muss zu plugins/yolo/manifest.json passen (Test prueft das). */
+export const YOLO_MODEL_TYPES = ['yolov5', 'yolov8', 'yolov9', 'yolo11', 'yolo'];
+
 export function detectYOLO(modelPathOrId: string, configJson?: ModelConfig): boolean {
   // config.json: model_type = "yolo" oder architecture-Hinweis
   if (configJson) {
     const mt = configJson.model_type?.toLowerCase() ?? '';
-    if (mt === 'yolo' || mt === 'yolov5' || mt === 'yolov8' || mt === 'yolov9' || mt === 'yolo11') return true;
+    if (YOLO_MODEL_TYPES.includes(mt)) return true;
     const archs = (configJson.architectures ?? []).map((a: string) => a.toLowerCase());
     if (archs.some((a: string) => a.includes('yolo'))) return true;
   }

@@ -68,5 +68,74 @@ class OrchestratorTest(unittest.TestCase):
                 self.assertNotIn("complete", run_with(FakePlugin(fail_at=step)))
 
 
+class PluginVertragTest(unittest.TestCase):
+    """load_plugin prueft die Pflichtmethoden, bevor das Plugin laeuft."""
+
+    def test_fehlendes_stop_wird_ergaenzt(self):
+        class OhneStop:
+            def __init__(self, cfg): self.is_stopped = False
+            def setup(self): pass
+            def load_data(self): pass
+            def build_model(self): pass
+            def train(self): pass
+            def validate(self): return {}
+            def export(self): return ""
+        cls = train_engine.ensure_plugin_contract(OhneStop, "test")
+        p = cls(None)
+        p.stop()
+        self.assertTrue(p.is_stopped)
+
+    def test_fehlende_pflichtmethode_nennt_sie(self):
+        class OhneTrain:
+            def setup(self): pass
+            def load_data(self): pass
+            def build_model(self): pass
+            def validate(self): return {}
+            def export(self): return ""
+        with self.assertRaises(ValueError) as ctx:
+            train_engine.ensure_plugin_contract(OhneTrain, "kaputt")
+        self.assertIn("train", str(ctx.exception))
+        self.assertIn("kaputt", str(ctx.exception))
+
+    def test_abstrakte_basisklasse_wird_erkannt(self):
+        from core.plugin_base import TrainPlugin
+
+        class Halb(TrainPlugin):
+            def setup(self): pass
+        with self.assertRaises(ValueError) as ctx:
+            train_engine.ensure_plugin_contract(Halb, "halb")
+        self.assertIn("export", str(ctx.exception))
+
+    def test_eigenstaendige_plugins_erben_von_trainplugin(self):
+        # Ohne das Verhalten zu aendern: sie bleiben instanziierbar (keine
+        # offene abstrakte Methode) und starten ungestoppt.
+        import importlib.util
+        from core.plugin_base import TrainPlugin
+        here = Path(__file__).resolve().parent / "plugins"
+        for folder, cls_name in (("yolo", "YOLOPlugin"), ("canvas", "CanvasPlugin"),
+                                 ("image_classification", "ImageClassificationPlugin")):
+            with self.subTest(plugin=folder):
+                spec = importlib.util.spec_from_file_location(
+                    f"plugins.{folder}.plugin", here / folder / "plugin.py")
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                cls = getattr(mod, cls_name)
+                self.assertTrue(issubclass(cls, TrainPlugin))
+                self.assertEqual(train_engine.ensure_plugin_contract(cls, folder), cls)
+                plugin = cls(TrainingConfig())
+                self.assertFalse(plugin.is_stopped)
+
+    def test_load_plugin_liefert_geprueftes_plugin(self):
+        cfg = TrainingConfig()
+        cfg.task_type = "detect"
+        with contextlib.redirect_stdout(io.StringIO()):
+            plugin = train_engine.load_plugin(cfg)
+        self.assertTrue(callable(plugin.stop))
+        cfg.task_type = "gibt_es_nicht"
+        with self.assertRaises(ValueError):
+            with contextlib.redirect_stdout(io.StringIO()):
+                train_engine.load_plugin(cfg)
+
+
 if __name__ == "__main__":
     unittest.main()
