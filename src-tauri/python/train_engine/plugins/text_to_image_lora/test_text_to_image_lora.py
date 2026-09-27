@@ -147,5 +147,18 @@ class ModellErkennungTest(unittest.TestCase):
         self.assertEqual(model_server.INPUT_KIND["text_to_image"], "text")
 
 
+
+class WeightVariantTest(unittest.TestCase):
+    def test_nur_fp16_dateien_brauchen_variant(self):
+        import tempfile
+        from pathlib import Path
+        from ft_data.diffusion import weight_variant
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "unet").mkdir()
+            (Path(d) / "unet" / "diffusion_pytorch_model.fp16.safetensors").write_bytes(b"x")
+            self.assertEqual(weight_variant(Path(d)), "fp16")
+            (Path(d) / "unet" / "diffusion_pytorch_model.safetensors").write_bytes(b"x")
+            self.assertIsNone(weight_variant(Path(d)))
+
 if __name__ == "__main__":
     unittest.main()

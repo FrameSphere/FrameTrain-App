@@ -78,6 +78,30 @@ def _pipeline_class(kind: str):
     return StableDiffusionXLPipeline if kind == "sdxl" else StableDiffusionPipeline
 
 
+def weight_variant(model_dir: Path) -> Optional[str]:
+    """"fp16", wenn die Komponenten NUR als fp16-Variante vorliegen.
+
+    Viele Repos (und der Import der App, wenn es keine vollen Gewichte gibt)
+    liefern diffusion_pytorch_model.fp16.safetensors / model.fp16.safetensors.
+    diffusers laedt die ohne variant="fp16" gar nicht ("no file named ...").
+    Gerechnet wird trotzdem in dem dtype, der beim Laden verlangt wird.
+    """
+    model_dir = Path(model_dir)
+    has_full, has_fp16 = False, False
+    for comp in ("unet", "transformer", "vae", "text_encoder"):
+        d = model_dir / comp
+        if not d.is_dir():
+            continue
+        for f in d.iterdir():
+            if f.suffix not in (".safetensors", ".bin"):
+                continue
+            if ".fp16." in f.name:
+                has_fp16 = True
+            elif not any(t in f.name for t in (".bf16.", ".ema.", ".non_ema.")):
+                has_full = True
+    return "fp16" if has_fp16 and not has_full else None
+
+
 def load_base_pipeline(model_dir: Path, dtype=None):
     """Laedt eine diffusers-Pipeline aus einem Ordner mit model_index.json.
 
@@ -96,6 +120,9 @@ def load_base_pipeline(model_dir: Path, dtype=None):
     kwargs: Dict[str, Any] = {"torch_dtype": dtype or torch.float32}
     if "safety_checker" in index:
         kwargs.update(safety_checker=None, requires_safety_checker=False)
+    variant = weight_variant(Path(model_dir))
+    if variant:
+        kwargs["variant"] = variant
     pipe = cls.from_pretrained(str(model_dir), **kwargs)
     pipe.set_progress_bar_config(disable=True)
     return pipe, kind
