@@ -2730,6 +2730,11 @@ fn write_class_export<'a>(
 ) -> Result<(PathBuf, Vec<&'a StudioSample>, Vec<Option<String>>, Vec<quality::Hinweis>), String> {
     let mit_label: Vec<&StudioSample> = samples.iter().copied().filter(|s| s.ann.label.is_some()).collect();
     let splits = gruppen_splits(&mit_label, train_ratio, val_ratio);
+    // Landet alles in einem Teil (nur eine Gruppe), bleibt der Ordner flach:
+    // train/ allein erkennt die App weder als Split noch als Klassenordner.
+    // Der Bericht warnt trotzdem vor dem leeren Teil.
+    let teile: std::collections::HashSet<&str> = splits.iter().flatten().map(String::as_str).collect();
+    let in_teilen = teile.len() >= 2;
     let daten = out.join("dataset");
     fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
 
@@ -2738,7 +2743,7 @@ fn write_class_export<'a>(
     for (s, split) in mit_label.iter().zip(&splits) {
         let klasse = s.ann.label.as_deref().unwrap_or("").replace(['/', '\\', ':'], "_");
         let mut ordner = daten.clone();
-        if let Some(sp) = split { ordner = ordner.join(sp); }
+        if let (true, Some(sp)) = (in_teilen, split) { ordner = ordner.join(sp); }
         let ordner = ordner.join(&klasse);
         fs::create_dir_all(&ordner).map_err(|e| format!("mkdir: {}", e))?;
         let quelle = media_dir.join(&s.media);
@@ -3845,6 +3850,31 @@ mod tests {
         let r = quality::baue_report(&p, &refs, &splits, &HashMap::new());
         assert!(r.group_leaks.is_empty());
         assert_eq!(r.per_class, vec![("katze".to_string(), 10), ("hund".to_string(), 10)]);
+    }
+
+    #[test]
+    fn eine_gruppe_mit_aufteilung_bleibt_ein_erkennbarer_klassenordner() {
+        // Ein einziges Video in Abschnitten: 80/20 kann nichts in val legen.
+        // Frueher entstand dataset/train/<klasse> allein — "Typ nicht erkannt".
+        let dir = TempDir::new("einegruppe");
+        let media = dir.path().join("media");
+        fs::create_dir_all(media.join("ab")).unwrap();
+        let mut samples = Vec::new();
+        for i in 0..4 {
+            let id = format!("s_{}", i);
+            fs::write(media.join(format!("ab/{}.jpg", id)), b"jpg").unwrap();
+            samples.push(klassen_sample(&id, if i % 2 == 0 { "katze" } else { "hund" }, "eine"));
+        }
+        let p = StudioProject { id: "p".into(), name: "Eins".into(), modality: "image".into(), task: "classify".into(),
+            target_format: "folder_class".into(), classes: vec!["katze".into(), "hund".into()],
+            created_at: String::new(), updated_at: String::new() };
+        let refs: Vec<&StudioSample> = samples.iter().collect();
+        let out = dir.path().join("o");
+        let (daten, _, splits, _) = write_class_export(None, &p, &refs, &media, &out, 0.8, 0.2).unwrap();
+        let a = crate::dataset_manager::detect_dataset_type(&daten);
+        assert!(matches!(a.detected_type, crate::dataset_manager::DatasetType::FolderClass), "erkannt als {:?}", a.detected_type);
+        let r = quality::baue_report(&p, &refs, &splits, &HashMap::new());
+        assert!(r.hints.iter().any(|h| h.code == "split_empty"), "der leere Teil wird trotzdem gemeldet");
     }
 
     #[test]

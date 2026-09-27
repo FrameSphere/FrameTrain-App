@@ -657,3 +657,30 @@ Text-Dubletten, Balance-Warnung, Export-Bericht.
 - Verstaendlichkeit: Projektarten nach Datenart gruppiert ("Objekte markieren
   (Boxen)" / "Klasse je Bild"), Texte ohne Box-Begriffe bei Klassen, kleine
   Bilder fuellen die Flaeche.
+
+## 22. 1.3.5 – Gegenprobe von 1.3.4 in der installierten App
+
+**Bestaetigt:** alte M4A-Aufnahmen in t1 und t3 werden beim Oeffnen zu
+16-kHz-Mono-WAV (Verweise umgestellt, Wiedergabe laeuft); die Bild-Dubletten
+vergleichen wirklich (gleiches Commons-Foto zweimal gefunden); Commons-Kategorie
+liefert Bilder bis 1280 px statt 120-px-Vorschaubilder, mit "Hund" als
+Vorschlag; Website-Crawl (de.wikipedia) liest 3 Seiten, 139 Absaetze mit
+Umlauten, robots.txt sperrt Spezial:Zufaellige_Seite; Video-Export 80/20
+legt 4 Clips in train und 3 in val, Hinweise in der Sprache der Oberflaeche.
+
+**Gefunden und behoben:**
+- gnu.org liess die Verbindung nicht zu (auch curl lief ins Timeout); der
+  Bericht sagte nur "Nicht erreichbar: 1". Jetzt steht je Adresse der Grund
+  da: keine Antwort, Server nicht erreichbar, verweigert (403), nicht
+  gefunden (404), zu viele Anfragen (429), Code sonst.
+- Der HTTP-Client hatte 30 s als Gesamtlimit je Anfrage - ein grosses Video
+  waere mitten im Download abgebrochen, obwohl die Grenze 4 GB erlaubt.
+  Jetzt 15 s fuer den Verbindungsaufbau und 30 s Frist je Datenstueck.
+- Bilder von Detailseiten (Commons-Kategorie) bekamen die Kategorieseite als
+  Fundseite, damit lag die ganze Galerie in einer Gruppe und der Split
+  steckte alles in einen Teil. Fundseite ist jetzt die Detailseite (dort
+  steht auch die Lizenz).
+- Landet beim Export alles in einem Teil (nur eine Gruppe), entstand
+  dataset/train/<klasse> allein - die App meldete "Dataset-Typ konnte nicht
+  erkannt werden". Dann bleibt der Ordner flach (Klassenordner); der
+  Bericht warnt weiter vor dem leeren Teil.

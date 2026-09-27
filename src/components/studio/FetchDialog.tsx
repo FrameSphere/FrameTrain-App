@@ -21,7 +21,7 @@ export interface FetchReport {
   fetched:           number;
   duplicates:        number;
   blocked:           string[];
-  failed:            string[];
+  failed:            { url: string; reason: string }[];
   skipped_type:      string[];
   pages_visited:     number;
   too_large:         string[];
@@ -74,6 +74,13 @@ export default function FetchDialog({ project, onClose, onDone }: {
 }) {
   const { t } = useLanguage();
   const { error } = useNotification();
+  // Grund aus dem Backend ("timeout", "connect", "http 403" …) in Klartext.
+  const warum = (reason: string) => {
+    const code = reason.match(/^http (\d+)$/)?.[1];
+    if (!code) return t(`studio.fetch.why.${reason}`);
+    return ['403', '404', '429'].includes(code)
+      ? t(`studio.fetch.why.http${code}`) : t('studio.fetch.why.http', { code });
+  };
   const ist = project.modality;
   const [mode, setMode] = useState<FetchMode>('urls');
   const [text, setText] = useState('');
@@ -199,6 +206,17 @@ export default function FetchDialog({ project, onClose, onDone }: {
               <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 p-3">
                 <p className="text-amber-200 text-xs font-medium mb-1">{t('studio.fetch.blockedTitle')}</p>
                 <p className="text-amber-200/80 text-[11px] break-all">{report.blocked.slice(0, 5).join(', ')}</p>
+              </div>
+            )}
+            {report.failed.length > 0 && (
+              <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3 space-y-1" data-testid="fetch-failed">
+                <p className="text-gray-300 text-xs font-medium">{t('studio.fetch.failedTitle')}</p>
+                {report.failed.slice(0, 5).map(f => (
+                  <p key={f.url} className="text-[11px] break-all">
+                    <span className="text-gray-500">{f.url}</span>
+                    <span className="text-gray-300"> – {warum(f.reason)}</span>
+                  </p>
+                ))}
               </div>
             )}
             {report.too_large.length > 0 && (

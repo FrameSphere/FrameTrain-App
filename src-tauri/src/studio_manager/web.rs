@@ -81,7 +81,8 @@ pub struct FetchReport {
     pub duplicates:        usize,
     /// Von robots.txt untersagt — mit der Adresse, damit es nachvollziehbar ist.
     pub blocked:           Vec<String>,
-    pub failed:            Vec<String>,
+    /// Nicht geladen, mit Grund (timeout, connect, network, http 403 …).
+    pub failed:            Vec<Fehlschlag>,
     pub skipped_type:      Vec<String>,
     pub pages_visited:     usize,
     /// Ueber dem Groessenlimit, nicht geladen.
@@ -95,8 +96,20 @@ pub struct FetchReport {
     pub cancelled:         bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Fehlschlag {
+    pub url:    String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Art { Text, Bild, Audio, Video }
+
+impl FetchReport {
+    fn fehlschlag(&mut self, url: &Url, reason: String) {
+        self.failed.push(Fehlschlag { url: url.to_string(), reason });
+    }
+}
 
 fn art_von(project: &StudioProject) -> Art {
     match project.modality.as_str() {
@@ -622,20 +635,51 @@ pub fn ext_aus_typ(content_type: &str, url: &str) -> Option<String> {
 // LADEN
 // ══════════════════════════════════════════════════════════════════
 
-enum Holfehler { ZuGross, Fehlgeschlagen }
+enum Holfehler { ZuGross, Fehlgeschlagen(String) }
+
+/// Frist fuer den Aufbau einer Antwort und fuer jedes weitere Stueck. Ein
+/// Gesamtlimit je Anfrage brach grosse Videos nach 30 s ab, obwohl Daten flossen.
+const FRIST: Duration = Duration::from_secs(30);
+
+fn grund(e: &reqwest::Error) -> String {
+    if e.is_timeout() { "timeout".into() }
+    else if e.is_connect() { "connect".into() }
+    else { "network".into() }
+}
+
+fn netzfehler(e: reqwest::Error) -> Holfehler { Holfehler::Fehlgeschlagen(grund(&e)) }
+
+fn platte<E>(_: E) -> Holfehler { Holfehler::Fehlgeschlagen("disk".into()) }
+
+/// Anfrage mit Frist; ein Status ausserhalb 2xx ist ein Fehlschlag mit Code.
+async fn anfrage(client: &reqwest::Client, url: &Url) -> Result<reqwest::Response, Holfehler> {
+    let antwort = tokio::time::timeout(FRIST, client.get(url.clone()).send()).await
+        .map_err(|_| Holfehler::Fehlgeschlagen("timeout".into()))?
+        .map_err(netzfehler)?;
+    if !antwort.status().is_success() {
+        return Err(Holfehler::Fehlgeschlagen(format!("http {}", antwort.status().as_u16())));
+    }
+    Ok(antwort)
+}
+
+/// Das naechste Stueck, mit Frist — steht der Server still, bricht es hier ab.
+async fn stueck(antwort: &mut reqwest::Response) -> Result<Option<bytes::Bytes>, Holfehler> {
+    tokio::time::timeout(FRIST, antwort.chunk()).await
+        .map_err(|_| Holfehler::Fehlgeschlagen("timeout".into()))?
+        .map_err(netzfehler)
+}
 
 /// Laedt eine Adresse, aber nie mehr als `max_bytes`. Der Content-Length-Kopf
 /// allein reicht nicht: Server lassen ihn weg, und dann stand frueher eine
 /// 2-GB-Datei komplett im Speicher, bevor irgendetwas geprueft wurde.
 async fn hole(client: &reqwest::Client, url: &Url, max_bytes: u64) -> Result<(String, Vec<u8>), Holfehler> {
-    let mut antwort = client.get(url.clone()).send().await.map_err(|_| Holfehler::Fehlgeschlagen)?;
-    if !antwort.status().is_success() { return Err(Holfehler::Fehlgeschlagen); }
+    let mut antwort = anfrage(client, url).await?;
     if antwort.content_length().map(|l| l > max_bytes).unwrap_or(false) { return Err(Holfehler::ZuGross); }
     let typ = antwort.headers().get("content-type")
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let mut daten: Vec<u8> = Vec::new();
-    while let Some(stueck) = antwort.chunk().await.map_err(|_| Holfehler::Fehlgeschlagen)? {
-        daten.extend_from_slice(&stueck);
+    while let Some(st) = stueck(&mut antwort).await? {
+        daten.extend_from_slice(&st);
         if daten.len() as u64 > max_bytes { return Err(Holfehler::ZuGross); }
     }
     Ok((typ, daten))
@@ -656,8 +700,7 @@ async fn lade(
     client: &reqwest::Client, url: &Url, max_datei: u64, max_seite: u64, temp_dir: &Path,
 ) -> Result<(String, Geladen), Holfehler> {
     use std::io::Write as _;
-    let mut antwort = client.get(url.clone()).send().await.map_err(|_| Holfehler::Fehlgeschlagen)?;
-    if !antwort.status().is_success() { return Err(Holfehler::Fehlgeschlagen); }
+    let mut antwort = anfrage(client, url).await?;
     let typ = antwort.headers().get("content-type")
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let laenge = antwort.content_length();
@@ -666,7 +709,7 @@ async fn lade(
     let mut kopf: Vec<u8> = Vec::new();
     let mut fertig = false;
     while kopf.len() < 1024 {
-        match antwort.chunk().await.map_err(|_| Holfehler::Fehlgeschlagen)? {
+        match stueck(&mut antwort).await? {
             Some(st) => kopf.extend_from_slice(&st),
             None => { fertig = true; break; }
         }
@@ -676,7 +719,7 @@ async fn lade(
         if laenge.map(|l| l > max_seite).unwrap_or(false) { return Err(Holfehler::ZuGross); }
         let mut daten = kopf;
         while !fertig {
-            match antwort.chunk().await.map_err(|_| Holfehler::Fehlgeschlagen)? {
+            match stueck(&mut antwort).await? {
                 Some(st) => {
                     daten.extend_from_slice(&st);
                     if daten.len() as u64 > max_seite { return Err(Holfehler::ZuGross); }
@@ -690,24 +733,24 @@ async fn lade(
     if laenge.map(|l| l > max_datei).unwrap_or(false) || kopf.len() as u64 > max_datei {
         return Err(Holfehler::ZuGross);
     }
-    fs::create_dir_all(temp_dir).map_err(|_| Holfehler::Fehlgeschlagen)?;
+    fs::create_dir_all(temp_dir).map_err(platte)?;
     let pfad = temp_dir.join(format!("{}.part", uuid::Uuid::new_v4()));
-    let mut datei = fs::File::create(&pfad).map_err(|_| Holfehler::Fehlgeschlagen)?;
+    let mut datei = fs::File::create(&pfad).map_err(platte)?;
     let mut hasher = Sha256::new();
     let mut geschrieben = kopf.len() as u64;
     hasher.update(&kopf);
     let fehler = |pfad: &Path, e: Holfehler| { let _ = fs::remove_file(pfad); e };
-    datei.write_all(&kopf).map_err(|_| fehler(&pfad, Holfehler::Fehlgeschlagen))?;
+    datei.write_all(&kopf).map_err(|e| fehler(&pfad, platte(e)))?;
     while !fertig {
-        match antwort.chunk().await {
+        match stueck(&mut antwort).await {
             Ok(Some(st)) => {
                 geschrieben += st.len() as u64;
                 if geschrieben > max_datei { drop(datei); return Err(fehler(&pfad, Holfehler::ZuGross)); }
                 hasher.update(&st);
-                datei.write_all(&st).map_err(|_| fehler(&pfad, Holfehler::Fehlgeschlagen))?;
+                datei.write_all(&st).map_err(|e| fehler(&pfad, platte(e)))?;
             }
             Ok(None) => fertig = true,
-            Err(_) => { drop(datei); return Err(fehler(&pfad, Holfehler::Fehlgeschlagen)); }
+            Err(e) => { drop(datei); return Err(fehler(&pfad, e)); }
         }
     }
     Ok((typ, Geladen::Datei { pfad, hash: format!("{:x}", hasher.finalize()), kopf }))
@@ -977,7 +1020,7 @@ pub async fn web_lauf(
 
     let client = reqwest::Client::builder()
         .user_agent(format!("{}/1.0 (lokales Werkzeug)", AGENT))
-        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(|e| format!("HTTP-Client: {}", e))?;
@@ -1048,8 +1091,10 @@ pub async fn web_lauf(
             gelesen += 1;
             if !hoeflich.darf(&client, &sm).await { report.blocked.push(sm.to_string()); continue; }
             hoeflich.warte(&sm).await;
-            let Ok((_, bytes)) = hole(&client, &sm, 32 * 1024 * 1024).await else {
-                report.failed.push(sm.to_string()); continue;
+            let bytes = match hole(&client, &sm, 32 * 1024 * 1024).await {
+                Ok((_, b)) => b,
+                Err(Holfehler::ZuGross) => { report.too_large.push(sm.to_string()); continue; }
+                Err(Holfehler::Fehlgeschlagen(g)) => { report.fehlschlag(&sm, g); continue; }
             };
             let (locs, ist_index) = sitemap_locs(&String::from_utf8_lossy(&bytes));
             for loc in locs {
@@ -1080,7 +1125,7 @@ pub async fn web_lauf(
         let (typ, geladen) = match lade(&client, &url, max_bytes, max_seite, &temp_dir).await {
             Ok(x) => x,
             Err(Holfehler::ZuGross) => { report.too_large.push(url.to_string()); continue; }
-            Err(Holfehler::Fehlgeschlagen) => { report.failed.push(url.to_string()); continue; }
+            Err(Holfehler::Fehlgeschlagen(g)) => { report.fehlschlag(&url, g); continue; }
         };
 
         let bytes = match geladen {
@@ -1145,7 +1190,9 @@ pub async fn web_lauf(
                     ablage.datei_aus(&pfad, &hash, &kopf, datei.as_str(), Some(&seite), &mut report)?,
                 // Ein Link, der auf .jpg endet, aber eine Seite liefert: eine
                 // Detailseite (Commons, Galerien). Dort steht das Original als
-                // og:image — das holen, mit der Galerie als Fundseite.
+                // og:image — das holen, mit der Detailseite als Fundseite: dort
+                // steht die Lizenz, und sonst laege die ganze Galerie in einer
+                // Gruppe und der Split steckte alles in einen Teil.
                 Ok((_, Geladen::Seite(html))) => {
                     let detail = funde(&String::from_utf8_lossy(&html), &datei);
                     let original = match art { Art::Video => detail.og_video, _ => detail.og_bild };
@@ -1156,14 +1203,14 @@ pub async fn web_lauf(
                     hoeflich.warte(&original).await;
                     match lade(&client, &original, max_bytes, max_seite, &temp_dir).await {
                         Ok((_, Geladen::Datei { pfad, hash, kopf })) =>
-                            ablage.datei_aus(&pfad, &hash, &kopf, original.as_str(), Some(&seite), &mut report)?,
+                            ablage.datei_aus(&pfad, &hash, &kopf, original.as_str(), Some(&datei.to_string()), &mut report)?,
                         Ok((_, Geladen::Seite(_))) => {}
                         Err(Holfehler::ZuGross) => report.too_large.push(original.to_string()),
-                        Err(Holfehler::Fehlgeschlagen) => report.failed.push(original.to_string()),
+                        Err(Holfehler::Fehlgeschlagen(g)) => report.fehlschlag(&original, g),
                     }
                 }
                 Err(Holfehler::ZuGross) => report.too_large.push(datei.to_string()),
-                Err(Holfehler::Fehlgeschlagen) => report.failed.push(datei.to_string()),
+                Err(Holfehler::Fehlgeschlagen(g)) => report.fehlschlag(&datei, g),
             }
         }
 
@@ -1463,7 +1510,25 @@ mod tests {
         assert!(r.skipped_type.is_empty(), "eine Detailseite ist kein Fehler: {:?}", r.skipped_type);
         let s = load_samples(&dir);
         assert_eq!((s[0].meta.w, s[0].meta.h), (1600, 1200), "das Original, nicht das Vorschaubild");
-        assert_eq!(s[0].src.page.as_deref(), Some(format!("{}/galerie", adr).as_str()));
+        // Fundseite und Gruppe ist die Detailseite: dort steht die Lizenz, und
+        // eine ganze Galerie laege sonst in einer Gruppe (Split alles in train).
+        assert_eq!(s[0].src.page.as_deref(), Some(format!("{}/wiki/File:Katze.jpg", adr).as_str()));
+        assert_eq!(s[0].meta.group.as_deref(), Some(format!("{}/wiki/File:Katze.jpg", adr).as_str()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn fehlschlaege_nennen_den_grund() {
+        let seite = r#"<img src="/fehlt.jpg" width="400" height="300">"#;
+        let adr = server(vec![("/seite", "text/html", seite.as_bytes().to_vec(), false)]);
+        let dir = projektordner();
+        let r = web_lauf(&dir, projekt("image"),
+            vec![format!("{}/seite", adr), "http://127.0.0.1:9/nichts".to_string()],
+            None, &|_| {}).await.unwrap();
+        let gruende: HashMap<String, String> = r.failed.iter()
+            .map(|f| (f.url.clone(), f.reason.clone())).collect();
+        assert_eq!(gruende.get(&format!("{}/fehlt.jpg", adr)).map(String::as_str), Some("http 404"), "{:?}", r.failed);
+        assert_eq!(gruende.get("http://127.0.0.1:9/nichts").map(String::as_str), Some("connect"), "{:?}", r.failed);
         let _ = fs::remove_dir_all(&dir);
     }
 

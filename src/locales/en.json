@@ -3535,7 +3535,18 @@
       "maxParagraphsLabel": "Max paragraphs",
       "labelLabel": "Class for everything fetched (optional)",
       "labelNone": "None – assign each sample yourself",
-      "labelHint": "Files arrive as suggestions with this class. You go through them and confirm with Enter – a page often shows other things too."
+      "labelHint": "Files arrive as suggestions with this class. You go through them and confirm with Enter – a page often shows other things too.",
+      "failedTitle": "Not loaded",
+      "why": {
+        "timeout": "no answer within 30 seconds",
+        "connect": "server unreachable – offline, wrong address, or the server refuses this connection",
+        "network": "connection dropped",
+        "disk": "could not write to disk",
+        "http": "server answered {code}",
+        "http403": "server refuses access (403)",
+        "http404": "page not found (404)",
+        "http429": "too many requests – try again later (429)"
+      }
     },
     "generate": {
       "title": "Have texts written",

@@ -3535,7 +3535,18 @@
       "maxParagraphsLabel": "Höchstens Absätze",
       "labelLabel": "Klasse für alles, was geholt wird (optional)",
       "labelNone": "Keine – jedes Sample selbst zuordnen",
-      "labelHint": "Die Dateien kommen als Vorschlag mit dieser Klasse an. Du siehst sie durch und bestätigst mit Enter – auf einer Seite steht oft auch anderes."
+      "labelHint": "Die Dateien kommen als Vorschlag mit dieser Klasse an. Du siehst sie durch und bestätigst mit Enter – auf einer Seite steht oft auch anderes.",
+      "failedTitle": "Nicht geladen",
+      "why": {
+        "timeout": "keine Antwort in 30 Sekunden",
+        "connect": "Server nicht erreichbar – offline, falsche Adresse oder der Server lässt diese Verbindung nicht zu",
+        "network": "Verbindung abgebrochen",
+        "disk": "konnte nicht auf die Platte schreiben",
+        "http": "Server antwortet mit {code}",
+        "http403": "Server verweigert den Zugriff (403)",
+        "http404": "Seite nicht gefunden (404)",
+        "http429": "zu viele Anfragen – später noch einmal (429)"
+      }
     },
     "generate": {
       "title": "Texte erzeugen lassen",

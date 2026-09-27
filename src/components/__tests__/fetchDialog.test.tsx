@@ -108,6 +108,29 @@ describe('FetchDialog', () => {
     })));
   });
 
+  // gnu.org liess die Verbindung nicht zu; der Bericht sagte nur
+  // "Nicht erreichbar: 1" und man wusste nicht, woran es lag.
+  it('nennt fuer jede nicht geladene Adresse den Grund', async () => {
+    invokeMock.mockResolvedValue({
+      fetched: 0, duplicates: 0, blocked: [], skipped_type: [], pages_visited: 0,
+      failed: [
+        { url: 'https://www.gnu.org/', reason: 'connect' },
+        { url: 'https://a.de/zu', reason: 'http 403' },
+        { url: 'https://a.de/kaputt', reason: 'http 502' },
+      ],
+      too_large: [], too_small: 0, outside_allowlist: 0, limit_reached: false, cancelled: false,
+    });
+    render(<FetchDialog project={PROJECT} onClose={vi.fn()} onDone={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText(/https/), { target: { value: 'https://www.gnu.org/' } });
+    fireEvent.click(screen.getByRole('button', { name: /Holen/ }));
+
+    const box = await screen.findByTestId('fetch-failed');
+    expect(box).toHaveTextContent('www.gnu.org');
+    expect(box).toHaveTextContent('Server nicht erreichbar');
+    expect(box).toHaveTextContent('Server verweigert den Zugriff (403)');
+    expect(box).toHaveTextContent('Server antwortet mit 502');
+  });
+
   it('bei Boxenprojekten gibt es keine Klasse fuer alles', () => {
     render(<FetchDialog project={{ ...PROJECT, classes: ['Lift'] }} onClose={vi.fn()} onDone={vi.fn()} />);
     expect(screen.queryByDisplayValue(/Keine/)).toBeNull();
