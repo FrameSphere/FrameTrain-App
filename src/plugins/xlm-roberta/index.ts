@@ -9,7 +9,9 @@ const xlmRobertaPlugin: ModelPlugin = {
   name: 'XLM-RoBERTa',
   description: 'Keyword Recognition & Sequence Classification mit XLM-RoBERTa base/large',
   taskType: 'seq_classification',
-  defaultPluginConfig: {},
+  // resume_from_checkpoint: nach "Stoppen" die gespeicherte Version waehlen und einschalten
+  // (oder einen Checkpoint-Pfad eintragen) - das Training laeuft ab dem letzten Schritt weiter.
+  defaultPluginConfig: { resume_from_checkpoint: false },
   detect: detectXLMRoberta,
   TestComponent: XLMRobertaTestPlugin,
   // Phase 7: Dataset-Kompatibilität

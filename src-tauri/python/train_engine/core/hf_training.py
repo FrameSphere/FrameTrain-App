@@ -256,3 +256,84 @@ def final_metrics(plugin, trainer, eval_result: Dict[str, Any], start_time: floa
         "n_val": int(len(plugin.eval_dataset)) if getattr(plugin, "eval_dataset", None) is not None else 0,
         "device": getattr(plugin, "device_used", "cpu"),
     }
+
+
+# ── Fortsetzen ab Checkpoint ─────────────────────────────────────────────────
+
+def _resume_wanted(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    s = str(value or "").strip().lower()
+    return bool(s) and s not in ("false", "0", "no", "nein", "off")
+
+
+def _latest_checkpoint(folder) -> Optional[str]:
+    """Der checkpoint-N-Ordner mit dem hoechsten N (oder None)."""
+    from pathlib import Path
+    d = Path(folder)
+    if not d.is_dir():
+        return None
+    found = []
+    for c in d.iterdir():
+        if c.is_dir() and c.name.startswith("checkpoint-"):
+            try:
+                found.append((int(c.name.split("-", 1)[1]), c))
+            except ValueError:
+                continue
+    return str(max(found)[1]) if found else None
+
+
+def _is_checkpoint(folder) -> bool:
+    from pathlib import Path
+    return (Path(folder) / "trainer_state.json").is_file()
+
+
+def resume_checkpoint(config) -> Optional[str]:
+    """
+    Checkpoint fuer trainer.train(resume_from_checkpoint=...) oder None.
+
+    plugin_config.resume_from_checkpoint:
+      true / "auto"  sucht (1) checkpoint-* im Ausgabeordner dieses Laufs,
+                     (2) das gewaehlte Modell selbst, wenn es ein Checkpoint ist,
+                     (3) checkpoint-* darin.
+      Pfad           ein checkpoint-N-Ordner oder ein Ordner mit checkpoint-*
+                     (z.B. .../training_outputs/<job>/checkpoints).
+    Die App legt fuer jeden Start einen neuen Job-Ordner an; (1) greift deshalb
+    nur bei einem Neustart in denselben Ordner. Der uebliche Weg: nach "Stoppen"
+    registriert die App den letzten Checkpoint als Version — diese Version
+    waehlen und resume_from_checkpoint einschalten, dann greift (2).
+    Ohne Checkpoint laeuft das Training normal von vorn, mit Hinweis.
+    """
+    import json
+    from pathlib import Path
+
+    value = (getattr(config, "plugin_config", None) or {}).get("resume_from_checkpoint")
+    if not _resume_wanted(value):
+        return None
+
+    candidates = []
+    explicit = isinstance(value, str) and value.strip().lower() not in ("true", "auto", "1", "yes", "ja")
+    if explicit:
+        p = Path(value.strip()).expanduser()
+        candidates += [str(p) if _is_checkpoint(p) else None, _latest_checkpoint(p)]
+    else:
+        model = Path(getattr(config, "model_path", "") or "")
+        candidates += [
+            _latest_checkpoint(config.effective_output_dir()),
+            str(model) if str(model) and _is_checkpoint(model) else None,
+            _latest_checkpoint(model) if str(model) else None,
+        ]
+    ckpt = next((c for c in candidates if c), None)
+    if ckpt is None:
+        where = value.strip() if explicit else f"{config.effective_output_dir()} / {getattr(config, 'model_path', '')}"
+        MessageProtocol.status(
+            "training",
+            f"Fortsetzen: kein Checkpoint gefunden ({where}) - Training startet von vorn.")
+        return None
+    step = "?"
+    try:
+        step = json.loads((Path(ckpt) / "trainer_state.json").read_text(encoding="utf-8")).get("global_step", "?")
+    except Exception:
+        pass
+    MessageProtocol.status("training", f"Setze Training fort ab Schritt {step} ({ckpt})")
+    return ckpt

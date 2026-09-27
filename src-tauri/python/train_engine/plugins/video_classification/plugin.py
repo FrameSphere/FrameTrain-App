@@ -162,7 +162,7 @@ class Plugin(TrainPlugin):
             callbacks=[hft.progress_callback(TrainerCallback, self, total_steps)],
         )
         self._start_time = time.time()
-        self._trainer.train()
+        self._trainer.train(resume_from_checkpoint=hft.resume_checkpoint(self.config))
         MessageProtocol.status("training", "Training abgeschlossen")
 
     # ── 5. Validierung ──────────────────────────────────────────────────────
