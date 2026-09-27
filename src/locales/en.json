@@ -3067,7 +3067,7 @@
     },
     "yolo": {
       "title": "{name} – Test",
-      "subtitle": "Single-image inference · Bounding box detection",
+      "subtitle": "Single-image inference · Detection, segmentation, keypoints, oriented boxes, classification",
       "confThreshold": "Confidence threshold",
       "iouThreshold": "IoU threshold (NMS)",
       "changeImage": "Choose another image",
@@ -3077,7 +3077,22 @@
       "run": "Run inference",
       "detectedOne": "1 object detected",
       "detectedMany": "{n} objects detected",
-      "noDetections": "No objects above the confidence threshold."
+      "noDetections": "No objects above the confidence threshold.",
+      "taskLabel": "Task: {task}",
+      "taskNames": {
+        "detect": "Object detection",
+        "segment": "Segmentation",
+        "pose": "Keypoints",
+        "obb": "Oriented boxes",
+        "classify": "Classification"
+      },
+      "maskBadge": "Mask ({n} points)",
+      "obbBadge": "rotated",
+      "keypointsBadge": "{n} keypoints ({visible} confident)",
+      "summaryMasks": "{n} with mask",
+      "summaryKeypoints": "{n} keypoints",
+      "topClasses": "Most likely classes",
+      "noClasses": "The model returned no class."
     },
     "imageClassification": {
       "subtitle": "Image Classification",

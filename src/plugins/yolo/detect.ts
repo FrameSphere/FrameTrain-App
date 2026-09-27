@@ -27,3 +27,21 @@ export function detectYOLO(modelPathOrId: string, configJson?: ModelConfig): boo
     id.includes('yolo_')
   );
 }
+
+export type YoloTask = 'detect' | 'segment' | 'pose' | 'obb' | 'classify';
+
+/**
+ * Aufgabe aus dem Gewichtsnamen, wie Ultralytics sie benennt
+ * (yolo11n-seg.pt -> segment). null, wenn der Name nichts verraet
+ * (model.pt, best.pt) — dann entscheidet das Python-Plugin am Checkpoint.
+ */
+export function yoloTaskFromName(nameOrPath: string): YoloTask | null {
+  const file = nameOrPath.split(/[\\/]/).pop() ?? '';
+  const stem = file.toLowerCase().replace(/\.(pt|pth|onnx|engine|mlpackage)$/, '');
+  if (!stem) return null;
+  if (stem.endsWith('-seg')) return 'segment';
+  if (stem.endsWith('-pose')) return 'pose';
+  if (stem.endsWith('-obb')) return 'obb';
+  if (stem.endsWith('-cls')) return 'classify';
+  return stem.startsWith('yolo') ? 'detect' : null;
+}

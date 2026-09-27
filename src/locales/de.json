@@ -3067,7 +3067,7 @@
     },
     "yolo": {
       "title": "{name} – Test",
-      "subtitle": "Einzelbild-Inferenz · Bounding Box Detection",
+      "subtitle": "Einzelbild-Inferenz · Erkennung, Segmentierung, Keypoints, gedrehte Boxen, Klassifikation",
       "confThreshold": "Konfidenz-Schwelle",
       "iouThreshold": "IoU-Schwelle (NMS)",
       "changeImage": "Anderes Bild wählen",
@@ -3077,7 +3077,22 @@
       "run": "Inferenz starten",
       "detectedOne": "1 Objekt erkannt",
       "detectedMany": "{n} Objekte erkannt",
-      "noDetections": "Keine Objekte über dem Konfidenz-Schwellwert."
+      "noDetections": "Keine Objekte über dem Konfidenz-Schwellwert.",
+      "taskLabel": "Aufgabe: {task}",
+      "taskNames": {
+        "detect": "Objekterkennung",
+        "segment": "Segmentierung",
+        "pose": "Keypoints",
+        "obb": "Gedrehte Boxen",
+        "classify": "Klassifikation"
+      },
+      "maskBadge": "Maske ({n} Punkte)",
+      "obbBadge": "gedreht",
+      "keypointsBadge": "{n} Keypoints ({visible} sicher)",
+      "summaryMasks": "{n} mit Maske",
+      "summaryKeypoints": "{n} Keypoints",
+      "topClasses": "Wahrscheinlichste Klassen",
+      "noClasses": "Das Modell hat keine Klasse geliefert."
     },
     "imageClassification": {
       "subtitle": "Bildklassifikation",

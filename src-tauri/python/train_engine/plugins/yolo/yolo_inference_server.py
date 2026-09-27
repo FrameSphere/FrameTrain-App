@@ -12,6 +12,12 @@ CSV-Export und Analyse ohne Sonderweg weiterverwendet. Zusaetzlich:
     boxes         Liste der Detektionen mit Pixelkoordinaten
     image_width   Breite des Bildes in Pixeln
     image_height  Hoehe des Bildes in Pixeln
+    task          detect / segment / pose / obb / classify
+
+Je Box optional 'polygon' (Maskenumriss bei segment, vier Ecken bei obb) und
+'keypoints' ([x, y, sichtbar] bei pose). Ein Klassifikationsmodell liefert
+keine Boxen; dort stehen die fuenf wahrscheinlichsten Klassen in
+top_predictions.
 
 Ohne die Boxen sagt "Tree 0.80" nicht, *wo* das Modell den Baum sieht —
 und genau dafuer geht man im Labor eine Bilderserie durch.
@@ -62,6 +68,59 @@ def find_weights(model_dir: Path) -> Path:
     )
 
 
+_MAX_POLYGON_POINTS = 64
+
+
+def _thin(points: list, limit: int = _MAX_POLYGON_POINTS) -> list:
+    """Maskenumrisse haben oft Hunderte Punkte; fuer die Anzeige reichen 64."""
+    if len(points) <= limit:
+        return points
+    step = len(points) / limit
+    return [points[int(i * step)] for i in range(limit)]
+
+
+def extract_boxes(result, names: dict) -> list:
+    """Boxen aller Aufgaben in einem Format.
+
+    detect/segment/pose liefern result.boxes, obb liefert result.obb (gedrehte
+    Boxen; x1..y2 ist dann das umschliessende Rechteck, 'polygon' die vier
+    Ecken). Segmentierung haengt den Maskenumriss als 'polygon' an, Pose die
+    Keypoints als [x, y, sichtbar].
+    """
+    obb = getattr(result, "obb", None)
+    source = obb if obb is not None else getattr(result, "boxes", None)
+    if source is None:
+        return []
+    masks = getattr(result, "masks", None)
+    polygons = list(getattr(masks, "xy", None) or []) if masks is not None else []
+    kpts = getattr(result, "keypoints", None)
+    kpt_xy = kpts.xy.tolist() if kpts is not None and getattr(kpts, "xy", None) is not None else []
+    kpt_conf = (kpts.conf.tolist() if kpts is not None and getattr(kpts, "conf", None) is not None
+                else [])
+    corners = obb.xyxyxyxy.tolist() if obb is not None else []
+    out = []
+    for i, box in enumerate(source):
+        cls_id = int(box.cls)
+        x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
+        item = {
+            "label": names.get(cls_id, str(cls_id)),
+            "confidence": round(float(box.conf), 4),
+            "x1": round(x1, 1), "y1": round(y1, 1),
+            "x2": round(x2, 1), "y2": round(y2, 1),
+        }
+        if i < len(corners):
+            item["polygon"] = [[round(float(x), 1), round(float(y), 1)] for x, y in corners[i]]
+        if i < len(polygons):
+            pts = [[round(float(x), 1), round(float(y), 1)] for x, y in polygons[i].tolist()]
+            item["polygon"] = _thin(pts)
+        if i < len(kpt_xy):
+            confs = kpt_conf[i] if i < len(kpt_conf) else [1.0] * len(kpt_xy[i])
+            item["keypoints"] = [[round(float(x), 1), round(float(y), 1), round(float(c), 3)]
+                                 for (x, y), c in zip(kpt_xy[i], confs)]
+        out.append(item)
+    return out
+
+
 class YoloInferenceServer:
     def __init__(self, model_dir: str, conf: float, iou: float):
         self.model_dir = Path(model_dir)
@@ -95,20 +154,16 @@ class YoloInferenceServer:
         elapsed = time.time() - started
 
         names = dict(getattr(result, "names", {}) or self.names)
-        boxes = []
-        for box in result.boxes or []:
-            cls_id = int(box.cls)
-            x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
-            boxes.append({
-                "label": names.get(cls_id, str(cls_id)),
-                "confidence": round(float(box.conf), 4),
-                "x1": round(x1, 1), "y1": round(y1, 1),
-                "x2": round(x2, 1), "y2": round(y2, 1),
-            })
-        boxes.sort(key=lambda b: b["confidence"], reverse=True)
-
         height, width = (result.orig_shape if getattr(result, "orig_shape", None)
                          else (0, 0))
+
+        # Klassifikation: keine Boxen, sondern eine Wahrscheinlichkeit je Klasse.
+        probs = getattr(result, "probs", None)
+        if probs is not None:
+            return self._classification(probs, names, width, height, elapsed)
+
+        boxes = extract_boxes(result, names)
+        boxes.sort(key=lambda b: b["confidence"], reverse=True)
 
         # Pro Klasse der beste Treffer – das ist es, was die Balkenanzeige im
         # Labor zeigt. Sieben Boxen mit dreimal "Sky" waeren dort unlesbar.
@@ -123,10 +178,27 @@ class YoloInferenceServer:
 
         return {
             "type": "result",
+            "task": self.task,
             "predicted": self._summary(boxes, best_per_label),
             "confidence": boxes[0]["confidence"] if boxes else None,
             "top_predictions": top_predictions,
             "boxes": boxes,
+            "image_width": int(width),
+            "image_height": int(height),
+            "inference_time": elapsed,
+        }
+
+    def _classification(self, probs, names: dict, width: int, height: int, elapsed: float) -> dict:
+        data = probs.data.tolist() if hasattr(probs, "data") else list(probs)
+        ranked = sorted(range(len(data)), key=lambda i: -float(data[i]))[:5]
+        top = [{"label": names.get(i, str(i)), "score": round(float(data[i]), 4)} for i in ranked]
+        return {
+            "type": "result",
+            "task": "classify",
+            "predicted": top[0]["label"] if top else "",
+            "confidence": top[0]["score"] if top else None,
+            "top_predictions": top,
+            "boxes": [],
             "image_width": int(width),
             "image_height": int(height),
             "inference_time": elapsed,

@@ -82,6 +82,19 @@ pub struct YoloDetection {
     pub label: String,
     pub confidence: f32,
     pub bbox: [f32; 4], // x1, y1, x2, y2
+    /// Maskenumriss (segment) bzw. die vier Ecken der gedrehten Box (obb), in Pixeln.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polygon: Option<Vec<[f32; 2]>>,
+    /// Keypoints (pose) als [x, y, Sicherheit].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keypoints: Option<Vec<[f32; 3]>>,
+}
+
+/// Eine Klasse samt Wahrscheinlichkeit (YOLO-cls).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct YoloClassification {
+    pub label: String,
+    pub confidence: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,6 +102,12 @@ pub struct YoloInferenceResult {
     pub detections: Vec<YoloDetection>,
     pub inference_time_ms: f64,
     pub image_path: String,
+    /// detect / segment / pose / obb / classify — so, wie das Modell es meldet.
+    #[serde(default)]
+    pub task: String,
+    /// Bei Klassifikationsmodellen die fuenf wahrscheinlichsten Klassen.
+    #[serde(default)]
+    pub classifications: Vec<YoloClassification>,
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1032,24 +1051,48 @@ try:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         detections = []
+        classifications = []
         for r in results:
-            boxes = r.boxes
+            names = r.names
+            name_of = lambda i: names.get(i, str(i)) if hasattr(names, "get") else str(i)
+            # Klassifikation (YOLO-cls): keine Boxen, sondern Wahrscheinlichkeiten.
+            if getattr(r, "probs", None) is not None:
+                data = r.probs.data.tolist()
+                for i in sorted(range(len(data)), key=lambda i: -data[i])[:5]:
+                    classifications.append({"label": name_of(i), "confidence": float(data[i])})
+                continue
+            # OBB liefert gedrehte Boxen in r.obb, alle anderen Aufgaben r.boxes.
+            obb = getattr(r, "obb", None)
+            boxes = obb if obb is not None else r.boxes
             if boxes is None:
                 continue
-            names = r.names
-            for box in boxes:
+            corners = obb.xyxyxyxy.tolist() if obb is not None else []
+            masks = list(r.masks.xy) if getattr(r, "masks", None) is not None else []
+            kpts = getattr(r, "keypoints", None)
+            kxy = kpts.xy.tolist() if kpts is not None else []
+            kconf = kpts.conf.tolist() if kpts is not None and kpts.conf is not None else []
+            for i, box in enumerate(boxes):
                 cls_id = int(box.cls[0].item())
-                label  = names.get(cls_id, str(cls_id)) if hasattr(names, "get") else str(cls_id)
-                conf_v = float(box.conf[0].item())
-                xyxy   = box.xyxy[0].tolist()
-                detections.append({
-                    "label":      label,
-                    "confidence": conf_v,
-                    "bbox":       xyxy,
-                })
+                det = {
+                    "label":      name_of(cls_id),
+                    "confidence": float(box.conf[0].item()),
+                    "bbox":       box.xyxy[0].tolist(),
+                }
+                if i < len(corners):
+                    det["polygon"] = corners[i]
+                if i < len(masks):
+                    pts = masks[i].tolist()
+                    step = max(1, len(pts) // 64)  # Umriss fuer die Anzeige ausduennen
+                    det["polygon"] = pts[::step]
+                if i < len(kxy):
+                    c = kconf[i] if i < len(kconf) else [1.0] * len(kxy[i])
+                    det["keypoints"] = [[x, y, v] for (x, y), v in zip(kxy[i], c)]
+                detections.append(det)
 
     emit({
         "detections":        detections,
+        "classifications":   classifications,
+        "task":              getattr(model, "task", task) or task,
         "inference_time_ms": elapsed_ms,
         "image_path":        image_path,
         "weights_path":      weights,
@@ -1101,7 +1144,25 @@ except Exception as e:
         return Err(err.to_string());
     }
 
-    let detections: Vec<YoloDetection> = json.get("detections")
+    let inference_time_ms = json.get("inference_time_ms").and_then(|t| t.as_f64()).unwrap_or(0.0);
+    let (detections, classifications, task) = parse_yolo_output(&json);
+
+    Ok(YoloInferenceResult { detections, inference_time_ms, image_path, task, classifications })
+}
+
+/// Liest Detektionen (mit Maske/Keypoints/OBB-Ecken) und Klassen aus der Skriptausgabe.
+/// Unvollstaendige Eintraege werden verworfen statt den ganzen Test scheitern zu lassen.
+fn parse_yolo_output(json: &serde_json::Value) -> (Vec<YoloDetection>, Vec<YoloClassification>, String) {
+    let points = |v: Option<&serde_json::Value>, dims: usize| -> Option<Vec<Vec<f32>>> {
+        let arr = v?.as_array()?;
+        let pts: Vec<Vec<f32>> = arr.iter().filter_map(|p| {
+            let p = p.as_array()?;
+            if p.len() < dims { return None; }
+            p.iter().take(dims).map(|x| x.as_f64().map(|f| f as f32)).collect()
+        }).collect();
+        if pts.is_empty() { None } else { Some(pts) }
+    };
+    let detections = json.get("detections")
         .and_then(|d| d.as_array())
         .map(|arr| arr.iter().filter_map(|v| {
             let label = v.get("label")?.as_str()?.to_string();
@@ -1114,18 +1175,55 @@ except Exception as e:
                 bbox_arr[2].as_f64()? as f32,
                 bbox_arr[3].as_f64()? as f32,
             ];
-            Some(YoloDetection { label, confidence, bbox })
+            let polygon = points(v.get("polygon"), 2).map(|p| p.into_iter().map(|q| [q[0], q[1]]).collect());
+            let keypoints = points(v.get("keypoints"), 3).map(|p| p.into_iter().map(|q| [q[0], q[1], q[2]]).collect());
+            Some(YoloDetection { label, confidence, bbox, polygon, keypoints })
         }).collect())
         .unwrap_or_default();
-
-    let inference_time_ms = json.get("inference_time_ms").and_then(|t| t.as_f64()).unwrap_or(0.0);
-
-    Ok(YoloInferenceResult { detections, inference_time_ms, image_path })
+    let classifications = json.get("classifications")
+        .and_then(|d| d.as_array())
+        .map(|arr| arr.iter().filter_map(|v| Some(YoloClassification {
+            label: v.get("label")?.as_str()?.to_string(),
+            confidence: v.get("confidence")?.as_f64()? as f32,
+        })).collect())
+        .unwrap_or_default();
+    let task = json.get("task").and_then(|t| t.as_str()).unwrap_or("detect").to_string();
+    (detections, classifications, task)
 }
 
 #[cfg(test)]
 mod yolo_error_tests {
-    use super::last_meaningful_line;
+    use super::{last_meaningful_line, parse_yolo_output};
+
+    #[test]
+    fn detect_ausgabe_bleibt_wie_bisher() {
+        let v = serde_json::json!({"detections": [{"label": "person", "confidence": 0.9, "bbox": [1.0, 2.0, 3.0, 4.0]}]});
+        let (d, c, task) = parse_yolo_output(&v);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].bbox, [1.0, 2.0, 3.0, 4.0]);
+        assert!(d[0].polygon.is_none() && d[0].keypoints.is_none());
+        assert!(c.is_empty());
+        assert_eq!(task, "detect", "alte Skriptausgabe ohne task gilt als detect");
+    }
+
+    #[test]
+    fn masken_keypoints_und_klassen_kommen_an() {
+        let v = serde_json::json!({
+            "task": "pose",
+            "detections": [{"label": "person", "confidence": 0.8, "bbox": [0, 0, 10, 10],
+                            "polygon": [[0, 0], [5, 0], [5, 5]],
+                            "keypoints": [[1, 2, 0.9], [3, 4, 0.1]]},
+                           {"label": "kaputt", "confidence": 0.5}],
+            "classifications": [{"label": "katze", "confidence": 0.7}, {"label": 3}],
+        });
+        let (d, c, task) = parse_yolo_output(&v);
+        assert_eq!(task, "pose");
+        assert_eq!(d.len(), 1, "Eintrag ohne bbox wird verworfen");
+        assert_eq!(d[0].polygon.as_ref().unwrap().len(), 3);
+        assert_eq!(d[0].keypoints.as_ref().unwrap()[1], [3.0, 4.0, 0.1]);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].label, "katze");
+    }
 
     #[test]
     fn nimmt_die_letzte_zeile_eines_tracebacks() {

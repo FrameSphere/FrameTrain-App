@@ -47,7 +47,9 @@ export function genericDatasetCompat(plugin: CompatPluginInfo, info: DatasetChec
   const exts = (info?.extensions?.length ? info.extensions : extensions).map(e => e.toLowerCase());
   const supported = plugin.supportedDatasetTypes ?? [];
 
-  const required = requiredFiles(plugin.taskType);
+  // YOLO-cls liest Ordner pro Klasse — dort gibt es keine Label-Dateien.
+  const yoloClassify = plugin.taskType === 'detect' && info?.type === 'folder_class';
+  const required = requiredFiles(yoloClassify ? 'image_classification' : plugin.taskType);
   if (required && exts.length > 0 && !required.exts.some(e => exts.includes(e))) {
     return { overallLevel: 'bad', fileResults: [], summary: required.missing, hint: `${plugin.name} kann dieses Dataset nicht trainieren.` };
   }
