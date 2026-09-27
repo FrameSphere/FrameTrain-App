@@ -1,5 +1,6 @@
 // YOLO Plugin – TestPlugin.tsx
-// Test-UI für YOLO Object Detection: Einzelbild-Inferenz
+// Test-UI für YOLO: Einzelbild-Inferenz fuer Erkennung, Segmentierung,
+// Keypoints, gedrehte Boxen und Klassifikation (die Aufgabe meldet das Backend).
 
 import { useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -12,12 +13,36 @@ interface Detection {
   label: string;
   confidence: number;
   bbox: [number, number, number, number]; // x1, y1, x2, y2
+  /** Maskenumriss (segment) bzw. die vier Ecken der gedrehten Box (obb). */
+  polygon?: [number, number][];
+  /** Keypoints (pose) als [x, y, Sicherheit]. */
+  keypoints?: [number, number, number][];
 }
 
-interface InferenceResult {
+interface Classification {
+  label: string;
+  confidence: number;
+}
+
+export interface InferenceResult {
   detections: Detection[];
   inference_time_ms: number;
   image_path: string;
+  /** detect / segment / pose / obb / classify — fehlt bei aelteren Backends. */
+  task?: string;
+  classifications?: Classification[];
+}
+
+/** Ab dieser Sicherheit zaehlt ein Keypoint als erkannt (Ultralytics zeichnet ab 0.5). */
+const KEYPOINT_VISIBLE = 0.5;
+
+/** Kennzahlen fuer die Kopfzeile: wie viele Masken und Keypoints kamen zurueck. */
+export function summarizeYoloResult(result: InferenceResult) {
+  const task = result.task ?? 'detect';
+  const masks = task === 'segment' ? result.detections.filter(d => (d.polygon?.length ?? 0) >= 3).length : 0;
+  const keypoints = result.detections.reduce(
+    (n, d) => n + (d.keypoints ?? []).filter(k => k[2] >= KEYPOINT_VISIBLE).length, 0);
+  return { task, masks, keypoints, classes: result.classifications ?? [] };
 }
 
 export default function YOLOTestPlugin({ modelPath, modelName, versionId }: TestPluginProps) {
@@ -28,6 +53,7 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
   const [error, setError] = useState<string | null>(null);
   const [confThreshold, setConfThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
+  const summary = result ? summarizeYoloResult(result) : null;
 
   const handlePickImage = async () => {
     const sel = await open({
@@ -146,8 +172,36 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
         </div>
       )}
 
-      {/* Ergebnis */}
-      {result && (
+      {/* Ergebnis: Klassifikation (YOLO-cls) */}
+      {result && summary?.task === 'classify' && (
+        <div className="space-y-3 p-4 rounded-2xl border border-white/10 bg-white/5">
+          <div className="flex items-center justify-between">
+            <p className="font-medium text-white">{t('testPlugins.yolo.topClasses')}</p>
+            <span className="text-xs text-gray-500">{result.inference_time_ms.toFixed(1)} ms</span>
+          </div>
+          <p className="text-xs text-gray-500">{t('testPlugins.yolo.taskLabel', { task: t('testPlugins.yolo.taskNames.classify') })}</p>
+          {summary.classes.length === 0 ? (
+            <p className="text-gray-500 text-xs">{t('testPlugins.yolo.noClasses')}</p>
+          ) : (
+            <div className="space-y-1.5">
+              {summary.classes.map((c, i) => (
+                <div key={i} className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-white text-xs font-medium">{c.label}</span>
+                    <span className="text-orange-400 text-xs font-mono">{(c.confidence * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                    <div className="h-full bg-orange-400" style={{ width: `${Math.max(0, Math.min(1, c.confidence)) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Ergebnis: Boxen (detect, segment, pose, obb) */}
+      {result && summary && summary.task !== 'classify' && (
         <div className="space-y-3 p-4 rounded-2xl border border-white/10 bg-white/5">
           <div className="flex items-center justify-between">
             <p className="font-medium text-white">
@@ -157,15 +211,36 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
             </p>
             <span className="text-xs text-gray-500">{result.inference_time_ms.toFixed(1)} ms</span>
           </div>
+          <p className="text-xs text-gray-500">
+            {t('testPlugins.yolo.taskLabel', { task: t(`testPlugins.yolo.taskNames.${summary.task}`) })}
+            {summary.task === 'segment' && <> · {t('testPlugins.yolo.summaryMasks', { n: summary.masks })}</>}
+            {summary.task === 'pose' && <> · {t('testPlugins.yolo.summaryKeypoints', { n: summary.keypoints })}</>}
+          </p>
           {result.detections.length === 0 ? (
             <p className="text-gray-500 text-xs">{t('testPlugins.yolo.noDetections')}</p>
           ) : (
             <div className="space-y-1.5">
               {result.detections.map((det, i) => (
                 <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/5 border border-white/10">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <div className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" />
-                    <span className="text-white text-xs font-medium">{det.label}</span>
+                    <span className="text-white text-xs font-medium truncate">{det.label}</span>
+                    {summary.task === 'segment' && det.polygon && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-gray-400">
+                        {t('testPlugins.yolo.maskBadge', { n: det.polygon.length })}
+                      </span>
+                    )}
+                    {summary.task === 'obb' && det.polygon && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-gray-400">{t('testPlugins.yolo.obbBadge')}</span>
+                    )}
+                    {det.keypoints && det.keypoints.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-gray-400">
+                        {t('testPlugins.yolo.keypointsBadge', {
+                          n: det.keypoints.length,
+                          visible: det.keypoints.filter(k => k[2] >= KEYPOINT_VISIBLE).length,
+                        })}
+                      </span>
+                    )}
                   </div>
                   <span className="text-orange-400 text-xs font-mono">
                     {(det.confidence * 100).toFixed(1)}%

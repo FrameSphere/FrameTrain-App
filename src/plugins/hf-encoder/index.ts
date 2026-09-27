@@ -9,7 +9,9 @@ const hfEncoderPlugin: ModelPlugin = {
   name: 'HF Encoder (Generic)',
   description: 'Sequence Classification für unterstützte HuggingFace Encoder-Modelle (BERT/RoBERTa/DeBERTa/...)',
   taskType: 'seq_classification',
-  defaultPluginConfig: {},
+  // resume_from_checkpoint: nach "Stoppen" die gespeicherte Version waehlen und einschalten
+  // (oder einen Checkpoint-Pfad eintragen) - das Training laeuft ab dem letzten Schritt weiter.
+  defaultPluginConfig: { resume_from_checkpoint: false },
   detect: detectHFEncoder,
   TestComponent: HFEncoderTestPlugin,
   // Phase 7: Dataset-Kompatibilität

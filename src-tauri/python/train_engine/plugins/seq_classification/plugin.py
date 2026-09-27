@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.plugin_base import TrainPlugin
 from core.config import TrainingConfig
 from core.protocol import MessageProtocol
+from core import hf_training as hft
 
 # ─── Unterstützte Architekturen ───────────────────────────────────────────────
 SUPPORTED_ARCHITECTURES = {
@@ -677,7 +678,8 @@ class Plugin(TrainPlugin):
             callbacks=[ProgressCallback()],
         )
 
-        self._train_result = self._trainer.train()
+        self._train_result = self._trainer.train(
+            resume_from_checkpoint=hft.resume_checkpoint(self.config))
         self._start_time_saved = time.time()
 
     # ─── 5. Validierung ────────────────────────────────────────────────────
