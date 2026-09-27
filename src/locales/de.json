@@ -2694,6 +2694,7 @@
       "skipButton": "Überspringen",
       "resultTitle": "Ergebnis",
       "idleHint": "Drücke „Testen“ um das Ergebnis zu sehen",
+      "vlmQuestionPlaceholder": "Frage zum Bild (leer = Standardprompt aus dem Training)",
       "inferenceRunning": "Inference läuft…",
       "matchLabel": "Übereinstimmend mit erwartetem Label",
       "mismatchLabel": "Abweichend — erwartet:",

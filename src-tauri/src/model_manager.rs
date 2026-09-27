@@ -187,6 +187,15 @@ fn detect_model_type(path: &Path) -> Option<String> {
     if path.join("graph_metadata.json").exists() {
         return Some("canvas".to_string());
     }
+    // 0b. diffusers-Pipeline: kein config.json im Wurzelordner, sondern
+    //     model_index.json mit der Pipeline-Klasse ("StableDiffusionPipeline").
+    //     Die Klasse ist die einzige Angabe, an der das Frontend SD 1.x/SDXL
+    //     von FLUX/SD3 unterscheiden kann — "diffusion" allein reichte nicht.
+    if !path.join("config.json").exists() {
+        if let Some(cls) = read_pipeline_class(path) {
+            return Some(cls);
+        }
+    }
     // 1. Aus config.json lesen (exakt, wie HuggingFace es speichert)
     let cfg_path = path.join("config.json");
     if cfg_path.exists() {
@@ -218,6 +227,77 @@ fn detect_model_type(path: &Path) -> Option<String> {
         if name.contains("pytorch_model") || name.contains(".safetensors") { return Some("transformer".to_string()); }
     }
     torch_fallback
+}
+
+/// `_class_name` aus model_index.json (diffusers-Pipeline), sonst None.
+pub fn read_pipeline_class(dir: &Path) -> Option<String> {
+    let content = fs::read_to_string(dir.join("model_index.json")).ok()?;
+    let cfg: serde_json::Value = serde_json::from_str(&content).ok()?;
+    cfg.get("_class_name").and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Unterordner einer diffusers-Pipeline, die FrameTrain nie laedt: ONNX-/
+/// OpenVINO-/Flax-Exporte und der Safety-Checker (~1,2 GB, wird beim Laden
+/// abgeschaltet, siehe ft_data/diffusion.py).
+const DIFFUSERS_SKIP_DIRS: &[&str] = &[
+    "onnx", "openvino", "flax", "safety_checker", "vae_encoder", "vae_decoder", ".git",
+];
+
+/// Auswahl der Dateien einer diffusers-Pipeline aus der rekursiven HF-Liste.
+///
+/// Ohne diese Auswahl lud der Download entweder nur model_index.json (die
+/// Liste war nicht rekursiv, Unterordner fielen als "directory" heraus) oder —
+/// rekursiv, aber ungefiltert — bei nota-ai/bk-sdm-tiny 10 GB: jede Gewichtsdatei
+/// liegt dort als .bin, .safetensors, fp16.bin und fp16.safetensors.
+/// Regel je Unterordner: Konfiguration und Tokenizer immer, Gewichte genau
+/// einmal — safetensors vor bin, volle Genauigkeit vor fp16-/EMA-Varianten.
+/// Im Wurzelordner nur Beschreibungen, keine Einzeldatei-Checkpoints (.ckpt).
+pub(crate) fn select_diffusers_files(files: &[HuggingFaceFile]) -> Vec<&HuggingFaceFile> {
+    use std::collections::BTreeMap;
+    let is_weight = |n: &str| n.ends_with(".safetensors") || n.ends_with(".bin")
+        || n.ends_with(".ckpt") || n.ends_with(".pt") || n.ends_with(".pth");
+    let is_variant = |n: &str| {
+        let stem = n.rsplit('/').next().unwrap_or(n);
+        stem.contains(".fp16.") || stem.contains(".bf16.") || stem.contains(".non_ema.")
+            || stem.contains(".ema.") || stem.contains("_fp16.") || stem.contains(".int8.")
+    };
+    let foreign = |n: &str| n.ends_with(".onnx") || n.ends_with(".msgpack") || n.ends_with(".xml")
+        || n.ends_with(".h5") || n.ends_with(".pb") || n.ends_with(".tflite") || n.ends_with(".onnx_data")
+        || n.ends_with(".png") || n.ends_with(".jpg") || n.ends_with(".gif") || n.ends_with(".mp4");
+
+    let mut out: Vec<&HuggingFaceFile> = Vec::new();
+    // Ordner -> Gewichtsdateien (je Ordner wird genau ein Satz gewaehlt).
+    let mut weights: BTreeMap<String, Vec<&HuggingFaceFile>> = BTreeMap::new();
+    for f in files {
+        if f.file_type.as_deref() == Some("directory") { continue; }
+        let n = f.filename.to_lowercase();
+        let Some((dir, _)) = n.split_once('/') else {
+            if n.ends_with(".json") || n.ends_with(".md") || n.ends_with(".txt") {
+                out.push(f);
+            }
+            continue;
+        };
+        if DIFFUSERS_SKIP_DIRS.contains(&dir) || n.contains("/.ipynb_checkpoints/") { continue; }
+        if foreign(&n) { continue; }
+        if is_weight(&n) {
+            weights.entry(dir.to_string()).or_default().push(f);
+        } else {
+            out.push(f);
+        }
+    }
+    for (_, list) in weights {
+        let rank = |f: &&HuggingFaceFile| {
+            let n = f.filename.to_lowercase();
+            let fmt = if n.ends_with(".safetensors") { 0 } else if n.ends_with(".bin") { 1 } else { 2 };
+            (is_variant(&n) as u8, fmt)
+        };
+        let best = list.iter().map(rank).min();
+        if let Some(best) = best {
+            // Alle Dateien des besten Satzes — sharded Gewichte bestehen aus mehreren Teilen.
+            out.extend(list.iter().copied().filter(|f| rank(f) == best));
+        }
+    }
+    out
 }
 
 fn save_metadata(models_dir: &Path, info: &ModelInfo) -> Result<(), String> {
@@ -612,8 +692,17 @@ pub async fn search_huggingface_models(
 pub async fn get_huggingface_model_files(
     repo_id: String,
 ) -> Result<Vec<HuggingFaceFile>, String> {
-    if !is_safe_repo_id(&repo_id) { return Err("Ungültige Repo-ID".to_string()); }
-    let url = format!("https://huggingface.co/api/models/{}/tree/main", repo_id);
+    list_huggingface_files(&repo_id, false).await
+}
+
+/// Dateiliste eines Repos. `recursive` liefert auch Unterordner (diffusers-
+/// Pipelines: unet/, vae/, text_encoder/ ...).
+async fn list_huggingface_files(repo_id: &str, recursive: bool) -> Result<Vec<HuggingFaceFile>, String> {
+    if !is_safe_repo_id(repo_id) { return Err("Ungültige Repo-ID".to_string()); }
+    let url = format!(
+        "https://huggingface.co/api/models/{}/tree/main{}",
+        repo_id, if recursive { "?recursive=true" } else { "" }
+    );
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -663,7 +752,17 @@ pub async fn download_huggingface_model(
         message: "Verbinde mit Hugging Face…".to_string(),
     });
 
-    let files = get_huggingface_model_files(repo_id.clone()).await?;
+    let mut files = get_huggingface_model_files(repo_id.clone()).await?;
+    // diffusers-Pipeline: Gewichte liegen in Unterordnern, die die flache Liste
+    // nur als "directory" nennt. Dann rekursiv holen und gezielt auswaehlen.
+    let is_diffusers = files.iter().any(|f| f.filename == "model_index.json");
+    if is_diffusers {
+        let all = list_huggingface_files(&repo_id, true).await?;
+        let keep: std::collections::HashSet<String> =
+            select_diffusers_files(&all).into_iter().map(|f| f.filename.clone()).collect();
+        println!("[HF Download] diffusers-Pipeline: {} von {} Dateien ausgewaehlt", keep.len(), all.len());
+        files = all.into_iter().filter(|f| keep.contains(&f.filename)).collect();
+    }
     let client = reqwest::Client::builder()
         // Gesamtdeckel pro Anfrage. Der eigentliche Netz-aus-Schutz ist das
         // Idle-Timeout pro Chunk weiter unten (30 s ohne Daten -> Abbruch),
@@ -711,7 +810,10 @@ pub async fn download_huggingface_model(
     let has_safetensors = relevant.iter()
         .any(|f| f.filename.to_lowercase().ends_with(".safetensors"));
 
-    let relevant: Vec<&HuggingFaceFile> = if has_torch {
+    // Bei diffusers-Pipelines hat select_diffusers_files je Unterordner schon
+    // genau einen Gewichtssatz gewaehlt. Der globale Filter hier wuerde sonst
+    // text_encoder/pytorch_model.bin verwerfen, sobald das UNet safetensors hat.
+    let relevant: Vec<&HuggingFaceFile> = if has_torch && !is_diffusers {
         let kept: Vec<&HuggingFaceFile> = relevant.iter().copied().filter(|f| {
             let n = f.filename.to_lowercase();
             // Gewichte anderer Frameworks
@@ -1118,6 +1220,76 @@ mod model_type_tests {
 
         fs::write(dir.join(PLUGIN_OVERRIDE_FILE), br#"{"plugin_id":"  "}"#).unwrap();
         assert_eq!(read_plugin_override(&dir), None, "leere ID zaehlt nicht");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+
+#[cfg(test)]
+mod diffusers_tests {
+    use super::*;
+    use std::fs;
+
+    fn f(name: &str) -> HuggingFaceFile {
+        HuggingFaceFile { filename: name.to_string(), size: Some(1), file_type: Some("file".to_string()) }
+    }
+
+    fn names(sel: Vec<&HuggingFaceFile>) -> Vec<String> {
+        let mut v: Vec<String> = sel.into_iter().map(|f| f.filename.clone()).collect();
+        v.sort();
+        v
+    }
+
+    /// Ausschnitt aus nota-ai/bk-sdm-tiny: jede Gewichtsdatei in vier Varianten.
+    #[test]
+    fn je_ordner_genau_ein_gewichtssatz_safetensors_vor_bin_voll_vor_fp16() {
+        let files = vec![
+            f("model_index.json"), f("README.md"), f("v1-5-pruned.ckpt"),
+            f("unet/config.json"),
+            f("unet/diffusion_pytorch_model.bin"), f("unet/diffusion_pytorch_model.fp16.bin"),
+            f("unet/diffusion_pytorch_model.fp16.safetensors"), f("unet/diffusion_pytorch_model.safetensors"),
+            f("text_encoder/config.json"), f("text_encoder/pytorch_model.bin"),
+            f("text_encoder/model.fp16.safetensors"),
+            f("tokenizer/vocab.json"), f("tokenizer/merges.txt"),
+            f("scheduler/scheduler_config.json"),
+            f("scheduler/.ipynb_checkpoints/scheduler_config-checkpoint.json"),
+            f("safety_checker/config.json"), f("safety_checker/model.safetensors"),
+            f("unet/diffusion_flax_model.msgpack"), f("unet/model.onnx"),
+            HuggingFaceFile { filename: "vae".into(), size: None, file_type: Some("directory".into()) },
+        ];
+        assert_eq!(names(select_diffusers_files(&files)), vec![
+            "README.md", "model_index.json",
+            "scheduler/scheduler_config.json",
+            // Nur fp16 als safetensors: die volle .bin gewinnt (fp16 waere auf MPS kaputt).
+            "text_encoder/config.json", "text_encoder/pytorch_model.bin",
+            "tokenizer/merges.txt", "tokenizer/vocab.json",
+            "unet/config.json", "unet/diffusion_pytorch_model.safetensors",
+        ]);
+    }
+
+    #[test]
+    fn geteilte_gewichte_bleiben_vollstaendig() {
+        let files = vec![
+            f("model_index.json"),
+            f("unet/diffusion_pytorch_model-00001-of-00002.safetensors"),
+            f("unet/diffusion_pytorch_model-00002-of-00002.safetensors"),
+            f("unet/diffusion_pytorch_model.safetensors.index.json"),
+        ];
+        assert_eq!(select_diffusers_files(&files).len(), 4);
+    }
+
+    #[test]
+    fn pipeline_ordner_meldet_die_klasse_als_model_type() {
+        let dir = std::env::temp_dir().join(format!("ft_diffusers_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("unet")).unwrap();
+        fs::write(dir.join("model_index.json"), br#"{"_class_name": "StableDiffusionPipeline"}"#).unwrap();
+        fs::write(dir.join("unet").join("config.json"), b"{}").unwrap();
+        assert_eq!(detect_model_type(&dir).as_deref(), Some("StableDiffusionPipeline"));
+        assert_eq!(validate_model_directory(dir.to_string_lossy().to_string()), Ok(true));
+        // Ein HF-Modell mit config.json bleibt beim model_type aus config.json.
+        fs::write(dir.join("config.json"), br#"{"model_type":"idefics3"}"#).unwrap();
+        assert_eq!(detect_model_type(&dir).as_deref(), Some("idefics3"));
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -2694,6 +2694,7 @@
       "skipButton": "Skip",
       "resultTitle": "Result",
       "idleHint": "Press “Test” to see the result",
+      "vlmQuestionPlaceholder": "Question about the image (empty = default prompt from training)",
       "inferenceRunning": "Inference running…",
       "matchLabel": "Matches expected label",
       "mismatchLabel": "Mismatch — expected:",

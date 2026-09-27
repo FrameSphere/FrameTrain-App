@@ -77,7 +77,7 @@ describe('Vision-Language', () => {
   it('CLIP bleibt nicht unterstuetzt und nennt den Grund', () => {
     const r = detectPlugin('openai/clip-vit-base-patch32');
     expect(r.supported).toBe(false);
-    if (!r.supported) expect(r.reason).toMatch(/Embedding/);
+    expect((r as { supported: false; reason: string }).reason).toMatch(/Embedding/);
     expect(pluginOf('/lokal/x', { model_type: 'clip' })).toBeNull();
     expect(pluginOf('Salesforce/blip-itm-base-coco')).toBeNull();
   });
