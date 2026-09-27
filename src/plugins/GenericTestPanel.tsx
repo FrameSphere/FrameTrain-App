@@ -14,6 +14,25 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 interface TopPred { label?: string; score?: number }
 
+/**
+ * Aufgabenspezifische Kennzahlen aus dem Testlauf (data.metrics). Fehlerraten
+ * und ROUGE sind Anteile (als % gezeigt), BLEU steht schon auf 0..100.
+ */
+const TEST_METRICS: Array<{ key: string; percent: boolean }> = [
+  { key: 'wer', percent: true }, { key: 'cer', percent: true },
+  { key: 'rouge1', percent: true }, { key: 'rouge2', percent: true }, { key: 'rougeL', percent: true },
+  { key: 'bleu', percent: false },
+];
+
+/** Fehlerraten und ROUGE als Prozent, BLEU (0..100) als Zahl, sonst drei Nachkommastellen. */
+export function formatTestMetric(key: string, v: unknown): string {
+  if (typeof v !== 'number') return String(v);
+  const m = TEST_METRICS.find(x => x.key === key);
+  if (m?.percent) return `${(v * 100).toFixed(1)} %`;
+  if (m) return v.toFixed(1);
+  return v.toFixed(3);
+}
+
 interface GenericTestPanelProps extends TestPluginProps {
   taskType: string;
   /** 'text' = Freitext-Feld, 'file' = Pfad zu einer Datei. */
@@ -339,8 +358,8 @@ export default function GenericTestPanel({
                     <p className="text-gray-400 text-[11px]">{t('testPlugins.generic.metrics')}</p>
                     {Object.entries(summary.metrics).map(([k, v]) => (
                       <div key={k} className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-400">{metricLabel(k)}</span>
-                        <span className="tabular-nums text-white">{typeof v === 'number' ? v.toFixed(3) : String(v)}</span>
+                        <span className="text-gray-400">{t(`testPlugins.generic.metricLabels.${k}`, metricLabel(k))}</span>
+                        <span className="tabular-nums text-white">{formatTestMetric(k, v)}</span>
                       </div>
                     ))}
                   </div>

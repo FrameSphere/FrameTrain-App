@@ -48,10 +48,16 @@ describe('Frontend-Architekturlisten == Train-Manifeste', () => {
     ['seq_classification', 'HF_ENCODER_SUPPORTED_MODEL_TYPES', HF_ENCODER_SUPPORTED_MODEL_TYPES],
     ['detect', 'YOLO_MODEL_TYPES', YOLO_MODEL_TYPES],
   ];
+  // Bewusste Ausnahmen: das Python-Plugin kann es, die Namensliste im Frontend
+  // leitet es aber woanders hin. whisper trainiert audio_classification als
+  // WhisperForAudioClassification (Erkennung ueber die Architektur); am
+  // model_type allein ist Whisper ein Spracherkenner (speech-recognition).
+  const TRAIN_ONLY: Record<string, string[]> = { audio_classification: ['whisper'] };
   for (const [task, name, list] of cases) {
     it(`${name} passt zu plugins/*/manifest.json (task_type ${task})`, () => {
       expect(byTask[task], `kein Manifest fuer ${task}`).toBeTruthy();
-      expect(sorted(list)).toEqual(sorted(byTask[task].supported_architectures ?? []));
+      const skip = new Set(TRAIN_ONLY[task] ?? []);
+      expect(sorted(list)).toEqual(sorted((byTask[task].supported_architectures ?? []).filter(a => !skip.has(a))));
     });
   }
 

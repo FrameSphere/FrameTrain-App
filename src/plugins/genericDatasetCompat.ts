@@ -33,6 +33,8 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'Keine Bilddateien (oder Parquet mit Bildspalte) gefunden.' };
     case 'audio_classification':
       return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.' };
+    case 'speech_recognition':
+      return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'Keine Audiodateien (oder Parquet mit Audio- und Textspalte) gefunden — Spracherkennung braucht Aufnahmen mit Transkript.' };
     case 'video_classification':
       return { exts: VIDEO_EXTS, missing: 'Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.' };
     case 'token_classification':

@@ -464,6 +464,10 @@ class ModelServer:
 
         with torch.no_grad():
             outputs = self.model(**inputs)
+        problem_type = getattr(self.model.config, "problem_type", None)
+        if problem_type in ("multi_label_classification", "regression"):
+            return self._special_result(outputs.logits, problem_type, t0)
+        with torch.no_grad():
             probs = torch.softmax(outputs.logits, dim=-1).squeeze().cpu().tolist()
         inference_time = time.time() - t0
 
@@ -487,6 +491,33 @@ class ModelServer:
             "top_predictions": top_predictions,
             "inference_time":  inference_time,
         }
+
+    def _special_result(self, logits, problem_type: str, t0: float) -> dict:
+        """Multi-Label: alle Labels ueber der Schwelle (Sigmoid statt Softmax).
+        Regression: der Zahlwert selbst, ohne erfundene Konfidenz."""
+        torch = self._torch
+        if problem_type == "regression":
+            value = float(logits.reshape(-1)[0].cpu())
+            return {"predicted": f"{value:.3f}", "value": value, "inference_time": time.time() - t0}
+        scores = torch.sigmoid(logits).reshape(-1).cpu().tolist()
+        threshold = self._threshold()
+        order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        chosen = [i for i in order if scores[i] >= threshold]
+        return {
+            "predicted": ", ".join(self.id2label.get(i, str(i)) for i in chosen),
+            "labels": [self.id2label.get(i, str(i)) for i in chosen],
+            "confidence": float(scores[order[0]]) if order else None,
+            "top_predictions": [{"label": self.id2label.get(i, str(i)), "score": float(scores[i])} for i in order[:5]],
+            "threshold": threshold,
+            "inference_time": time.time() - t0,
+        }
+
+    def _threshold(self) -> float:
+        try:
+            lm = json.loads((self.model_path / "label_mapping.json").read_text(encoding="utf-8"))
+            return float(lm.get("threshold", 0.5))
+        except (OSError, ValueError, TypeError):
+            return 0.5
 
     def _infer_text(self, text: str) -> dict:
         inputs = self.tokenizer(

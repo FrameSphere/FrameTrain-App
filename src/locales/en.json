@@ -3188,7 +3188,16 @@
       "vlmImagePlaceholder": "Full path to an image, e.g. /Users/you/pictures/invoice.png",
       "vlmQuestionLabel": "Question about the image (optional)",
       "vlmQuestionPlaceholder": "e.g. What colour is the shape? Empty = default prompt from training",
-      "vlmResult": "Model answer"
+      "vlmResult": "Model answer",
+      "transcript": "Transcript",
+      "metricLabels": {
+        "wer": "Word error rate (WER)",
+        "cer": "Character error rate (CER)",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "rougeL": "ROUGE-L",
+        "bleu": "BLEU"
+      }
     }
   },
   "studio": {

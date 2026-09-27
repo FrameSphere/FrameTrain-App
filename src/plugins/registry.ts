@@ -13,6 +13,7 @@ import yoloPlugin from './yolo';
 import imageClassificationPlugin from './image-classification';
 import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
+import speechRecognitionPlugin from './speech-recognition';
 import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
 import causalLMPlugin from './causal-lm';
@@ -33,6 +34,9 @@ const PLUGINS: ModelPlugin[] = [
   // soll auch wirklich trainiert werden, nicht durch ein resnet18 ersetzt.
   hfImageClassificationPlugin,
   imageClassificationPlugin,  // torchvision-Backbones (ohne HF-Gewichte)
+  // Vor der Audio-Klassifikation: Whisper, *ForCTC und wav2vec2-…-960h sind
+  // Spracherkenner. Ein wav2vec2 ohne solche Hinweise bleibt Klassifikation.
+  speechRecognitionPlugin,    // Whisper / Moonshine / wav2vec2-CTC
   audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
   videoClassificationPlugin,  // VideoMAE / TimeSformer / ViViT
   seq2seqPlugin,              // T5 / BART / Pegasus / Marian

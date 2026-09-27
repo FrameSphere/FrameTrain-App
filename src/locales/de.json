@@ -3188,7 +3188,16 @@
       "vlmImagePlaceholder": "Vollständiger Pfad zu einem Bild, z.B. /Users/du/bilder/rechnung.png",
       "vlmQuestionLabel": "Frage zum Bild (optional)",
       "vlmQuestionPlaceholder": "z.B. Welche Farbe hat die Form? Leer = Standardprompt aus dem Training",
-      "vlmResult": "Antwort des Modells"
+      "vlmResult": "Antwort des Modells",
+      "transcript": "Transkript",
+      "metricLabels": {
+        "wer": "Wortfehlerrate (WER)",
+        "cer": "Zeichenfehlerrate (CER)",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "rougeL": "ROUGE-L",
+        "bleu": "BLEU"
+      }
     }
   },
   "studio": {

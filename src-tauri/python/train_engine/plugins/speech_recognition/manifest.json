@@ -1,0 +1,15 @@
+{
+  "task_type": "speech_recognition",
+  "name": "Speech Recognition / ASR (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert Spracherkennung: Whisper, Moonshine und Speech2Text als Seq2Seq, wav2vec2, HuBERT, WavLM und data2vec-audio mit CTC (Vokabular wird bei Bedarf aus den Transkripten gebaut).",
+  "supported_architectures": [
+    "whisper", "moonshine", "speech_to_text", "speech-encoder-decoder",
+    "wav2vec2", "wav2vec2-bert", "wav2vec2-conformer", "hubert", "wavlm", "data2vec-audio",
+    "unispeech", "unispeech-sat", "sew", "sew-d"
+  ],
+  "dataset_formats": ["audio_transcript", "audiofolder", "common_voice", "pre_split", "parquet"],
+  "metrics": ["train_loss", "val_loss", "wer", "cer"]
+}

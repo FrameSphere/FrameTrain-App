@@ -91,7 +91,7 @@ describe('VLM-Test', () => {
       data: { total_samples: 20, accuracy: 0.9, correct_predictions: 18, metrics: { exact_match: 0.9, rougeL: 0.95 } },
     }));
     // Zusatzkennzahlen stehen als Beschriftung + Wert (gemeinsame Darstellung mit NER/Embeddings).
-    expect(await screen.findByText('RougeL')).toBeTruthy();
-    expect(screen.getByText('0.950')).toBeTruthy();
+    expect(await screen.findByText('ROUGE-L')).toBeTruthy();
+    expect(screen.getByText('95.0 %')).toBeTruthy();
   });
 });

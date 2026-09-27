@@ -26,9 +26,9 @@ export function passendeAufgaben(project: Pick<StudioProject, 'modality' | 'task
     return ['hf_image_classification', 'image_classification'];
   }
   if (project.modality === 'audio') {
-    // Transkripte trainieren Sprach-zu-Text-Modelle, die in der Registry als
-    // seq2seq gefuehrt sind.
-    return project.task === 'transcript' ? ['seq2seq', 'audio_classification'] : ['audio_classification'];
+    // Transkripte trainieren Spracherkenner (Whisper, Wav2Vec2-CTC). Die
+    // liefen frueher mangels eigenem Plugin als seq2seq bzw. Audio-Klassifikation.
+    return project.task === 'transcript' ? ['speech_recognition'] : ['audio_classification'];
   }
   return ['detect'];
 }
