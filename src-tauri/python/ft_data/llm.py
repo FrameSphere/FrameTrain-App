@@ -16,6 +16,8 @@ Erkannte Formate je Zeile
   {"question": ..., "answer": ...} / {"query": ..., "response": ...} u. a.
   {"text": ...}                                     (weiteres Vortraining)
   .txt/.md-Dateien                                   (weiteres Vortraining)
+  {"prompt": ..., "chosen": ..., "rejected": ...}   (Praeferenzen → DPO)
+    chosen/rejected auch als Chat-Liste; der gemeinsame Anfang ist dann der Prompt.
 """
 from __future__ import annotations
 
@@ -73,6 +75,9 @@ class Example:
     """Eine Trainingszeile: entweder ein Chat oder reiner Text."""
     messages: Optional[List[Dict[str, str]]] = None
     text: Optional[str] = None
+    # Nur bei Praeferenzdaten (DPO): die schlechtere Antwort. messages endet
+    # dann mit der besseren (chosen).
+    rejected: Optional[str] = None
 
     @property
     def is_chat(self) -> bool:
@@ -97,7 +102,7 @@ class LoadedData:
     train: List[Example]
     val: List[Example]
     test: List[Example] = field(default_factory=list)
-    kind: str = "chat"          # "chat" | "text"
+    kind: str = "chat"          # "chat" | "text" | "preference"
     source_format: str = ""     # fuer die Statusmeldung
     notes: List[str] = field(default_factory=list)
 
@@ -221,6 +226,9 @@ def detect_format(columns: Iterable[str], overrides: Optional[Dict[str, Any]] = 
         if missing:
             raise ValueError(f"Spalte(n) {missing} aus plugin_config nicht gefunden. Vorhanden: {sorted(columns)}")
         return "pair", (p_col, r_col)
+    if "chosen" in cols and "rejected" in cols:
+        prompt = next((cols[k] for k in ("prompt", "question", "instruction", "query", "input") if k in cols), "")
+        return "preference", (prompt, cols["chosen"], cols["rejected"])
     for key in ("messages", "conversations", "conversation", "chat"):
         if key in cols:
             return "messages", (cols[key],)
@@ -242,8 +250,30 @@ def detect_format(columns: Iterable[str], overrides: Optional[Dict[str, Any]] = 
     )
 
 
+def _split_preference(prompt_raw: Any, chosen_raw: Any, rejected_raw: Any):
+    """(prompt_messages, chosen_text, rejected_text) aus Text- oder Chat-Form."""
+    ch, rj = _norm_messages(chosen_raw), _norm_messages(rejected_raw)
+    if ch and rj:
+        # Chat-Form (z. B. Anthropic HH): alles vor der letzten Antwort ist der Prompt.
+        ctx = ch[:-1] if ch[-1]["role"] == "assistant" else ch
+        return ctx, ch[-1]["content"], rj[-1]["content"]
+    prompt_msgs = _norm_messages(prompt_raw) if isinstance(prompt_raw, (list, str)) else None
+    if not prompt_msgs:
+        text = _as_text(prompt_raw).strip()
+        prompt_msgs = [{"role": "user", "content": text}] if text else []
+    return prompt_msgs, _as_text(chosen_raw).strip(), _as_text(rejected_raw).strip()
+
+
 def row_to_example(row: Dict[str, Any], fmt: str, cols: Tuple[str, ...],
                    system_prompt: str = "") -> Optional[Example]:
+    if fmt == "preference":
+        ctx, chosen, rejected = _split_preference(row.get(cols[0]) if cols[0] else None,
+                                                  row.get(cols[1]), row.get(cols[2]))
+        if not ctx or not chosen or not rejected or chosen == rejected:
+            return None
+        if system_prompt and ctx[0]["role"] != "system":
+            ctx = [{"role": "system", "content": system_prompt}] + ctx
+        return Example(messages=ctx + [{"role": "assistant", "content": chosen}], rejected=rejected)
     if fmt == "messages":
         msgs = _norm_messages(row.get(cols[0]))
         if not msgs:
@@ -297,9 +327,9 @@ def load_examples(dataset_path: str, plugin_config: Optional[Dict[str, Any]] = N
                 continue
             by_split[split].append(ex)
 
-    if "text" in formats and len(formats) > 1:
+    if len(formats & {"text", "preference"}) and len(formats) > 1:
         raise ValueError(
-            "Das Dataset mischt Chat-/Frage-Antwort-Daten und reinen Text. "
+            "Das Dataset mischt verschiedene Arten (Chat/Frage-Antwort, Praeferenzpaare, reiner Text). "
             "Bitte eine Art pro Dataset verwenden."
         )
     if skipped:
@@ -326,7 +356,7 @@ def load_examples(dataset_path: str, plugin_config: Optional[Dict[str, Any]] = N
             val = list(train)
             notes.append("Sehr kleines Dataset — Validierung auf den Trainingsdaten (nur Lernnachweis).")
 
-    kind = "text" if formats == {"text"} else "chat"
+    kind = "text" if formats == {"text"} else "preference" if formats == {"preference"} else "chat"
     return LoadedData(train=train, val=val, test=test, kind=kind,
                       source_format="/".join(sorted(formats)), notes=notes)
 
@@ -433,6 +463,29 @@ def tokenize_example(tokenizer, ex: Example, max_len: int) -> List[Tokenized]:
     if all(l == -100 for l in labels):
         return []   # Antwort komplett abgeschnitten — nichts zu lernen
     return [Tokenized(full, labels, min(first, len(full)), ok)]
+
+
+@dataclass
+class PreferencePair:
+    chosen: Tokenized
+    rejected: Tokenized
+
+
+def tokenize_preferences(tokenizer, examples: List[Example], max_len: int) -> Tuple[List[PreferencePair], Dict[str, int]]:
+    """Fuer DPO: beide Antworten mit demselben Prompt, Loss-Maske nur auf der Antwort."""
+    out: List[PreferencePair] = []
+    stats = {"examples": len(examples), "dropped": 0, "unmasked": 0, "truncated": 0}
+    for ex in examples:
+        prompt = ex.prompt_messages()
+        good = tokenize_example(tokenizer, Example(messages=ex.messages), max_len)
+        bad = tokenize_example(tokenizer, Example(messages=prompt + [{"role": "assistant", "content": ex.rejected or ""}]), max_len)
+        if not good or not bad:
+            stats["dropped"] += 1
+            continue
+        if not (good[0].masked_ok and bad[0].masked_ok):
+            stats["unmasked"] += 1
+        out.append(PreferencePair(good[0], bad[0]))
+    return out, stats
 
 
 def tokenize_all(tokenizer, examples: List[Example], max_len: int) -> Tuple[List[Tokenized], Dict[str, int]]:

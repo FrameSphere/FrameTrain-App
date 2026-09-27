@@ -114,6 +114,34 @@ class TokenTest(unittest.TestCase):
         self.assertEqual([len(t.input_ids) for t in items], [10, 10, 6])
 
 
+class PreferenceTest(unittest.TestCase):
+    def test_praeferenzen_werden_erkannt(self):
+        self.assertEqual(D.detect_format(["prompt", "chosen", "rejected"]), ("preference", ("prompt", "chosen", "rejected")))
+
+    def test_chatform_hh(self):
+        chosen = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hallo!"}]
+        rejected = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Weg."}]
+        ex = D.row_to_example({"chosen": chosen, "rejected": rejected}, "preference", ("", "chosen", "rejected"))
+        self.assertEqual(ex.prompt_messages(), [{"role": "user", "content": "Hi"}])
+        self.assertEqual((ex.reference(), ex.rejected), ("Hallo!", "Weg."))
+
+    def test_gleiche_antworten_werden_verworfen(self):
+        self.assertIsNone(D.row_to_example({"prompt": "p", "chosen": "a", "rejected": "a"},
+                                           "preference", ("prompt", "chosen", "rejected")))
+
+    def test_paar_tokenisierung_maskiert_nur_die_antworten(self):
+        ex = D.Example(messages=[{"role": "user", "content": "Q"}, {"role": "assistant", "content": "gut"}], rejected="schlecht")
+        pairs, _ = D.tokenize_preferences(_CharTok(), [ex], 512)
+        ch = "".join(chr(i) for i, l in zip(pairs[0].chosen.input_ids, pairs[0].chosen.labels) if l != -100)
+        rj = "".join(chr(i) for i, l in zip(pairs[0].rejected.input_ids, pairs[0].rejected.labels) if l != -100)
+        self.assertEqual((ch, rj), ("gut|", "schlecht|"))
+
+    def test_kind_preference(self):
+        with tempfile.TemporaryDirectory() as d:
+            _jsonl(Path(d) / "train.jsonl", [{"prompt": f"p{i}", "chosen": "a", "rejected": "b"} for i in range(12)])
+            self.assertEqual(D.load_examples(d).kind, "preference")
+
+
 class ScoreTest(unittest.TestCase):
     def test_bewertung(self):
         s = D.score_generations(["Abteilung: KONTO", "falsch"], ["abteilung:  konto", "richtig"])

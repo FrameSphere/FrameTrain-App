@@ -4,7 +4,7 @@
   "version": "1.0",
   "entry": "plugin.py",
   "class": "Plugin",
-  "description": "Fine-Tuning von Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM, GPT-2) mit LoRA oder QLoRA. Chat-, Instruktions- und Textdaten. Backends: PyTorch/peft (CUDA, MPS, CPU) und MLX (Apple Silicon, inkl. 4-bit).",
+  "description": "Fine-Tuning von Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM, GPT-2) mit LoRA oder QLoRA. Chat-, Instruktions- und Textdaten, Präferenzpaare per DPO. Backends: PyTorch/peft (CUDA, MPS, CPU) und MLX (Apple Silicon, inkl. 4-bit).",
   "supported_architectures": [
     "llama", "mistral", "mixtral", "qwen2", "qwen2_moe", "qwen3", "qwen3_moe",
     "gemma", "gemma2", "gemma3", "gemma3_text", "phi", "phi3", "phimoe",
@@ -12,6 +12,6 @@
     "stablelm", "olmo", "olmo2", "granite", "cohere", "starcoder2", "smollm3"
   ],
   "dataset_formats": ["jsonl", "json", "csv", "tsv", "parquet", "txt"],
-  "metrics": ["train_loss", "val_loss", "perplexity", "exact_match", "rougeL"],
-  "supports_features": {"lora": true, "qlora": true, "gradient_checkpointing": true}
+  "metrics": ["train_loss", "val_loss", "perplexity", "exact_match", "rougeL", "preference_accuracy", "reward_margin"],
+  "supports_features": {"lora": true, "qlora": true, "gradient_checkpointing": true, "dpo": true}
 }

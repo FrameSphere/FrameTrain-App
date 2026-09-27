@@ -25,6 +25,8 @@ plugin_config:
   max_new_tokens    Laenge der Antworten in dieser Auswertung
   lora_layers       MLX: wie viele Bloecke (von hinten) LoRA bekommen, -1 = alle
   export_gguf       zusaetzlich eine GGUF-Datei fuer Ollama / LM Studio schreiben
+  dpo_beta          DPO (Daten mit chosen/rejected): Staerke der Praeferenz, Standard 0.1
+  dpo_sft_weight    DPO: Anteil SFT-Loss auf der guten Antwort (RPO), 0 = reines DPO
 """
 from __future__ import annotations
 
@@ -185,16 +187,12 @@ class Plugin(TrainPlugin):
             + (f" | QLoRA {self.quant_bits}-bit" if self.quant_bits else "")
             + (" | LoRA" if self.config.use_lora or self.quant_bits else " | volles Fine-Tuning"))
 
-        if self.backend == "torch":
-            from transformers import AutoTokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-        else:
-            # Tokenizer kommt beim Laden des MLX-Modells mit; fuer die
-            # Datenaufbereitung reicht vorerst der HF-Tokenizer.
-            from transformers import AutoTokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+        # Auch fuer MLX: die Datenaufbereitung laeuft ueber den HF-Tokenizer,
+        # das MLX-Modell bringt beim Laden seinen eigenen mit.
+        from transformers import AutoTokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         self.template_source = D.ensure_chat_template(self.tokenizer)
         if self.template_source == "fallback":
             MessageProtocol.status(
@@ -223,8 +221,11 @@ class Plugin(TrainPlugin):
         self.data = D.load_examples(self.config.dataset_path, self.pc, seed=self.config.seed)
         for note in self.data.notes:
             MessageProtocol.status("loading_data", note)
-        kind = "Chat/Frage-Antwort (Loss nur auf den Antworten)" if self.data.kind == "chat" \
-            else "reiner Text (weiteres Vortraining)"
+        kind = {"chat": "Chat/Frage-Antwort (Loss nur auf den Antworten)",
+                "preference": "Praeferenzpaare chosen/rejected (DPO)",
+                "text": "reiner Text (weiteres Vortraining)"}[self.data.kind]
+        if self.data.kind == "preference":
+            return self._load_preferences(kind)
         MessageProtocol.status(
             "loading_data",
             f"Format: {self.data.source_format} → {kind} | Train: {len(self.data.train)} | "
@@ -248,6 +249,34 @@ class Plugin(TrainPlugin):
         self.train_dataset, self.eval_dataset = train_tok, val_tok
         n_tokens = sum(sum(1 for l in t.labels if l != -100) for t in train_tok)
         MessageProtocol.status("loading_data", f"Tokenisiert: {len(train_tok)} Sequenzen, {n_tokens} Ziel-Tokens")
+        return True
+
+    def _load_preferences(self, kind: str) -> bool:
+        if self.backend == "mlx":
+            # mlx-lm kennt nur SFT. DPO braucht das Referenzmodell (Basis ohne
+            # Adapter) — das gibt es sauber nur im peft-Weg.
+            MessageProtocol.warning("DPO laeuft ueber PyTorch (mlx-lm kann kein DPO) — Backend gewechselt.")
+            self.backend = "torch"
+            import torch
+            if self.quant_bits and not torch.cuda.is_available():
+                MessageProtocol.warning("4-bit gibt es mit PyTorch nur auf NVIDIA — DPO laeuft mit normalem LoRA.")
+                self.quant_bits = 0
+        MessageProtocol.status(
+            "loading_data",
+            f"Format: {self.data.source_format} → {kind} | Train: {len(self.data.train)} | Val: {len(self.data.val)}")
+        max_len = int(self.config.max_seq_length or 512)
+        train_p, st = D.tokenize_preferences(self.tokenizer, self.data.train, max_len)
+        val_p, _ = D.tokenize_preferences(self.tokenizer, self.data.val, max_len)
+        if st["dropped"]:
+            MessageProtocol.warning(f"{st['dropped']} Paare verworfen (Antwort hinter max_seq_length={max_len}).")
+        if not train_p:
+            raise ValueError("Nach der Tokenisierung ist kein Praeferenzpaar uebrig.")
+        self.train_dataset, self.eval_dataset = train_p, val_p
+        self.dpo_beta = float(self.pc.get("dpo_beta", 0.1) or 0.1)
+        self.dpo_sft_weight = float(self.pc.get("dpo_sft_weight", 1.0))
+        MessageProtocol.status(
+            "loading_data",
+            f"Tokenisiert: {len(train_p)} Paare | DPO beta={self.dpo_beta}, SFT-Anteil={self.dpo_sft_weight}")
         return True
 
     # ── 3. Modell ───────────────────────────────────────────────────────────
@@ -354,7 +383,7 @@ class Plugin(TrainPlugin):
 
     # ── Generierung (Auswertung vorher/nachher) ─────────────────────────────
     def _eval_examples(self) -> List[D.Example]:
-        if not self.eval_samples or not self.data or self.data.kind != "chat":
+        if not self.eval_samples or not self.data or self.data.kind not in ("chat", "preference"):
             return []
         pool = self.data.test or self.data.val
         return pool[: self.eval_samples]
@@ -425,6 +454,8 @@ class Plugin(TrainPlugin):
         return max(1, math.ceil(len(self.train_dataset) / eff))
 
     def _train_torch(self) -> bool:
+        if self.data and self.data.kind == "preference":
+            return self._train_dpo()
         import torch
         from datasets import Dataset
         from transformers import Trainer, TrainerCallback, TrainingArguments
@@ -462,6 +493,114 @@ class Plugin(TrainPlugin):
         self._trainer.train()
         self._steps_done = int(self._trainer.state.global_step)
         return not self.is_stopped
+
+    # ── DPO ────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _seq_logps(model, ids, att, labels, with_counts: bool = False):
+        """Summe der Log-Wahrscheinlichkeiten der Antwort-Tokens je Sequenz."""
+        import torch
+        logits = model(input_ids=ids, attention_mask=att).logits[:, :-1].float()
+        tgt = labels[:, 1:]
+        mask = tgt != -100
+        lp = torch.gather(logits.log_softmax(-1), 2, tgt.clamp(min=0).unsqueeze(-1)).squeeze(-1)
+        sums = (lp * mask).sum(-1)
+        return (sums, mask.sum(-1).clamp(min=1)) if with_counts else sums
+
+    def _ref_logps(self, model, ids, att, labels):
+        import torch
+        with torch.no_grad():
+            if hasattr(model, "disable_adapter"):
+                # LoRA: das Referenzmodell ist die Basis ohne Adapter — kein
+                # zweites Modell im Speicher.
+                with model.disable_adapter():
+                    return self._seq_logps(model, ids, att, labels)
+            return self._seq_logps(self._ref_model, ids, att, labels)
+
+    def _dpo_collate(self, batch):
+        import torch
+        pad_id = self.tokenizer.pad_token_id
+        seqs = [(b["c_ids"], b["c_lab"]) for b in batch] + [(b["r_ids"], b["r_lab"]) for b in batch]
+        n = max(len(i) for i, _ in seqs)
+        return {
+            "input_ids": torch.tensor([i + [pad_id] * (n - len(i)) for i, _ in seqs]),
+            "labels": torch.tensor([l + [-100] * (n - len(l)) for _, l in seqs]),
+            "attention_mask": torch.tensor([[1] * len(i) + [0] * (n - len(i)) for i, _ in seqs]),
+        }
+
+    def _dpo_batch(self, model, inputs):
+        """(loss, Anteil richtig geordneter Paare, mittlerer Abstand)."""
+        import torch.nn.functional as F
+        ids, att, lab = inputs["input_ids"], inputs["attention_mask"], inputs["labels"]
+        half = ids.shape[0] // 2
+        pol, counts = self._seq_logps(model, ids, att, lab, with_counts=True)
+        ref = self._ref_logps(model, ids, att, lab)
+        margin = self.dpo_beta * ((pol[:half] - ref[:half]) - (pol[half:] - ref[half:]))
+        loss = -F.logsigmoid(margin).mean()
+        if self.dpo_sft_weight > 0:
+            # RPO: reines DPO senkt auch Tokens, die gute und schlechte Antwort
+            # teilen ("Abteilung: … | Code: FT-") — im echten Lauf zerfiel so das
+            # Format (Exact Match 30 % -> 0 %). Der SFT-Anteil auf der guten
+            # Antwort haelt es stabil.
+            loss = loss + self.dpo_sft_weight * (-(pol[:half] / counts[:half]).mean())
+        return loss, float((margin > 0).float().mean()), float(margin.mean())
+
+    def _train_dpo(self) -> bool:
+        import copy
+        from datasets import Dataset
+        from transformers import Trainer, TrainerCallback, TrainingArguments
+
+        plugin = self
+        if not hasattr(self.model, "disable_adapter"):
+            MessageProtocol.warning("DPO ohne LoRA haelt eine zweite Kopie des Modells als Referenz im Speicher.")
+            self._ref_model = copy.deepcopy(self.model).eval()
+            for p in self._ref_model.parameters():
+                p.requires_grad_(False)
+
+        def to_ds(pairs):
+            return Dataset.from_list([{"c_ids": p.chosen.input_ids, "c_lab": p.chosen.labels,
+                                       "r_ids": p.rejected.input_ids, "r_lab": p.rejected.labels} for p in pairs])
+
+        class _DPOTrainer(Trainer):
+            def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+                loss, acc, margin = plugin._dpo_batch(model, inputs)
+                plugin._last_pref_acc, plugin._last_margin = acc, margin
+                return (loss, {}) if return_outputs else loss
+
+        train_ds = to_ds(self.train_dataset)
+        eval_ds = to_ds(self.eval_dataset) if self.eval_dataset else None
+        total = self._steps_per_epoch() * max(1, int(self.config.epochs))
+        if int(self.config.max_steps) > 0:
+            total = int(self.config.max_steps)
+        overrides: Dict[str, Any] = {"remove_unused_columns": False, "label_smoothing_factor": 0.0,
+                                     "prediction_loss_only": True}
+        if eval_ds is None:
+            overrides["eval_strategy"] = "no"
+        args = hft.build_training_arguments(self.config, self.config.effective_output_dir(), TrainingArguments, **overrides)
+        self._trainer = _DPOTrainer(
+            model=self.model, args=args, train_dataset=train_ds, eval_dataset=eval_ds,
+            data_collator=self._dpo_collate, callbacks=[hft.progress_callback(TrainerCallback, self, total)])
+        self._trainer.train()
+        self._steps_done = int(self._trainer.state.global_step)
+        return not self.is_stopped
+
+    def _dpo_eval(self) -> Dict[str, float]:
+        """Anteil der Val-Paare, bei denen das Modell chosen staerker bevorzugt als die Basis."""
+        import torch
+        pairs = self.eval_dataset or []
+        if not pairs:
+            return {}
+        self.model.eval()
+        accs, margins = [], []
+        for i in range(0, len(pairs), 4):
+            chunk = pairs[i:i + 4]
+            batch = self._dpo_collate([{"c_ids": p.chosen.input_ids, "c_lab": p.chosen.labels,
+                                        "r_ids": p.rejected.input_ids, "r_lab": p.rejected.labels} for p in chunk])
+            batch = {k: v.to(self.model.device) for k, v in batch.items()}
+            with torch.no_grad():
+                _, acc, margin = self._dpo_batch(self.model, batch)
+            accs.append(acc * len(chunk))
+            margins.append(margin * len(chunk))
+        return {"preference_accuracy": sum(accs) / len(pairs), "reward_margin": sum(margins) / len(pairs)}
 
     def _train_mlx(self) -> bool:
         import mlx.optimizers as optim
@@ -568,6 +707,14 @@ class Plugin(TrainPlugin):
         else:
             result = self._trainer.evaluate() if self._trainer and self._trainer.eval_dataset is not None else {}
         self.after = self._run_generation_eval("Nach dem Training")
+        if self.data and self.data.kind == "preference":
+            dpo = self._dpo_eval()
+            self.after.update(dpo)
+            if dpo:
+                MessageProtocol.status(
+                    "validating",
+                    f"DPO: bevorzugt bei {dpo['preference_accuracy']:.0%} der Val-Paare die bessere Antwort "
+                    f"(mittlerer Abstand {dpo['reward_margin']:.3f})")
 
         class _S:  # final_metrics erwartet trainer.state
             pass
@@ -594,7 +741,7 @@ class Plugin(TrainPlugin):
             "lora": bool(self.config.use_lora or self.quant_bits), "quant_bits": int(self.quant_bits),
             "chat_template": self.template_source, "data_kind": self.data.kind if self.data else "",
         })
-        if self.after:
+        if self.after.get("exact_match") is not None:
             msg = f"Nachher: Exact Match {self.after['exact_match']:.0%}, ROUGE-L {self.after['rougeL']:.2f}"
             if self.baseline:
                 msg += f" (vorher {self.baseline['exact_match']:.0%} / {self.baseline['rougeL']:.2f})"

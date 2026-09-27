@@ -5,7 +5,7 @@ import CausalLMTestPlugin from './TestPlugin';
 const causalLMPlugin: ModelPlugin = {
   id: 'causal-lm',
   name: 'LLM Fine-Tuning (LoRA)',
-  description: 'Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten.',
+  description: 'Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Praeferenzpaare (chosen/rejected) per DPO.',
   taskType: 'causal_lm',
   // LoRA ist der Normalfall: volles Fine-Tuning eines 7B-Modells braucht
   // >100 GB. LoRA-Lernraten liegen etwa 10x ueber denen des vollen Trainings.
@@ -17,9 +17,11 @@ const causalLMPlugin: ModelPlugin = {
   // backend: auto = MLX auf Apple Silicon (schneller, 4-bit moeglich), sonst PyTorch.
   // eval_samples: so viele Val-Beispiele werden vor/nach dem Training generiert
   // und mit der Referenz verglichen (Exact Match, ROUGE-L).
+  // dpo_*: greifen nur bei Praeferenzdaten (chosen/rejected). dpo_sft_weight
+  // haelt das Antwortformat stabil — reines DPO (0) zerlegte es im Test.
   defaultPluginConfig: {
     backend: 'auto', system_prompt: '', eval_samples: 10, eval_baseline: true,
-    max_new_tokens: 256, export_gguf: false,
+    max_new_tokens: 256, export_gguf: false, dpo_beta: 0.1, dpo_sft_weight: 1.0,
   },
   hiddenTrainingFields: ['label_smoothing', 'group_by_length'],
   detect: detectCausalLM,
