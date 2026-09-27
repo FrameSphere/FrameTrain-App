@@ -1,0 +1,14 @@
+{
+  "task_type": "sentence_embedding",
+  "name": "Sentence Embeddings (Sentence-Transformers)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert Embedding-Modelle fuer Suche, RAG und Aehnlichkeit (all-MiniLM, BGE, E5, GTE, MPNet oder jeder HF-Encoder). Paare, Tripel, Paare mit Score oder Texte mit Klasse.",
+  "supported_architectures": [
+    "bert", "distilbert", "roberta", "xlm-roberta", "deberta", "deberta-v2",
+    "electra", "albert", "camembert", "mpnet", "modernbert"
+  ],
+  "dataset_formats": ["jsonl", "json", "csv", "tsv", "parquet"],
+  "metrics": ["train_loss", "val_loss", "recall_at_1", "recall_at_5", "mrr_at_10", "spearman"]
+}

@@ -1,0 +1,10 @@
+{
+  "task_type": "token_classification",
+  "name": "Token Classification (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz fuer NER-/POS-Modelle: Text rein, Entitaeten raus.",
+  "input_type": "text",
+  "output_format": "entities"
+}

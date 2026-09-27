@@ -3115,7 +3115,14 @@
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
       "detectedClass": "Erkannte Klasse",
       "videoLabel": "Einzelnes Video",
-      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4"
+      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4",
+      "tokenLabel": "Text für die Entitätenerkennung",
+      "tokenPlaceholder": "z.B. Karol fliegt morgen mit Lufthansa nach Berlin.",
+      "tokenResult": "Gefundene Entitäten",
+      "embeddingLabel": "Satz oder Satzpaar",
+      "embeddingPlaceholder": "Ein Satz – die ähnlichsten Texte kommen aus dem unten gewählten Dataset. Oder zwei Sätze vergleichen: Satz A ||| Satz B",
+      "embeddingResult": "Ergebnis (Kosinus-Ähnlichkeit)",
+      "metrics": "Kennzahlen"
     }
   },
   "studio": {

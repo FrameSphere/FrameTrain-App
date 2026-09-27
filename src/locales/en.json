@@ -3115,7 +3115,14 @@
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
       "detectedClass": "Detected class",
       "videoLabel": "Single video",
-      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4"
+      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4",
+      "tokenLabel": "Text for entity recognition",
+      "tokenPlaceholder": "e.g. Karol is flying to Berlin with Lufthansa tomorrow.",
+      "tokenResult": "Entities found",
+      "embeddingLabel": "Sentence or sentence pair",
+      "embeddingPlaceholder": "One sentence – the most similar texts come from the dataset selected below. Or compare two sentences: Sentence A ||| Sentence B",
+      "embeddingResult": "Result (cosine similarity)",
+      "metrics": "Metrics"
     }
   },
   "studio": {

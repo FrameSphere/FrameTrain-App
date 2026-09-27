@@ -23,14 +23,37 @@ interface GenericTestPanelProps extends TestPluginProps {
   resultLabel: string;
   /** Seq2Seq liefert freien Text statt Klassen — dann keine Konfidenz zeigen. */
   showConfidence?: boolean;
+  /**
+   * Liste unter dem Ergebnis (Entitaeten, aehnlichste Texte) auch ohne
+   * Konfidenz zeigen. Standard: wie showConfidence.
+   */
+  showTopList?: boolean;
+  /** 'raw' zeigt Scores als 0.834 (Kosinus), 'percent' als 83.4 %. */
+  scoreFormat?: 'percent' | 'raw';
+  /**
+   * Einzel-Eingabe bekommt das gewaehlte Dataset als corpus_path mit — das
+   * Embedding-Plugin sucht dort die aehnlichsten Texte.
+   */
+  singleUsesDataset?: boolean;
   pluginConfig?: Record<string, unknown>;
+}
+
+/** recall_at_1 -> Recall@1, entity_f1 -> Entity F1 — lesbar ohne Uebersetzungstabelle. */
+export function metricLabel(key: string): string {
+  const s = key.replace(/_at_(\d+)/g, '@$1').replace(/_/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export default function GenericTestPanel({
   versionId, modelId, modelName, versionName, datasets,
   taskType, inputKind, singleLabel, singlePlaceholder, resultLabel,
-  showConfidence = true, pluginConfig = {},
+  showConfidence = true, showTopList, scoreFormat = 'percent', singleUsesDataset = false,
+  pluginConfig = {},
 }: GenericTestPanelProps) {
+  const topList = showTopList ?? showConfidence;
+  const fmtScore = (v?: number) => scoreFormat === 'raw'
+    ? (v ?? 0).toFixed(3)
+    : `${((v ?? 0) * 100).toFixed(1)} %`;
   const { t } = useLanguage();
   const [input, setInput] = useState('');
   const [singleBusy, setSingleBusy] = useState(false);
@@ -45,7 +68,7 @@ export default function GenericTestPanel({
   const [maxSamples, setMaxSamples] = useState<number | ''>(50);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
-  const [summary, setSummary] = useState<{ total: number; accuracy: number | null; correct: number | null } | null>(null);
+  const [summary, setSummary] = useState<{ total: number; accuracy: number | null; correct: number | null; metrics?: Record<string, number> } | null>(null);
 
   const unlistenRef = useRef<Array<() => void>>([]);
   useEffect(() => () => { unlistenRef.current.forEach(fn => fn()); }, []);
@@ -54,12 +77,13 @@ export default function GenericTestPanel({
     if (!input.trim()) { setError(t('testPlugins.generic.inputMissing', { label: singleLabel })); return; }
     setError(null); setSingle(null); setStatus(null); setSingleBusy(true);
     try {
+      const corpus = singleUsesDataset ? datasets.find(d => d.id === datasetId)?.storage_path : undefined;
       const testId = await invoke<string>('test_single_input', {
         versionId,
         singleInput: input.trim(),
         singleInputType: inputKind,
         taskType,
-        pluginConfig,
+        pluginConfig: corpus ? { ...pluginConfig, corpus_path: corpus } : pluginConfig,
       });
       const off = await listen<{ test_id: string; data?: { predicted_output?: string; confidence?: number; top_predictions?: TopPred[]; inference_time?: number } }>(
         'test-single-complete', e => {
@@ -108,13 +132,14 @@ export default function GenericTestPanel({
             setProgress({ current: d.current_sample, total: d.total_samples });
           }
         });
-      const offC = await listen<{ test_id?: string; data?: { total_samples?: number; accuracy?: number | null; correct_predictions?: number | null } }>(
+      const offC = await listen<{ test_id?: string; data?: { total_samples?: number; accuracy?: number | null; correct_predictions?: number | null; metrics?: Record<string, number> } }>(
         'test-complete', e => {
           const d = e.payload.data;
           setSummary({
             total: d?.total_samples ?? 0,
             accuracy: d?.accuracy ?? null,
             correct: d?.correct_predictions ?? null,
+            metrics: d?.metrics,
           });
           setStatus(null);
           setRunning(false);
@@ -177,12 +202,12 @@ export default function GenericTestPanel({
                 : ''}
               {single.ms} ms
             </p>
-            {showConfidence && single.top.length > 1 && (
+            {topList && single.top.length > (showConfidence ? 1 : 0) && (
               <div className="space-y-1 pt-1">
                 {single.top.map((pred, i) => (
-                  <div key={i} className="flex items-center justify-between text-[11px] text-gray-400">
-                    <span>{pred.label}</span>
-                    <span className="tabular-nums">{((pred.score ?? 0) * 100).toFixed(1)} %</span>
+                  <div key={i} className="flex items-center justify-between gap-3 text-[11px] text-gray-400">
+                    <span className="break-words">{pred.label}</span>
+                    <span className="tabular-nums flex-shrink-0">{fmtScore(pred.score)}</span>
                   </div>
                 ))}
               </div>
@@ -257,7 +282,18 @@ export default function GenericTestPanel({
                 <p>{t('testPlugins.generic.evaluated', { n: summary.total })}</p>
                 {summary.accuracy != null
                   ? <p className="text-white font-medium">{t('testPlugins.generic.hits', { value: (summary.accuracy * 100).toFixed(1), correct: summary.correct ?? 0 })}</p>
-                  : <p className="text-gray-500">{t('testPlugins.generic.noExpected')}</p>}
+                  : !summary.metrics && <p className="text-gray-500">{t('testPlugins.generic.noExpected')}</p>}
+                {summary.metrics && Object.keys(summary.metrics).length > 0 && (
+                  <div className="pt-1 space-y-0.5">
+                    <p className="text-gray-400 text-[11px]">{t('testPlugins.generic.metrics')}</p>
+                    {Object.entries(summary.metrics).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-400">{metricLabel(k)}</span>
+                        <span className="tabular-nums text-white">{typeof v === 'number' ? v.toFixed(3) : String(v)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </>

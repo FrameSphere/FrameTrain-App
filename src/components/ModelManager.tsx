@@ -133,7 +133,7 @@ export function checkHfModelSupport(
       supported: false,
       // Der Satz nannte frueher nur Sequenzklassifikation. Seit 1.2.17 kommen
       // Bild, Audio und Seq2Seq dazu — die alte Formulierung log den Nutzer an.
-      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), Bildklassifikation, Audioklassifikation, Seq2Seq (T5/BART) sowie YOLO-Objekterkennung.`,
+      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), NER/Token-Klassifikation, Sentence Embeddings, Bild-, Audio- und Videoklassifikation, Seq2Seq (T5/BART) sowie YOLO-Objekterkennung.`,
     };
   }
   return { supported: false, reason: (result as { supported: false; reason: string }).reason };

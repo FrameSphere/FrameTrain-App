@@ -20,6 +20,8 @@ const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.
 const AUDIO_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aiff', '.aif'];
 const VIDEO_EXTS = ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi'];
 const TABLE_EXTS = ['.csv', '.tsv', '.json', '.jsonl', '.parquet'];
+/** CoNLL-Text fuer NER/POS: ein Token pro Zeile, Tag in der letzten Spalte. */
+const CONLL_EXTS = ['.conll', '.conllu', '.iob', '.bio', '.txt'];
 
 /** Welche Dateien braucht die Aufgabe mindestens? */
 function requiredFiles(taskType: string): { exts: string[]; missing: string } | null {
@@ -33,6 +35,10 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.' };
     case 'video_classification':
       return { exts: VIDEO_EXTS, missing: 'Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.' };
+    case 'token_classification':
+      return { exts: ['.jsonl', '.json', '.parquet', ...CONLL_EXTS], missing: 'Keine Token-Daten gefunden (JSONL/Parquet mit tokens + ner_tags oder CoNLL-Text .conll/.iob/.txt).' };
+    case 'sentence_embedding':
+      return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) mit Satzpaaren gefunden.' };
     case 'seq2seq':
     case 'seq_classification':
       return { exts: TABLE_EXTS, missing: 'Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.' };
@@ -53,6 +59,12 @@ export function genericDatasetCompat(plugin: CompatPluginInfo, info: DatasetChec
   const required = requiredFiles(plugin.taskType);
   if (required && exts.length > 0 && !required.exts.some(e => exts.includes(e))) {
     return { overallLevel: 'bad', fileResults: [], summary: required.missing, hint: `${plugin.name} kann dieses Dataset nicht trainieren.` };
+  }
+
+  // CoNLL-Ordner erkennt die Dataset-Analyse nicht als Typ — fuer NER sind
+  // sie aber genau das richtige Format.
+  if (plugin.taskType === 'token_classification' && exts.some(e => ['.conll', '.conllu', '.iob', '.bio'].includes(e))) {
+    return { overallLevel: 'perfect', fileResults: [], summary: `CoNLL-Dateien passen zu ${plugin.name}.` };
   }
 
   if (!info || info.type === 'unknown') {
