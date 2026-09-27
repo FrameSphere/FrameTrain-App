@@ -15,6 +15,8 @@ import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
 import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
+import tokenClassificationPlugin from './token-classification';
+import sentenceEmbeddingPlugin from './sentence-embedding';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
@@ -27,6 +29,12 @@ const PLUGINS: ModelPlugin[] = [
   audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
   videoClassificationPlugin,  // VideoMAE / TimeSformer / ViViT
   seq2seqPlugin,              // T5 / BART / Pegasus / Marian
+  // Beide VOR xlm-roberta/hf-encoder: die erkennen jedes BERT/RoBERTa am
+  // model_type und liessen ein NER- oder Embedding-Modell nie durch. Die
+  // beiden greifen nur bei eindeutigem Signal (Architektur bzw. Name) — ein
+  // Basis-BERT ohne Hinweis landet weiter bei der Sequenzklassifikation.
+  tokenClassificationPlugin,  // NER / POS (…ForTokenClassification)
+  sentenceEmbeddingPlugin,    // Sentence-Transformers (all-MiniLM, BGE, E5, GTE)
   xlmRobertaPlugin,
   hfEncoderPlugin,
 ];
@@ -69,7 +77,7 @@ export function detectPlugin(
     // Der Hinweis auf Text-Encoder gehoert nur zu Textmodellen. Bei einem
     // Bildmodell wie DETR stand er sinnlos daneben.
     const textHint = TEXT_DOMAIN_KEYS.has(knownKey)
-      ? ' FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte).'
+      ? ' FrameTrain trainiert derzeit Encoder-Modelle (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte) für Sequenzklassifikation, Token-Klassifikation (NER/POS) und Sentence Embeddings.'
       : '';
     return {
       supported: false,
@@ -185,7 +193,16 @@ export function detectPluginForModel(model: ModelDetectionInfo): DetectionResult
     : undefined;
 
   const byPath = detectPlugin(model.source_path ?? model.name, config);
-  if (byPath.supported) return byPath;
+  if (byPath.supported) {
+    // hf-encoder/xlm-roberta nehmen jedes BERT am model_type. Bei einem lokal
+    // importierten Modell steht im Pfad aber oft nichts ueber die Aufgabe —
+    // nennt der vergebene Name sie ("kunden-ner", "faq-embeddings"), zaehlt er.
+    if (GENERIC_ENCODER_PLUGINS.has(byPath.plugin.id) && model.source_path && model.name.trim()) {
+      const byName = detectPlugin(model.name, config);
+      if (byName.supported && !GENERIC_ENCODER_PLUGINS.has(byName.plugin.id)) return byName;
+    }
+    return byPath;
+  }
 
   if (model.source_path && model.name.trim()) {
     const byName = detectPlugin(model.name, config);
@@ -199,6 +216,9 @@ export function detectPluginForModel(model: ModelDetectionInfo): DetectionResult
     model.model_type ? { model_type: model.model_type } : undefined,
   );
 }
+
+/** Plugins, die jeden passenden Encoder am model_type annehmen (Auffangbecken). */
+const GENERIC_ENCODER_PLUGINS = new Set(['hf-encoder', 'xlm-roberta']);
 
 /**
  * Modelltypen, die FrameTrain selbst aus der Dateiendung ableitet, wenn keine

@@ -48,7 +48,12 @@ class TestProtocol:
                          average_loss: Optional[float],
                          average_inference_time: float,
                          samples_per_second: float,
-                         hard_examples_file: Optional[str] = None) -> None:
+                         hard_examples_file: Optional[str] = None,
+                         metrics: Optional[Dict[str, Any]] = None) -> None:
+        # metrics: Kennzahlen, die nicht in "Accuracy" passen (Entitaeten-F1,
+        # Recall@k, Spearman). Nur gesendet, wenn vorhanden — aeltere Plugins
+        # liefern exakt dieselbe Nachricht wie bisher.
+        extra = {"metrics": metrics} if metrics else {}
         TestProtocol._send("complete", {
             "mode": "dataset",
             "results_file": results_file,
@@ -59,4 +64,5 @@ class TestProtocol:
             "average_inference_time": average_inference_time,
             "samples_per_second": samples_per_second,
             "hard_examples_file": hard_examples_file,
+            **extra,
         })

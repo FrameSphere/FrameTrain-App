@@ -1,0 +1,10 @@
+{
+  "task_type": "sentence_embedding",
+  "name": "Sentence Embeddings (Sentence-Transformers)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Aehnlichkeit zweier Saetze, aehnlichste Texte und Retrieval-Metriken (Recall@k, MRR).",
+  "input_type": "text",
+  "output_format": "embedding"
+}

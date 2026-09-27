@@ -6,13 +6,13 @@ Bleibt als Hintergrundprozess am Leben und beantwortet Inferenz-Anfragen
 via stdin/stdout JSON-Protokoll.
 
 Protokoll:
-  Rust -> Python (stdin):   {"text": "..."}\n                (Text / Seq2Seq)
+  Rust -> Python (stdin):   {"text": "..."}\n                (Text / Seq2Seq / Token / Embedding)
                             {"file_path": "/pfad/bild.png"}\n (Bild / Audio / ASR)
                             {"file_path": "/v.mp4", "start": 2.0, "end": 6.0}\n (Video)
   Python -> Rust (stdout):  {"predicted": "...", "confidence": 0.95, ...}\n
 
 Startup:
-  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video",
+  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video|token|embedding",
                     "input_kind": "text|image|audio"}\n
   Python -> Rust:  {"type": "error", "message": "..."}\n  (bei Fehler)
 """
@@ -67,7 +67,9 @@ ASR_MODEL_TYPES = {"whisper", "speech_to_text", "speech-encoder-decoder", "moons
 def detect_modality(model_cfg: dict) -> str:
     """Bestimmt aus config.json, welche Auto-Klasse und welche Eingabe passt.
 
-    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video"
+    Rueckgabe: "text" | "image" | "audio" | "seq2seq" | "asr" | "video" | "token"
+    ("embedding" erkennt detect_modality_for_dir an modules.json — die
+    config.json eines Sentence-Transformers sagt nur "BertModel".)
     """
     archs = [a for a in (model_cfg.get("architectures") or []) if isinstance(a, str)]
     arch = archs[0] if archs else ""
@@ -79,6 +81,10 @@ def detect_modality(model_cfg: dict) -> str:
         return "audio"
     if arch.endswith("ForVideoClassification"):
         return "video"
+    if arch.endswith("ForTokenClassification"):
+        # Vorher landete ein NER-Modell ueber model_type "bert" bei der
+        # Sequenzklassifikation — mit zufaellig initialisiertem Kopf.
+        return "token"
     if arch.endswith("ForCTC") or arch.endswith("ForSpeechSeq2Seq"):
         return "asr"
     if model_type in ASR_MODEL_TYPES and (not arch or arch.endswith("ForConditionalGeneration")):
@@ -105,6 +111,17 @@ def detect_modality(model_cfg: dict) -> str:
     return "text"
 
 
+def detect_modality_for_dir(model_path: Path, model_cfg: dict) -> str:
+    """Wie detect_modality, prueft aber zusaetzlich die Dateien im Ordner.
+
+    Ein Sentence-Transformers-Modell (modules.json / sentence_bert_config.json)
+    ist ein Embedding-Modell — sein config.json nennt nur das Basismodell.
+    """
+    if (model_path / "modules.json").exists() or (model_path / "sentence_bert_config.json").exists():
+        return "embedding"
+    return detect_modality(model_cfg)
+
+
 # Wie im Audio-Test-Plugin: laengere Aufnahmen werden gekappt
 MAX_AUDIO_SECONDS = 10.0
 
@@ -115,6 +132,8 @@ INPUT_KIND = {
     "audio":   "audio",
     "asr":     "audio",
     "video":   "video",
+    "token":   "text",
+    "embedding": "text",
 }
 
 
@@ -149,7 +168,7 @@ class ModelServer:
 
         self.id2label = self._load_labels(model_cfg)
 
-        self.modality = detect_modality(model_cfg)
+        self.modality = detect_modality_for_dir(self.model_path, model_cfg)
 
         # Geraet waehlen (CUDA > MPS > CPU)
         if torch.cuda.is_available():
@@ -164,6 +183,8 @@ class ModelServer:
             "audio":   self._load_audio,
             "asr":     self._load_asr,
             "video":   self._load_video,
+            "token":   self._load_token,
+            "embedding": self._load_embedding,
             "seq2seq": self._load_seq2seq,
             "text":    self._load_text,
         }[self.modality]
@@ -275,6 +296,40 @@ class ModelServer:
         )
         self.num_frames = int(getattr(self.model.config, "num_frames", 16) or 16)
 
+    def _load_token(self):
+        from transformers import AutoModelForTokenClassification, AutoTokenizer
+        self.model = AutoModelForTokenClassification.from_pretrained(
+            str(self.model_path), local_files_only=True
+        )
+        model_type = str(getattr(self.model.config, "model_type", "") or "")
+        # BPE-Tokenizer brauchen fuer vorzerlegte Woerter add_prefix_space.
+        kwargs = {"add_prefix_space": True} if model_type in {
+            "roberta", "longformer", "deberta", "bart", "gpt2", "mvp", "led"} else {}
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            str(self.model_path), local_files_only=True, **kwargs
+        )
+        self._tokens = self._ft_data("tokens")
+        self._bio = self._tokens.is_bio_scheme(self.id2label.values())
+
+    def _load_embedding(self):
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            raise ImportError(
+                "sentence-transformers fehlt. Installiere: pip install sentence-transformers"
+            )
+        dev = self.device.type if self.device is not None else "cpu"
+        self.model = SentenceTransformer(str(self.model_path), device=dev, local_files_only=True)
+
+    @staticmethod
+    def _ft_data(name: str):
+        """Gemeinsame Dataset-Logik (python/ft_data) — dieselbe wie im Test-Plugin."""
+        import importlib
+        root = str(Path(__file__).resolve().parent.parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        return importlib.import_module(f"ft_data.{name}")
+
     def _load_audio(self):
         from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
         self.processor = AutoFeatureExtractor.from_pretrained(
@@ -298,6 +353,10 @@ class ModelServer:
             return self._infer_video(self._require_file(req, "Video"), req.get("start"), req.get("end"))
         if self.modality == "seq2seq":
             return self._infer_seq2seq(self._require_text(req))
+        if self.modality == "token":
+            return self._infer_token(self._require_text(req))
+        if self.modality == "embedding":
+            return self._infer_embedding(self._require_text(req))
         return self._infer_text(self._require_text(req))
 
     def _require_text(self, req: dict) -> str:
@@ -404,6 +463,52 @@ class ModelServer:
         inputs = self.processor(list(frames), return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         return self._classify(inputs, time.time())
+
+    def _infer_token(self, text: str) -> dict:
+        tk = self._tokens
+        t0 = time.time()
+        words = tk.split_words(text)
+        preds = tk.predict_words(self.model, self.tokenizer, [w for w, _, _ in words],
+                                 self.id2label, self.device)
+        ents = tk.entities_from_tags(words, [p[0] for p in preds], [p[1] for p in preds],
+                                     text=text, bio=self._bio)
+        return {
+            "predicted": tk.format_entities(ents) or "Keine Entitaeten gefunden",
+            # Unsicherste Entitaet: danach sortiert "Unsicherste zuerst" sinnvoll.
+            "confidence": min((e["score"] for e in ents), default=None),
+            "top_predictions": [
+                {"label": f"{e['text']} [{e['label']}]", "score": e["score"],
+                 "entity": e["label"], "start": e["start"], "end": e["end"]}
+                for e in ents
+            ],
+            "entities": ents,
+            "inference_time": time.time() - t0,
+        }
+
+    def _infer_embedding(self, text: str) -> dict:
+        np = self._np
+        t0 = time.time()
+        if "|||" in text:
+            a, b = (part.strip() for part in text.split("|||", 1))
+            if not a or not b:
+                raise ValueError('Fuer einen Vergleich beide Saetze angeben: "Satz A ||| Satz B"')
+            emb = self.model.encode([a, b], convert_to_numpy=True, normalize_embeddings=True)
+            sim = float(np.dot(emb[0], emb[1]))
+            return {
+                "predicted": f"Kosinus-Aehnlichkeit: {sim:.3f}",
+                "similarity": sim,
+                "inference_time": time.time() - t0,
+            }
+        vec = self.model.encode([text], convert_to_numpy=True)[0]
+        norm = float(np.linalg.norm(vec))
+        head = ", ".join(f"{v:.3f}" for v in vec[:5])
+        # Keine confidence: ein Vektor ist keine Entscheidung mit Wahrscheinlichkeit.
+        return {
+            "predicted": f"Vektor mit {vec.shape[0]} Dimensionen (Norm {norm:.3f}): [{head}, …]",
+            "embedding_dim": int(vec.shape[0]),
+            "norm": norm,
+            "inference_time": time.time() - t0,
+        }
 
     def _read_audio(self, path: Path, cap: bool = True):
         """Laedt eine Audiodatei als Mono-Wellenform in der Modell-Samplerate.

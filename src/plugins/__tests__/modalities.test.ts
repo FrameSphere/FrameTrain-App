@@ -24,9 +24,11 @@ describe('Text-Encoder werden erkannt', () => {
     ['xlm-roberta-base', 'xlm-roberta'],
   ])('%s -> %s', (id, plugin) => expect(pluginOf(id)).toBe(plugin));
 
-  it('sentence-transformers/all-MiniLM-L6-v2 ist ein BERT und wird erkannt', () => {
+  it('sentence-transformers/all-MiniLM-L6-v2 wird erkannt – als Embedding-Modell', () => {
     // Wurde frueher abgelehnt, obwohl es eines der meistgenutzten Modelle ist.
-    expect(pluginOf('sentence-transformers/all-MiniLM-L6-v2')).toBe('hf-encoder');
+    // Seit es das Embedding-Plugin gibt, landet es dort statt bei der
+    // Sequenzklassifikation — dafuer ist es gebaut.
+    expect(pluginOf('sentence-transformers/all-MiniLM-L6-v2')).toBe('sentence-embedding');
   });
 });
 
