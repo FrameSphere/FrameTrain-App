@@ -306,7 +306,12 @@
       "installFailed": "Installation fehlgeschlagen",
       "pipStarting": "pip wird gestartet…",
       "installed": "installiert",
-      "missing": "fehlt"
+      "missing": "fehlt",
+      "groupsTitle": "Paketgruppen",
+      "pythonUsed": "FrameTrain nutzt: {path} (Python {version})",
+      "pythonUnsupported": "Diese Python-Version wird nicht unterstützt (nötig: 3.10 bis 3.13).",
+      "groupInstall": "Installieren",
+      "groupUpdate": "Prüfen / aktualisieren"
     },
     "updates": {
       "checking": "Auf Updates prüfen...",
@@ -468,6 +473,14 @@
       "yolo": {
         "name": "YOLO Objekterkennung (Ultralytics)",
         "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
+      },
+      "llm": {
+        "name": "LLM Fine-Tuning (LoRA / QLoRA)",
+        "description": "Feinjustiert Sprachmodelle wie Llama, Qwen, Mistral, Gemma und Phi mit LoRA, auch per DPO. Auf Apple Silicon zusätzlich MLX: schneller und mit 4-bit-Quantisierung."
+      },
+      "generative": {
+        "name": "Generative Modelle (Diffusion, Bild+Text)",
+        "description": "Trainiert eigene Stile und Motive für Stable Diffusion (LoRA) und Vision-Language-Modelle für Fragen zu Bildern. Benötigt diffusers."
       }
     },
     "preflight": {
@@ -2286,6 +2299,40 @@
       "title": "Detektions-Metriken",
       "map50": "mAP@50",
       "map5095": "mAP@50-95"
+    },
+    "taskMetrics": {
+      "title": "Aufgabenspezifische Kennzahlen",
+      "before": "vorher {value}",
+      "labels": {
+        "perplexity": "Perplexität",
+        "exact_match": "Exact Match",
+        "rougeL": "ROUGE-L",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "bleu": "BLEU",
+        "preference_accuracy": "Präferenz richtig",
+        "reward_margin": "Belohnungsabstand",
+        "wer": "Wortfehlerrate (WER)",
+        "cer": "Zeichenfehlerrate (CER)",
+        "trainable_params": "Trainierbare Parameter",
+        "total_params": "Parameter gesamt",
+        "mask_mAP50": "Masken-mAP50",
+        "mask_mAP50-95": "Masken-mAP50-95",
+        "pose_mAP50": "Keypoint-mAP50",
+        "pose_mAP50-95": "Keypoint-mAP50-95",
+        "top1_accuracy": "Top-1-Accuracy",
+        "top5_accuracy": "Top-5-Accuracy",
+        "mrr@10": "MRR@10",
+        "recall@1": "Recall@1",
+        "recall@5": "Recall@5",
+        "spearman": "Spearman",
+        "pearson": "Pearson",
+        "mse": "MSE",
+        "rmse": "RMSE",
+        "mae": "MAE",
+        "r2": "R²",
+        "token_accuracy": "Token-Accuracy"
+      }
     }
   },
   "datasetUpload": {
@@ -2728,7 +2775,8 @@
       "correctionLabelPlaceholder": "Richtige Klasse",
       "correctionTextPlaceholder": "Der Text, wie er hätte sein müssen",
       "correctionDiscard": "Verwerfen",
-      "correctionKeep": "Übernehmen"
+      "correctionKeep": "Übernehmen",
+      "vlmQuestionPlaceholder": "Frage zum Bild (leer = Standardprompt aus dem Training)"
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -2996,7 +3044,13 @@
         "image": "Keine Bilddateien (oder Parquet mit Bildspalte) gefunden.",
         "audio": "Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.",
         "video": "Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.",
-        "table": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden."
+        "table": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.",
+        "speech": "Keine Audiodateien (oder Parquet mit Audio- und Textspalte) gefunden – Spracherkennung braucht Aufnahmen mit Transkript.",
+        "tokens": "Keine Token-Daten gefunden (JSONL/Parquet mit tokens + ner_tags oder CoNLL-Text .conll/.iob/.txt).",
+        "pairs": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) mit Satzpaaren gefunden.",
+        "textToImage": "Keine Bilddateien gefunden – für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).",
+        "visionLanguage": "Keine Bilddateien gefunden – ein VLM lernt aus Bild + Frage + Antwort.",
+        "llm": "Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext)."
       },
       "cannotTrain": "{model} kann dieses Dataset nicht trainieren.",
       "typeUnknown": "Dataset-Typ nicht erkannt – {model} kann es eventuell nicht lesen.",
@@ -3005,7 +3059,8 @@
       "suitableTypes": "Geeignet: {types}",
       "labelsPartial": "Nur {paired} von {total} Bildern haben ein Label.",
       "unlabeledBackground": "Bilder ohne Label zählen im Training als Hintergrund.",
-      "typeFits": "{type} passt zu {model}."
+      "typeFits": "{type} passt zu {model}.",
+      "conllFits": "CoNLL-Dateien passen zu {model}."
     }
   },
   "pluginRegistry": {
@@ -3130,7 +3185,22 @@
       "run": "Inferenz starten",
       "detectedOne": "1 Objekt erkannt",
       "detectedMany": "{n} Objekte erkannt",
-      "noDetections": "Keine Objekte über dem Konfidenz-Schwellwert."
+      "noDetections": "Keine Objekte über dem Konfidenz-Schwellwert.",
+      "taskLabel": "Aufgabe: {task}",
+      "taskNames": {
+        "detect": "Objekterkennung",
+        "segment": "Segmentierung",
+        "pose": "Keypoints",
+        "obb": "Gedrehte Boxen",
+        "classify": "Klassifikation"
+      },
+      "maskBadge": "Maske ({n} Punkte)",
+      "obbBadge": "gedreht",
+      "keypointsBadge": "{n} Keypoints ({visible} sicher)",
+      "summaryMasks": "{n} mit Maske",
+      "summaryKeypoints": "{n} Keypoints",
+      "topClasses": "Wahrscheinlichste Klassen",
+      "noClasses": "Das Modell hat keine Klasse geliefert."
     },
     "imageClassification": {
       "subtitle": "Bildklassifikation",
@@ -3165,7 +3235,34 @@
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
       "detectedClass": "Erkannte Klasse",
       "videoLabel": "Einzelnes Video",
-      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4"
+      "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4",
+      "causalLmLabel": "Eingabe / Frage",
+      "causalLmPlaceholder": "Stelle eine Frage oder gib eine Anweisung ein …",
+      "causalLmResult": "Antwort des Modells",
+      "tokenLabel": "Text für die Entitätenerkennung",
+      "tokenPlaceholder": "z.B. Karol fliegt morgen mit Lufthansa nach Berlin.",
+      "tokenResult": "Gefundene Entitäten",
+      "embeddingLabel": "Satz oder Satzpaar",
+      "embeddingPlaceholder": "Ein Satz – die ähnlichsten Texte kommen aus dem unten gewählten Dataset. Oder zwei Sätze vergleichen: Satz A ||| Satz B",
+      "embeddingResult": "Ergebnis (Kosinus-Ähnlichkeit)",
+      "metrics": "Kennzahlen",
+      "t2iLabel": "Prompt",
+      "t2iPlaceholder": "Beschreibung des Bildes, z.B. a photo of sks dog on the beach",
+      "t2iResult": "Erzeugtes Bild",
+      "vlmImageLabel": "Bild",
+      "vlmImagePlaceholder": "Vollständiger Pfad zu einem Bild, z.B. /Users/du/bilder/rechnung.png",
+      "vlmQuestionLabel": "Frage zum Bild (optional)",
+      "vlmQuestionPlaceholder": "z.B. Welche Farbe hat die Form? Leer = Standardprompt aus dem Training",
+      "vlmResult": "Antwort des Modells",
+      "transcript": "Transkript",
+      "metricLabels": {
+        "wer": "Wortfehlerrate (WER)",
+        "cer": "Zeichenfehlerrate (CER)",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "rougeL": "ROUGE-L",
+        "bleu": "BLEU"
+      }
     }
   },
   "studio": {
@@ -3599,7 +3696,8 @@
         "http403": "Server verweigert den Zugriff (403)",
         "http404": "Seite nicht gefunden (404)",
         "http429": "zu viele Anfragen – später noch einmal (429)"
-      }
+      },
+      "limitsSummary": "{pages} Seiten · {files} Dateien · {mb} MB"
     },
     "generate": {
       "title": "Texte erzeugen lassen",
@@ -3826,5 +3924,19 @@
     "hf_configs": "Dataset hat {count} Konfigurationen ({configs}). Importiert wurde „{chosen}“.",
     "hf_splits_skipped": "Splits ohne verwertbare Labels übersprungen: {splits}.",
     "hf_no_standard_splits": "Keine Standard-Splits erkannt – alle Dateien werden als „train“ importiert."
+  },
+  "packageCheck": {
+    "title": "Für diese Aufgabe fehlen Python-Pakete ({group})",
+    "missing": "Fehlt oder zu alt: {list}",
+    "tooOld": "zu alt",
+    "python": "Wird installiert in: {path}",
+    "install": "„{group}“ jetzt installieren",
+    "installing": "Wird installiert …",
+    "groups": {
+      "seq_classification": "HuggingFace-Stack",
+      "yolo": "YOLO",
+      "llm": "LLM Fine-Tuning",
+      "generative": "Generative Modelle"
+    }
   }
 }

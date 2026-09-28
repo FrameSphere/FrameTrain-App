@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from '@tauri-apps/api/event';
-import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain, ScanEye } from 'lucide-react';
+import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain, ScanEye, MessageSquare, Sparkles } from 'lucide-react';
 import { useTheme, type Theme, type ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import AIAssistantSettingsPanel from './AIAssistantSettingsPanel';
@@ -22,9 +22,10 @@ interface PluginInfo {
 
 /** Symbol je Plugin — lucide statt Emoji (das Backend liefert nur eine Kategorie). */
 function pluginIcon(plugin: PluginInfo, className: string) {
-  return plugin.category === 'Vision'
-    ? <ScanEye className={className} />
-    : <Brain className={className} />;
+  if (plugin.category === 'Vision') return <ScanEye className={className} />;
+  if (plugin.category === 'LLM') return <MessageSquare className={className} />;
+  if (plugin.category === 'Generative') return <Sparkles className={className} />;
+  return <Brain className={className} />;
 }
 
 /** Ohne diesen Stack kann die App nichts trainieren — er bleibt gesetzt. */

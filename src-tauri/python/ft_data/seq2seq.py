@@ -112,3 +112,45 @@ def load_spec(model_dir: Path) -> Dict[str, Any]:
         return json.loads((Path(model_dir) / SPEC_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+# ── Qualitaet generierter Texte: ROUGE und BLEU ──────────────────────────────
+
+class _UnicodeTokenizer:
+    """Woerter per \\w. Der Standard-Tokenizer von rouge_score wirft alles ausser
+    a-z weg: "Grüße über Straßen" wurde zu "gr e ber stra en", chinesischer Text
+    zu gar nichts — ROUGE waere fuer Deutsch wertlos."""
+
+    def tokenize(self, text: str) -> List[str]:
+        import re
+        return re.findall(r"\w+", str(text or "").lower())
+
+
+def generation_scores(predictions: Sequence[str], references: Sequence[Optional[str]]) -> Tuple[Dict[str, float], List[str]]:
+    """ROUGE-1/2/L (F1, 0..1) und BLEU (sacrebleu, 0..100) ueber einen Split.
+
+    Zweiter Wert: Hinweise, falls ein Paket fehlt — dann fehlt nur diese
+    Kennzahl, Training bzw. Test laufen weiter.
+    """
+    pairs = [(str(p or ""), str(r)) for p, r in zip(predictions, references)
+             if r is not None and str(r).strip()]
+    scores: Dict[str, float] = {}
+    notes: List[str] = []
+    if not pairs:
+        return scores, notes
+    try:
+        from rouge_score import rouge_scorer
+        scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], tokenizer=_UnicodeTokenizer())
+        sums = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0}
+        for p, r in pairs:
+            for key, val in scorer.score(r, p).items():
+                sums[key] += val.fmeasure
+        scores.update({k: v / len(pairs) for k, v in sums.items()})
+    except ImportError:
+        notes.append("ROUGE nicht berechnet: Paket rouge-score fehlt (Einstellungen → Python-Pakete → „HuggingFace-Stack“).")
+    try:
+        import sacrebleu
+        scores["bleu"] = float(sacrebleu.corpus_bleu([p for p, _ in pairs], [[r for _, r in pairs]]).score)
+    except ImportError:
+        notes.append("BLEU nicht berechnet: Paket sacrebleu fehlt (Einstellungen → Python-Pakete → „HuggingFace-Stack“).")
+    return scores, notes

@@ -9,7 +9,9 @@ const hfImageClassificationPlugin: ModelPlugin = {
   taskType: 'hf_image_classification',
   // ViT/ConvNeXt-Feintuning laeuft ueblicherweise bei 5e-5.
   defaultTrainingConfig: { learning_rate: 5e-5, batch_size: 16, epochs: 5 },
-  defaultPluginConfig: {},
+  // resume_from_checkpoint: nach "Stoppen" die gespeicherte Version waehlen und einschalten
+  // (oder einen Checkpoint-Pfad eintragen) - das Training laeuft ab dem letzten Schritt weiter.
+  defaultPluginConfig: { resume_from_checkpoint: false },
   detect: detectHFImageClassification,
   TestComponent: HFImageTestPlugin,
   // flat_file/multi_shard: HF-Parquet mit Bildspalte wird in Klassenordner entpackt.

@@ -9,7 +9,7 @@ const seq2seqPlugin: ModelPlugin = {
   taskType: 'seq2seq',
   // T5 & Co. brauchen deutlich hoehere Lernraten als Encoder-Modelle.
   defaultTrainingConfig: { learning_rate: 3e-4, batch_size: 8, epochs: 3 },
-  defaultPluginConfig: { max_target_length: 128 },
+  defaultPluginConfig: { max_target_length: 128, resume_from_checkpoint: false },
   detect: detectSeq2Seq,
   TestComponent: Seq2SeqTestPlugin,
   supportedDatasetTypes: ['flat_file', 'pre_split', 'multi_shard'],

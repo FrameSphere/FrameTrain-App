@@ -17,7 +17,9 @@ from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 from core import hf_training as hft
 
-from ft_data.seq2seq import batch_texts, describe, file_split_name, resolve_spec, save_spec
+from ft_data.seq2seq import (
+    batch_texts, describe, file_split_name, generation_scores, resolve_spec, save_spec,
+)
 
 
 class Plugin(TrainPlugin):
@@ -111,6 +113,8 @@ class Plugin(TrainPlugin):
             MessageProtocol.status("loading_data", "Kein Validierungs-Split gefunden — 10% abgetrennt.")
 
         eval_raw = hft.cap_eval_dataset(eval_raw, getattr(self.config, "max_eval_samples", 0), self.config.seed)
+        # Rohtexte fuer ROUGE/BLEU am Ende — tokenisiert laesst sich das Ziel nicht vergleichen.
+        self._eval_raw = eval_raw
 
         tokenizer = self.tokenizer
         spec, prefix = self.spec, self.prefix
@@ -169,7 +173,7 @@ class Plugin(TrainPlugin):
             callbacks=[hft.progress_callback(TrainerCallback, self, total_steps)],
         )
         self._start_time = time.time()
-        self._trainer.train()
+        self._trainer.train(resume_from_checkpoint=hft.resume_checkpoint(self.config))
         MessageProtocol.status("training", "Training abgeschlossen")
 
     # ── 5. Validierung ──────────────────────────────────────────────────────
@@ -183,7 +187,55 @@ class Plugin(TrainPlugin):
         # Seq2Seq hat keine Klassen — die Kennzahlen wären sonst irrefuehrende Nullen.
         for key in ("accuracy", "f1", "precision", "recall", "num_labels"):
             metrics.pop(key, None)
+        metrics.update(self._generation_metrics())
         return metrics
+
+    def _generation_metrics(self) -> Dict[str, float]:
+        """ROUGE-1/2/L und BLEU ueber echte Generierung auf dem Val-Split.
+
+        Der Val-Loss sagt wenig darueber, ob die Zusammenfassung oder Uebersetzung
+        taugt. Gedeckelt auf Max Eval Samples bzw. 200 Beispiele — Generieren ist
+        um ein Vielfaches langsamer als ein Loss-Durchlauf.
+        """
+        raw = getattr(self, "_eval_raw", None)
+        if raw is None or len(raw) == 0 or self.is_stopped:
+            return {}
+        import torch
+
+        cap = int(getattr(self.config, "max_eval_samples", 0) or 0) or 200
+        if len(raw) > cap:
+            raw = raw.shuffle(seed=self.config.seed).select(range(cap))
+        sources, targets = batch_texts(raw[:], self.spec)
+        MessageProtocol.status("evaluating", f"ROUGE/BLEU: erzeuge {len(sources)} Texte aus dem Val-Split...")
+        model, tok = self.model, self.tokenizer
+        device = next(model.parameters()).device
+        was_training = model.training
+        model.eval()
+        preds: List[str] = []
+        bs = max(1, int(self.config.batch_size))
+        try:
+            for i in range(0, len(sources), bs):
+                if self.is_stopped:
+                    return {}
+                enc = tok([f"{self.prefix}{t}" for t in sources[i:i + bs]], return_tensors="pt",
+                          padding=True, truncation=True, max_length=self.config.max_seq_length).to(device)
+                with torch.no_grad():
+                    out = model.generate(**enc, max_new_tokens=self.max_target_length, num_beams=1)
+                preds.extend(tok.batch_decode(out, skip_special_tokens=True))
+        except Exception as exc:  # Metrik-Zugabe — ein Fehler hier darf das Modell nicht kosten
+            MessageProtocol.warning(f"ROUGE/BLEU nicht berechnet: {type(exc).__name__}: {exc}")
+            return {}
+        finally:
+            if was_training:
+                model.train()
+        scores, notes = generation_scores(preds, targets)
+        for note in notes:
+            MessageProtocol.warning(note)
+        if scores:
+            MessageProtocol.status(
+                "evaluating",
+                " | ".join(f"{k} {v:.3f}" if k != "bleu" else f"BLEU {v:.1f}" for k, v in scores.items()))
+        return scores
 
     # ── 6. Export ───────────────────────────────────────────────────────────
     def export(self) -> str:

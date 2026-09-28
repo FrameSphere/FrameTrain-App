@@ -18,6 +18,8 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+# ft_data (gemeinsame Helfer, u. a. Hinweise zu fehlenden Paketen) liegt eine Ebene hoeher.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # stdout/stderr auf UTF-8 zwingen — MUSS vor jedem print laufen.
 # Auf Windows ist stdout/stderr per Default cp1252; ein Unicode-Zeichen
@@ -156,7 +158,10 @@ def handle_exception(exc: Exception) -> None:
     if isinstance(exc, (ImportError, ModuleNotFoundError)):
         TestProtocol.error(
             "Fehlendes Python-Paket",
-            f"{exc}\n\nInstalliere mit: pip install transformers torch scikit-learn\n\n{tb}"
+            (str(exc) if "In FrameTrain:" in str(exc) else
+             f"{exc}\n\n" + (__import__("ft_data.deps", fromlist=["hint_for_exception"]).hint_for_exception(exc)
+                              or __import__("ft_data.deps", fromlist=["install_hint"]).install_hint("transformers", "torch")))
+            + f"\n\n{tb}"
         )
         return
 

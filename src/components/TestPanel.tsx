@@ -8,6 +8,7 @@ import type { ModelPlugin, DatasetInfo } from '../plugins/types';
 import DevTestPanel from './DevTestPanel';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import PackageCheckBanner from './PackageCheckBanner';
 
 // ── Types (analog zu TrainingPanel) ───────────────────────────────────────
 
@@ -439,6 +440,9 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
                   <span className="text-amber-300 text-xs font-medium">{t('testPanel.pluginBanner.activeLabel')}</span>
                 </div>
               </div>
+
+              {/* Fehlende Python-Pakete fuer diese Aufgabe — Knopf installiert sie. */}
+              <PackageCheckBanner taskType={panelState.plugin.taskType} />
 
               {/* Plugin-Komponente */}
               <panelState.plugin.TestComponent

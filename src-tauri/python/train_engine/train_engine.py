@@ -104,6 +104,38 @@ class LoggingTee:
 
 # ============ Plugin-Loader ============
 
+# Was der Orchestrator von jedem Plugin aufruft (Lebenszyklus + Abbruch).
+REQUIRED_PLUGIN_METHODS = ("setup", "load_data", "build_model", "train", "validate", "export", "stop")
+
+
+def _default_stop(self) -> None:
+    """Ersatz-stop(): setzt nur das Flag, das die Plugins ohnehin pruefen."""
+    self.is_stopped = True
+
+
+def ensure_plugin_contract(plugin_class, plugin_name: str = ""):
+    """Prueft die Plugin-Klasse, bevor sie laeuft.
+
+    Frueher fiel eine fehlende Methode erst mitten im Lauf auf: ohne stop()
+    lief der Signal-Handler in einen AttributeError und "Stoppen" blieb
+    wirkungslos (YOLO, Canvas, torchvision). Fehlt nur stop(), bekommt die
+    Klasse die Standard-Implementierung; fehlt etwas anderes, bricht das
+    Laden mit einer Meldung ab, die die Methode nennt.
+    """
+    if not callable(getattr(plugin_class, "stop", None)):
+        plugin_class.stop = _default_stop
+    missing = [m for m in REQUIRED_PLUGIN_METHODS if not callable(getattr(plugin_class, m, None))]
+    abstract = sorted(getattr(plugin_class, "__abstractmethods__", ()) or ())
+    if missing or abstract:
+        names = ", ".join(dict.fromkeys(missing + abstract))
+        raise ValueError(
+            f"Plugin '{plugin_name or plugin_class.__name__}' ist unvollstaendig: "
+            f"{plugin_class.__name__} fehlt {names}.\n"
+            f"Jedes Trainings-Plugin braucht: {', '.join(REQUIRED_PLUGIN_METHODS)} "
+            "(am einfachsten: von core.plugin_base.TrainPlugin erben)."
+        )
+    return plugin_class
+
 def load_plugin(config: TrainingConfig):
     """
     Dynamischer Plugin-Loader.
@@ -162,11 +194,12 @@ def load_plugin(config: TrainingConfig):
                 f"Prüfe 'class' in {manifest_path}"
             )
 
+        plugin_class = ensure_plugin_contract(getattr(module, class_name), plugin_dir.name)
         MessageProtocol.status(
             "init",
             f"Plugin geladen: {manifest.get('name', plugin_dir.name)} (task_type='{config.task_type}')"
         )
-        return getattr(module, class_name)(config)
+        return plugin_class(config)
 
     raise ValueError(
         f"Kein Plugin für task_type='{config.task_type}' gefunden.\n"
@@ -232,10 +265,14 @@ def handle_exception(exc: Exception) -> None:
         return
 
     if isinstance(exc, (ImportError, ModuleNotFoundError)):
-        MessageProtocol.error(
-            "Fehlendes Python-Paket",
-            f"{exc}\n\nInstalliere mit:\n  pip install transformers datasets torch scikit-learn\n\n{tb}"
-        )
+        # Plugins bringen den Hinweis schon mit (ft_data.deps.missing); sonst
+        # aus dem Modulnamen ableiten. Nie ein nacktes "pip install": das pip im
+        # Terminal gehoert oft zu einem anderen Python als FrameTrain.
+        from ft_data.deps import hint_for_exception, install_hint
+        text = str(exc)
+        if "In FrameTrain:" not in text:
+            text += "\n\n" + (hint_for_exception(exc) or install_hint("transformers", "datasets", "torch"))
+        MessageProtocol.error("Fehlendes Python-Paket", f"{text}\n\n{tb}")
         return
 
     if isinstance(exc, FileNotFoundError):
@@ -244,7 +281,8 @@ def handle_exception(exc: Exception) -> None:
 
     if isinstance(exc, ValueError) and (
         "wird noch nicht unterstützt" in str(exc) or
-        "Kein Plugin für" in str(exc)
+        "Kein Plugin für" in str(exc) or
+        "ist unvollstaendig" in str(exc)
     ):
         MessageProtocol.error("Konfigurationsfehler", str(exc))
         return
@@ -410,7 +448,8 @@ def main():
     except ImportError:
         MessageProtocol.error(
             "PyTorch nicht installiert",
-            "Installiere mit: pip install torch transformers datasets scikit-learn"
+            "FrameTrain hat in diesem Python kein PyTorch gefunden: " + sys.executable + "\n"
+            "In FrameTrain: Einstellungen → Python-Pakete → „HuggingFace-Stack“ installieren."
         )
         sys.exit(0)
 

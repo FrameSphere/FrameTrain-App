@@ -1,23 +1,206 @@
-"""YOLO Object Detection Plugin — task_type: 'detect'"""
-import json, os, shutil
+"""YOLO Plugin (Ultralytics) — task_type: 'detect'
+
+Ein Plugin fuer alle Ultralytics-Aufgaben: Objekterkennung (detect),
+Instanz-Segmentierung (segment), Keypoints (pose), orientierte Boxen (obb) und
+Bildklassifikation (classify). Der Orchestrator waehlt genau ein Plugin pro
+task_type; ein eigener task_type je YOLO-Aufgabe haette fuenf fast gleiche
+Plugins bedeutet. Welche Aufgabe gemeint ist, steht in den Gewichten
+(yolo11n-seg.pt, ein trainiertes model.pt) — deshalb bestimmt das Plugin sie
+selbst (plugin_config.task = "auto") und laesst sie nur auf Wunsch festlegen.
+"""
+import json, os, random, shutil
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from core.config import TrainingConfig
+from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 
 
-class YOLOPlugin:
+# ── Aufgaben ────────────────────────────────────────────────────────────────
+YOLO_TASKS = ("detect", "segment", "pose", "obb", "classify")
+
+# Was Nutzer in das Textfeld "task" schreiben — alles auf die Ultralytics-Namen.
+_TASK_ALIASES = {
+    "": "auto", "auto": "auto",
+    "detect": "detect", "detection": "detect", "det": "detect", "bbox": "detect",
+    "segment": "segment", "seg": "segment", "segmentation": "segment",
+    "pose": "pose", "keypoints": "pose", "keypoint": "pose", "kpt": "pose",
+    "obb": "obb", "oriented": "obb",
+    "classify": "classify", "cls": "classify", "classification": "classify",
+}
+
+# Suffixe, an denen Ultralytics die Aufgabe einer Gewichtsdatei erkennt.
+TASK_SUFFIX = {"segment": "-seg", "pose": "-pose", "classify": "-cls", "obb": "-obb"}
+
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+
+
+def normalize_task(value: Any) -> str:
+    """'auto' oder einer der Ultralytics-Aufgabennamen; Unbekanntes gilt als 'auto'."""
+    return _TASK_ALIASES.get(str(value or "").strip().lower(), "auto")
+
+
+def task_from_weights_name(name: str) -> Optional[str]:
+    """Aufgabe aus dem Dateinamen (yolo11n-seg.pt -> segment).
+
+    None, wenn der Name nichts verraet (model.pt, best.pt) — dann entscheidet
+    der Checkpoint selbst.
+    """
+    stem = Path(str(name or "")).stem.lower()
+    if not stem:
+        return None
+    for task, suffix in TASK_SUFFIX.items():
+        if stem.endswith(suffix):
+            return task
+    if stem.startswith("yolo"):
+        return "detect"
+    return None
+
+
+def _has_images(d: Path) -> bool:
+    try:
+        return any(f.is_file() and f.suffix.lower() in _IMAGE_EXTS for f in d.iterdir())
+    except OSError:
+        return False
+
+
+# Ordnernamen, die zu Detektions-/Segmentierungs-Layouts gehoeren und nie eine Klasse sind.
+_NOT_A_CLASS = {"images", "labels", "annotations", "train", "val", "valid", "validation", "test"}
+
+
+def class_dirs(d: Path) -> List[Path]:
+    """Unterordner, die direkt Bilder enthalten — bei Ordner-pro-Klasse die Klassen."""
+    if not d.is_dir():
+        return []
+    return sorted(c for c in d.iterdir()
+                  if c.is_dir() and c.name.lower() not in _NOT_A_CLASS
+                  and not c.name.startswith(".") and _has_images(c))
+
+
+def is_class_folder_dataset(root: Path) -> bool:
+    """Ordner pro Klasse (direkt oder unter train/)? Das liest YOLO-cls."""
+    if (root / "labels").is_dir() or any((root / s / "labels").is_dir() for s in ("train", "val", "valid")):
+        return False
+    return len(class_dirs(root / "train")) >= 2 or len(class_dirs(root)) >= 2
+
+
+def label_value_counts(label_files: List[Path], max_lines: int = 400) -> List[int]:
+    """Anzahl der Zahlen je Label-Zeile — daran unterscheiden sich die Formate."""
+    counts: List[int] = []
+    for f in label_files:
+        try:
+            for line in f.read_text(encoding="utf-8").splitlines():
+                parts = line.split()
+                if parts:
+                    counts.append(len(parts))
+                    if len(counts) >= max_lines:
+                        return counts
+        except (OSError, UnicodeDecodeError):
+            continue
+    return counts
+
+
+def infer_kpt_shape(counts: List[int]) -> Optional[List[int]]:
+    """kpt_shape [Punkte, Dimension] aus der Breite der Pose-Labels.
+
+    Eine Pose-Zeile ist 'klasse cx cy w h' plus Punkte*Dimension Werte. Ohne
+    kpt_shape in der yaml bricht Ultralytics ab; die App erzeugt ihre yaml aber
+    ohne dieses Feld. Dimension 3 (x, y, sichtbar) hat Vorrang, weil COCO und
+    Ultralytics sie verwenden.
+    """
+    widths = {c for c in counts if c > 5}
+    if len(widths) != 1:
+        return None
+    extra = widths.pop() - 5
+    if extra % 3 == 0:
+        return [extra // 3, 3]
+    if extra % 2 == 0:
+        return [extra // 2, 2]
+    return None
+
+
+def guess_task_from_labels(counts: List[int]) -> Optional[str]:
+    """Aufgabe aus der Form der Label-Zeilen (nur, wenn die Gewichte nichts sagen).
+
+    5 Werte = Box. Genau 9 Werte = orientierte Box (4 Eckpunkte). Gleich breite
+    Zeilen mit 5 + n*3 (oder n*2) Werten = Keypoints. Unterschiedlich lange
+    Zeilen mit ungerader Breite = Polygone (Segmentierung).
+    """
+    if not counts:
+        return None
+    if all(c == 5 for c in counts):
+        return "detect"
+    if all(c == 9 for c in counts):
+        return "obb"
+    if infer_kpt_shape(counts) and len(set(counts)) == 1:
+        return "pose"
+    if all(c >= 7 and (c - 1) % 2 == 0 for c in counts if c != 5):
+        return "segment"
+    return None
+
+
+def task_metrics(task: str, m: Dict[str, Any]) -> Dict[str, float]:
+    """Ultralytics-Ergebnisse unter den Schluesseln, die die App liest.
+
+    Detect-Schluessel (mAP50, mAP50-95, precision, recall) bleiben wie sie
+    waren — auch fuer segment/pose/obb, dort als Box-Werte. Die Masken- bzw.
+    Keypoint-Werte kommen als eigene Schluessel dazu. Klassifikation hat keine
+    mAP; 'accuracy' ist dort top-1, damit die Analyse-Seite sie anzeigt.
+    """
+    def g(key: str) -> float:
+        try:
+            return float(m.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    if task == "classify":
+        top1 = g("metrics/accuracy_top1")
+        return {"accuracy": top1, "top1_accuracy": top1,
+                "top5_accuracy": g("metrics/accuracy_top5")}
+    out = {
+        "mAP50":     g("metrics/mAP50(B)"),
+        "mAP50-95":  g("metrics/mAP50-95(B)"),
+        "precision": g("metrics/precision(B)"),
+        "recall":    g("metrics/recall(B)"),
+    }
+    extra = {"segment": ("mask", "M"), "pose": ("pose", "P")}.get(task)
+    if extra:
+        name, tag = extra
+        out[f"{name}_mAP50"] = g(f"metrics/mAP50({tag})")
+        out[f"{name}_mAP50-95"] = g(f"metrics/mAP50-95({tag})")
+        out[f"{name}_precision"] = g(f"metrics/precision({tag})")
+        out[f"{name}_recall"] = g(f"metrics/recall({tag})")
+    return out
+
+
+def resume_requested(value: Any) -> bool:
+    """plugin_config.resume: true, "auto" oder ein Pfad heisst fortsetzen."""
+    if isinstance(value, bool):
+        return value
+    s = str(value or "").strip().lower()
+    return bool(s) and s not in ("false", "0", "no", "nein", "off")
+
+
+class YOLOPlugin(TrainPlugin):
     def __init__(self, config: TrainingConfig):
+        # Bewusst ohne super().__init__: das Verhalten bleibt, wie es war;
+        # TrainPlugin dient hier als Vertrag (Pflichtmethoden, stop()).
         self.config = config
         self.model = None
         self.is_stopped = False
         self.results = None
         self._yaml_path: Optional[str] = None
+        self._data_arg: Optional[str] = None
+        self._run_dir: Optional[Path] = None
         self._output_dir: Optional[Path] = None
         self._device_used: str = "cpu"
         pc = config.plugin_config or {}
         self.yolo_model   = pc.get("yolo_model") or ""
-        self.task         = pc.get("task",          "detect")
+        # "auto" (Standard): die Gewichte bestimmen die Aufgabe. Bis setup()
+        # sie kennt, gilt detect — so verhaelt sich _resolve_weights wie bisher.
+        self.task_setting = normalize_task(pc.get("task"))
+        self.task         = self.task_setting if self.task_setting != "auto" else "detect"
+        self.resume       = pc.get("resume", False)
         self.imgsz        = int(pc.get("imgsz",    640))
         self.patience     = int(pc.get("patience",  50))
         self.augment      = bool(pc.get("augment",  True))
@@ -32,10 +215,10 @@ class YOLOPlugin:
     def stop(self) -> None:
         """Abbruch aus der Oberflaeche.
 
-        Diese Klasse erbt nicht von TrainPlugin, wo stop() definiert ist.
-        Ohne die Methode lief der Signal-Handler der Engine in einen
+        Ohne die Methode lief der Signal-Handler der Engine frueher in einen
         AttributeError: "Stoppen" blieb wirkungslos und das Training lief
         bis zur letzten Epoche weiter, obwohl is_stopped ueberall geprueft wird.
+        (TrainPlugin.stop() taete dasselbe; die Methode bleibt ausdruecklich.)
         """
         self.is_stopped = True
 
@@ -43,37 +226,147 @@ class YOLOPlugin:
         try:
             from ultralytics import YOLO  # noqa
         except ImportError:
-            MessageProtocol.error("Ultralytics nicht installiert",
-                "pip install ultralytics>=8.0.0")
+            from ft_data.deps import install_hint
+            MessageProtocol.error("Ultralytics nicht installiert", install_hint("ultralytics"))
             return False
         dsp = self.config.dataset_path
         if not dsp or not Path(dsp).exists():
             MessageProtocol.error("Dataset nicht gefunden", f"Pfad: {dsp!r}")
             return False
-        yaml_path = self._find_or_build_yaml(Path(dsp))
-        if yaml_path is None:
-            return False
-        # Pascal VOC (XML) in YOLO-Labels umrechnen und Platzhalter-Klassen aus
-        # dem Import ersetzen — beides liest Ultralytics sonst nicht.
-        try:
-            from ft_data.detection import convert_voc_to_yolo, fill_placeholder_names
-            note = lambda m: MessageProtocol.status("setup", m)
-            convert_voc_to_yolo(Path(dsp), yaml_path, status=note)
-            fill_placeholder_names(Path(dsp), yaml_path, status=note)
-        except Exception as e:
-            MessageProtocol.status("setup", f"Label-Vorbereitung uebersprungen: {e}")
-        if not self._verify_labels(yaml_path):
-            return False
-        self._yaml_path = str(yaml_path)
-        self.yolo_model = self._resolve_weights()
+        root = Path(dsp)
         self._output_dir = Path(self.config.output_path)
+
+        # Erst die Aufgabe, dann die Daten: Klassifikation liest Ordner statt
+        # einer dataset.yaml, Pose braucht kpt_shape.
+        self.task = self._initial_task(root)
+        self.yolo_model = self._resolve_weights()
+        if not self._settle_task():
+            return False
+
+        if self.task == "classify":
+            data_dir = self._prepare_classify_data(root)
+            if data_dir is None:
+                return False
+            self._data_arg = str(data_dir)
+        else:
+            yaml_path = self._find_or_build_yaml(root)
+            if yaml_path is None:
+                return False
+            # Pascal VOC (XML) in YOLO-Labels umrechnen und Platzhalter-Klassen aus
+            # dem Import ersetzen — beides liest Ultralytics sonst nicht.
+            try:
+                from ft_data.detection import convert_voc_to_yolo, fill_placeholder_names
+                note = lambda m: MessageProtocol.status("setup", m)
+                convert_voc_to_yolo(root, yaml_path, status=note)
+                fill_placeholder_names(root, yaml_path, status=note)
+            except Exception as e:
+                MessageProtocol.status("setup", f"Label-Vorbereitung uebersprungen: {e}")
+            if not self._verify_labels(yaml_path):
+                return False
+            if self.task == "pose":
+                yaml_path = self._ensure_kpt_shape(yaml_path)
+                if yaml_path is None:
+                    return False
+            self._yaml_path = str(yaml_path)
+            self._data_arg = self._yaml_path
         self._output_dir.mkdir(parents=True, exist_ok=True)
         MessageProtocol.status("setup",
-            f"YOLO Setup OK\n  Model: {self.yolo_model}\n  Task: {self.task}\n  YAML: {self._yaml_path}")
+            f"YOLO Setup OK\n  Model: {self.yolo_model}\n  Task: {self.task}\n  Daten: {self._data_arg}")
         return True
 
-    # Suffixe, an denen Ultralytics die Aufgabe einer Gewichtsdatei erkennt.
-    _TASK_SUFFIX = {"segment": "-seg", "pose": "-pose", "classify": "-cls", "obb": "-obb"}
+    # ── Aufgabe bestimmen ────────────────────────────────────────────────────
+    def _candidate_weights(self) -> List[Path]:
+        model_dir = Path(self.config.model_path or "")
+        return sorted(model_dir.glob("*.pt")) if model_dir.is_dir() else []
+
+    def _initial_task(self, root: Path) -> str:
+        """Vorlaeufige Aufgabe, nach der _resolve_weights die Gewichte waehlt.
+
+        Reihenfolge bei "auto": ausdrueckliche Gewichte (yolo_model), dann die
+        Gewichte im Modellordner, wenn sie alle dieselbe Aufgabe haben, dann
+        die Form des Datasets. Ein Basisordner wie Ultralytics/YOLO11 enthaelt
+        Detect-, Seg- und Pose-Gewichte — dort entscheidet das Dataset.
+        """
+        if self.task_setting != "auto":
+            return self.task_setting
+        named = task_from_weights_name(self.yolo_model) if self.yolo_model else None
+        if named:
+            return named
+        tasks = {task_from_weights_name(p.name) for p in self._candidate_weights()}
+        tasks.discard(None)
+        if len(tasks) == 1:
+            return tasks.pop()
+        guessed = self._guess_task_from_dataset(root)
+        if guessed and (not tasks or guessed in tasks):
+            MessageProtocol.status("setup", f"Aufgabe aus dem Dataset erkannt: {guessed}")
+            return guessed
+        return "detect"
+
+    def _guess_task_from_dataset(self, root: Path) -> Optional[str]:
+        if is_class_folder_dataset(root):
+            return "classify"
+        yaml_path = self._existing_yaml(root)
+        if yaml_path is not None:
+            try:
+                if "kpt_shape" in yaml_path.read_text(encoding="utf-8"):
+                    return "pose"
+            except OSError:
+                pass
+        label_files = sorted(root.rglob("*.txt"))[:80]
+        label_files = [f for f in label_files
+                       if f.name.lower() not in ("classes.txt", "labels.txt", "readme.txt")]
+        return guess_task_from_labels(label_value_counts(label_files))
+
+    def _weights_task(self, weights: str) -> Optional[str]:
+        """Die Aufgabe, die die Gewichte wirklich haben.
+
+        Ein trainiertes model.pt verraet sie nicht im Namen; der Checkpoint
+        selbst (bzw. die daneben geschriebene model.json) schon.
+        """
+        p = Path(weights)
+        meta = p.with_suffix(".json")
+        if p.is_file() and meta.is_file():
+            try:
+                t = json.loads(meta.read_text(encoding="utf-8")).get("task")
+                if t in YOLO_TASKS:
+                    return t
+            except (OSError, ValueError):
+                pass
+        if p.is_file():
+            try:
+                import contextlib, io
+                from ultralytics import YOLO
+                with contextlib.redirect_stdout(io.StringIO()):
+                    t = getattr(YOLO(str(p)), "task", None)
+                if t in YOLO_TASKS:
+                    return t
+            except Exception:
+                pass
+        return task_from_weights_name(p.name)
+
+    def _settle_task(self) -> bool:
+        """Gleicht die vorlaeufige Aufgabe mit den gewaehlten Gewichten ab."""
+        actual = self._weights_task(self.yolo_model)
+        if not actual or actual == self.task:
+            return True
+        if self.task_setting == "auto":
+            MessageProtocol.status("setup",
+                f"Die Gewichte {Path(self.yolo_model).name} sind ein {actual}-Modell — Aufgabe: {actual}")
+            self.task = actual
+            return True
+        suffix = TASK_SUFFIX.get(self.task_setting, "")
+        MessageProtocol.error(
+            "YOLO-Aufgabe passt nicht zu den Gewichten",
+            f"Eingestellt ist task={self.task_setting}, die Gewichte "
+            f"{Path(self.yolo_model).name} sind aber ein {actual}-Modell.\n"
+            + (f"Fuer {self.task_setting} werden Gewichte wie yolo11n{suffix}.pt gebraucht "
+               "(im Modellordner ablegen oder per yolo_model waehlen), "
+               if suffix else "Fuer detect werden Gewichte ohne Aufgaben-Suffix gebraucht (z.B. yolo11n.pt), ")
+            + "oder task auf 'auto' stellen.")
+        return False
+
+    # Rueckwaertskompatibel: frueher Klassenattribut.
+    _TASK_SUFFIX = TASK_SUFFIX
     # Groessenreihenfolge: klein zuerst, damit ein Fine-Tuning auf einem Laptop nicht ausufert.
     _SIZE_ORDER = ["n", "s", "m", "l", "x"]
 
@@ -271,9 +564,58 @@ class YOLOPlugin:
             MessageProtocol.status("setup",
                 f"Warnung: nur {found} von {probed} geprueften Bildern haben ein Label. "
                 "Bilder ohne Label zaehlen als Hintergrund.")
+        if self.task in ("segment", "pose", "obb"):
+            return self._verify_label_format(yaml_path)
         return True
 
-    def _find_or_build_yaml(self, root: Path) -> Optional[Path]:
+    # Was jede Aufgabe in einer Label-Zeile erwartet — fuer die Fehlermeldung.
+    _FORMAT_HINT = {
+        "segment": "klasse x1 y1 x2 y2 x3 y3 ... (Polygon mit mindestens 3 Punkten, normiert 0-1)",
+        "pose":    "klasse cx cy w h px1 py1 [v1] px2 py2 [v2] ... (gleich viele Punkte je Zeile)",
+        "obb":     "klasse x1 y1 x2 y2 x3 y3 x4 y4 (die vier Ecken der gedrehten Box)",
+    }
+
+    def _verify_label_format(self, yaml_path: Path) -> bool:
+        """Prueft, ob die Labels zur Aufgabe passen.
+
+        Ein Segmentierungs-Training auf reinen Box-Labels laeuft sonst durch,
+        aber der Masken-Loss bleibt 0 und die Masken-mAP ebenso — dasselbe
+        Bild wie frueher bei Detektion ohne Labels.
+        """
+        counts = label_value_counts(self._label_files_for(yaml_path))
+        if not counts:
+            return True
+        if self.task == "segment":
+            valid = [c for c in counts if c >= 7 and (c - 1) % 2 == 0]
+        elif self.task == "obb":
+            valid = [c for c in counts if c == 9]
+        else:  # pose
+            shape = self._read_yaml(yaml_path).get("kpt_shape")
+            try:
+                want = 5 + int(shape[0]) * int(shape[1]) if shape else None
+            except (TypeError, ValueError, IndexError):
+                want = None
+            if want is None:
+                inferred = infer_kpt_shape(counts)
+                want = 5 + inferred[0] * inferred[1] if inferred else None
+            valid = [c for c in counts if want is not None and c == want]
+        if not valid:
+            widths = sorted(set(counts))[:6]
+            MessageProtocol.error(
+                f"Labels passen nicht zur Aufgabe '{self.task}'",
+                f"Erwartet je Zeile: {self._FORMAT_HINT[self.task]}\n"
+                f"Gefunden: Zeilen mit {', '.join(map(str, widths))} Werten"
+                + (" — das sind Box-Labels fuer Objekterkennung.\nFuer diese Labels passt "
+                   "ein Detect-Modell (z.B. yolo11n.pt) oder task='detect'."
+                   if widths == [5] else "."))
+            return False
+        if len(valid) < len(counts):
+            MessageProtocol.status("setup",
+                f"Warnung: {len(counts) - len(valid)} von {len(counts)} geprueften Label-Zeilen "
+                f"passen nicht zum Format fuer {self.task}.")
+        return True
+
+    def _existing_yaml(self, root: Path) -> Optional[Path]:
         # Die App traegt die bereits gepruefte (und ggf. reparierte) yaml ein.
         given = (self.config.plugin_config or {}).get("dataset_yaml_path")
         if given and Path(given).is_file():
@@ -281,8 +623,136 @@ class YOLOPlugin:
         for c in [root/"dataset.yaml", root/"data.yaml"]:
             if c.exists():
                 return c
+        return None
+
+    def _find_or_build_yaml(self, root: Path) -> Optional[Path]:
+        found = self._existing_yaml(root)
+        if found is not None:
+            return found
         MessageProtocol.status("setup", "Kein dataset.yaml — generiere automatisch...")
         return self._generate_yaml(root)
+
+    # ── Aufgabenspezifische Daten ────────────────────────────────────────────
+    def _label_files_for(self, yaml_path: Path, sample: int = 60) -> List[Path]:
+        files: List[Path] = []
+        for d in self._yaml_image_dirs(yaml_path):
+            imgs = [f for f in sorted(d.rglob("*"))
+                    if f.is_file() and f.suffix.lower() in self._IMG_EXTS][:sample]
+            for im in imgs:
+                lab = next((c for c in self._label_candidates(im) if c.exists()), None)
+                if lab is not None:
+                    files.append(lab)
+        return files
+
+    @staticmethod
+    def _read_yaml(yaml_path: Path) -> Dict[str, Any]:
+        try:
+            import yaml  # kommt mit ultralytics
+            data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _ensure_kpt_shape(self, yaml_path: Path) -> Optional[Path]:
+        """Pose braucht kpt_shape in der yaml — fehlt es, aus den Labels ableiten.
+
+        Die dataset.yaml der App (oder eine selbst geschriebene) kennt das Feld
+        nicht; Ultralytics bricht dann mit einem KeyError ab. Die Ableitung
+        landet in einer Kopie im Ausgabeordner, das Dataset bleibt unberuehrt.
+        """
+        data = self._read_yaml(yaml_path)
+        if data.get("kpt_shape"):
+            return yaml_path
+        shape = infer_kpt_shape(label_value_counts(self._label_files_for(yaml_path)))
+        if not shape:
+            MessageProtocol.error(
+                "Keypoints: kpt_shape fehlt",
+                f"In {yaml_path} steht kein kpt_shape, und aus den Labels laesst es sich "
+                "nicht ableiten (alle Zeilen muessen gleich breit sein: klasse cx cy w h "
+                "+ Punkte x Dimension).\nTrage es in die dataset.yaml ein, z.B. "
+                "'kpt_shape: [17, 3]' fuer COCO-Keypoints.")
+            return None
+        base = data.get("path")
+        base_path = Path(base) if base else yaml_path.parent
+        if not base_path.is_absolute():
+            base_path = (yaml_path.parent / base_path).resolve()
+        data["path"] = str(base_path)
+        data["kpt_shape"] = shape
+        try:
+            import yaml
+            self._output_dir.mkdir(parents=True, exist_ok=True)
+            derived = self._output_dir / "dataset_pose.yaml"
+            derived.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                               encoding="utf-8")
+        except Exception as e:
+            MessageProtocol.error("Keypoints: yaml nicht schreibbar", str(e))
+            return None
+        MessageProtocol.status("setup",
+            f"kpt_shape {shape} aus den Labels abgeleitet (Kopie: {derived.name})")
+        return derived
+
+    def _prepare_classify_data(self, root: Path) -> Optional[Path]:
+        """Ordner-pro-Klasse fuer YOLO-cls.
+
+        Ultralytics erwartet <root>/train/<klasse>/bild.jpg und val/ (oder test/).
+        Liegt nur <root>/<klasse>/ vor oder fehlt ein Validierungsteil, entsteht
+        im Arbeitsordner des Jobs eine 80/20-Aufteilung aus Verknuepfungen — das
+        Dataset selbst wird nicht umgebaut.
+        """
+        train = class_dirs(root / "train")
+        val_name = next((s for s in ("val", "validation", "test") if class_dirs(root / s)), None)
+        if len(train) >= 2 and val_name:
+            return root
+        if len(train) >= 2:
+            source = {c.name: c for c in train}
+            extra_val = {c.name: c for c in class_dirs(root / "valid")}
+        else:
+            source = {c.name: c for c in class_dirs(root)}
+            extra_val = {}
+        if len(source) < 2:
+            MessageProtocol.error(
+                "Klassifikation: keine Klassenordner gefunden",
+                f"YOLO-cls erwartet einen Ordner pro Klasse (mindestens zwei), z.B.\n"
+                f"  {root}/train/katze/bild.jpg\n  {root}/train/hund/bild.jpg\n"
+                f"oder direkt {root}/katze/, {root}/hund/.")
+            return None
+        # Nicht in den Modellordner: der wird als Version kopiert, und die
+        # Verknuepfungen kaemen dort als volle Bildkopien an.
+        work = Path(self.config.checkpoint_dir) if self.config.checkpoint_dir else self._output_dir
+        out = work / "cls_data"
+        if out.exists():
+            shutil.rmtree(out, ignore_errors=True)
+        rng = random.Random(int(getattr(self.config, "seed", 42) or 42))
+        counts = {"train": 0, "val": 0}
+        for name, d in source.items():
+            imgs = sorted(f for f in d.iterdir() if f.is_file() and f.suffix.lower() in _IMAGE_EXTS)
+            if extra_val:
+                parts = {"train": imgs,
+                         "val": sorted(f for f in extra_val.get(name, d).iterdir()
+                                       if f.is_file() and f.suffix.lower() in _IMAGE_EXTS)
+                         if name in extra_val else []}
+            else:
+                rng.shuffle(imgs)
+                n_val = max(1, len(imgs) // 5) if len(imgs) >= 2 else 0
+                parts = {"train": imgs[n_val:], "val": imgs[:n_val]}
+            for split, files in parts.items():
+                target = out / split / name
+                target.mkdir(parents=True, exist_ok=True)
+                for f in files:
+                    link = target / f.name
+                    try:
+                        os.symlink(f.resolve(), link)
+                    except OSError:
+                        shutil.copy2(f, link)  # Windows ohne Symlink-Recht
+                    counts[split] += 1
+        if counts["val"] == 0:
+            MessageProtocol.error("Klassifikation: zu wenige Bilder",
+                                  "Fuer eine Validierung braucht jede Klasse mindestens zwei Bilder.")
+            return None
+        MessageProtocol.status("setup",
+            f"Klassifikation: {len(source)} Klassen, {counts['train']} Trainings- und "
+            f"{counts['val']} Validierungsbilder (Aufteilung in {out})")
+        return out
 
     def _generate_yaml(self, root: Path) -> Optional[Path]:
         def find_images(base: Path) -> Optional[Path]:
@@ -306,6 +776,11 @@ class YOLOPlugin:
             f.write(f"val: {val_imgs.resolve() if val_imgs else train_imgs.resolve()}\n")
             f.write(f"nc: {len(classes)}\n")
             f.write(f"names: {classes}\n")
+            if self.task == "pose":
+                # Ultralytics bricht ohne kpt_shape ab; die Breite der Labels verraet es.
+                shape = infer_kpt_shape(label_value_counts(sorted(root.rglob("*.txt"))[:80]))
+                if shape:
+                    f.write(f"kpt_shape: {shape}\n")
         MessageProtocol.status("setup", f"dataset.yaml generiert: {len(classes)} Klassen")
         return yaml_path
 
@@ -323,13 +798,20 @@ class YOLOPlugin:
             if nf.exists():
                 names = [l.strip() for l in nf.read_text(encoding="utf-8").splitlines() if l.strip()]
                 if names: return names
-        return [f"class_{i}" for i in sorted(class_ids)] if class_ids else []
+        # Durchgehend bis zur hoechsten ID: Ultralytics prueft 'Klasse < nc'.
+        # Mit nur den vorkommenden IDs (z.B. 0, 22, 45 -> nc=3) brach es ab.
+        return [f"class_{i}" for i in range(max(class_ids) + 1)] if class_ids else []
 
     @staticmethod
     def _sum_prefixed(metrics: Dict[str, Any], prefix: str) -> Optional[float]:
-        """Summiert box/cls/dfl-Loss eines Praefixes ('train/' oder 'val/')."""
+        """Summiert die Loss-Anteile eines Praefixes ('train/' oder 'val/').
+
+        box/cls/dfl bei Detektion, dazu seg bzw. pose/kobj; die Klassifikation
+        hat nur einen Wert namens 'loss' ('train/loss').
+        """
         vals = [float(v) for k, v in metrics.items()
-                if k.startswith(prefix) and k.endswith("_loss") and v is not None]
+                if k.startswith(prefix) and (k.endswith("_loss") or k == f"{prefix}loss")
+                and v is not None]
         return sum(vals) if vals else None
 
     def _running_loss(self, trainer) -> float:
@@ -364,7 +846,7 @@ class YOLOPlugin:
     def build_model(self) -> None: pass
 
     def train(self) -> bool:
-        if not self._yaml_path:
+        if not self._data_arg:
             MessageProtocol.error("Training", "setup() nicht aufgerufen.")
             return False
         try:
@@ -374,8 +856,10 @@ class YOLOPlugin:
             return False
         try:
             import torch
-            MessageProtocol.status("train", f"Lade {self.yolo_model}...")
-            self.model = YOLO(self.yolo_model)
+            resume_ckpt = self._resume_checkpoint() if resume_requested(self.resume) else None
+            start_weights = str(resume_ckpt) if resume_ckpt else self.yolo_model
+            MessageProtocol.status("train", f"Lade {start_weights}...")
+            self.model = YOLO(start_weights)
             if self.device_arg:
                 device = self.device_arg
             elif torch.cuda.is_available():
@@ -436,25 +920,30 @@ class YOLOPlugin:
                 bpe = batches_per_epoch(trainer)
                 loss = self._running_loss(trainer)
                 val_loss = self._sum_prefixed(m, "val/")
-                map50 = float(m.get("metrics/mAP50(B)", 0.0) or 0.0)
-                map5095 = float(m.get("metrics/mAP50-95(B)", 0.0) or 0.0)
-                metrics = {
-                    "mAP50": map50,
-                    "mAP50-95": map5095,
-                    "precision": float(m.get("metrics/precision(B)", 0.0) or 0.0),
-                    "recall":    float(m.get("metrics/recall(B)",    0.0) or 0.0),
-                }
+                metrics = task_metrics(self.task, m)
+                # Fuer die Analyse-Seite: dort stand bei YOLO immer "Final Train Loss 0".
+                self._last_losses = (loss, val_loss)
                 MessageProtocol.progress(
                     epoch=ep, total_epochs=tot, step=ep * bpe, total_steps=tot * bpe,
                     train_loss=loss, val_loss=val_loss,
                     learning_rate=self._current_lr(trainer), metrics=metrics)
-                MessageProtocol.status("train",
-                    f"[Metric] epoch={ep}/{tot} loss={loss:.4f} mAP50={map50:.4f} mAP50-95={map5095:.4f}")
+                MessageProtocol.status("train", f"[Metric] epoch={ep}/{tot} loss={loss:.4f} "
+                    + " ".join(f"{k}={v:.4f}" for k, v in metrics.items()
+                               if k not in ("precision", "recall", "top1_accuracy")))
 
-            self.model.add_callback("on_train_batch_end", on_batch_end)
-            self.model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
+            self._callbacks = {"on_train_batch_end": [on_batch_end],
+                               "on_fit_epoch_end": [on_fit_epoch_end]}
+            for event, fns in self._callbacks.items():
+                for fn in fns:
+                    self.model.add_callback(event, fn)
+            if resume_ckpt:
+                if self._train_resumed(resume_ckpt, device):
+                    return True
+                if self.is_stopped:
+                    return True
+                # Nichts mehr fortzusetzen: normales Training ab diesen Gewichten.
             self.results = self.model.train(
-                data=self._yaml_path,
+                data=self._data_arg,
                 epochs=self.config.epochs,
                 batch=self.config.batch_size,
                 imgsz=self.imgsz,
@@ -470,27 +959,80 @@ class YOLOPlugin:
                 exist_ok=True,
                 verbose=False, plots=False, save=True,
             )
+            self._remember_run_dir()
             return True
         except Exception as e:
             import traceback
             MessageProtocol.error("YOLO Training Fehler", f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
             return False
 
+    # ── Fortsetzen ───────────────────────────────────────────────────────────
+    def _resume_checkpoint(self) -> Optional[Path]:
+        """last.pt eines unterbrochenen Laufs (plugin_config.resume).
+
+        Ein Pfad zeigt auf last.pt oder einen Ordner, in dem es liegt (z.B. den
+        Job-Ordner des abgebrochenen Laufs). true/"auto" sucht in der
+        gewaehlten Version und im eigenen Ausgabeordner. Die App legt fuer jeden
+        Start einen neuen Job-Ordner an — ein Lauf von gestern ist deshalb nur
+        ueber seinen Pfad erreichbar.
+        """
+        value = self.resume
+        roots: List[Path] = []
+        if isinstance(value, str) and value.strip().lower() not in ("true", "auto", "1", "yes", "ja"):
+            roots.append(Path(value.strip()).expanduser())
+        else:
+            roots += [Path(self.config.model_path or ""), self._output_dir or Path(self.config.output_path)]
+        for r in roots:
+            if r.is_file() and r.suffix == ".pt":
+                return r
+            for rel in ("train/weights/last.pt", "weights/last.pt", "last.pt",
+                        "final_model/train/weights/last.pt"):
+                if (r / rel).is_file():
+                    return r / rel
+        MessageProtocol.status("setup",
+            f"Fortsetzen: kein last.pt gefunden ({', '.join(str(r) for r in roots)}) — "
+            "Training startet neu.")
+        return None
+
+    def _train_resumed(self, ckpt: Path, device: str) -> bool:
+        """Setzt einen Ultralytics-Lauf ab last.pt fort. False = nichts fortzusetzen."""
+        MessageProtocol.status("train", f"Setze Training fort ab {ckpt}")
+        try:
+            # Ultralytics uebernimmt Daten, Epochen und Ausgabeordner aus dem
+            # Checkpoint; nur Geraet und Batch duerfen sich aendern.
+            self.results = self.model.train(resume=True, device=device,
+                                            batch=self.config.batch_size)
+        except AssertionError as e:
+            # "... training to N epochs is finished, nothing to resume"
+            MessageProtocol.status("train",
+                f"Fortsetzen nicht moeglich ({e}). Neues Training ab diesen Gewichten.")
+            from ultralytics import YOLO
+            self.model = YOLO(self.yolo_model)
+            for event, fns in getattr(self, "_callbacks", {}).items():
+                for fn in fns:
+                    self.model.add_callback(event, fn)
+            return False
+        self._remember_run_dir()
+        return True
+
+    def _remember_run_dir(self) -> None:
+        """Wohin Ultralytics wirklich geschrieben hat (beim Fortsetzen der alte Ordner)."""
+        try:
+            save_dir = getattr(getattr(self.model, "trainer", None), "save_dir", None)
+            if save_dir:
+                self._run_dir = Path(save_dir)
+        except Exception:
+            pass
+
     def validate(self) -> Dict[str, float]:
         if not self.results: return {}
         try:
-            m = self.results.results_dict or {}
-            return {
-                "mAP50":    float(m.get("metrics/mAP50(B)",    0)),
-                "mAP50-95": float(m.get("metrics/mAP50-95(B)", 0)),
-                "precision": float(m.get("metrics/precision(B)", 0)),
-                "recall":    float(m.get("metrics/recall(B)",    0)),
-            }
+            return task_metrics(self.task, self.results.results_dict or {})
         except Exception: return {}
 
     def save_model(self, output_path: str, **_) -> bool:
         try:
-            run_dir = self._output_dir / "train"
+            run_dir = self._run_dir or (self._output_dir / "train")
             best = run_dir / "weights" / "best.pt"
             last = run_dir / "weights" / "last.pt"
             src = best if best.exists() else last if last.exists() else None
@@ -500,6 +1042,7 @@ class YOLOPlugin:
             shutil.copy2(str(src), output_path)
             meta = {"framework":"ultralytics","base_model":self.yolo_model,
                     "task":self.task,"imgsz":self.imgsz,"yaml_path":self._yaml_path,
+                    "data":self._data_arg,
                     "metrics":self.validate()}
             with open(Path(output_path).with_suffix(".json"), "w") as f:
                 json.dump(meta, f, indent=2)
@@ -515,6 +1058,15 @@ class YOLOPlugin:
         116 Bilder trainiert wurden.
         """
         counts = {"n_train": 0, "n_val": 0}
+        if self.task == "classify" and self._data_arg:
+            # Klassifikation: <daten>/train/<klasse>/*.jpg und val/ bzw. test/.
+            base = Path(self._data_arg)
+            val = next((s for s in ("val", "validation", "test") if (base / s).is_dir()), None)
+            for split, out in (("train", "n_train"), (val, "n_val")):
+                if split and (base / split).is_dir():
+                    counts[out] = sum(1 for f in (base / split).rglob("*")
+                                      if f.suffix.lower() in _IMAGE_EXTS)
+            return counts
         if not self._yaml_path:
             return counts
         yaml_path = Path(self._yaml_path)
@@ -553,7 +1105,17 @@ class YOLOPlugin:
             "imgsz":        self.imgsz,
             **self._split_sizes(),
             **self.validate(),
+            **self._final_losses(),
         }
+
+    def _final_losses(self) -> Dict[str, float]:
+        train_loss, val_loss = getattr(self, "_last_losses", (None, None))
+        out: Dict[str, float] = {}
+        if train_loss is not None:
+            out["final_train_loss"] = float(train_loss)
+        if val_loss is not None:
+            out["final_val_loss"] = float(val_loss)
+        return out
 
     def export(self) -> str:
         try:

@@ -2,6 +2,7 @@
 // Nutzt globale AISettings aus dem Context (konfigurierbar in Einstellungen → KI-Assistent)
 
 import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { buildTaskMetricTiles, formatMetric, improved } from './analysis/taskMetrics';
 import { invoke } from '@tauri-apps/api/core';
 import {
   TrendingDown, Activity, Target, Clock, Layers,
@@ -65,6 +66,8 @@ interface FullTrainingData {
     map50?: number | null; map50_95?: number | null;
     precision?: number | null; recall?: number | null;
   } | null;
+  /** Aufgabenspezifische Zahlen (Perplexitaet, WER, ROUGE, Recall@k …). */
+  task_metrics?: Record<string, number> | null;
 }
 interface AIAnalysisReport { version_id: string; report_text: string; provider: string; model: string; generated_at: string; /** Sprache bei der Erstellung; fehlt bei Berichten aus älteren Versionen. */ language?: Language | null; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
@@ -2018,6 +2021,40 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                   );
                 })()
               )}
+
+              {/* 4c. Aufgabenspezifische Kennzahlen: LLM, Spracherkennung,
+                   Embeddings, NER, Segmentierung … — mit Vorher-Wert, wo
+                   das Plugin vor dem Training gemessen hat. */}
+              {(() => {
+                const tiles = buildTaskMetricTiles(fullData?.task_metrics);
+                if (tiles.length === 0) return null;
+                return (
+                  <div className="bg-white/5 rounded-xl border border-white/10 p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                      <Target className="w-4 h-4 text-violet-400" />
+                      {t('analysisPanel.taskMetrics.title')}
+                    </h3>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      {tiles.map(tile => {
+                        const better = improved(tile);
+                        return (
+                          <div key={tile.key} className="rounded-lg bg-black/20 border border-white/5 p-3">
+                            <p className="text-gray-400 text-xs mb-1 truncate" title={tile.key}>
+                              {t(`analysisPanel.taskMetrics.labels.${tile.key}`, tile.key)}
+                            </p>
+                            <p className="text-white text-lg font-semibold tabular-nums">{formatMetric(tile.value, tile.rate)}</p>
+                            {tile.before !== undefined && (
+                              <p className={`text-[11px] tabular-nums ${better === undefined ? 'text-gray-500' : better ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {t('analysisPanel.taskMetrics.before').replace('{value}', formatMetric(tile.before, tile.rate))}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* 5. Hardware + Dataset Info */}
               {fullData && (

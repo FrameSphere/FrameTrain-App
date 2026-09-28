@@ -20,10 +20,16 @@ describe('checkHfModelSupport', () => {
     expect(r.reason).toBeTruthy();
   });
 
-  it('warnt weiter bei Decoder-Modellen', () => {
-    const r = checkHfModelSupport('meta-llama/Llama-3-8B', 'text-generation');
+  // Bis 1.3.3 abgelehnt — seit dem causal-lm-Plugin trainierbar.
+  it('laesst Decoder-LLMs durch, auch mit unbekanntem Namen', () => {
+    expect(checkHfModelSupport('meta-llama/Llama-3-8B', 'text-generation').supported).toBe(true);
+    expect(checkHfModelSupport('irgendwer/hauseigenes-sprachmodell', 'text-generation').supported).toBe(true);
+  });
+
+  it('warnt weiter bei Aufgaben ohne Plugin', () => {
+    const r = checkHfModelSupport('irgendwer/tts-modell', 'text-to-speech');
     expect(r.supported).toBe(false);
-    expect(r.reason).toContain('Textgenerierung');
+    expect(r.reason).toContain('Sprachsynthese');
   });
 
   it('laesst unterstuetzte Encoder-Modelle durch', () => {

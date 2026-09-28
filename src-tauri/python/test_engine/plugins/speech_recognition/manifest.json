@@ -1,0 +1,10 @@
+{
+  "task_type": "speech_recognition",
+  "name": "Speech Recognition / ASR",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Transkribiert Audiodateien und misst WER/CER gegen die Transkripte eines Datasets.",
+  "input_type": "audio",
+  "output_format": "text"
+}

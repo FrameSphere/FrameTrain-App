@@ -9,7 +9,7 @@ const audioClassificationPlugin: ModelPlugin = {
   taskType: 'audio_classification',
   // Audio-Encoder sind empfindlich; kleine Batches wegen langer Sequenzen.
   defaultTrainingConfig: { learning_rate: 3e-5, batch_size: 4, epochs: 5 },
-  defaultPluginConfig: { max_seconds: 10 },
+  defaultPluginConfig: { max_seconds: 10, resume_from_checkpoint: false },
   detect: detectAudioClassification,
   TestComponent: AudioTestPlugin,
   // flat_file/multi_shard: HF-Parquet mit Audiospalte wird in Klassenordner entpackt.

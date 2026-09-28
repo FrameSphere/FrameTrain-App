@@ -9,7 +9,12 @@ const hfEncoderPlugin: ModelPlugin = {
   name: 'HF Encoder (Generic)',
   description: 'Sequence Classification für unterstützte HuggingFace Encoder-Modelle (BERT/RoBERTa/DeBERTa/...)',
   taskType: 'seq_classification',
-  defaultPluginConfig: {},
+  // resume_from_checkpoint: nach "Stoppen" die gespeicherte Version waehlen und einschalten
+  // (oder einen Checkpoint-Pfad eintragen) - das Training laeuft ab dem letzten Schritt weiter.
+  // multi_label/problem_type "auto": Multi-Label, wenn die Label-Spalte Listen oder "a;b"
+  // enthaelt; Regression bei Kommazahlen mit vielen Werten. Sonst Single-Label wie bisher.
+  // problem_type: auto | single_label_classification | multi_label_classification | regression
+  defaultPluginConfig: { multi_label: 'auto', problem_type: 'auto', threshold: 0.5, resume_from_checkpoint: false },
   detect: detectHFEncoder,
   TestComponent: HFEncoderTestPlugin,
   // Phase 7: Dataset-Kompatibilität

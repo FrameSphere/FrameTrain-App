@@ -105,6 +105,7 @@ class Plugin(TrainPlugin):
             label2id={c: i for i, c in enumerate(self.classes)},
             ignore_mismatched_sizes=True,
         )
+        hft.repair_uninitialized_params(self.model)
         params = sum(p.numel() for p in self.model.parameters())
         MessageProtocol.status(
             "building_model",
@@ -154,7 +155,8 @@ class Plugin(TrainPlugin):
             __import__("transformers").TrainingArguments,
             remove_unused_columns=False,
         )
-        self._trainer = Trainer(
+        # NaN-Schutz vor dem Clipping (wav2vec2/HuBERT auf MPS, siehe hf_training).
+        self._trainer = hft.nan_safe_trainer(Trainer)(
             model=self.model,
             args=args,
             train_dataset=self.train_dataset,
@@ -164,7 +166,7 @@ class Plugin(TrainPlugin):
             callbacks=[hft.progress_callback(TrainerCallback, self, total_steps)],
         )
         self._start_time = time.time()
-        self._trainer.train()
+        self._trainer.train(resume_from_checkpoint=hft.resume_checkpoint(self.config))
         MessageProtocol.status("training", "Training abgeschlossen")
 
     # ── 5. Validierung ──────────────────────────────────────────────────────

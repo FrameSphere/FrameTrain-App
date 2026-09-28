@@ -80,7 +80,9 @@ describe('detectPluginForModel', () => {
   it.each([
     ['resnet18-transfer', 'hf-image-classification'],
     ['mein-bert-v2', 'hf-encoder'],
-    ['whisper-small-de', 'audio-classification'],
+    // Seit dem ASR-Plugin: Whisper ist Spracherkennung, nicht Audio-Klassifikation.
+    ['whisper-small-de', 'speech-recognition'],
+    ['wavlm-sprecher', 'audio-classification'],
     ['flan-t5-spellcheck', 'seq2seq'],
     ['yolo11n-custom', 'yolo'],
   ])('erkennt %s trotz model_type "pytorch"', (name, pluginId) => {
@@ -90,10 +92,16 @@ describe('detectPluginForModel', () => {
 
   it('laesst einen echten model_type weiter entscheiden', () => {
     // Nicht jede Architektur ist trainierbar – das darf der Name nicht aushebeln.
+    // (gpt2 war hier das Beispiel, ist aber seit dem LLM-Plugin trainierbar –
+    // dann muss es eben dort landen und nicht beim Encoder aus dem Namen.)
     const r = detectPluginForModel({
-      id: 'x', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'gpt2',
+      id: 'x', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'speecht5',
     });
     expect(r.supported).toBe(false);
+    const g = detectPluginForModel({
+      id: 'y', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'gpt2',
+    });
+    expect(g.supported && g.plugin.id).toBe('causal-lm');
   });
 
   it('nennt den erkannten Typ in der Begruendung', () => {

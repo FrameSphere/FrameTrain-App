@@ -51,7 +51,8 @@ class Plugin(TrainPlugin):
         try:
             import cv2  # noqa: F401
         except ImportError:
-            raise ImportError("OpenCV fehlt. Installiere: pip install opencv-python")
+            from ft_data.deps import missing
+            raise missing("opencv-python", what="Videoklassifikation")
 
         cfg_path = Path(self.config.model_path) / "config.json"
         cfg = {}
@@ -162,7 +163,7 @@ class Plugin(TrainPlugin):
             callbacks=[hft.progress_callback(TrainerCallback, self, total_steps)],
         )
         self._start_time = time.time()
-        self._trainer.train()
+        self._trainer.train(resume_from_checkpoint=hft.resume_checkpoint(self.config))
         MessageProtocol.status("training", "Training abgeschlossen")
 
     # ── 5. Validierung ──────────────────────────────────────────────────────

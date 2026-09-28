@@ -24,17 +24,27 @@ describe('Text-Encoder werden erkannt', () => {
     ['xlm-roberta-base', 'xlm-roberta'],
   ])('%s -> %s', (id, plugin) => expect(pluginOf(id)).toBe(plugin));
 
-  it('sentence-transformers/all-MiniLM-L6-v2 ist ein BERT und wird erkannt', () => {
+  it('sentence-transformers/all-MiniLM-L6-v2 wird erkannt – als Embedding-Modell', () => {
     // Wurde frueher abgelehnt, obwohl es eines der meistgenutzten Modelle ist.
-    expect(pluginOf('sentence-transformers/all-MiniLM-L6-v2')).toBe('hf-encoder');
+    // Seit es das Embedding-Plugin gibt, landet es dort statt bei der
+    // Sequenzklassifikation — dafuer ist es gebaut.
+    expect(pluginOf('sentence-transformers/all-MiniLM-L6-v2')).toBe('sentence-embedding');
   });
 });
 
-describe('Decoder-Modelle werden abgelehnt – dafuer gibt es kein Plugin', () => {
+// Bis 1.3.3 wurden Decoder-Modelle abgelehnt. Seit dem causal-lm-Plugin
+// (LoRA/QLoRA, PyTorch oder MLX) sind sie trainierbar.
+describe('Decoder-LLMs laufen ueber das causal-lm-Plugin', () => {
   it.each([
     'gpt2', 'distilbert/distilgpt2', 'meta-llama/Llama-3.2-1B',
-    'Qwen/Qwen2.5-0.5B', 'mistralai/Mistral-7B-v0.1',
-  ])('%s', (id) => expect(pluginOf(id)).toBeNull());
+    'Qwen/Qwen2.5-0.5B', 'mistralai/Mistral-7B-v0.1', 'HuggingFaceTB/SmolLM2-135M-Instruct',
+    'google/gemma-2-2b-it', 'microsoft/Phi-3-mini-4k-instruct',
+  ])('%s -> causal-lm', (id) => expect(pluginOf(id)).toBe('causal-lm'));
+
+  it.each([
+    'Qwen/Qwen2-VL-2B-Instruct', 'Qwen/Qwen3-Embedding-0.6B',
+    'TheBloke/Llama-2-7B-GGUF', 'TheBloke/Mistral-7B-Instruct-v0.2-AWQ',
+  ])('%s ist keine trainierbare Text-LLM-Variante', (id) => expect(pluginOf(id)).not.toBe('causal-lm'));
 });
 
 describe('Seq2Seq wird seit 1.2.17 unterstuetzt', () => {
@@ -45,15 +55,26 @@ describe('Seq2Seq wird seit 1.2.17 unterstuetzt', () => {
 });
 
 describe('Audio wird seit 1.2.17 unterstuetzt', () => {
+  // Whisper und wav2vec2-…-960h standen hier bis zum ASR-Plugin ebenfalls als
+  // Audio-Klassifikation. Beide sind Spracherkenner (Transkript statt Klasse)
+  // und gehoeren seitdem zu speech-recognition — siehe den Block darunter.
   it.each([
-    'openai/whisper-tiny', 'facebook/wav2vec2-base-960h',
     'microsoft/wavlm-base', 'MIT/ast-finetuned-audioset-10-10-0.4593',
+    'facebook/wav2vec2-base', 'superb/hubert-base-superb-ks',
   ])('%s -> audio-classification', (id) => expect(pluginOf(id)).toBe('audio-classification'));
 
   it('Sprachsynthese bleibt abgelehnt – das ist kein Klassifikator', () => {
     expect(pluginOf('microsoft/speecht5_tts')).toBeNull();
     expect(pluginOf('suno/bark')).toBeNull();
   });
+});
+
+describe('Spracherkennung (ASR): Whisper und CTC-Modelle', () => {
+  it.each([
+    'openai/whisper-tiny', 'openai/whisper-large-v3', 'distil-whisper/distil-small.en',
+    'UsefulSensors/moonshine-tiny', 'facebook/wav2vec2-base-960h',
+    'jonatasgrosman/wav2vec2-large-xlsr-53-german-asr', 'facebook/s2t-small-librispeech-asr',
+  ])('%s -> speech-recognition', (id) => expect(pluginOf(id)).toBe('speech-recognition'));
 });
 
 describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
@@ -75,8 +96,8 @@ describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
     expect(pluginOf('openai/clip-vit-base-patch32')).toBeNull();
   });
 
-  it('BLIP wird abgelehnt', () => {
-    expect(pluginOf('Salesforce/blip-image-captioning-base')).toBeNull();
+  it('BLIP-Captioning gehoert seit dem VLM-Plugin zu vision-language, nicht zur Bildklassifikation', () => {
+    expect(pluginOf('Salesforce/blip-image-captioning-base')).toBe('vision-language');
   });
 
   it('config.json schlaegt den Namen', () => {
@@ -106,7 +127,6 @@ describe('Ablehnungen nennen den Grund, auch ohne config.json', () => {
     ['microsoft/speecht5_tts', /Text-to-Speech|Sprachsynthese/i],
     ['facebook/detr-resnet-50', /Objekterkennung/i],
     ['openai/clip-vit-base-patch32', /multimodal/i],
-    ['meta-llama/Llama-3.2-1B', /Decoder/i],
   ])('%s', (id, muster) => expect(reasonOf(id)).toMatch(muster));
 
   it('unbekannte Modelle bekommen weiterhin den allgemeinen Hinweis', () => {

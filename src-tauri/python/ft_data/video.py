@@ -39,7 +39,8 @@ def read_clip_frames(path, num_frames: int, start: Optional[float] = None,
     try:
         import cv2
     except ImportError as e:  # pragma: no cover - Hinweis fuer den Nutzer
-        raise ImportError("OpenCV fehlt. Installiere: pip install opencv-python") from e
+        from ft_data.deps import missing
+        raise missing("opencv-python", what="Das Lesen von Videos") from e
 
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():

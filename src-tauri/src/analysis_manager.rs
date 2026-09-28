@@ -467,6 +467,9 @@ pub fn save_full_analysis_data(
             "precision": final_metrics.get("precision").and_then(|v| v.as_f64()),
             "recall":    final_metrics.get("recall").and_then(|v| v.as_f64()),
         },
+        // Alles, was nur eine Aufgabe kennt (Perplexitaet, WER, ROUGE, Recall@k,
+        // Masken-mAP, DPO …). Ohne diesen Block blieben diese Zahlen unsichtbar.
+        "task_metrics": task_metrics(final_metrics),
         "epoch_summaries": epoch_summaries,
         "step_logs": step_logs,
         "derived_stats": {
@@ -504,5 +507,44 @@ pub fn save_full_analysis_data(
         eprintln!("[Analysis] Logs schreiben: {}", e);
     } else {
         println!("[Analysis] ✅ {} Step-Logs gespeichert: {:?}", step_logs.len(), logs_path);
+    }
+}
+
+/// Schluessel, die schon eigene Karten oder Felder haben.
+const COMMON_METRIC_KEYS: &[&str] = &[
+    "final_train_loss", "final_val_loss", "total_epochs", "total_steps", "best_epoch",
+    "training_duration_seconds", "num_labels", "n_train", "n_val",
+    "accuracy", "f1", "precision", "recall", "mAP50", "mAP50-95",
+];
+
+/// Aufgabenspezifische Zahlen aus final_metrics (nur Zahlen, keine Texte/Flags).
+fn task_metrics(final_metrics: &serde_json::Value) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    if let Some(obj) = final_metrics.as_object() {
+        for (k, v) in obj {
+            if COMMON_METRIC_KEYS.contains(&k.as_str()) { continue; }
+            if let Some(n) = v.as_f64() {
+                if n.is_finite() { out.insert(k.clone(), serde_json::json!(n)); }
+            }
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
+#[cfg(test)]
+mod task_metrics_tests {
+    use super::*;
+
+    #[test]
+    fn nur_aufgabenspezifische_zahlen() {
+        let fm = serde_json::json!({
+            "final_train_loss": 0.1, "accuracy": 0.9, "perplexity": 1.09, "exact_match": 0.75,
+            "backend": "mlx", "lora": true, "wer": 0.12, "mask_mAP50": 0.83,
+        });
+        let tm = task_metrics(&fm);
+        let keys: Vec<&String> = tm.as_object().unwrap().keys().collect();
+        assert_eq!(keys.len(), 4, "{:?}", keys);
+        assert_eq!(tm["perplexity"], 1.09);
+        assert!(tm.get("backend").is_none() && tm.get("lora").is_none() && tm.get("accuracy").is_none());
     }
 }

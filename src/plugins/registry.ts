@@ -13,20 +13,40 @@ import yoloPlugin from './yolo';
 import imageClassificationPlugin from './image-classification';
 import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
+import speechRecognitionPlugin from './speech-recognition';
 import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
+import causalLMPlugin from './causal-lm';
+import tokenClassificationPlugin from './token-classification';
+import sentenceEmbeddingPlugin from './sentence-embedding';
+import textToImageLoraPlugin from './text-to-image-lora';
+import visionLanguagePlugin from './vision-language';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
   canvasPlugin,               // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
   yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11)
+  // Generative Bildmodelle vor den Klassifikatoren: "blip-image-captioning"
+  // oder "stable-diffusion" sollen nicht an einer Bild-Heuristik haengen bleiben.
+  textToImageLoraPlugin,      // Stable Diffusion 1.x/2.x, SDXL (LoRA)
+  visionLanguagePlugin,       // SmolVLM / Qwen2-VL / PaliGemma / LLaVA / BLIP (LoRA)
   // Vor dem torchvision-Plugin: ein heruntergeladenes HuggingFace-Bildmodell
   // soll auch wirklich trainiert werden, nicht durch ein resnet18 ersetzt.
   hfImageClassificationPlugin,
   imageClassificationPlugin,  // torchvision-Backbones (ohne HF-Gewichte)
+  // Vor der Audio-Klassifikation: Whisper, *ForCTC und wav2vec2-…-960h sind
+  // Spracherkenner. Ein wav2vec2 ohne solche Hinweise bleibt Klassifikation.
+  speechRecognitionPlugin,    // Whisper / Moonshine / wav2vec2-CTC
   audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
   videoClassificationPlugin,  // VideoMAE / TimeSformer / ViViT
   seq2seqPlugin,              // T5 / BART / Pegasus / Marian
+  causalLMPlugin,             // Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi) mit LoRA
+  // Beide VOR xlm-roberta/hf-encoder: die erkennen jedes BERT/RoBERTa am
+  // model_type und liessen ein NER- oder Embedding-Modell nie durch. Die
+  // beiden greifen nur bei eindeutigem Signal (Architektur bzw. Name) — ein
+  // Basis-BERT ohne Hinweis landet weiter bei der Sequenzklassifikation.
+  tokenClassificationPlugin,  // NER / POS (…ForTokenClassification)
+  sentenceEmbeddingPlugin,    // Sentence-Transformers (all-MiniLM, BGE, E5, GTE)
   xlmRobertaPlugin,
   hfEncoderPlugin,
 ];
@@ -69,7 +89,7 @@ export function detectPlugin(
     // Der Hinweis auf Text-Encoder gehoert nur zu Textmodellen. Bei einem
     // Bildmodell wie DETR stand er sinnlos daneben.
     const textHint = TEXT_DOMAIN_KEYS.has(knownKey)
-      ? ' FrameTrain trainiert derzeit Encoder-Modelle für Sequenzklassifikation (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, DeBERTa und verwandte).'
+      ? ' Für Text trainiert FrameTrain Encoder (BERT & Co.) für Sequenz- und Token-Klassifikation (NER/POS) sowie Sentence Embeddings, Seq2Seq-Modelle (T5, BART) und Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi).'
       : '';
     return {
       supported: false,
@@ -126,20 +146,15 @@ const TEXT_DOMAIN_KEYS = new Set([
  * und "geht nicht, weil …, nimm stattdessen …".
  */
 const KNOWN_UNSUPPORTED: Record<string, string> = {
-  gpt2: 'GPT-2 ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  gptj: 'GPT-J ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  gpt_neo: 'GPT-Neo ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  gpt_neox: 'GPT-NeoX ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  llama: 'Llama ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  mistral: 'Mistral ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  qwen2: 'Qwen ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
-  falcon: 'Falcon ist ein Decoder-Modell für Textgenerierung, kein Encoder.',
+  // Decoder-LLMs (gpt2, llama, mistral, qwen2, falcon …) trainiert seit dem
+  // causal-lm-Plugin FrameTrain selbst — sie stehen deshalb nicht mehr hier.
   speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
   detr: 'DETR ist ein Objekterkennungs-Modell, kein Bildklassifikator — für Objekterkennung nutze ein YOLO-Modell.',
-  blip: 'BLIP ist ein multimodales Bild-Text-Modell, kein Bildklassifikator.',
   segformer: 'SegFormer ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   sam: 'SAM (Segment Anything) ist ein Segmentierungs-Modell, kein Bildklassifikator.',
-  clip: 'CLIP ist ein multimodales Embedding-Modell.',
+  // BLIP (Captioning) laeuft seit dem Plugin vision-language. CLIP erzeugt
+  // keinen Text, sondern Vektoren — dafuer gibt es weiterhin kein Plugin.
+  clip: 'CLIP ist ein multimodales Embedding-Modell (Bild und Text als Vektoren), es erzeugt keinen Text. Für Bild + Frage -> Antwort ein VLM wie SmolVLM nutzen.',
 };
 
 /** Minimal-Shape für die Modell-Vorauswahl – deckt ModelInfo aus den Panels ab. */
@@ -185,7 +200,16 @@ export function detectPluginForModel(model: ModelDetectionInfo): DetectionResult
     : undefined;
 
   const byPath = detectPlugin(model.source_path ?? model.name, config);
-  if (byPath.supported) return byPath;
+  if (byPath.supported) {
+    // hf-encoder/xlm-roberta nehmen jedes BERT am model_type. Bei einem lokal
+    // importierten Modell steht im Pfad aber oft nichts ueber die Aufgabe —
+    // nennt der vergebene Name sie ("kunden-ner", "faq-embeddings"), zaehlt er.
+    if (GENERIC_ENCODER_PLUGINS.has(byPath.plugin.id) && model.source_path && model.name.trim()) {
+      const byName = detectPlugin(model.name, config);
+      if (byName.supported && !GENERIC_ENCODER_PLUGINS.has(byName.plugin.id)) return byName;
+    }
+    return byPath;
+  }
 
   if (model.source_path && model.name.trim()) {
     const byName = detectPlugin(model.name, config);
@@ -199,6 +223,9 @@ export function detectPluginForModel(model: ModelDetectionInfo): DetectionResult
     model.model_type ? { model_type: model.model_type } : undefined,
   );
 }
+
+/** Plugins, die jeden passenden Encoder am model_type annehmen (Auffangbecken). */
+const GENERIC_ENCODER_PLUGINS = new Set(['hf-encoder', 'xlm-roberta']);
 
 /**
  * Modelltypen, die FrameTrain selbst aus der Dateiendung ableitet, wenn keine

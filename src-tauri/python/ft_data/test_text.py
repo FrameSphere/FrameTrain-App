@@ -47,5 +47,49 @@ class TextColumnsTest(unittest.TestCase):
         self.assertEqual(safe_text(float("nan")), "")
 
 
+class ProblemTypeTest(unittest.TestCase):
+    def test_single_label_bleibt_standard(self):
+        from ft_data.text import SINGLE_LABEL, resolve_problem_type
+        # Genau die Faelle, die bisher liefen, muessen Single-Label bleiben.
+        self.assertEqual(resolve_problem_type(["pos", "neg", "pos"]), SINGLE_LABEL)
+        self.assertEqual(resolve_problem_type([1, 2, 3, 4, 5]), SINGLE_LABEL)        # Sterne = Klassen
+        self.assertEqual(resolve_problem_type([0.0, 1.0, 0.0]), SINGLE_LABEL)
+        self.assertEqual(resolve_problem_type([["a"], ["b"]]), SINGLE_LABEL)         # Einer-Listen
+        self.assertEqual(resolve_problem_type([0.5, 1.5, 2.5]), SINGLE_LABEL)        # zu wenige Werte
+
+    def test_multi_label_erkennung_und_schalter(self):
+        from ft_data.text import MULTI_LABEL, SINGLE_LABEL, resolve_problem_type
+        self.assertEqual(resolve_problem_type(["sport;politik", "sport"]), MULTI_LABEL)
+        self.assertEqual(resolve_problem_type(["a|b"]), MULTI_LABEL)
+        self.assertEqual(resolve_problem_type([["a", "b"], ["a"]]), MULTI_LABEL)
+        self.assertEqual(resolve_problem_type(["a;b"], multi_label=False), SINGLE_LABEL)
+        self.assertEqual(resolve_problem_type(["a;b"], multi_label="false"), SINGLE_LABEL)
+        self.assertEqual(resolve_problem_type(["a"], multi_label=True), MULTI_LABEL)
+
+    def test_regression(self):
+        from ft_data.text import REGRESSION, resolve_problem_type
+        self.assertEqual(resolve_problem_type([i / 7 for i in range(20)]), REGRESSION)
+        self.assertEqual(resolve_problem_type([1, 2, 3], problem_type="regression"), REGRESSION)
+        self.assertEqual(resolve_problem_type(["3,5", "4,25"] * 1, problem_type="regression"), REGRESSION)
+
+    def test_split_multi_labels(self):
+        from ft_data.text import split_multi_labels
+        self.assertEqual(split_multi_labels("sport; politik ;"), ["sport", "politik"])
+        self.assertEqual(split_multi_labels([0, 2], ["a", "b", "c"]), ["a", "c"])
+        self.assertEqual(split_multi_labels(None), [])
+
+    def test_kennzahlen(self):
+        from ft_data.text import multi_label_scores, regression_scores
+        m = multi_label_scores([[1, 0, 1], [0, 1, 0]], [[0.9, 0.2, 0.7], [0.1, 0.4, 0.2]])
+        self.assertAlmostEqual(m["subset_accuracy"], 0.5)
+        self.assertAlmostEqual(m["micro_f1"], 0.8)
+        r = regression_scores([1, 2, 3, 4], [1, 2, 3, 5])
+        self.assertAlmostEqual(r["mse"], 0.25)
+        self.assertAlmostEqual(r["mae"], 0.25)
+        self.assertGreater(r["pearson"], 0.9)
+        flat = regression_scores([1, 2, 3], [2, 2, 2])      # konstante Vorhersage: kein NaN
+        self.assertEqual(flat["pearson"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

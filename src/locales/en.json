@@ -306,7 +306,12 @@
       "installFailed": "Installation failed",
       "pipStarting": "Starting pip…",
       "installed": "installed",
-      "missing": "missing"
+      "missing": "missing",
+      "groupsTitle": "Package groups",
+      "pythonUsed": "FrameTrain uses: {path} (Python {version})",
+      "pythonUnsupported": "This Python version is not supported (required: 3.10 to 3.13).",
+      "groupInstall": "Install",
+      "groupUpdate": "Check / update"
     },
     "updates": {
       "checking": "Checking for updates...",
@@ -468,6 +473,14 @@
       "yolo": {
         "name": "YOLO Object Detection (Ultralytics)",
         "description": "Trains YOLOv5/v8/v9/YOLO11 models for bounding box detection. Requires Ultralytics."
+      },
+      "llm": {
+        "name": "LLM fine-tuning (LoRA / QLoRA)",
+        "description": "Fine-tunes language models such as Llama, Qwen, Mistral, Gemma and Phi with LoRA, including DPO. On Apple Silicon also MLX: faster and with 4-bit quantization."
+      },
+      "generative": {
+        "name": "Generative models (diffusion, image+text)",
+        "description": "Trains custom styles and subjects for Stable Diffusion (LoRA) and vision-language models that answer questions about images. Requires diffusers."
       }
     },
     "preflight": {
@@ -2286,6 +2299,40 @@
       "title": "Detection metrics",
       "map50": "mAP@50",
       "map5095": "mAP@50-95"
+    },
+    "taskMetrics": {
+      "title": "Task-specific metrics",
+      "before": "before {value}",
+      "labels": {
+        "perplexity": "Perplexity",
+        "exact_match": "Exact match",
+        "rougeL": "ROUGE-L",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "bleu": "BLEU",
+        "preference_accuracy": "Preference correct",
+        "reward_margin": "Reward margin",
+        "wer": "Word error rate (WER)",
+        "cer": "Character error rate (CER)",
+        "trainable_params": "Trainable parameters",
+        "total_params": "Total parameters",
+        "mask_mAP50": "Mask mAP50",
+        "mask_mAP50-95": "Mask mAP50-95",
+        "pose_mAP50": "Keypoint mAP50",
+        "pose_mAP50-95": "Keypoint mAP50-95",
+        "top1_accuracy": "Top-1 accuracy",
+        "top5_accuracy": "Top-5 accuracy",
+        "mrr@10": "MRR@10",
+        "recall@1": "Recall@1",
+        "recall@5": "Recall@5",
+        "spearman": "Spearman",
+        "pearson": "Pearson",
+        "mse": "MSE",
+        "rmse": "RMSE",
+        "mae": "MAE",
+        "r2": "R²",
+        "token_accuracy": "Token accuracy"
+      }
     }
   },
   "datasetUpload": {
@@ -2728,7 +2775,8 @@
       "correctionLabelPlaceholder": "Correct class",
       "correctionTextPlaceholder": "The text as it should have been",
       "correctionDiscard": "Discard",
-      "correctionKeep": "Keep"
+      "correctionKeep": "Keep",
+      "vlmQuestionPlaceholder": "Question about the image (empty = default prompt from training)"
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -2996,7 +3044,13 @@
         "image": "No image files (or Parquet with an image column) found.",
         "audio": "No audio files (or Parquet with an audio column) found.",
         "video": "No video files (.mp4, .mov, .webm, .mkv, .avi) found.",
-        "table": "No table files (.csv, .tsv, .json, .jsonl, .parquet) found."
+        "table": "No table files (.csv, .tsv, .json, .jsonl, .parquet) found.",
+        "speech": "No audio files (or Parquet with audio and text column) found – speech recognition needs recordings with transcripts.",
+        "tokens": "No token data found (JSONL/Parquet with tokens + ner_tags or CoNLL text .conll/.iob/.txt).",
+        "pairs": "No table files (.csv, .tsv, .json, .jsonl, .parquet) with sentence pairs found.",
+        "textToImage": "No image files found – text-to-image LoRA needs images (with .txt captions, metadata.jsonl or an instance prompt).",
+        "visionLanguage": "No image files found – a VLM learns from image + question + answer.",
+        "llm": "No training data found – expected .jsonl/.json/.csv/.parquet (chat, question-answer) or .txt/.md (plain text)."
       },
       "cannotTrain": "{model} cannot train this dataset.",
       "typeUnknown": "Dataset type not detected – {model} may not be able to read it.",
@@ -3005,7 +3059,8 @@
       "suitableTypes": "Suitable: {types}",
       "labelsPartial": "Only {paired} of {total} images have a label.",
       "unlabeledBackground": "Images without a label count as background in training.",
-      "typeFits": "{type} fits {model}."
+      "typeFits": "{type} fits {model}.",
+      "conllFits": "CoNLL files fit {model}."
     }
   },
   "pluginRegistry": {
@@ -3130,7 +3185,22 @@
       "run": "Run inference",
       "detectedOne": "1 object detected",
       "detectedMany": "{n} objects detected",
-      "noDetections": "No objects above the confidence threshold."
+      "noDetections": "No objects above the confidence threshold.",
+      "taskLabel": "Task: {task}",
+      "taskNames": {
+        "detect": "Object detection",
+        "segment": "Segmentation",
+        "pose": "Keypoints",
+        "obb": "Oriented boxes",
+        "classify": "Classification"
+      },
+      "maskBadge": "Mask ({n} points)",
+      "obbBadge": "rotated",
+      "keypointsBadge": "{n} keypoints ({visible} confident)",
+      "summaryMasks": "{n} with mask",
+      "summaryKeypoints": "{n} keypoints",
+      "topClasses": "Most likely classes",
+      "noClasses": "The model returned no class."
     },
     "imageClassification": {
       "subtitle": "Image Classification",
@@ -3165,7 +3235,34 @@
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
       "detectedClass": "Detected class",
       "videoLabel": "Single video",
-      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4"
+      "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4",
+      "causalLmLabel": "Prompt / question",
+      "causalLmPlaceholder": "Ask a question or give an instruction …",
+      "causalLmResult": "Model answer",
+      "tokenLabel": "Text for entity recognition",
+      "tokenPlaceholder": "e.g. Karol is flying to Berlin with Lufthansa tomorrow.",
+      "tokenResult": "Entities found",
+      "embeddingLabel": "Sentence or sentence pair",
+      "embeddingPlaceholder": "One sentence – the most similar texts come from the dataset selected below. Or compare two sentences: Sentence A ||| Sentence B",
+      "embeddingResult": "Result (cosine similarity)",
+      "metrics": "Metrics",
+      "t2iLabel": "Prompt",
+      "t2iPlaceholder": "Describe the image, e.g. a photo of sks dog on the beach",
+      "t2iResult": "Generated image",
+      "vlmImageLabel": "Image",
+      "vlmImagePlaceholder": "Full path to an image, e.g. /Users/you/pictures/invoice.png",
+      "vlmQuestionLabel": "Question about the image (optional)",
+      "vlmQuestionPlaceholder": "e.g. What colour is the shape? Empty = default prompt from training",
+      "vlmResult": "Model answer",
+      "transcript": "Transcript",
+      "metricLabels": {
+        "wer": "Word error rate (WER)",
+        "cer": "Character error rate (CER)",
+        "rouge1": "ROUGE-1",
+        "rouge2": "ROUGE-2",
+        "rougeL": "ROUGE-L",
+        "bleu": "BLEU"
+      }
     }
   },
   "studio": {
@@ -3599,7 +3696,8 @@
         "http403": "server refuses access (403)",
         "http404": "page not found (404)",
         "http429": "too many requests – try again later (429)"
-      }
+      },
+      "limitsSummary": "{pages} pages · {files} files · {mb} MB"
     },
     "generate": {
       "title": "Have texts written",
@@ -3826,5 +3924,19 @@
     "hf_configs": "Dataset has {count} configurations ({configs}). Imported: “{chosen}”.",
     "hf_splits_skipped": "Skipped splits without usable labels: {splits}.",
     "hf_no_standard_splits": "No standard splits detected – all files are imported as “train”."
+  },
+  "packageCheck": {
+    "title": "Python packages are missing for this task ({group})",
+    "missing": "Missing or too old: {list}",
+    "tooOld": "too old",
+    "python": "Installing into: {path}",
+    "install": "Install “{group}” now",
+    "installing": "Installing …",
+    "groups": {
+      "seq_classification": "HuggingFace stack",
+      "yolo": "YOLO",
+      "llm": "LLM fine-tuning",
+      "generative": "Generative models"
+    }
   }
 }

@@ -90,7 +90,12 @@ fn clear_config(app_handle: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn read_model_config(model_path: String) -> Result<String, String> {
     let p = std::path::Path::new(&model_path);
-    let cfg = if p.is_dir() { p.join("config.json") } else { p.to_path_buf() };
+    // diffusers-Pipelines haben statt config.json eine model_index.json; die
+    // Plugin-Erkennung liest daraus _class_name (StableDiffusionPipeline ...).
+    let cfg = if p.is_dir() {
+        let c = p.join("config.json");
+        if !c.exists() && p.join("model_index.json").exists() { p.join("model_index.json") } else { c }
+    } else { p.to_path_buf() };
     if !cfg.exists() {
         return Err("config.json nicht gefunden".to_string());
     }
@@ -266,6 +271,8 @@ fn main() {
             plugin_commands::check_dependency_status,
             plugin_commands::check_first_launch,
             plugin_commands::install_plugins,
+            plugin_commands::check_task_packages,
+            plugin_commands::get_python_info,
             plugin_commands::handle_plugin_approval,
             plugin_commands::run_preflight_check,
             plugin_commands::run_yolo_inference,

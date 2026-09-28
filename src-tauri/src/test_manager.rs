@@ -380,12 +380,7 @@ fn run_test(
                         if let Some(rf) = d.get("results_file").and_then(|f| f.as_str()) {
                             if let Ok(content) = fs::read_to_string(rf) {
                                 if let Ok(fj) = serde_json::from_str::<serde_json::Value>(&content) {
-                                    let metrics = fj.get("metrics").cloned().unwrap_or_default();
-                                    let preds_raw = fj.get("predictions").and_then(|p| p.as_array()).cloned().unwrap_or_default();
-                                    let mut preds: Vec<PredictionResult> = Vec::new();
-                                    for p in &preds_raw {
-                                        if let Ok(pr) = serde_json::from_value::<PredictionResult>(p.clone()) { preds.push(pr); }
-                                    }
+                                    let (metrics, preds) = parse_results_json(&fj);
                                     let total    = d.get("total_samples").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                                     let acc      = d.get("accuracy").and_then(|v| v.as_f64()).or_else(|| metrics.get("accuracy").and_then(|v| v.as_f64()));
                                     let correct  = d.get("correct_predictions").and_then(|v| v.as_u64()).map(|v| v as usize);
@@ -497,4 +492,58 @@ pub fn export_hard_examples(app_handle: tauri::AppHandle, predictions: Vec<Predi
         _ => return Err(format!("Unbekanntes Format: {}", format)),
     }
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Liest die results.json eines Testlaufs.
+///
+/// Zwei Formen sind im Umlauf: `{"predictions": [...], "metrics": {...}}`
+/// (Text, NER, Embeddings) und eine nackte Liste (Bild, Audio, Video, Seq2Seq,
+/// LLM). Gelesen wurde nur die erste — die Einzelergebnisse der anderen fehlten
+/// in der Testhistorie. Zeilen ohne Referenz (`is_correct: null`, z. B. freier
+/// Text ohne Zielspalte) fielen ausserdem beim Deserialisieren weg; ohne
+/// Referenz kann eine Antwort nicht "richtig" sein, sie zaehlt als false.
+fn parse_results_json(fj: &serde_json::Value) -> (serde_json::Value, Vec<PredictionResult>) {
+    let metrics = fj.get("metrics").cloned().unwrap_or_default();
+    let rows = fj.as_array().cloned()
+        .or_else(|| fj.get("predictions").and_then(|p| p.as_array()).cloned())
+        .unwrap_or_default();
+    let preds = rows.into_iter().filter_map(|mut p| {
+        if let Some(obj) = p.as_object_mut() {
+            if obj.get("is_correct").map_or(true, |v| v.is_null()) {
+                obj.insert("is_correct".into(), serde_json::Value::Bool(false));
+            }
+            if obj.get("predicted_output").map_or(false, |v| !v.is_string()) {
+                let text = obj.get("predicted_output").map(|v| v.to_string()).unwrap_or_default();
+                obj.insert("predicted_output".into(), serde_json::Value::String(text));
+            }
+        }
+        serde_json::from_value::<PredictionResult>(p).ok()
+    }).collect();
+    (metrics, preds)
+}
+
+#[cfg(test)]
+mod results_json_tests {
+    use super::*;
+
+    #[test]
+    fn liest_objekt_und_nackte_liste() {
+        let zeile = serde_json::json!({"sample_id": 1, "input_text": "x", "expected_output": "a",
+            "predicted_output": "a", "is_correct": true, "loss": null, "inference_time": 0.1});
+        let obj = serde_json::json!({"predictions": [zeile.clone()], "metrics": {"f1": 0.9}});
+        let (m, p) = parse_results_json(&obj);
+        assert_eq!(p.len(), 1);
+        assert_eq!(m["f1"], 0.9);
+        let (_, p) = parse_results_json(&serde_json::json!([zeile]));
+        assert_eq!(p.len(), 1, "nackte Liste (Bild/Audio/Seq2Seq/LLM) muss gelesen werden");
+    }
+
+    #[test]
+    fn zeile_ohne_referenz_bleibt_erhalten() {
+        let zeile = serde_json::json!({"sample_id": 3, "input_text": "Fliesstext", "expected_output": null,
+            "predicted_output": "Perplexität 2.1", "is_correct": null, "loss": 0.7, "inference_time": 0.2});
+        let (_, p) = parse_results_json(&serde_json::json!([zeile]));
+        assert_eq!(p.len(), 1);
+        assert!(!p[0].is_correct);
+    }
 }

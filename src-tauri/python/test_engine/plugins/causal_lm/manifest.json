@@ -1,0 +1,10 @@
+{
+  "task_type": "causal_lm",
+  "name": "LLM (Decoder)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz für feinjustierte Decoder-LLMs: Antwort erzeugen, im Dataset-Modus Exact Match, ROUGE-L bzw. Perplexität.",
+  "input_type": "text",
+  "output_format": "text"
+}

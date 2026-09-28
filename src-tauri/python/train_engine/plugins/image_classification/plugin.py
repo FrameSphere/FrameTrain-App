@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from core.config import TrainingConfig
+from core.plugin_base import TrainPlugin
 from core.protocol import MessageProtocol
 
 
@@ -47,7 +48,8 @@ def _build_backbone(arch: str, num_classes: int, pretrained: bool) -> nn.Module:
             m.classifier[3] = nn.Linear(m.classifier[3].in_features, num_classes); return m
         raise ValueError(f"Unbekannte Architektur: '{arch}'. Unterstuetzt: resnet18, resnet50, efficientnet_b0, efficientnet_b4, vit_b_16, mobilenet_v3_small, mobilenet_v3_large")
     except ImportError:
-        raise ImportError("torchvision nicht installiert. pip install torchvision")
+        from ft_data.deps import missing
+        raise missing("torchvision", what="Bildklassifikation (torchvision)")
 
 
 def _freeze_base(model: nn.Module, arch: str) -> None:
@@ -113,7 +115,9 @@ def _load_datasets(root: Path, sz: int, augment: bool, batch: int, seed: int = 4
             layout.classes)
 
 
-class ImageClassificationPlugin:
+class ImageClassificationPlugin(TrainPlugin):
+    # Eigenes __init__ ohne super(): Verhalten unveraendert, TrainPlugin
+    # dient als Vertrag (Pflichtmethoden, stop()).
     def __init__(self, config: TrainingConfig):
         self.config = config
         self.is_stopped = False
@@ -136,10 +140,10 @@ class ImageClassificationPlugin:
     def stop(self) -> None:
         """Abbruch aus der Oberflaeche.
 
-        Diese Klasse erbt nicht von TrainPlugin, wo stop() definiert ist.
-        Ohne die Methode lief der Signal-Handler der Engine in einen
+        Ohne die Methode lief der Signal-Handler der Engine frueher in einen
         AttributeError: "Stoppen" blieb wirkungslos und das Training lief
         bis zur letzten Epoche weiter, obwohl is_stopped ueberall geprueft wird.
+        (TrainPlugin.stop() taete dasselbe; die Methode bleibt ausdruecklich.)
         """
         self.is_stopped = True
 
