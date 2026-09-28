@@ -2834,7 +2834,8 @@
       "correctionTextPlaceholder": "The text as it should have been",
       "correctionDiscard": "Discard",
       "correctionKeep": "Keep",
-      "vlmQuestionPlaceholder": "Question about the image (empty = default prompt from training)"
+      "vlmQuestionPlaceholder": "Question about the image (empty = default prompt from training)",
+      "inputMismatchVideo": "This model expects video files. Load samples from a video dataset."
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -2887,6 +2888,24 @@
       "exportDatasetDoneDetail": "{count} corrected samples are now available as a dataset for training.",
       "exportDatasetDoneSkipped": "{count} samples exported, {skipped} skipped (missing file or image size).",
       "exportDatasetError": "Export failed"
+    },
+    "taskViews": {
+      "similarity": "Cosine similarity",
+      "expectedScore": "Expected from dataset: {value}",
+      "expected": "Expected",
+      "wer": "Word error rate (WER): {value} %",
+      "generated": "Generated",
+      "reference": "Image from the dataset",
+      "entitiesExpected": "Expected entities",
+      "entitiesFound": "Found",
+      "entityCompare": "{hits} of {total} entities correct",
+      "entityMissing": "{count} missing",
+      "entityExtra": "{count} extra",
+      "noEntities": "No entities found",
+      "question": "Question",
+      "prompt": "Prompt",
+      "vectorInfo": "Vector with {dim} dimensions, norm {norm}",
+      "pairHint": "Separate two sentences with ||| to measure their similarity."
     }
   },
   "openLibrary": {

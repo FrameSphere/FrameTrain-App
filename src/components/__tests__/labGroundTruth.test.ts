@@ -74,9 +74,24 @@ describe('parseYoloLabelFile', () => {
     expect(box).toEqual({ label: 'Tree', x1: 192, y1: 128, x2: 320, y2: 384 });
   });
 
-  it('nimmt bei Segmentierungs-Polygonen die umschliessende Box', () => {
+  it('nimmt bei Segmentierungs-Polygonen die umschliessende Box und behaelt den Umriss', () => {
     const [box] = parseYoloLabelFile('2 0.1 0.2 0.4 0.2 0.4 0.6 0.1 0.6\n', 100, 100, names);
-    expect(box).toEqual({ label: 'Person', x1: 10, y1: 20, x2: 40, y2: 60 });
+    expect(box).toMatchObject({ label: 'Person', x1: 10, y1: 20, x2: 40, y2: 60 });
+    expect(box.polygon).toEqual([[10, 20], [40, 20], [40, 60], [10, 60]]);
+  });
+
+  // Live-Test 1.4.0: Pose-Labels (cls cx cy w h + 17 Keypoints) fielen ganz
+  // heraus — 56 Werte sind weder Box noch Polygon.
+  it('liest Pose-Zeilen mit Keypoints (x y sichtbar), wenn das Modell pose ist', () => {
+    const line = '2 0.5 0.5 0.2 0.4 0.25 0.5 2 0.75 0.5 1 0 0 0\n';
+    const [box] = parseYoloLabelFile(line, 100, 100, names, [], 'pose');
+    expect(box).toMatchObject({ label: 'Person', x1: 40, y1: 30, x2: 60, y2: 70 });
+    expect(box.keypoints).toEqual([[25, 50, 2], [75, 50, 1], [0, 0, 0]]);
+  });
+
+  it('Keypoints ohne Sichtbarkeit (kpt_shape [k, 2]) gelten als sichtbar', () => {
+    const [box] = parseYoloLabelFile('2 0.5 0.5 0.2 0.4 0.25 0.5 0.75 0.5\n', 100, 100, names, [], 'pose');
+    expect(box.keypoints).toEqual([[25, 50, 2], [75, 50, 2]]);
   });
 
   it('ignoriert leere Zeilen, Kommentare und kaputte Zeilen', () => {

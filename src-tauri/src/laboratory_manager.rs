@@ -61,6 +61,11 @@ pub struct InferResult {
     pub image_width:      Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_height:     Option<u32>,
+    /// Die ganze Antwort des Modell-Servers. Jede Aufgabe meldet eigene
+    /// Felder (Entitaeten, Aehnlichkeit, Bildpfad, YOLO-Task, Frage …); ohne
+    /// sie konnte das Labor nur Klasse und Konfidenz zeigen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra:            Option<serde_json::Value>,
 }
 
 // ============ Hilfsfunktionen ============
@@ -358,6 +363,9 @@ pub async fn lab_start_model_server(
         // Klassennamen des Modells. Sie kommen aus dem Checkpoint, nicht aus
         // einer Liste in FrameTrain — jedes Modell bringt seine eigenen mit.
         let mut classes: Vec<String> = Vec::new();
+        // YOLO-Aufgabe (detect/segment/pose/obb/classify): bestimmt, wie das
+        // Labor die Soll-Labels liest und was es ueber das Bild zeichnet.
+        let mut task: Option<String> = None;
 
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -382,6 +390,7 @@ pub async fn lab_start_model_server(
                                 if let Some(m) = msg.get("modality").and_then(|v| v.as_str()) {
                                     modality = m.to_string();
                                 }
+                                task = msg.get("task_type").and_then(|v| v.as_str()).map(str::to_string);
                                 if let Some(c) = msg.get("classes").and_then(|v| v.as_array()) {
                                     classes = c.iter()
                                         .filter_map(|v| v.as_str().map(str::to_string))
@@ -436,6 +445,7 @@ pub async fn lab_start_model_server(
                 "input_kind": input_kind,
                 "modality": modality,
                 "classes": classes,
+                "task": task,
             }));
             println!("[LabServer] Bereit fuer Inferenz.");
         }
@@ -452,6 +462,8 @@ fn infer_timeout_secs(modality: &str) -> u64 {
         // Ein LLM schreibt Token fuer Token — 256 Tokens eines 7B-Modells
         // brauchen auf dem Mac leicht ueber 30 s.
         "causal_lm" => 180,
+        // Lange Aufnahmen laufen in 30-s-Stuecken durch, Videos werden erst dekodiert.
+        "asr" | "video" => 120,
         _ => 30,
     }
 }
@@ -459,14 +471,34 @@ fn infer_timeout_secs(modality: &str) -> u64 {
 /// Fuehrt Inferenz auf einem einzelnen Sample durch (Text oder Datei).
 /// Schnell (~50ms) weil das Modell bereits geladen ist.
 #[tauri::command]
-pub fn lab_infer_sample(
+pub async fn lab_infer_sample(
     text: String,
     file_path: Option<String>,
     // Frage zum Bild (VLM). Andere Modelle ignorieren das Feld.
     question: Option<String>,
+    // Clip-Grenzen in Sekunden (Video). Ohne sie gilt das ganze Video.
+    start: Option<f64>,
+    end: Option<f64>,
     state: tauri::State<'_, Arc<Mutex<LabState>>>,
 ) -> Result<InferResult, String> {
+    // Asynchron: ein Text-zu-Bild-Lauf dauert Minuten. Als synchroner Befehl
+    // lief er auf dem Haupt-Thread und die ganze App stand still.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || infer_blocking(text, file_path, question, start, end, &state))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn infer_blocking(
+    text: String,
+    file_path: Option<String>,
+    question: Option<String>,
+    start: Option<f64>,
+    end: Option<f64>,
+    state: &Arc<Mutex<LabState>>,
+) -> Result<InferResult, String> {
     let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let mut timeout_secs = 30;
 
     // Schreiben + Lesen atomar (Mutex haelt waehrend beider Operationen)
     let recv_result = {
@@ -479,6 +511,10 @@ pub fn lab_infer_sample(
         let req = if let (Some(path), true) = (file, server.is_canvas) {
             // Canvas: Preprocessing per IR im Python
             serde_json::json!({ "input": path, "input_type": "image" }).to_string()
+        } else if !server.is_canvas && server.input_kind == "video" {
+            let path = file.ok_or_else(||
+                "Dieses Modell erwartet eine Video-Datei. Lade im Labor Video-Samples aus einem Dataset.".to_string())?;
+            serde_json::json!({ "file_path": path, "start": start, "end": end }).to_string()
         } else if !server.is_canvas && matches!(server.input_kind.as_str(), "image" | "audio") {
             let kind = if server.input_kind == "image" { "Bild" } else { "Audio" };
             let path = file.ok_or_else(|| format!(
@@ -515,7 +551,8 @@ pub fn lab_infer_sample(
 
         // Auf Antwort warten. Bilderzeugung braucht je nach Modell und Geraet
         // deutlich laenger als eine Klassifikation (SD 1.5 auf der CPU: Minuten).
-        server.receiver.recv_timeout(Duration::from_secs(infer_timeout_secs(&server.modality)))
+        timeout_secs = infer_timeout_secs(&server.modality);
+        server.receiver.recv_timeout(Duration::from_secs(timeout_secs))
     }; // server-Borrow endet hier
 
     match recv_result {
@@ -536,10 +573,11 @@ pub fn lab_infer_sample(
                 boxes: resp["boxes"].as_array().cloned(),
                 image_width: resp["image_width"].as_u64().map(|v| v as u32),
                 image_height: resp["image_height"].as_u64().map(|v| v as u32),
+                extra: Some(resp),
             })
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err("Inferenz-Timeout (30s) – Modell antwortet nicht. Bitte neu laden.".to_string())
+            Err(format!("Inferenz-Timeout ({}s) – Modell antwortet nicht. Bitte neu laden.", timeout_secs))
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             // Prozess ist abgestuerzt – Server-Referenz bereinigen

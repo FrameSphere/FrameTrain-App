@@ -2834,7 +2834,8 @@
       "correctionTextPlaceholder": "Der Text, wie er hätte sein müssen",
       "correctionDiscard": "Verwerfen",
       "correctionKeep": "Übernehmen",
-      "vlmQuestionPlaceholder": "Frage zum Bild (leer = Standardprompt aus dem Training)"
+      "vlmQuestionPlaceholder": "Frage zum Bild (leer = Standardprompt aus dem Training)",
+      "inputMismatchVideo": "Dieses Modell erwartet Video-Dateien. Lade Samples aus einem Video-Dataset."
     },
     "analysis": {
       "exportButton": "Export CSV",
@@ -2887,6 +2888,24 @@
       "exportDatasetDoneDetail": "{count} korrigierte Samples stehen jetzt als Dataset zum Training bereit.",
       "exportDatasetDoneSkipped": "{count} Samples exportiert, {skipped} übersprungen (fehlende Datei oder Bildmaße).",
       "exportDatasetError": "Export fehlgeschlagen"
+    },
+    "taskViews": {
+      "similarity": "Kosinus-Ähnlichkeit",
+      "expectedScore": "Soll aus dem Dataset: {value}",
+      "expected": "Soll",
+      "wer": "Wortfehlerrate (WER): {value} %",
+      "generated": "Erzeugt",
+      "reference": "Bild aus dem Dataset",
+      "entitiesExpected": "Soll-Entitäten",
+      "entitiesFound": "Gefunden",
+      "entityCompare": "{hits} von {total} Entitäten richtig",
+      "entityMissing": "{count} fehlen",
+      "entityExtra": "{count} zusätzlich",
+      "noEntities": "Keine Entitäten gefunden",
+      "question": "Frage",
+      "prompt": "Prompt",
+      "vectorInfo": "Vektor mit {dim} Dimensionen, Norm {norm}",
+      "pairHint": "Zwei Sätze mit ||| trennen, um ihre Ähnlichkeit zu messen."
     }
   },
   "openLibrary": {

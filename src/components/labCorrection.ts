@@ -28,11 +28,13 @@ export type CorrectionKind = 'boxes' | 'label' | 'text';
  */
 export function correctionKindFor(
   modality: string | null | undefined,
-  fileKind?: 'image' | 'audio' | null,
+  fileKind?: 'image' | 'audio' | 'video' | null,
 ): CorrectionKind {
   if (modality === 'detect') return 'boxes';
-  if (modality === 'seq2seq') return 'text';
-  if (modality === 'text' || modality === 'image' || modality === 'audio' || modality === 'canvas') {
+  // Freier Text als Soll: Umformulierung, LLM-Antwort, Transkript, Bildantwort,
+  // Entitaeten ("EU [ORG]") und bei Text-zu-Bild der bessere Prompt.
+  if (['seq2seq', 'causal_lm', 'asr', 'vlm', 'token', 'embedding', 'text_to_image'].includes(modality ?? '')) return 'text';
+  if (modality === 'text' || modality === 'image' || modality === 'audio' || modality === 'video' || modality === 'canvas') {
     return 'label';
   }
   // Unbekannte Modalitaet (Dev-Script): bei Dateien hilft nur ein Label,

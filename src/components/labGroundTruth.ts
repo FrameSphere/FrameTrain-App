@@ -13,6 +13,10 @@
 export interface TruthBox {
   label: string;
   x1: number; y1: number; x2: number; y2: number;
+  /** Maskenumriss (segment) oder die vier Ecken (obb), Pixel. */
+  polygon?: [number, number][];
+  /** Pose: [x, y, sichtbar] je Keypoint, Pixel; sichtbar 0 = nicht annotiert. */
+  keypoints?: [number, number, number][];
 }
 
 /**
@@ -108,7 +112,10 @@ export function labelForClassId(
  * Zeilenformat `cls cx cy w h`, alle Werte auf 0–1 normiert. Segmentierungs-
  * Datasets schreiben stattdessen ein Polygon (`cls x1 y1 x2 y2 …`); daraus
  * wird die umschliessende Box berechnet, damit auch diese Datasets im Labor
- * eine Erwartung haben.
+ * eine Erwartung haben. Der Umriss bleibt als `polygon` erhalten (Masken,
+ * gedrehte Boxen). Pose-Zeilen (`cls cx cy w h` plus je Keypoint x y [v])
+ * lassen sich an der Laenge nicht sicher von Polygonen unterscheiden —
+ * deshalb entscheidet die YOLO-Aufgabe des Modells (`task`).
  */
 export function parseYoloLabelFile(
   text: string,
@@ -116,6 +123,7 @@ export function parseYoloLabelFile(
   imageHeight: number,
   fromDataset: Record<number, string> = {},
   fromModel: string[] = [],
+  task?: string | null,
 ): TruthBox[] {
   if (imageWidth <= 0 || imageHeight <= 0) return [];
   const boxes: TruthBox[] = [];
@@ -131,15 +139,25 @@ export function parseYoloLabelFile(
     const id = Math.trunc(nums[0]);
     const label = labelForClassId(id, fromDataset, fromModel);
 
-    if (nums.length === 5) {
+    if (nums.length === 5 || (task === 'pose' && nums.length > 5)) {
       const [, cx, cy, w, h] = nums;
-      boxes.push({
+      const box: TruthBox = {
         label,
         x1: (cx - w / 2) * imageWidth,
         y1: (cy - h / 2) * imageHeight,
         x2: (cx + w / 2) * imageWidth,
         y2: (cy + h / 2) * imageHeight,
-      });
+      };
+      const rest = nums.slice(5);
+      if (rest.length) {
+        // kpt_shape [k, 3] (mit Sichtbarkeit) oder [k, 2]
+        const dims = rest.length % 3 === 0 ? 3 : 2;
+        box.keypoints = [];
+        for (let i = 0; i + dims <= rest.length; i += dims) {
+          box.keypoints.push([rest[i] * imageWidth, rest[i + 1] * imageHeight, dims === 3 ? rest[i + 2] : 2]);
+        }
+      }
+      boxes.push(box);
       continue;
     }
 
@@ -153,6 +171,7 @@ export function parseYoloLabelFile(
         y1: Math.min(...ys) * imageHeight,
         x2: Math.max(...xs) * imageWidth,
         y2: Math.max(...ys) * imageHeight,
+        polygon: xs.map((x, i) => [x * imageWidth, ys[i] * imageHeight] as [number, number]),
       });
     }
   }

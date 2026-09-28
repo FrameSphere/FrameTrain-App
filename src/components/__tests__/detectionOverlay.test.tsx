@@ -86,3 +86,33 @@ describe('DetectionOverlay', () => {
     expect(container.querySelectorAll('rect')).toHaveLength(1);
   });
 });
+
+// Live-Test 1.4.0: Segmentierung, Pose und gedrehte Boxen erschienen als
+// gerade Rechtecke — Masken, Keypoints und Drehung lieferte der YOLO-Server
+// zwar, gezeichnet wurden sie nie.
+describe('DetectionOverlay: Masken, Keypoints, gedrehte Boxen', () => {
+  it('zeichnet eine Maske als gefuelltes Polygon statt als Rechteck', () => {
+    const seg = { ...BOX, polygon: [[330, 240], [500, 250], [480, 380]] as [number, number][] };
+    const { container } = render(<DetectionOverlay boxes={[seg]} width={512} height={512} />);
+    const poly = container.querySelector('polygon')!;
+    expect(poly.getAttribute('points')).toBe('330,240 500,250 480,380');
+    expect(poly.getAttribute('fill-opacity')).toBe('0.25');
+    expect(container.querySelector('rect')).toBeNull();
+  });
+
+  it('zeichnet sichere Keypoints und bei 17 Punkten das Skelett', () => {
+    const kpts = Array.from({ length: 17 }, (_, i) => [100 + i, 200, i === 16 ? 0.1 : 0.9] as [number, number, number]);
+    const { container } = render(<DetectionOverlay boxes={[{ ...BOX, keypoints: kpts }]} width={512} height={512} />);
+    // Punkt 16 ist unsicher (0.1) → 16 Kreise; die Skelett-Linien zu ihm fallen weg.
+    expect(container.querySelectorAll('circle')).toHaveLength(16);
+    expect(container.querySelectorAll('line').length).toBeGreaterThan(10);
+  });
+
+  it('Soll-Umrisse und Soll-Keypoints gestrichelt bzw. hohl', () => {
+    const truth = [{ label: 'Tree', x1: 0, y1: 0, x2: 10, y2: 10, polygon: [[0, 0], [10, 0], [5, 10]] as [number, number][],
+      keypoints: [[5, 5, 2]] as [number, number, number][] }];
+    const { container } = render(<DetectionOverlay boxes={[]} truthBoxes={truth} width={512} height={512} />);
+    expect(container.querySelector('polygon')?.getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(container.querySelector('circle')?.getAttribute('fill')).toBe('none');
+  });
+});

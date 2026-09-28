@@ -14,6 +14,8 @@ import {
   Check, Wand2, Copy, Maximize2, Minimize2, Zap, Database, Boxes,
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
+import { buildTaskSamples, labTaskFor, type ExpectedEntity, type MediaKind } from './labTaskSamples';
+import { EntityText, GeneratedImage, GeneratedText, PairView, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
 import {
   labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes,
   compareClassSets, classColor, legendEntries, type TruthBox,
@@ -64,14 +66,48 @@ interface ModelInfo {
 interface VersionTreeItem { id: string; name: string; is_root: boolean; version_number: number; }
 interface ModelWithVersionTree { id: string; name: string; versions: VersionTreeItem[]; }
 
-type LabInputKind = 'text' | 'image' | 'audio' | 'tensor';
+type LabInputKind = 'text' | 'image' | 'audio' | 'video' | 'tensor';
 
 /** Eine Detektion in Pixelkoordinaten des Originalbildes (YOLO). */
 interface DetectionBox {
   label: string;
   confidence: number;
   x1: number; y1: number; x2: number; y2: number;
+  /** Maskenumriss (segment) oder vier Ecken (obb). */
+  polygon?: [number, number][];
+  /** Pose: [x, y, Konfidenz] je Keypoint. */
+  keypoints?: [number, number, number][];
 }
+
+/** COCO-Skelett (17 Keypoints, 0-basiert) — Ultralytics' Standard fuer Pose. */
+const COCO_SKELETON: [number, number][] = [
+  [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6], [5, 7],
+  [6, 8], [7, 9], [8, 10], [1, 2], [0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6],
+];
+
+/** Keypoints und (bei 17 Punkten) Skelett. Unsichere/unsichtbare Punkte fallen weg. */
+function KeypointMarks({ points, color, stroke, dashed = false }: {
+  points: [number, number, number][]; color: string; stroke: number; dashed?: boolean;
+}) {
+  // Vorhersage: Konfidenz 0..1; Soll: Sichtbarkeit 0/1/2 — beides "> 0.5" heisst da.
+  const shown = (i: number) => points[i] && points[i][2] > 0.5 && (points[i][0] > 0 || points[i][1] > 0);
+  const r = stroke * 1.8;
+  return (
+    <g>
+      {points.length === 17 && COCO_SKELETON.map(([a, b]) => shown(a) && shown(b) && (
+        <line key={`${a}-${b}`} x1={points[a][0]} y1={points[a][1]} x2={points[b][0]} y2={points[b][1]}
+          stroke={color} strokeWidth={stroke} strokeOpacity={0.8}
+          strokeDasharray={dashed ? `${stroke * 3} ${stroke * 2}` : undefined} />
+      ))}
+      {points.map((p, i) => shown(i) && (
+        <circle key={i} cx={p[0]} cy={p[1]} r={r}
+          fill={dashed ? 'none' : color} stroke={dashed ? color : '#0f172a'} strokeWidth={stroke / 2} />
+      ))}
+    </g>
+  );
+}
+
+const polygonPoints = (poly: [number, number][]) => poly.map(([x, y]) => `${x},${y}`).join(' ');
 
 /** Zeilen, die aus einer Parquet-Datei als Samples geladen werden (Backend deckelt bei 500). */
 const PARQUET_SAMPLE_ROWS = 200;
@@ -82,8 +118,14 @@ interface LabSample {
   text: string;          // Haupttext für die Inference
   label?: string;        // Erwartetes Label (optional)
   rawData: unknown;      // Original-Daten aus Datei
-  filePath?: string;     // Datei-Sample: absoluter Pfad (Bild-/Audio-Modelle)
-  fileKind?: 'image' | 'audio';  // gesetzt → Datei-Inferenz statt Text/Tensor
+  filePath?: string;     // Datei-Sample: absoluter Pfad (Bild-/Audio-/Video-Modelle)
+  fileKind?: MediaKind;  // gesetzt → Datei-Inferenz statt Text/Tensor
+  /** VLM: Frage zum Bild aus dem Dataset. */
+  question?: string;
+  /** Text-zu-Bild: Bild aus dem Dataset zur Caption. */
+  refImage?: string;
+  /** NER: Soll-Entitaeten mit Zeichenpositionen im Text. */
+  entities?: ExpectedEntity[];
 }
 
 interface TopPred { label: string; score: number; }
@@ -981,16 +1023,25 @@ export function DetectionOverlay({ boxes, truthBoxes = [], draftBox = null, clas
       className="absolute inset-0 w-full h-full pointer-events-none"
       aria-hidden="true"
     >
-      {truthBoxes.map((b, i) => (
-        <rect
-          key={`truth-${b.label}-${i}`}
-          x={b.x1} y={b.y1}
-          width={Math.max(0, b.x2 - b.x1)} height={Math.max(0, b.y2 - b.y1)}
-          fill="none" stroke={classColor(b.label, classes)} strokeWidth={stroke}
-          strokeDasharray={`${stroke * 3} ${stroke * 2}`} rx={stroke}
-          opacity={0.9}
-        />
-      ))}
+      {truthBoxes.map((b, i) => {
+        const color = classColor(b.label, classes);
+        const dash = `${stroke * 3} ${stroke * 2}`;
+        return (
+          <g key={`truth-${b.label}-${i}`} opacity={0.9}>
+            {b.polygon && b.polygon.length >= 3 ? (
+              <polygon points={polygonPoints(b.polygon)} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={dash} />
+            ) : (
+              <rect
+                x={b.x1} y={b.y1}
+                width={Math.max(0, b.x2 - b.x1)} height={Math.max(0, b.y2 - b.y1)}
+                fill="none" stroke={color} strokeWidth={stroke}
+                strokeDasharray={dash} rx={stroke}
+              />
+            )}
+            {b.keypoints && <KeypointMarks points={b.keypoints} color={color} stroke={stroke} dashed />}
+          </g>
+        );
+      })}
       {draftBox && (
         <rect
           x={draftBox.x1} y={draftBox.y1}
@@ -1006,12 +1057,19 @@ export function DetectionOverlay({ boxes, truthBoxes = [], draftBox = null, clas
         // Sitzt die Box oben am Rand, wandert die Beschriftung nach innen.
         const labelY = b.y1 > font * 1.4 ? b.y1 - font * 0.35 : b.y1 + font * 1.1;
         const color = classColor(b.label, classes);
+        const poly = b.polygon && b.polygon.length >= 3 ? b.polygon : null;
         return (
           <g key={`${b.label}-${i}`}>
-            <rect
-              x={b.x1} y={b.y1} width={w} height={h}
-              fill="none" stroke={color} strokeWidth={stroke} rx={stroke}
-            />
+            {poly ? (
+              // Maske bzw. gedrehte Box: gefuellter Umriss statt geradem Rechteck.
+              <polygon points={polygonPoints(poly)} fill={color} fillOpacity={0.25} stroke={color} strokeWidth={stroke} />
+            ) : (
+              <rect
+                x={b.x1} y={b.y1} width={w} height={h}
+                fill="none" stroke={color} strokeWidth={stroke} rx={stroke}
+              />
+            )}
+            {b.keypoints && <KeypointMarks points={b.keypoints} color={color} stroke={stroke} />}
             <text
               x={b.x1 + stroke} y={labelY}
               fontSize={font} fill={color}
@@ -1074,6 +1132,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   // Datasets (aus dessen data.yaml). Beides ist pro Modell/Dataset verschieden
   // — deshalb Zustand und keine Konstante.
   const [modelClasses, setModelClasses] = useState<string[]>([]);
+  /** YOLO-Aufgabe des geladenen Modells (detect/segment/pose/obb/classify). */
+  const [serverTask, setServerTask] = useState<string | null>(null);
   const [datasetClasses, setDatasetClasses] = useState<Record<number, string>>({});
   const [truthBoxes, setTruthBoxes] = useState<TruthBox[]>([]);
   // Nur Boxen ab dieser Konfidenz werden gezeigt und verglichen. Der Server
@@ -1090,6 +1150,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const [testResult, setTestResult] = useState<{
     predicted: string; confidence?: number; topPredictions?: TopPred[]; inferenceMs: number;
     boxes?: DetectionBox[]; imageWidth?: number; imageHeight?: number;
+    /** Ganze Server-Antwort (Entitaeten, Aehnlichkeit, Bildpfad …). */
+    extra?: Record<string, unknown>;
   } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [userNote, setUserNote] = useState('');
@@ -1198,10 +1260,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   ]);
 
   useEffect(() => {
-    const unlisten = listen<{ status: string; version_id?: string; message?: string; input_kind?: string; modality?: string; classes?: string[] }>(
+    const unlisten = listen<{ status: string; version_id?: string; message?: string; input_kind?: string; modality?: string; classes?: string[]; task?: string | null }>(
       'lab-server-status',
       e => {
-        const { status, version_id, message, input_kind, modality, classes } = e.payload;
+        const { status, version_id, message, input_kind, modality, classes, task } = e.payload;
         console.log('[Lab] Server-Status:', status, version_id, message, modality);
         setServerStatus(status as typeof serverStatus);
         serverStatusRef.current = status as typeof serverStatus;
@@ -1210,6 +1272,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           setServerInputKind((input_kind as LabInputKind) ?? 'text');
           setServerModality(modality ?? 'text');
           setModelClasses(classes ?? []);
+          setServerTask(task ?? null);
         }
         if (status === 'loading') { setServerInputKind(null); setServerModality(null); }
         if (status === 'error') {
@@ -1414,6 +1477,12 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
 
   const currentSample = samples[currentSampleIdx] ?? null;
+  // VLM: die Frage aus dem Dataset gehoert zum Sample; ohne sie bleibt die
+  // zuletzt getippte stehen.
+  const sampleQuestion = currentSample?.question;
+  useEffect(() => {
+    if (sampleQuestion) setLabQuestion(sampleQuestion);
+  }, [sampleQuestion, currentSample?.id]);
 
   // Klassennamen des Datasets aus dessen data.yaml. Sie haben Vorrang vor den
   // Namen im Modell: wer ein fremdes Modell gegen eigene Daten prueft, will
@@ -1440,7 +1509,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       for (const candidate of labelPathsForImage(currentSample.filePath!)) {
         try {
           const text = await invoke<string>('read_dataset_samples_file', { filePath: candidate });
-          const boxes = parseYoloLabelFile(text, imageSize.w, imageSize.h, datasetClasses, modelClasses);
+          const boxes = parseYoloLabelFile(text, imageSize.w, imageSize.h, datasetClasses, modelClasses, serverTask);
           if (!aborted && boxes.length > 0) { setTruthBoxes(boxes); return; }
         } catch {
           // Datei gibt es nicht – naechster Kandidat, sonst gibt es eben
@@ -1449,7 +1518,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       }
     })();
     return () => { aborted = true; };
-  }, [currentSample, imageSize, datasetClasses, modelClasses]);
+  }, [currentSample, imageSize, datasetClasses, modelClasses, serverTask]);
 
   /** Erwartung: bei Objekterkennung die Labeldatei, sonst der Ordnername. */
   const datasetExpected = truthBoxes.length > 0
@@ -1536,13 +1605,15 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     ? boxFromPoints(dragFrom, dragTo, drawLabel)
     : null;
   // Erwartet der geladene Server eine andere Eingabeart als das aktuelle Sample?
-  const inputMismatch: 'inputMismatchImage' | 'inputMismatchAudio' | 'inputMismatchText' | null =
+  const inputMismatch: 'inputMismatchImage' | 'inputMismatchAudio' | 'inputMismatchVideo' | 'inputMismatchText' | null =
     !currentSample || !serverInputKind || serverInputKind === 'tensor'
       ? null
       : serverInputKind === 'image' && currentSample.fileKind !== 'image'
       ? 'inputMismatchImage'
       : serverInputKind === 'audio' && currentSample.fileKind !== 'audio'
       ? 'inputMismatchAudio'
+      : serverInputKind === 'video' && currentSample.fileKind !== 'video'
+      ? 'inputMismatchVideo'
       : serverInputKind === 'text' && currentSample.fileKind
       ? 'inputMismatchText'
       : null;
@@ -1562,6 +1633,25 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
 
       const filtered = files.filter(f => !f.is_dir && (selectedSampleSplit === 'all' || f.split === selectedSampleSplit));
       console.log('[Lab] Gefilterte Dateien:', filtered);
+
+      // Aufgaben mit eigener Datenform (Transkripte, Captions, CoNLL, Paare,
+      // Videos, Bild+Frage) zuerst — sonst landet z. B. ein Text-zu-Bild-
+      // Dataset als Bild-Samples bei einem Modell, das Prompts braucht.
+      const task = labTaskFor(detectedPlugin?.taskType, serverModality);
+      const drafts = task === 'other' ? null : await buildTaskSamples(
+        task, filtered, path => invoke<string>('read_dataset_samples_file', { filePath: path }),
+      );
+      if (drafts && drafts.length > 0) {
+        const stamp = Date.now();
+        setSamples(drafts.map((d, i) => ({ ...d, id: `${task}_${stamp}_${i}`, index: i })));
+        const ds = datasets.find(d => d.id === selectedSampleDatasetId);
+        setSourceFileName(ds?.name ?? 'Dataset');
+        success(
+          t('laboratoryPanel.setup.notifications.loadSuccess'),
+          t('laboratoryPanel.setup.notifications.loadSuccessDetail', { count: drafts.length, fileCount: filtered.length }),
+        );
+        return;
+      }
 
       // Bild-Dataset (ImageFolder): Dateien sind Bilder → als Bild-Samples laden,
       // Label = übergeordneter Ordnername. Kein Text-Parsing.
@@ -1663,11 +1753,22 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
       const content = ev.target?.result as string;
       let parsed: LabSample[];
-      try { parsed = parseSamples(content, file.name); }
-      catch (err) { error(t('laboratoryPanel.setup.notifications.loadError'), String(err instanceof Error ? err.message : err)); return; }
+      // NER (CoNLL/Token-Listen) und Embedding-Paare haben eine eigene Form —
+      // zeilenweise gelesen zerfiele eine CoNLL-Datei in "EU B-ORG".
+      const task = labTaskFor(detectedPlugin?.taskType, serverModality);
+      const drafts = task === 'token' || task === 'embedding'
+        ? await buildTaskSamples(task, [{ name: file.name, path: file.name, is_dir: false, split: 'all' }], async () => content)
+        : null;
+      if (drafts && drafts.length > 0) {
+        const stamp = Date.now();
+        parsed = drafts.map((d, i) => ({ ...d, id: `${task}_${stamp}_${i}`, index: i }));
+      } else {
+        try { parsed = parseSamples(content, file.name); }
+        catch (err) { error(t('laboratoryPanel.setup.notifications.loadError'), String(err instanceof Error ? err.message : err)); return; }
+      }
       if (parsed.length === 0) { warning(t('laboratoryPanel.setup.notifications.fileEmpty'), t('laboratoryPanel.setup.notifications.fileEmptyDetail')); return; }
       setSamples(parsed);
       setSourceFileName(file.name);
@@ -1752,10 +1853,13 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           boxes?: DetectionBox[];
           image_width?: number;
           image_height?: number;
+          extra?: Record<string, unknown>;
         }>('lab_infer_sample', {
           text: currentSample.text,
           filePath: currentSample.fileKind ? currentSample.filePath ?? null : null,
-          question: labQuestion.trim() || null,
+          question: labQuestion.trim() || currentSample.question || null,
+          start: null,
+          end: null,
         });
 
         setTestResult({
@@ -1766,6 +1870,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           boxes:          result.boxes,
           imageWidth:     result.image_width,
           imageHeight:    result.image_height,
+          extra:          result.extra,
         });
         setTesting(false);
       } else {
@@ -2306,8 +2411,16 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             );
                           })()}
                         </div>
+                      ) : currentSample.fileKind === 'video' ? (
+                        <video
+                          key={currentSample.filePath}
+                          controls
+                          src={convertFileSrc(currentSample.filePath)}
+                          className="max-h-80 max-w-full rounded-lg bg-black"
+                        />
                       ) : (
                         <audio
+                          key={currentSample.filePath}
                           controls
                           src={convertFileSrc(currentSample.filePath)}
                           className="w-full"
@@ -2348,8 +2461,25 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                       })()}
                     </div>
                   ) : (
-                    <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-36 overflow-y-auto">
-                      <p className="text-gray-200 text-xs leading-relaxed whitespace-pre-wrap">{getDisplayText(currentSample)}</p>
+                    <div className="rounded-xl bg-black/30 border border-white/10 p-3 max-h-56 overflow-y-auto space-y-2">
+                      {currentSample.entities ? (
+                        // NER: Soll-Entitaeten gestrichelt im Satz
+                        <>
+                          <p className="text-[10px] text-gray-500">{t('laboratoryPanel.taskViews.entitiesExpected')}</p>
+                          <EntityText text={currentSample.text} entities={currentSample.entities} dashed />
+                        </>
+                      ) : currentSample.text.includes('|||') ? (
+                        <PairView text={currentSample.text} />
+                      ) : (
+                        <p className="text-gray-200 text-xs leading-relaxed whitespace-pre-wrap">{getDisplayText(currentSample)}</p>
+                      )}
+                      {currentSample.refImage && (
+                        <img
+                          src={convertFileSrc(currentSample.refImage)}
+                          alt=""
+                          className="max-h-40 rounded-lg border border-white/10 object-contain"
+                        />
+                      )}
                     </div>
                   )}
 
@@ -2426,25 +2556,58 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {/* Result */}
                   {testResult && !testing && (
                     <>
-                      {/* Text-to-Image: das Ergebnis ist der Pfad des erzeugten Bildes */}
-                      {serverModality === 'text_to_image' && testResult.predicted && testResult.predicted !== '?' && (
-                        <img
-                          src={convertFileSrc(testResult.predicted)}
-                          alt={currentSample?.text ?? ''}
-                          className="w-full max-h-80 object-contain rounded-xl border border-white/10 bg-black/20"
-                        />
-                      )}
-
-                      {/* Hauptklasse */}
-                      <div className="px-4 py-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
-                        <span className="text-amber-300 text-lg font-bold">{testResult.predicted}</span>
-                        <div className="text-right">
-                          {testResult.confidence != null && (
-                            <p className="text-amber-400 font-mono text-base font-semibold">{(testResult.confidence * 100).toFixed(1)}%</p>
-                          )}
-                          <p className="text-gray-600 text-[10px]">{testResult.inferenceMs.toFixed(0)} ms</p>
-                        </div>
-                      </div>
+                      {/* Ergebnis je Aufgabe: Bild, markierter Text, Aehnlichkeit,
+                          freier Text — oder die Klasse mit Konfidenz. */}
+                      {(() => {
+                        const extra = testResult.extra ?? {};
+                        if (serverModality === 'text_to_image' && testResult.predicted && testResult.predicted !== '?') {
+                          return <GeneratedImage path={String(extra.image_path ?? testResult.predicted)} refImage={currentSample.refImage} prompt={currentSample.text} />;
+                        }
+                        if (serverModality === 'token') {
+                          const ents = Array.isArray(extra.entities) ? extra.entities as EntitySpan[] : [];
+                          return (
+                            <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-1">
+                              <p className="text-[10px] text-gray-500">{t('laboratoryPanel.taskViews.entitiesFound')}</p>
+                              {ents.length
+                                ? <EntityText text={currentSample.text} entities={ents} />
+                                : <p className="text-gray-400 text-xs">{t('laboratoryPanel.taskViews.noEntities')}</p>}
+                              <p className="text-gray-600 text-[10px] text-right">{testResult.inferenceMs.toFixed(0)} ms</p>
+                            </div>
+                          );
+                        }
+                        if (serverModality === 'embedding' && typeof extra.similarity === 'number') {
+                          return <SimilarityView similarity={extra.similarity} expected={currentSample.label} />;
+                        }
+                        if (serverModality === 'embedding' && typeof extra.embedding_dim === 'number') {
+                          return (
+                            <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-1 text-xs">
+                              <p className="text-amber-200">{t('laboratoryPanel.taskViews.vectorInfo', { dim: String(extra.embedding_dim), norm: Number(extra.norm ?? 0).toFixed(3) })}</p>
+                              <p className="text-gray-500">{t('laboratoryPanel.taskViews.pairHint')}</p>
+                            </div>
+                          );
+                        }
+                        if (['causal_lm', 'seq2seq', 'vlm', 'asr'].includes(serverModality ?? '')) {
+                          return (
+                            <>
+                              {serverModality === 'vlm' && typeof extra.question === 'string' && extra.question && (
+                                <p className="text-[11px] text-gray-500">{t('laboratoryPanel.taskViews.question')}: <span className="text-gray-300">{extra.question}</span></p>
+                              )}
+                              <GeneratedText text={testResult.predicted} inferenceMs={testResult.inferenceMs} />
+                            </>
+                          );
+                        }
+                        return (
+                          <div className="px-4 py-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-3">
+                            <span className="text-amber-300 text-lg font-bold break-words min-w-0">{testResult.predicted}</span>
+                            <div className="text-right flex-shrink-0">
+                              {testResult.confidence != null && (
+                                <p className="text-amber-400 font-mono text-base font-semibold">{(testResult.confidence * 100).toFixed(1)}%</p>
+                              )}
+                              <p className="text-gray-600 text-[10px]">{testResult.inferenceMs.toFixed(0)} ms</p>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Korrektheits-Indikator falls Soll bekannt.
                           Bei Objekterkennung waere ein Textvergleich sinnlos —
@@ -2465,13 +2628,35 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             </span>
                           </div>
                         );
-                      })() : currentSample.label && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs ${testResult.predicted === currentSample.label ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
-                          {testResult.predicted === currentSample.label
-                            ? <><CheckCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.matchLabel')}</>
-                            : <><XCircle className="w-3.5 h-3.5" /> {t('laboratoryPanel.testing.mismatchLabel')} <strong>{currentSample.label}</strong></>}
-                      </div>
-                      )}
+                      })() : serverModality === 'asr' && currentSample.label ? (
+                        <TranscriptCheck expected={currentSample.label} got={testResult.predicted} />
+                      ) : serverModality === 'token' && currentSample.entities ? (() => {
+                        const got = Array.isArray(testResult.extra?.entities) ? testResult.extra!.entities as EntitySpan[] : [];
+                        const { hits, missing, extra } = compareEntities(currentSample.entities, got);
+                        const ok = missing === 0 && extra === 0;
+                        return (
+                          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs ${ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
+                            {ok ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                            <span>
+                              {t('laboratoryPanel.taskViews.entityCompare', { hits: String(hits), total: String(currentSample.entities.length) })}
+                              {missing > 0 && ` · ${t('laboratoryPanel.taskViews.entityMissing', { count: String(missing) })}`}
+                              {extra > 0 && ` · ${t('laboratoryPanel.taskViews.entityExtra', { count: String(extra) })}`}
+                            </span>
+                          </div>
+                        );
+                      })() : serverModality === 'embedding' || serverModality === 'text_to_image' ? null
+                      : currentSample.label && (() => {
+                        // Freier Text (LLM, Seq2Seq, VLM): Gross/klein und Leerraum egal.
+                        const generative = ['causal_lm', 'seq2seq', 'vlm'].includes(serverModality ?? '');
+                        const match = generative ? sameText(testResult.predicted, currentSample.label) : testResult.predicted === currentSample.label;
+                        return (
+                          <div className={`flex items-start gap-2 px-3 py-2 rounded-xl text-xs ${match ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
+                            {match
+                              ? <><CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> {t('laboratoryPanel.testing.matchLabel')}</>
+                              : <><XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> <span>{t('laboratoryPanel.testing.mismatchLabel')} <strong className="whitespace-pre-wrap break-words">{currentSample.label}</strong></span></>}
+                          </div>
+                        );
+                      })()}
 
                       {/* Konfidenz-Regler – nur wenn es Boxen gibt */}
                       {(testResult.boxes?.length ?? 0) > 0 && (
