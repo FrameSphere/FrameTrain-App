@@ -1110,6 +1110,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   // Konkrete Fehlermeldung vom Server-Start (inline sichtbar, nicht nur als Toast)
   const [serverErrorMsg, setServerErrorMsg] = useState<string | null>(null);
   const [serverVersionId, setServerVersionId] = useState<string | null>(null);
+  // Fuer welche Version zuletzt geladen wurde: ein Ladefehler gehoert zu ihr.
+  // Ohne das stand nach einem Modellwechsel noch der Fehler des vorigen
+  // Modells da (Live-Test 1.4.2: tiny-sd-Fehler bei gewaehltem SmolLM2).
+  const [attemptVersionId, setAttemptVersionId] = useState<string | null>(null);
   const [serverInputKind, setServerInputKind] = useState<LabInputKind | null>(null);
   const [serverModality,  setServerModality]  = useState<string | null>(null);
   // Frage zum Bild fuer VLMs. Ohne Frage nimmt der Server den Standardprompt
@@ -1229,6 +1233,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const handleLoadModel = useCallback(() => {
     if (!selectedVersionId) return;
     setServerErrorMsg(null);
+    setAttemptVersionId(selectedVersionId);
     setServerStatus('loading');
     serverStatusRef.current = 'loading';
     invoke('lab_start_model_server', { versionId: selectedVersionId }).catch(e => {
@@ -2113,7 +2118,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-xs font-medium transition-all"
                             >
                               <Zap className="w-3.5 h-3.5" />
-                              {serverStatus === 'error'
+                              {serverStatus === 'error' && attemptVersionId === selectedVersionId
                                 ? t('laboratoryPanel.setup.loadModelRetryButton')
                                 : t('laboratoryPanel.setup.loadModelButton')}
                             </button>
@@ -2131,7 +2136,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                               <span className="text-emerald-300 text-xs">{t('laboratoryPanel.setup.serverReady')}</span>
                             </div>
                           )}
-                          {serverStatus === 'error' && (
+                          {serverStatus === 'error' && attemptVersionId === selectedVersionId && (
                             <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
                               <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
                               <span className="text-red-300 text-xs whitespace-pre-wrap">
