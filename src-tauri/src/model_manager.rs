@@ -131,10 +131,20 @@ const PLUGIN_OVERRIDE_FILE: &str = ".frametrain_plugin.json";
 
 /// Liest die manuelle Plugin-Zuordnung eines Modells, falls vorhanden.
 pub fn read_plugin_override(model_dir: &Path) -> Option<String> {
-    let content = fs::read_to_string(model_dir.join(PLUGIN_OVERRIDE_FILE)).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let id = value.get("plugin_id")?.as_str()?.trim().to_string();
-    if id.is_empty() { None } else { Some(id) }
+    let manual = fs::read_to_string(model_dir.join(PLUGIN_OVERRIDE_FILE)).ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|v| v.get("plugin_id").and_then(|p| p.as_str()).map(|p| p.trim().to_string()))
+        .filter(|id| !id.is_empty());
+    manual.or_else(|| embedding_by_files(model_dir))
+}
+
+/// Sentence-Transformers-Modelle tragen modules.json bzw.
+/// sentence_bert_config.json. Die Erkennung im Frontend sieht nur Namen und
+/// model_type — ein lokal importierter Ordner "minilm" landete so als
+/// BERT-Klassifikator beim HF-Encoder (Live-Test 1.4.1).
+fn embedding_by_files(model_dir: &Path) -> Option<String> {
+    let marked = model_dir.join("modules.json").is_file() || model_dir.join("sentence_bert_config.json").is_file();
+    marked.then(|| "sentence-embedding".to_string())
 }
 
 /// Erkennt einen Ultralytics-Checkpoint am Inhalt statt am Dateinamen.
@@ -1220,6 +1230,11 @@ mod model_type_tests {
 
         fs::write(dir.join(PLUGIN_OVERRIDE_FILE), br#"{"plugin_id":"  "}"#).unwrap();
         assert_eq!(read_plugin_override(&dir), None, "leere ID zaehlt nicht");
+        fs::write(dir.join("modules.json"), "[]").unwrap();
+        assert_eq!(read_plugin_override(&dir).as_deref(), Some("sentence-embedding"),
+                   "Sentence-Transformers-Ordner ohne Zuordnung");
+        fs::write(dir.join(PLUGIN_OVERRIDE_FILE), br#"{"plugin_id":"hf-encoder"}"#).unwrap();
+        assert_eq!(read_plugin_override(&dir).as_deref(), Some("hf-encoder"), "Hand schlaegt Dateien");
         let _ = fs::remove_dir_all(&dir);
     }
 }

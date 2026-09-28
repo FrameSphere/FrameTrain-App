@@ -353,6 +353,9 @@ fn run_test(
         thread::spawn(move || { for l in BufReader::new(stderr).lines().flatten() { eprintln!("[Test STDERR] {}", l); } });
     }
 
+    // Ergebnis des Laufs fuer den Verlauf (Startseite "Letzte Tests").
+    let mut final_results: Option<TestResults> = None;
+
     if let Some(stdout) = child.stdout.take() {
         let ah = app_handle.clone();
         let tid = test_id.clone();
@@ -404,6 +407,7 @@ fn run_test(
                                     if let Err(e) = save_test_results(&ah, &vid, &full) {
                                         eprintln!("[Test] DB: {}", e);
                                     }
+                                    final_results = Some(full);
                                 }
                             }
                         }
@@ -418,7 +422,19 @@ fn run_test(
 
     let status = child.wait();
     if !is_single {
-        if let Ok(mut s) = state.lock() { s.current_job = None; s.stop_signal = false; }
+        if let Ok(mut s) = state.lock() {
+            // Frueher wurde der Job hier verworfen: jobs_history blieb leer und
+            // die Startseite zeigte nie einen Test (Live-Test 1.4.2).
+            if let Some(mut job) = s.current_job.take() {
+                if job.status != TestStatus::Stopped {
+                    job.status = if final_results.is_some() { TestStatus::Completed } else { TestStatus::Failed };
+                }
+                job.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                job.results = final_results.map(|mut r| { r.predictions.clear(); r });
+                remember_test(&app_handle, &mut s.jobs_history, job);
+            }
+            s.stop_signal = false;
+        }
     }
     let _ = app_handle.emit("test-finished", serde_json::json!({"test_id":test_id,"is_single":is_single,"success":status.map(|s| s.success()).unwrap_or(false)}));
     let _ = app_handle.emit("test-done", serde_json::json!({"test_id":test_id}));
@@ -452,8 +468,48 @@ pub fn get_current_test(state: tauri::State<'_, Arc<Mutex<TestState>>>) -> Resul
 }
 
 #[tauri::command]
-pub fn get_test_history(state: tauri::State<'_, Arc<Mutex<TestState>>>) -> Result<Vec<TestJob>, String> {
-    Ok(state.lock().map_err(|e| format!("Lock: {}", e))?.jobs_history.clone())
+pub fn get_test_history(app_handle: tauri::AppHandle, state: tauri::State<'_, Arc<Mutex<TestState>>>) -> Result<Vec<TestJob>, String> {
+    let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    if s.jobs_history.is_empty() {
+        s.jobs_history = load_test_history(&app_handle);
+    }
+    Ok(s.jobs_history.clone())
+}
+
+/// Verlauf der Dataset-Tests, ueber App-Neustarts hinweg (ohne Einzel-
+/// Vorhersagen — die stehen in der Datenbank).
+const TEST_HISTORY_FILE: &str = "test_jobs.json";
+const TEST_HISTORY_MAX: usize = 200;
+
+fn test_history_path(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    app_handle.path().app_data_dir().ok().map(|d| d.join(TEST_HISTORY_FILE))
+}
+
+fn load_test_history(app_handle: &tauri::AppHandle) -> Vec<TestJob> {
+    test_history_path(app_handle)
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_default()
+}
+
+fn remember_test(app_handle: &tauri::AppHandle, history: &mut Vec<TestJob>, job: TestJob) {
+    if history.is_empty() {
+        *history = load_test_history(app_handle);
+    }
+    history.push(job);
+    trim_history(history);
+    if let Some(path) = test_history_path(app_handle) {
+        if let Ok(json) = serde_json::to_string_pretty(history) {
+            if let Err(e) = fs::write(&path, json) { eprintln!("[Test] Verlauf: {}", e); }
+        }
+    }
+}
+
+fn trim_history(history: &mut Vec<TestJob>) {
+    if history.len() > TEST_HISTORY_MAX {
+        let drop = history.len() - TEST_HISTORY_MAX;
+        history.drain(0..drop);
+    }
 }
 
 #[tauri::command]
@@ -545,5 +601,37 @@ mod results_json_tests {
         let (_, p) = parse_results_json(&serde_json::json!([zeile]));
         assert_eq!(p.len(), 1);
         assert!(!p[0].is_correct);
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    fn job(i: usize) -> TestJob {
+        TestJob {
+            id: format!("test_{}", i), model_id: "m".into(), model_name: "M".into(),
+            version_id: "v".into(), version_name: "V".into(), dataset_id: "d".into(), dataset_name: "D".into(),
+            status: TestStatus::Completed, created_at: String::new(), started_at: None, completed_at: None,
+            progress: TestProgress::default(), results: None, error: None,
+            task_type: "causal_lm".into(), mode: "dataset".into(),
+        }
+    }
+
+    #[test]
+    fn verlauf_behaelt_die_neuesten() {
+        let mut h: Vec<TestJob> = (0..TEST_HISTORY_MAX + 5).map(job).collect();
+        trim_history(&mut h);
+        assert_eq!(h.len(), TEST_HISTORY_MAX);
+        assert_eq!(h[0].id, "test_5");
+        assert_eq!(h.last().unwrap().id, format!("test_{}", TEST_HISTORY_MAX + 4));
+    }
+
+    #[test]
+    fn verlauf_ueberlebt_json() {
+        let json = serde_json::to_string(&vec![job(1)]).unwrap();
+        let back: Vec<TestJob> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back[0].status, TestStatus::Completed);
+        assert!(json.contains("\"completed\""), "Startseite erwartet Kleinbuchstaben: {}", json);
     }
 }
