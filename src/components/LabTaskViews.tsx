@@ -55,10 +55,13 @@ export function compareEntities(expected: ExpectedEntity[], predicted: EntitySpa
   return { hits, missing: expected.length - hits, extra: predicted.filter(e => !want.has(key(e))).length };
 }
 
+/** Position auf dem Aehnlichkeitsbalken: -1 → 0 %, 0 → 50 %, 1 → 100 %. */
+export const similarityPercent = (v: number) => Math.max(0, Math.min(100, ((v + 1) / 2) * 100));
+
 /** Zwei Saetze und ihre Kosinus-Aehnlichkeit als Balken (-1..1 → 0..100 %). */
 export function SimilarityView({ similarity, expected }: { similarity: number; expected?: string }) {
   const { t } = useLanguage();
-  const pct = Math.max(0, Math.min(100, ((similarity + 1) / 2) * 100));
+  const pct = similarityPercent(similarity);
   const exp = expected != null && expected !== '' && Number.isFinite(Number(expected)) ? Number(expected) : null;
   return (
     <div className="space-y-2">
@@ -72,7 +75,8 @@ export function SimilarityView({ similarity, expected }: { similarity: number; e
           // Soll-Wert aus dem Dataset (0..1 bzw. 0..5 → normiert)
           <div
             className="absolute -top-1 -bottom-1 w-0.5 bg-white"
-            style={{ left: `${Math.max(0, Math.min(100, (exp > 1 ? exp / 5 : exp) * 100))}%` }}
+            // Gleiche Skala wie der Balken (-1..1); Soll 0..1 bzw. STS 0..5.
+            style={{ left: `${similarityPercent(exp > 1 ? exp / 5 : exp)}%` }}
             title={t('laboratoryPanel.taskViews.expectedScore', { value: String(exp) })}
           />
         )}

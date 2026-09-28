@@ -14,7 +14,7 @@ import {
   Check, Wand2, Copy, Maximize2, Minimize2, Zap, Database, Boxes,
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
-import { buildTaskSamples, labTaskFor, type ExpectedEntity, type MediaKind } from './labTaskSamples';
+import { buildTaskSamples, folderLabel, labTaskFor, type ExpectedEntity, type MediaKind } from './labTaskSamples';
 import { EntityText, GeneratedImage, GeneratedText, PairView, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
 import {
   labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes,
@@ -1663,13 +1663,11 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       const mediaKind: 'image' | 'audio' = imageFiles.length >= audioFiles.length ? 'image' : 'audio';
       if (mediaFiles.length > 0 && mediaFiles.length >= filtered.length * 0.5) {
         const mediaSamples: LabSample[] = mediaFiles.map((f, i) => {
-          const parts = f.path.split(/[/\\]/);
-          const folderLabel = parts.length >= 2 ? parts[parts.length - 2] : undefined;
           return {
             id: `${mediaKind}_${Date.now()}_${i}`,
             index: i,
             text: f.name,
-            label: folderLabel,
+            label: folderLabel(f.path),
             rawData: { path: f.path, name: f.name },
             filePath: f.path,
             fileKind: mediaKind,

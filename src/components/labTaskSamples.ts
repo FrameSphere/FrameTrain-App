@@ -70,7 +70,19 @@ const baseName = (p: string) => p.split(/[/\\]/).pop() ?? p;
 const dirName = (p: string) => { const parts = p.split(/[/\\]/); parts.pop(); return parts.join('/'); };
 /** Dateiname ohne Endung, klein — Schluessel fuer "gleichnamige" Dateien. */
 export const stemKey = (p: string) => baseName(p).replace(/\.[^.]+$/, '').toLowerCase();
-const parentFolder = (p: string) => { const parts = p.split(/[/\\]/); return parts.length >= 2 ? parts[parts.length - 2] : undefined; };
+/**
+ * Ordnername als Klasse (ImageFolder-Konvention). Struktur-Ordner wie
+ * "images" (YOLO) oder "test" sind keine Klasse — im Live-Test stand bei
+ * einem YOLO-Dataset "erwartet: images" unter jedem Bild.
+ */
+const STRUCTURE_FOLDERS = new Set(['images', 'image', 'imgs', 'img', 'audio', 'audios', 'wavs', 'clips', 'videos', 'video',
+  'train', 'training', 'val', 'valid', 'validation', 'test', 'testing', 'data', 'dataset', 'samples', 'files', 'media']);
+export const folderLabel = (p: string): string | undefined => {
+  const parts = p.split(/[/\\]/);
+  const folder = parts.length >= 2 ? parts[parts.length - 2] : undefined;
+  return folder && !STRUCTURE_FOLDERS.has(folder.toLowerCase()) && !folder.startsWith('ds_') ? folder : undefined;
+};
+const parentFolder = folderLabel;
 
 /** Tabelle (CSV/TSV/JSONL/JSON) als Zeilen-Objekte. */
 export function parseTable(content: string, fileName: string): Record<string, unknown>[] {

@@ -3,7 +3,7 @@
 // Text-zu-Bild Bilder statt Prompts und zerlegte CoNLL-Dateien in Zeilen.
 import { describe, it, expect } from 'vitest';
 import {
-  buildTaskSamples, entitiesFromTags, labTaskFor, parseConll, wordErrorRate,
+  buildTaskSamples, entitiesFromTags, folderLabel, labTaskFor, parseConll, wordErrorRate,
   type DatasetFileInfo,
 } from '../labTaskSamples';
 
@@ -129,5 +129,15 @@ describe('wordErrorRate', () => {
     expect(wordErrorRate('Hallo Welt.', 'hallo welt')).toBe(0);
     expect(wordErrorRate('eins zwei drei vier', 'eins zwo drei')).toBe(0.5);
     expect(wordErrorRate('a', 'a b c')).toBe(2);
+  });
+});
+
+// Live-Test 1.4.2: Bei einem YOLO-Dataset stand "erwartet: images" unter jedem Bild.
+describe('folderLabel', () => {
+  it('Struktur-Ordner sind keine Klasse, Klassen-Ordner schon', () => {
+    expect(folderLabel('/d/test/images/a.jpg')).toBeUndefined();
+    expect(folderLabel('/d/train/a.jpg')).toBeUndefined();
+    expect(folderLabel('/data/ds_abc123/a.jpg')).toBeUndefined();
+    expect(folderLabel('/d/test/katze/a.jpg')).toBe('katze');
   });
 });

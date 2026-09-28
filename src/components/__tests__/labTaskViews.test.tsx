@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import { LanguageProvider } from '../../contexts/LanguageContext';
-import { EntityText, PairView, SimilarityView, compareEntities, sameText } from '../LabTaskViews';
+import { EntityText, PairView, SimilarityView, compareEntities, sameText, similarityPercent } from '../LabTaskViews';
 
 describe('EntityText', () => {
   it('markiert Entitaeten an ihren Zeichenpositionen mit Typ', () => {
@@ -35,6 +35,16 @@ describe('SimilarityView / PairView', () => {
     const { container } = render(<LanguageProvider><SimilarityView similarity={0.8123} expected="4.2" /></LanguageProvider>);
     expect(container.textContent).toContain('0.812');
     expect(container.textContent).toContain('4.2');
+  });
+
+  // Live-Test 1.4.2: Soll 0.8 stand bei 80 % des Balkens, der aber von -1
+  // bis 1 reicht — richtig sind 90 %.
+  it('Soll-Markierung auf derselben Skala wie der Balken', () => {
+    const { container } = render(<LanguageProvider><SimilarityView similarity={0.5} expected="0.8" /></LanguageProvider>);
+    const marker = container.querySelector('[title]') as HTMLElement;
+    expect(marker.style.left).toBe('90%');
+    expect(similarityPercent(-1)).toBe(0);
+    expect(similarityPercent(0)).toBe(50);
   });
 
   it('zerlegt "A ||| B" in zwei Zeilen', () => {

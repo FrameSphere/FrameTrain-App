@@ -2330,7 +2330,8 @@ const LAB_TEXT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 fn read_text_for_samples(path: &Path, max_bytes: u64) -> Result<String, String> {
     if !path.is_file() { return Err(format!("Datei nicht gefunden: {}", path.display())); }
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-    if !matches!(ext.as_str(), "txt" | "json" | "jsonl" | "csv" | "tsv") {
+    // conll/iob/bio: NER-Daten (ein Token je Zeile) — das Labor baut daraus Saetze.
+    if !matches!(ext.as_str(), "txt" | "json" | "jsonl" | "csv" | "tsv" | "conll" | "conllu" | "iob" | "bio") {
         return Err(format!("Keine Text-Datei fuer Samples: .{}", ext));
     }
     let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);

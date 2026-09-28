@@ -251,7 +251,7 @@ pub async fn lab_start_model_server(
                 version_path
             ));
         }
-        if !vp.join("config.json").exists() {
+        if !has_lab_model_marker(&vp) {
             let contents: Vec<String> = std::fs::read_dir(&vp).ok().into_iter().flatten().flatten()
                 .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
                 .filter(|n| !n.starts_with('.'))
@@ -452,6 +452,15 @@ pub async fn lab_start_model_server(
     });
 
     Ok(())
+}
+
+/// Kann der Modell-Server diesen Ordner laden? HuggingFace-Modelle tragen
+/// config.json; Diffusers-Pipelines stattdessen model_index.json, der
+/// LoRA-Export des Text-zu-Bild-Trainings text_to_image_lora.json (wie
+/// is_diffusion_model in model_server.py). Nur config.json zu verlangen
+/// sperrte jedes Stable-Diffusion-Modell aus dem Labor aus (Live-Test 1.4.2).
+fn has_lab_model_marker(dir: &std::path::Path) -> bool {
+    ["config.json", "model_index.json", "text_to_image_lora.json"].iter().any(|f| dir.join(f).is_file())
 }
 
 /// Wartezeit auf eine Antwort des Modell-Servers je Modalitaet.
@@ -1032,7 +1041,7 @@ mod export_tests {
 
 #[cfg(test)]
 mod infer_timeout_tests {
-    use super::infer_timeout_secs;
+    use super::{has_lab_model_marker, infer_timeout_secs};
 
     #[test]
     fn bilderzeugung_bekommt_mehr_zeit_als_klassifikation() {
@@ -1040,5 +1049,15 @@ mod infer_timeout_tests {
         assert_eq!(infer_timeout_secs("image"), 30);
         assert!(infer_timeout_secs("text_to_image") >= 300);
         assert!(infer_timeout_secs("vlm") > 30);
+    }
+
+    #[test]
+    fn diffusions_pipelines_sind_lab_modelle() {
+        let dir = std::env::temp_dir().join(format!("ft_lab_marker_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        assert!(!has_lab_model_marker(&dir), "leerer Ordner");
+        std::fs::write(dir.join("model_index.json"), "{}").unwrap();
+        assert!(has_lab_model_marker(&dir), "Diffusers-Pipeline");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
