@@ -1500,6 +1500,13 @@ mod ram_info_tests {
     }
 
     #[test]
+    fn requirements_skript_behaelt_seine_einrueckung() {
+        let s = super::REQUIREMENTS_SCRIPT;
+        assert!(s.contains("\n    try:\n        return __import__(mod).__version__"), "{}", s);
+        assert!(s.contains("\n    import torch\n"));
+    }
+
+    #[test]
     fn ohne_config_keine_architektur() {
         assert!(!ram_info_from_config(&serde_json::Value::Null).has_config);
     }
@@ -1527,26 +1534,33 @@ pub async fn check_training_requirements() -> Result<RequirementsCheck, String> 
         .map_err(|e| e.to_string())
 }
 
+/// Als Raw-String: mit "\n\"-Zeilenfortsetzung entfernt Rust die fuehrenden
+/// Leerzeichen der Folgezeile — das Skript verlor seine Einrueckung, Python
+/// brach mit einem Syntaxfehler ab und das Training meldete "PyTorch nicht
+/// installiert" (1.4.1 bis 1.4.6).
+const REQUIREMENTS_SCRIPT: &str = r#"import json, sys
+out = {'python': 'Python %d.%d.%d' % sys.version_info[:3]}
+def ver(mod):
+    try:
+        return __import__(mod).__version__
+    except Exception:
+        return None
+out['torch'] = ver('torch')
+out['transformers'] = ver('transformers')
+out['peft'] = ver('peft')
+out['cuda'] = out['mps'] = False
+if out['torch']:
+    import torch
+    out['cuda'] = bool(torch.cuda.is_available())
+    out['mps'] = bool(hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())
+print('FT_REQ ' + json.dumps(out))
+"#;
+
 /// Ein Python-Prozess fuer alles. Frueher waren es sechs nacheinander, drei
 /// davon mit torch-Import — die Einstellungen pruefen das alle paar Sekunden.
 fn training_requirements_blocking() -> RequirementsCheck {
     let python = get_python_path();
-    let script = "import json, sys\n\
-out = {'python': 'Python %d.%d.%d' % sys.version_info[:3]}\n\
-def ver(mod):\n\
-    try:\n\
-        return __import__(mod).__version__\n\
-    except Exception:\n\
-        return None\n\
-out['torch'] = ver('torch')\n\
-out['transformers'] = ver('transformers')\n\
-out['peft'] = ver('peft')\n\
-out['cuda'] = out['mps'] = False\n\
-if out['torch']:\n\
-    import torch\n\
-    out['cuda'] = bool(torch.cuda.is_available())\n\
-    out['mps'] = bool(hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())\n\
-print('FT_REQ ' + json.dumps(out))";
+    let script = REQUIREMENTS_SCRIPT;
     let found: serde_json::Value = Command::new(&python).no_window()
         .args(["-c", script]).output().ok()
         .and_then(|o| String::from_utf8_lossy(&o.stdout).lines()
