@@ -14,6 +14,7 @@ export interface DatasetInfo {
   dataset_type?:   DatasetType;
   pairing_status?: PairingStatus | null;
   warnings?:       string[];
+  hints?:          import('./datasetMessages').DatasetHint[];
   // v2: Schema-Hint (z.B. dataset.yaml Inhalt bei YOLO)
   schema_hint?:    Record<string, unknown> | null;
   /** Gepruefte dataset.yaml/data.yaml (YOLO), vom Backend beim Auflisten ermittelt. */

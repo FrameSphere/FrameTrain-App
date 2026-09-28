@@ -9,6 +9,7 @@ import {
   type DatasetCompatResult, type DatasetAnalysis,
 } from '../plugins/datasetCompat';
 import type { CompatPluginInfo } from '../plugins/genericDatasetCompat';
+import { msgText } from '../plugins/datasetMessages';
 
 interface DatasetCompatBadgeProps {
   /** Plugin-ID des Modells, z.B. "xlm-roberta" */
@@ -57,6 +58,8 @@ export default function DatasetCompatBadge({
 
   const result: DatasetCompatResult = checkDatasetCompat(modelPluginId, extensions, analysis, modelPlugin);
   const meta = LEVEL_META[result.overallLevel];
+  const summary = result.summaryMsg ? msgText(t, result.summaryMsg, result.summary) : result.summary;
+  const hint = result.hintMsg ? msgText(t, result.hintMsg, result.hint) : result.hint;
   const levelIcon = (() => {
     const cls = 'w-4 h-4';
     switch (meta.icon) {
@@ -84,7 +87,7 @@ export default function DatasetCompatBadge({
           <span className="text-base">{levelIcon}</span>
           <div>
             <span className={`text-sm font-semibold ${meta.color}`}>{t(meta.labelKey, meta.label)}</span>
-            <p className="text-gray-400 text-xs mt-0.5 leading-snug">{result.summary}</p>
+            <p className="text-gray-400 text-xs mt-0.5 leading-snug">{summary}</p>
           </div>
         </div>
         {result.fileResults.length > 0 && (
@@ -98,9 +101,9 @@ export default function DatasetCompatBadge({
       </div>
 
       {/* Hint */}
-      {result.hint && (
+      {hint && (
         <div className="px-4 pb-2">
-          <p className="text-gray-500 text-xs italic">{result.hint}</p>
+          <p className="text-gray-500 text-xs italic">{hint}</p>
         </div>
       )}
 
@@ -115,7 +118,9 @@ export default function DatasetCompatBadge({
                 <span className={`text-xs font-mono font-semibold min-w-[60px] mt-0.5 ${fm.color}`}>
                   {fr.extension}
                 </span>
-                <span className="text-gray-400 text-xs leading-snug">{fr.reason}</span>
+                <span className="text-gray-400 text-xs leading-snug">
+                  {fr.reasonMsg ? msgText(t, fr.reasonMsg, fr.reason) : fr.reason}
+                </span>
               </div>
             );
           })}

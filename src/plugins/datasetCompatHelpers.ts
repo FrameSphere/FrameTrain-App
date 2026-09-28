@@ -3,6 +3,10 @@
 // Plugin-eigene datasetCompat.ts Dateien importieren von hier statt von ../datasetCompat
 // (verhindert zirkuläre Abhängigkeiten)
 
+import { msgDe, type DatasetHint, type Msg } from './datasetMessages';
+
+export type { DatasetHint, Msg, MsgParam } from './datasetMessages';
+
 // ══════════════════════════════════════════════════════════════════
 // DATASET TYPE SYSTEM (spiegelt Rust DatasetType enum)
 // ══════════════════════════════════════════════════════════════════
@@ -47,7 +51,9 @@ export interface DatasetAnalysis {
   detected_type:  DatasetType;
   confidence:     number;           // 0–100
   pairing_status: PairingStatus | null;
+  /** Deutsche Texte — Fallback fuer alte Metadaten; angezeigt wird `hints`. */
   warnings:       string[];
+  hints?:         DatasetHint[];
   file_count:     number;
   dir_count:      number;
   extensions:     string[];
@@ -73,10 +79,15 @@ export type CompatLevel =
   | 'warning'
   | 'bad';
 
+/**
+ * `reason`, `summary` und `hint` sind die deutschen Texte (Fallback, Logs);
+ * angezeigt werden die `…Msg`-Felder in der Sprache der Oberflaeche.
+ */
 export interface FileCompatResult {
-  extension: string;
-  level:     CompatLevel;
-  reason:    string;
+  extension:  string;
+  level:      CompatLevel;
+  reason:     string;
+  reasonMsg?: Msg;
 }
 
 export interface DatasetCompatResult {
@@ -84,7 +95,27 @@ export interface DatasetCompatResult {
   fileResults:  FileCompatResult[];
   summary:      string;
   hint?:        string;
+  summaryMsg?:  Msg;
+  hintMsg?:     Msg;
 }
+
+/** Ergebnis aus Meldungen bauen — die deutschen Felder kommen aus de.json. */
+export function compatResult(
+  overallLevel: CompatLevel, fileResults: FileCompatResult[], summary: Msg, hint?: Msg,
+): DatasetCompatResult {
+  return {
+    overallLevel, fileResults,
+    summary: msgDe(summary), summaryMsg: summary,
+    ...(hint ? { hint: msgDe(hint), hintMsg: hint } : {}),
+  };
+}
+
+export function fileResult(extension: string, level: CompatLevel, reason: Msg): FileCompatResult {
+  return { extension, level, reason: msgDe(reason), reasonMsg: reason };
+}
+
+/** Meldung fuer den Namen eines Dataset-Typs (als Parameter in anderen Meldungen). */
+export const typeMsg = (t: DatasetType): Msg => ({ key: `datasetCompat.datasetTypes.${t}` });
 
 // ══════════════════════════════════════════════════════════════════
 // PLUGIN INTERFACE (erweitert, rückwärtskompatibel)
@@ -146,19 +177,30 @@ export type DatasetTypeIconKey =
   | 'file-text' | 'target' | 'image' | 'folder-tree' | 'folder'
   | 'mic' | 'volume' | 'split' | 'layers' | 'help';
 
-/** Lesbare Labels für DatasetType */
-export const DATASET_TYPE_LABELS: Record<DatasetType, { label: string; icon: DatasetTypeIconKey; color: string; modality: Modality }> = {
-  flat_file:        { label: 'Flat File',           icon: 'file-text',   color: 'text-violet-400',  modality: 'text'  },
-  yolo_bbox:        { label: 'YOLO Bounding Box',   icon: 'target',      color: 'text-orange-400',  modality: 'image' },
-  coco_json:        { label: 'COCO JSON',           icon: 'image',       color: 'text-amber-400',   modality: 'image' },
-  pascal_voc:       { label: 'Pascal VOC',          icon: 'folder-tree', color: 'text-yellow-400',  modality: 'image' },
-  folder_class:     { label: 'Ordner-Klassen',      icon: 'folder',      color: 'text-blue-400',    modality: 'image' },
-  audio_transcript: { label: 'Audio + Transkript',  icon: 'mic',         color: 'text-cyan-400',    modality: 'audio' },
-  common_voice:     { label: 'Common Voice',        icon: 'volume',      color: 'text-teal-400',    modality: 'audio' },
-  pre_split:        { label: 'Voraufgeteilt',       icon: 'split',       color: 'text-emerald-400', modality: 'text'  },
-  multi_shard:      { label: 'Multi-Shard Parquet', icon: 'layers',      color: 'text-indigo-400',  modality: 'text'  },
-  unknown:          { label: 'Unbekannt',           icon: 'help',        color: 'text-gray-400',    modality: 'text'  },
+/**
+ * Lesbare Labels für DatasetType. Angezeigt wird `labelKey`
+ * (datasetCompat.datasetTypes.*), `label` ist der deutsche Fallback.
+ */
+export const DATASET_TYPE_LABELS: Record<DatasetType, { label: string; labelKey: string; icon: DatasetTypeIconKey; color: string; modality: Modality }> = {
+  flat_file:        { labelKey: 'datasetCompat.datasetTypes.flat_file', label: 'Flat File',           icon: 'file-text',   color: 'text-violet-400',  modality: 'text'  },
+  yolo_bbox:        { labelKey: 'datasetCompat.datasetTypes.yolo_bbox', label: 'YOLO Bounding Box',   icon: 'target',      color: 'text-orange-400',  modality: 'image' },
+  coco_json:        { labelKey: 'datasetCompat.datasetTypes.coco_json', label: 'COCO JSON',           icon: 'image',       color: 'text-amber-400',   modality: 'image' },
+  pascal_voc:       { labelKey: 'datasetCompat.datasetTypes.pascal_voc', label: 'Pascal VOC',          icon: 'folder-tree', color: 'text-yellow-400',  modality: 'image' },
+  folder_class:     { labelKey: 'datasetCompat.datasetTypes.folder_class', label: 'Ordner-Klassen',      icon: 'folder',      color: 'text-blue-400',    modality: 'image' },
+  audio_transcript: { labelKey: 'datasetCompat.datasetTypes.audio_transcript', label: 'Audio + Transkript',  icon: 'mic',         color: 'text-cyan-400',    modality: 'audio' },
+  common_voice:     { labelKey: 'datasetCompat.datasetTypes.common_voice', label: 'Common Voice',        icon: 'volume',      color: 'text-teal-400',    modality: 'audio' },
+  pre_split:        { labelKey: 'datasetCompat.datasetTypes.pre_split', label: 'Voraufgeteilt',       icon: 'split',       color: 'text-emerald-400', modality: 'text'  },
+  multi_shard:      { labelKey: 'datasetCompat.datasetTypes.multi_shard', label: 'Multi-Shard Parquet', icon: 'layers',      color: 'text-indigo-400',  modality: 'text'  },
+  unknown:          { labelKey: 'datasetCompat.datasetTypes.unknown', label: 'Unbekannt',           icon: 'help',        color: 'text-gray-400',    modality: 'text'  },
 };
+
+/** Name eines Dataset-Typs in der Sprache der Oberflaeche. */
+export function typeLabel(
+  t: (key: string, fallback?: string) => string, type: DatasetType | null | undefined,
+): string {
+  const meta = type ? DATASET_TYPE_LABELS[type] : undefined;
+  return meta ? t(meta.labelKey, meta.label) : (type ?? '');
+}
 
 /**
  * Konvertiert DatasetAnalysis zu DatasetCheckInput für Plugins.

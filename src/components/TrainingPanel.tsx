@@ -54,6 +54,7 @@ export interface DatasetInfo {
   dataset_type?: import('../plugins/datasetCompatHelpers').DatasetType;
   pairing_status?: import('../plugins/datasetCompatHelpers').PairingStatus | null;
   warnings?: string[];
+  hints?: import('../plugins/datasetMessages').DatasetHint[];
   /** Gepruefte dataset.yaml/data.yaml (YOLO) — kommt als DATASET_YAML in Dev Train/Test an. */
   dataset_yaml_path?: string | null;
 }
@@ -1957,6 +1958,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                     confidence: 80,
                     pairing_status: selectedDataset.pairing_status ?? null,
                     warnings: selectedDataset.warnings ?? [],
+                    hints: selectedDataset.hints ?? [],
                     file_count: selectedDataset.file_count,
                     dir_count: 0,
                     extensions: selectedDataset.extensions ?? [],

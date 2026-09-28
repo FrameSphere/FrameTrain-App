@@ -2953,6 +2953,59 @@
       "pre_split": "Pre-Split",
       "multi_shard": "Multi-Shard Parquet",
       "unknown": "Unknown"
+    },
+    "msg": {
+      "empty": "No files found – the dataset seems to be empty.",
+      "emptyHint": "Add .jsonl, .json, .csv or .parquet files.",
+      "format": {
+        "jsonl": "JSONL is the preferred format – one JSON object with text + label per line.",
+        "json": "JSON arrays with {text, label} entries are fully supported.",
+        "csv": "CSV with text/label columns works directly.",
+        "parquet": "Parquet is supported natively by HuggingFace datasets.",
+        "tsv": "TSV (tab-separated) works, it has to be converted to CSV.",
+        "txt": "Plain text files need their own parsing script.",
+        "arrow": "The Arrow format is supported by HuggingFace datasets.",
+        "unknown": "Format \"{ext}\" is not recognized directly – manual parsing may be needed."
+      },
+      "idealFormats": "{perfect} of {total} formats are ideal for {model}.",
+      "usable": "Usable, but some formats are not optimal.",
+      "needsWork": "Some formats need preparation.",
+      "textHint": "Use .jsonl, .csv or .parquet with text columns.",
+      "preSplit": "Pre-split dataset. {rest}",
+      "withOrphans": "{rest} {count} files without a partner.",
+      "xlm": {
+        "imageDataset": "Image dataset detected – XLM-RoBERTa needs text data.",
+        "audioDataset": "Audio dataset detected – XLM-RoBERTa is a text model.",
+        "audioHint": "For speech recognition, use a Whisper plugin.",
+        "imageClassDataset": "Image classification dataset – not compatible with XLM-RoBERTa.",
+        "multiShardReason": "Multi-shard Parquet – ideal for large datasets.",
+        "multiShard": "Multi-shard Parquet is supported natively."
+      },
+      "encoder": {
+        "modelName": "encoder models",
+        "imageDataset": "Image dataset detected – encoder models need text data.",
+        "audioDataset": "Audio dataset – not compatible with text encoders.",
+        "multiShardReason": "Multi-shard Parquet supported natively.",
+        "multiShard": "Multi-shard Parquet is loaded directly."
+      },
+      "unknownModel": "Compatibility for this model is not known yet.",
+      "unknownModelHint": "This model will be checked in a later version.",
+      "noCheck": "No compatibility check configured.",
+      "missing": {
+        "detect": "No label files (.txt or Pascal VOC .xml) found – without labels an object detection model learns nothing.",
+        "image": "No image files (or Parquet with an image column) found.",
+        "audio": "No audio files (or Parquet with an audio column) found.",
+        "video": "No video files (.mp4, .mov, .webm, .mkv, .avi) found.",
+        "table": "No table files (.csv, .tsv, .json, .jsonl, .parquet) found."
+      },
+      "cannotTrain": "{model} cannot train this dataset.",
+      "typeUnknown": "Dataset type not detected – {model} may not be able to read it.",
+      "formatsFit": "File formats fit {model}.",
+      "typeUnsupported": "{model} cannot read {type}.",
+      "suitableTypes": "Suitable: {types}",
+      "labelsPartial": "Only {paired} of {total} images have a label.",
+      "unlabeledBackground": "Images without a label count as background in training.",
+      "typeFits": "{type} fits {model}."
     }
   },
   "pluginRegistry": {
@@ -3762,5 +3815,16 @@
         "clips_failed": "{count} video segment(s) could not be cut and are missing from the export."
       }
     }
+  },
+  "datasetHints": {
+    "orphan_images": "{count} image(s) without a label.",
+    "no_val_split": "No validation split found – training only.",
+    "orphan_audio": "{count} audio file(s) without a transcript.",
+    "mixed_file_types": "Dataset contains mixed file types.",
+    "images_labels_mismatch": "Found images/ and labels/, but the structure does not match: images are expected directly in images/, or split folders with the same names in both (images/train + labels/train).",
+    "type_unknown": "Dataset type could not be detected.",
+    "hf_configs": "Dataset has {count} configurations ({configs}). Imported: “{chosen}”.",
+    "hf_splits_skipped": "Skipped splits without usable labels: {splits}.",
+    "hf_no_standard_splits": "No standard splits detected – all files are imported as “train”."
   }
 }

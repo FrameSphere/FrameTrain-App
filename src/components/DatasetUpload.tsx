@@ -19,7 +19,8 @@ import { usePageContext } from '../contexts/PageContext';
 import { onCoachCommand, consumePendingCoachCommand, type CoachCommand } from '../ai/coachToolEvents';
 import { useLanguage, type Language } from '../contexts/LanguageContext';
 import DatasetFileManager from './DatasetFileManager';
-import { DATASET_TYPE_LABELS } from '../plugins/datasetCompatHelpers';
+import { DATASET_TYPE_LABELS, typeLabel } from '../plugins/datasetCompatHelpers';
+import { datasetHintTexts, type DatasetHint } from '../plugins/datasetMessages';
 import DatasetTypeIcon from './DatasetTypeIcon';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
@@ -59,6 +60,7 @@ interface DatasetInfo {
   dataset_type?:   DatasetType;
   pairing_status?: PairingStatus | null;
   warnings?:       string[];
+  hints?:          DatasetHint[];
 }
 
 interface HuggingFaceDataset {
@@ -114,6 +116,7 @@ interface AnalysisPreviewProps {
 function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
   const { t } = useLanguage();
   const typeMeta = DATASET_TYPE_LABELS[analysis.detected_type] ?? DATASET_TYPE_LABELS['unknown'];
+  const warnings = datasetHintTexts(t, analysis.hints, analysis.warnings);
 
   // Plugin-Kompatibilität prüfen
   let pluginCompat: { ok: boolean; label: string; preferred: boolean } | null = null;
@@ -135,7 +138,7 @@ function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
             ? t('datasetUpload.analysisPreview.compatible').replace('{name}', plugin.name)
             : t('datasetUpload.analysisPreview.notRecommended')
                 .replace('{name}', plugin.name)
-                .replace('{types}', supported.map(t => DATASET_TYPE_LABELS[t]?.label ?? t).join(', ')),
+                .replace('{types}', supported.map(ty => typeLabel(t, ty)).join(', ')),
         };
       }
     }
@@ -147,7 +150,7 @@ function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
         <div className="flex items-center gap-2.5">
           <DatasetTypeIcon icon={typeMeta.icon} className={`w-6 h-6 flex-shrink-0 ${typeMeta.color}`} />
           <div>
-            <p className={`text-sm font-semibold ${typeMeta.color}`}>{typeMeta.label}</p>
+            <p className={`text-sm font-semibold ${typeMeta.color}`}>{t(typeMeta.labelKey, typeMeta.label)}</p>
             <p className="text-gray-500 text-xs">{t('datasetUpload.analysisPreview.confidenceLabel').replace('{confidence}', String(analysis.confidence)).replace('{count}', String(analysis.file_count))}</p>
           </div>
         </div>
@@ -191,9 +194,9 @@ function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
       )}
 
       {/* Warnungen */}
-      {analysis.warnings.length > 0 && (
+      {warnings.length > 0 && (
         <div className="space-y-1">
-          {analysis.warnings.map((w, i) => (
+          {warnings.map((w, i) => (
             <div key={i} className="flex items-start gap-1.5 text-xs text-amber-400/80">
               <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
               <span>{w}</span>
@@ -1053,7 +1056,7 @@ export default function DatasetUpload() {
                   <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
                   <div className="text-xs text-amber-300 space-y-1">
                     <p className="font-medium">{t('datasetUpload.splitModal.pairedSplitTitle')}</p>
-                    <p>{t('datasetUpload.splitModal.pairedWarning').replace('{type}', DATASET_TYPE_LABELS[datasetToSplit.dataset_type]?.label ?? '')}</p>
+                    <p>{t('datasetUpload.splitModal.pairedWarning').replace('{type}', typeLabel(t, datasetToSplit.dataset_type))}</p>
                   </div>
                 </div>
               ) : !datasetToSplit.dataset_type || datasetToSplit.dataset_type === 'unknown' ? (
@@ -1244,12 +1247,12 @@ export default function DatasetUpload() {
                     <div className="text-xs text-blue-300 space-y-0.5">
                       <p className="font-medium">{plugin.name}</p>
                       {preferredMeta && (
-                      <p className="flex items-center gap-1">{t('datasetUpload.importModal.local.pluginPreferredType')} <span className={`inline-flex items-center gap-1 ${preferredMeta.color}`}><DatasetTypeIcon icon={preferredMeta.icon} className="w-3.5 h-3.5" /> {preferredMeta.label}</span></p>
+                      <p className="flex items-center gap-1">{t('datasetUpload.importModal.local.pluginPreferredType')} <span className={`inline-flex items-center gap-1 ${preferredMeta.color}`}><DatasetTypeIcon icon={preferredMeta.icon} className="w-3.5 h-3.5" /> {t(preferredMeta.labelKey, preferredMeta.label)}</span></p>
                       )}
                       {supported && supported.length > 1 && (
                         <p className="text-blue-400/60">{t('datasetUpload.importModal.local.pluginAlsoCompatible')} {supported
-                          .filter(t => t !== preferred)
-                          .map(t => DATASET_TYPE_LABELS[t]?.label ?? t)
+                          .filter(ty => ty !== preferred)
+                          .map(ty => typeLabel(t, ty))
                           .join(', ')}
                         </p>
                       )}
@@ -1505,7 +1508,8 @@ interface DatasetCardProps {
 
 function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFiles }: DatasetCardProps) {
   const { t, language } = useLanguage();
-  const hasWarnings = (dataset.warnings?.length ?? 0) > 0;
+  const warnings = datasetHintTexts(t, dataset.hints, dataset.warnings);
+  const hasWarnings = warnings.length > 0;
   const typeMeta = dataset.dataset_type ? DATASET_TYPE_LABELS[dataset.dataset_type] : null;
 
   return (
@@ -1548,7 +1552,7 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       {typeMeta && dataset.dataset_type !== 'unknown' && (
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10">
           <DatasetTypeIcon icon={typeMeta.icon} className={`w-4 h-4 flex-shrink-0 ${typeMeta.color}`} />
-          <span className={`text-xs font-medium ${typeMeta.color}`}>{typeMeta.label}</span>
+          <span className={`text-xs font-medium ${typeMeta.color}`}>{t(typeMeta.labelKey, typeMeta.label)}</span>
           {dataset.pairing_status && (
             <span className={`ml-auto text-xs ${dataset.pairing_status.is_paired ? 'text-emerald-400/70' : 'text-amber-400/70'}`}>
               <span className="inline-flex items-center gap-1.5">
@@ -1571,7 +1575,7 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       {/* Warnungen */}
       {hasWarnings && (
         <div className="space-y-1">
-          {dataset.warnings!.slice(0, 2).map((w, i) => (
+          {warnings.slice(0, 2).map((w, i) => (
             <div key={i} className="flex items-start gap-1.5 text-xs text-amber-400/70">
               <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
               <span className="truncate">{w}</span>

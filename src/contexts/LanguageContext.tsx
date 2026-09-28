@@ -47,7 +47,9 @@ function lookup(language: Language, key: string): unknown {
     )
 }
 
-function translate(
+/** Uebersetzung ohne React-Kontext — fuer reine TS-Module (Plugins), die
+ *  einen deutschen Fallback-Text neben dem Schluessel mitliefern. */
+export function translate(
   language: Language,
   key: string,
   paramsOrFallback?: string | Record<string, string | number>,

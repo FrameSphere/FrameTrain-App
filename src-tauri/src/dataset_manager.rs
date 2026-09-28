@@ -65,12 +65,36 @@ pub struct PairingStatus {
     pub orphan_secondaries: Vec<String>,
 }
 
+/// Hinweis zur Dataset-Erkennung. Die Oberflaeche uebersetzt `code` mit
+/// `params` (Schluessel datasetHints.<code>); `text` ist der deutsche
+/// Fallback fuer Stellen ohne Uebersetzung (alte Metadaten, Logs, Python).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct DatasetHint {
+    pub code:   String,
+    #[serde(default)]
+    pub params: serde_json::Value,
+    #[serde(default)]
+    pub text:   String,
+}
+
+fn hint(code: &str, params: serde_json::Value, text: String) -> DatasetHint {
+    DatasetHint { code: code.to_string(), params, text }
+}
+
+/// Die deutschen Texte — `warnings` bleibt dafuer bestehen, aeltere
+/// Metadaten und andere Leser kennen nur dieses Feld.
+fn hint_texte(hints: &[DatasetHint]) -> Vec<String> {
+    hints.iter().map(|h| h.text.clone()).collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DatasetAnalysis {
     pub detected_type:  DatasetType,
     pub confidence:     u8,
     pub pairing_status: Option<PairingStatus>,
     pub warnings:       Vec<String>,
+    #[serde(default)]
+    pub hints:          Vec<DatasetHint>,
     pub file_count:     usize,
     pub dir_count:      usize,
     pub extensions:     Vec<String>,
@@ -111,6 +135,8 @@ pub struct DatasetInfo {
     pub pairing_status: Option<PairingStatus>,
     #[serde(default)]
     pub warnings:       Vec<String>,
+    #[serde(default)]
+    pub hints:          Vec<DatasetHint>,
     /// Absoluter Pfad zur (geprueften) dataset.yaml/data.yaml, falls vorhanden.
     /// Wird nicht gespeichert, sondern beim Auflisten live ermittelt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -302,7 +328,7 @@ fn make_info(
     status: &str, split_info: Option<SplitInfo>,
     dataset_type: DatasetType,
     pairing_status: Option<PairingStatus>,
-    warnings: Vec<String>,
+    hints: Vec<DatasetHint>,
 ) -> DatasetInfo {
     DatasetInfo {
         id: id.to_string(), name: name.to_string(),
@@ -313,7 +339,7 @@ fn make_info(
         status: status.to_string(), split_info,
         training_count: 0, last_used_at: None,
         extensions: collect_extensions(target),
-        dataset_type, pairing_status, warnings,
+        dataset_type, pairing_status, warnings: hint_texte(&hints), hints,
         dataset_yaml_path: None,
     }
 }
@@ -554,7 +580,7 @@ fn read_existing_dataset_yaml(path: &Path) -> Option<serde_json::Value> {
 }
 
 pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
-    let mut warnings  = Vec::new();
+    let mut hints: Vec<DatasetHint> = Vec::new();
     let dir_names     = list_subdir_names(path);
     let dir_names_lc: Vec<String> = dir_names.iter().map(|s| s.to_lowercase()).collect();
     let root_files    = list_files_in_dir(path);
@@ -570,10 +596,11 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
     if let Some(layout) = detect_split_layout(path) {
         let pairing = pairing_across_splits(path, &layout);
         if !pairing.is_paired {
-            warnings.push(format!("{} Bild(er) ohne Label.", pairing.orphan_primaries.len()));
+            let n = pairing.orphan_primaries.len();
+            hints.push(hint("orphan_images", serde_json::json!({ "count": n }), format!("{} Bild(er) ohne Label.", n)));
         }
         if layout.count_of("val") == 0 {
-            warnings.push("Kein Validierungs-Split gefunden – nur Training.".to_string());
+            hints.push(hint("no_val_split", serde_json::json!({}), "Kein Validierungs-Split gefunden – nur Training.".to_string()));
         }
         let splits_json: serde_json::Map<String, serde_json::Value> = layout.splits.iter()
             .map(|(canon, dir, n)| (canon.clone(), serde_json::json!({ "dir": dir, "count": n })))
@@ -581,7 +608,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         return DatasetAnalysis {
             detected_type: if layout.has_xml { DatasetType::PascalVoc } else { DatasetType::YoloBbox },
             confidence: 95,
-            pairing_status: Some(pairing), warnings, file_count: total_file_count,
+            pairing_status: Some(pairing), warnings: hint_texte(&hints), hints, file_count: total_file_count,
             dir_count: dir_names.len(), extensions: all_extensions,
             schema_hint: Some(serde_json::json!({
                 "images_dir":   layout.images_dir,
@@ -599,7 +626,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         .iter().filter(|&&s| dir_names_lc.contains(&s.to_string())).copied().collect();
     if split_dirs.len() >= 2 {
         return DatasetAnalysis { detected_type: DatasetType::PreSplit, confidence: 95,
-            pairing_status: None, warnings: vec![], file_count: total_file_count,
+            pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
             dir_count: dir_names.len(), extensions: all_extensions,
             schema_hint: Some(serde_json::json!({ "split_dirs": split_dirs })) };
     }
@@ -622,17 +649,20 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         if has_images {
             let has_xml = lbl_files.iter().any(|f| f.extension().and_then(|e| e.to_str()).map(|e| e == "xml").unwrap_or(false));
             let pairing = check_basename_pairing(&img_dir, &lbl_dir);
-            if !pairing.is_paired { warnings.push(format!("{} Bild(er) ohne Label.", pairing.orphan_primaries.len())); }
+            if !pairing.is_paired {
+                let n = pairing.orphan_primaries.len();
+                hints.push(hint("orphan_images", serde_json::json!({ "count": n }), format!("{} Bild(er) ohne Label.", n)));
+            }
             let has_classes = path.join("classes.txt").exists() || path.join("obj.names").exists();
             if has_xml {
                 return DatasetAnalysis { detected_type: DatasetType::PascalVoc, confidence: 90,
-                    pairing_status: Some(pairing), warnings, file_count: total_file_count,
+                    pairing_status: Some(pairing), warnings: hint_texte(&hints), hints, file_count: total_file_count,
                     dir_count: dir_names.len(), extensions: all_extensions,
                     schema_hint: Some(serde_json::json!({ "images_dir": img_dir_name, "annotations_dir": lbl_dir_name })) };
             }
             return DatasetAnalysis { detected_type: DatasetType::YoloBbox,
                 confidence: if has_classes { 97 } else { 88 },
-                pairing_status: Some(pairing), warnings, file_count: total_file_count,
+                pairing_status: Some(pairing), warnings: hint_texte(&hints), hints, file_count: total_file_count,
                 dir_count: dir_names.len(), extensions: all_extensions,
                 schema_hint: Some(serde_json::json!({
                     "images_dir": img_dir_name,
@@ -654,7 +684,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         let ann_name = ann_file.unwrap().file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         let img_dir  = dir_names.iter().find(|d| matches!(d.to_lowercase().as_str(), "images"|"imgs"|"image")).cloned().unwrap_or_default();
         return DatasetAnalysis { detected_type: DatasetType::CocoJson, confidence: 95,
-            pairing_status: None, warnings: vec![], file_count: total_file_count,
+            pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
             dir_count: dir_names.len(), extensions: all_extensions,
             schema_hint: Some(serde_json::json!({ "annotations_file": ann_name, "images_dir": img_dir })) };
     }
@@ -671,7 +701,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
             if has_img || has_aud || has_vid {
                 let classes: Vec<&str> = dir_names.iter().map(String::as_str).take(10).collect();
                 return DatasetAnalysis { detected_type: DatasetType::FolderClass, confidence: 92,
-                    pairing_status: None, warnings: vec![], file_count: total_file_count,
+                    pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
                     dir_count: dir_names.len(), extensions: all_extensions,
                     schema_hint: Some(serde_json::json!({ "class_count": dir_names.len(), "classes": classes, "media_type": if has_img { "image" } else if has_vid { "video" } else { "audio" } })) };
             }
@@ -687,7 +717,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         if let Some(tsv_file) = tsv {
             let tsv_name = tsv_file.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
             return DatasetAnalysis { detected_type: DatasetType::CommonVoice, confidence: 97,
-                pairing_status: None, warnings: vec![], file_count: total_file_count,
+                pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
                 dir_count: dir_names.len(), extensions: all_extensions,
                 schema_hint: Some(serde_json::json!({ "clips_dir": "clips", "metadata_file": tsv_name })) };
         }
@@ -705,14 +735,17 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         if overlap > 0 {
             let orphan_audio: Vec<String> = audio_bns.difference(&txt_bns).take(20).cloned().collect();
             let orphan_txt:   Vec<String> = txt_bns.difference(&audio_bns).take(20).cloned().collect();
-            if !orphan_audio.is_empty() { warnings.push(format!("{} Audio-Datei(en) ohne Transkript.", orphan_audio.len())); }
+            if !orphan_audio.is_empty() {
+                let n = orphan_audio.len();
+                hints.push(hint("orphan_audio", serde_json::json!({ "count": n }), format!("{} Audio-Datei(en) ohne Transkript.", n)));
+            }
             let pairing = PairingStatus {
                 is_paired: orphan_audio.is_empty() && orphan_txt.is_empty(),
                 primary_count: audio_files.len(), paired_count: overlap,
                 orphan_primaries: orphan_audio, orphan_secondaries: orphan_txt,
             };
             return DatasetAnalysis { detected_type: DatasetType::AudioTranscript, confidence: 93,
-                pairing_status: Some(pairing), warnings, file_count: total_file_count,
+                pairing_status: Some(pairing), warnings: hint_texte(&hints), hints, file_count: total_file_count,
                 dir_count: dir_names.len(), extensions: all_extensions, schema_hint: None };
         }
     }
@@ -727,7 +760,7 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         });
         if is_sharded {
             return DatasetAnalysis { detected_type: DatasetType::MultiShard, confidence: 90,
-                pairing_status: None, warnings: vec![], file_count: total_file_count,
+                pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
                 dir_count: dir_names.len(), extensions: all_extensions,
                 schema_hint: Some(serde_json::json!({ "shard_count": parquet_files.len() })) };
         }
@@ -738,10 +771,12 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         .filter(|f| f.extension().and_then(|e| e.to_str()).map(|e| is_flat(e)).unwrap_or(false)).count();
     if flat_count > 0 {
         let all_flat = root_exts.iter().all(|e| is_flat(e));
-        if !all_flat { warnings.push("Dataset enthaelt gemischte Dateitypen.".to_string()); }
+        if !all_flat {
+            hints.push(hint("mixed_file_types", serde_json::json!({}), "Dataset enthält gemischte Dateitypen.".to_string()));
+        }
         return DatasetAnalysis { detected_type: DatasetType::FlatFile,
             confidence: if all_flat { 92 } else { 70 },
-            pairing_status: None, warnings, file_count: total_file_count,
+            pairing_status: None, warnings: hint_texte(&hints), hints, file_count: total_file_count,
             dir_count: dir_names.len(), extensions: all_extensions, schema_hint: None };
     }
 
@@ -753,11 +788,12 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
     let has_img_dir_like = dir_names_lc.iter().any(|d| matches!(d.as_str(), "images"|"imgs"|"image"));
     let has_lbl_dir_like = dir_names_lc.iter().any(|d| matches!(d.as_str(), "labels"|"label"|"annotations"|"annotation"));
     if has_img_dir_like && has_lbl_dir_like {
-        warnings.push("images/ und labels/ gefunden, aber die Struktur passt nicht: erwartet werden Bilder direkt in images/ oder gleich benannte Split-Ordner in beiden (images/train + labels/train).".to_string());
+        hints.push(hint("images_labels_mismatch", serde_json::json!({}),
+            "images/ und labels/ gefunden, aber die Struktur passt nicht: erwartet werden Bilder direkt in images/ oder gleich benannte Split-Ordner in beiden (images/train + labels/train).".to_string()));
     }
-    warnings.push("Dataset-Typ konnte nicht erkannt werden.".to_string());
+    hints.push(hint("type_unknown", serde_json::json!({}), "Dataset-Typ konnte nicht erkannt werden.".to_string()));
     DatasetAnalysis { detected_type: DatasetType::Unknown, confidence: 0,
-        pairing_status: None, warnings, file_count: total_file_count,
+        pairing_status: None, warnings: hint_texte(&hints), hints, file_count: total_file_count,
         dir_count: dir_names.len(), extensions: all_extensions, schema_hint: None }
 }
 
@@ -1534,7 +1570,7 @@ pub async fn analyze_dataset_path(path: String) -> Result<DatasetAnalysis, Strin
     if p.is_file() {
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         return Ok(DatasetAnalysis { detected_type: DatasetType::FlatFile, confidence: 85,
-            pairing_status: None, warnings: vec![], file_count: 1, dir_count: 0,
+            pairing_status: None, warnings: vec![], hints: vec![], file_count: 1, dir_count: 0,
             extensions: vec![format!(".{}", ext)], schema_hint: None });
     }
     Ok(detect_dataset_type(p))
@@ -1642,7 +1678,7 @@ pub async fn import_local_dataset(
     let analysis = if src.is_dir() { detect_dataset_type(src) } else {
         let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         DatasetAnalysis { detected_type: DatasetType::FlatFile, confidence: 85,
-            pairing_status: None, warnings: vec![], file_count: 1, dir_count: 0,
+            pairing_status: None, warnings: vec![], hints: vec![], file_count: 1, dir_count: 0,
             extensions: vec![format!(".{}", ext)], schema_hint: None }
     };
     let dataset_id   = format!("ds_{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]);
@@ -1676,7 +1712,7 @@ pub async fn import_local_dataset(
 
     let info = make_info(&dataset_id, &dataset_name, &model_id, "local",
         Some(source_path), &target, size, files, status, split_info,
-        analysis.detected_type.clone(), analysis.pairing_status, analysis.warnings);
+        analysis.detected_type.clone(), analysis.pairing_status, analysis.hints);
     // dataset.yaml für YOLO/Pascal generieren falls noch nicht vorhanden
     if matches!(info.dataset_type, DatasetType::YoloBbox | DatasetType::PascalVoc) {
         if let Some(layout) = &existing_layout {
@@ -2560,8 +2596,8 @@ fn map_hf_split(split: &str) -> Option<&'static str> {
 /// selben Zielordner und ueberschrieben sich gegenseitig — uebrig blieb der
 /// zuletzt geschriebene. Bei IMDB war das `unsupervised`, wo jedes Label -1 ist;
 /// das Training bekam dadurch nur eine einzige Klasse zu sehen.
-fn select_hf_parquet_files(files: &[HfParquetFile]) -> (Vec<(HfParquetFile, String)>, Vec<String>) {
-    let mut warnings: Vec<String> = Vec::new();
+fn select_hf_parquet_files(files: &[HfParquetFile]) -> (Vec<(HfParquetFile, String)>, Vec<DatasetHint>) {
+    let mut warnings: Vec<DatasetHint> = Vec::new();
     if files.is_empty() { return (Vec::new(), warnings); }
 
     // Configs in Reihenfolge des ersten Auftretens sammeln.
@@ -2585,9 +2621,10 @@ fn select_hf_parquet_files(files: &[HfParquetFile]) -> (Vec<(HfParquetFile, Stri
         .unwrap_or_else(|| configs[0].clone());
 
     if configs.len() > 1 {
-        warnings.push(format!(
-            "Dataset hat {} Konfigurationen ({}). Importiert wurde '{}'.",
-            configs.len(), configs.join(", "), chosen));
+        warnings.push(hint("hf_configs",
+            serde_json::json!({ "count": configs.len(), "configs": configs.join(", "), "chosen": chosen }),
+            format!("Dataset hat {} Konfigurationen ({}). Importiert wurde '{}'.",
+                configs.len(), configs.join(", "), chosen)));
     }
 
     let candidates = files_of(&chosen);
@@ -2605,14 +2642,15 @@ fn select_hf_parquet_files(files: &[HfParquetFile]) -> (Vec<(HfParquetFile, Stri
         }
     }
     if !skipped.is_empty() {
-        warnings.push(format!(
-            "Splits ohne verwertbare Labels uebersprungen: {}.", skipped.join(", ")));
+        warnings.push(hint("hf_splits_skipped", serde_json::json!({ "splits": skipped.join(", ") }),
+            format!("Splits ohne verwertbare Labels übersprungen: {}.", skipped.join(", "))));
     }
 
     // Notfall: keine bekannten Splitnamen -> alles als train behandeln,
     // damit ungewoehnlich benannte Datasets nicht komplett leer ankommen.
     if selected.is_empty() {
-        warnings.push("Keine Standard-Splits erkannt — alle Dateien werden als 'train' importiert.".to_string());
+        warnings.push(hint("hf_no_standard_splits", serde_json::json!({}),
+            "Keine Standard-Splits erkannt — alle Dateien werden als 'train' importiert.".to_string()));
         selected = candidates.into_iter().map(|f| (f, "train".to_string())).collect();
     }
     (selected, warnings)
@@ -2722,8 +2760,8 @@ async fn download_parquet_direct(
         message: format!("Fertig! ({} Dateien, {:.1} MB)", file_count, total_size as f64 / 1_048_576.0) });
     // FIX Bug 2: Typ nach Download neu erkennen statt immer MultiShard zu setzen.
     let detected = detect_dataset_type(&target);
-    let mut warnings = detected.warnings;
-    warnings.append(&mut select_warnings);
+    let mut hints = detected.hints;
+    hints.append(&mut select_warnings);
     // Zeilenzahlen je Split von HuggingFace nachladen. Ohne sie stand auf der
     // Dataset-Karte "1 / 0 / 1" (Datei-Zahlen) statt "25000 / 0 / 25000" — der
     // Nutzer konnte nicht erkennen, wie viele Daten er ueberhaupt hat.
@@ -2731,7 +2769,7 @@ async fn download_parquet_direct(
     let hf_status = if hf_split_info.is_some() { "split" } else { "unused" };
     let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
         Some(repo_id), &target, total_size, file_count, hf_status, hf_split_info,
-        detected.detected_type, detected.pairing_status, warnings);
+        detected.detected_type, detected.pairing_status, hints);
     upsert_metadata(&datasets_dir, &info)?;
     if let Ok(db_path) = app_handle.path().app_data_dir().map(|p| p.join("frametrain.db")) {
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
@@ -2874,7 +2912,7 @@ except Exception as e:
     let detected = detect_dataset_type(&target);
     let info = make_info(&dataset_id, &dataset_name, &model_id, "huggingface",
         Some(repo_id), &target, total_written, count, "unused", None,
-        detected.detected_type, detected.pairing_status, detected.warnings);
+        detected.detected_type, detected.pairing_status, detected.hints);
     upsert_metadata(&datasets_dir, &info)?;
     if let Ok(db_path) = app_handle.path().app_data_dir().map(|p| p.join("frametrain.db")) {
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
@@ -2896,6 +2934,7 @@ pub async fn validate_image_label_folders(path: String) -> Result<serde_json::Va
         "detected_type": analysis.detected_type.as_str(),
         "confidence": analysis.confidence,
         "warnings": analysis.warnings,
+        "hints": analysis.hints,
     }))
 }
 
@@ -3112,7 +3151,7 @@ mod hf_split_selection_tests {
         assert!(dirs.contains(&"train"));
         assert!(dirs.contains(&"test"));
         assert!(!dirs.contains(&"unsupervised"));
-        assert!(warnings.iter().any(|w| w.contains("unsupervised")));
+        assert!(warnings.iter().any(|w| w.code == "hf_splits_skipped" && w.text.contains("unsupervised")));
     }
 
     #[test]
@@ -3136,7 +3175,7 @@ mod hf_split_selection_tests {
         ];
         let (selected, warnings) = select_hf_parquet_files(&files);
         assert!(selected.iter().all(|(file, _)| file.config.as_deref() == Some("en")));
-        assert!(warnings.iter().any(|w| w.contains("Konfigurationen")));
+        assert!(warnings.iter().any(|w| w.code == "hf_configs" && w.params["chosen"] == "en"));
     }
 
     #[test]
@@ -3394,6 +3433,35 @@ mod split_layout_tests {
         assert!(matches!(a.detected_type, DatasetType::Unknown));
         assert!(a.warnings.iter().any(|w| w.contains("images/") && w.contains("labels/")),
                 "kein erklaerender Hinweis: {:?}", a.warnings);
+        // Die Oberflaeche uebersetzt ueber den Code, der Text bleibt Fallback.
+        let codes: Vec<&str> = a.hints.iter().map(|h| h.code.as_str()).collect();
+        assert_eq!(codes, vec!["images_labels_mismatch", "type_unknown"]);
+        assert_eq!(a.warnings, a.hints.iter().map(|h| h.text.clone()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn hinweise_tragen_code_und_parameter() {
+        let dir = TempDir::new("gemischt");
+        fs::write(dir.path().join("daten.csv"), b"text,label\na,b\n").unwrap();
+        fs::write(dir.path().join("notiz.md"), b"x").unwrap();
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::FlatFile));
+        assert_eq!(a.hints.len(), 1);
+        assert_eq!(a.hints[0].code, "mixed_file_types");
+        assert_eq!(a.hints[0].text, "Dataset enthält gemischte Dateitypen.");
+    }
+
+    #[test]
+    fn alte_metadaten_ohne_hints_laden_weiter() {
+        // datasets_metadata.json aus Versionen vor den Hinweis-Codes.
+        let alt = r#"{"id":"ds_1","name":"A","model_id":"m","source":"local","source_path":null,
+            "size_bytes":1,"file_count":1,"created_at":"","status":"unused","split_info":null,
+            "training_count":0,"last_used_at":null,"warnings":["Dataset-Typ konnte nicht erkannt werden."]}"#;
+        let info: super::DatasetInfo = serde_json::from_str(alt).unwrap();
+        assert!(info.hints.is_empty());
+        assert_eq!(info.warnings.len(), 1);
+        let json = serde_json::to_value(&info).unwrap();
+        assert!(json["hints"].as_array().unwrap().is_empty(), "das Frontend bekommt immer ein Feld");
     }
 
     #[test]

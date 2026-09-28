@@ -23,12 +23,13 @@ export {
   LEVEL_META,
   DATASET_TYPE_LABELS,
   analysisToCheckInput,
+  typeLabel,
 } from './datasetCompatHelpers';
 
 // ── Registry ───────────────────────────────────────────────────────────────
 
 import type { DatasetCompatPlugin, DatasetCompatResult, DatasetAnalysis } from './datasetCompatHelpers';
-import { analysisToCheckInput } from './datasetCompatHelpers';
+import { analysisToCheckInput, compatResult } from './datasetCompatHelpers';
 import { xlmRobertaCompatPlugin } from './xlm-roberta/datasetCompat';
 import { hfEncoderCompatPlugin } from './hf-encoder/datasetCompat';
 import { genericDatasetCompat, type CompatPluginInfo } from './genericDatasetCompat';
@@ -65,12 +66,7 @@ export function checkDatasetCompat(
   }
 
   if (!plugin) {
-    return {
-      overallLevel: 'ok',
-      fileResults:  [],
-      summary:      'Kompatibilität für dieses Modell noch unbekannt.',
-      hint:         'Dieses Modell wird in einer späteren Version geprüft.',
-    };
+    return compatResult('ok', [], { key: 'datasetCompat.msg.unknownModel' }, { key: 'datasetCompat.msg.unknownModelHint' });
   }
 
   // Neue API bevorzugen
@@ -84,9 +80,5 @@ export function checkDatasetCompat(
   }
 
   // Plugin ohne Check-Funktion – sollte nicht vorkommen
-  return {
-    overallLevel: 'ok',
-    fileResults:  [],
-    summary:      'Keine Kompatibilitätsprüfung konfiguriert.',
-  };
+  return compatResult('ok', [], { key: 'datasetCompat.msg.noCheck' });
 }

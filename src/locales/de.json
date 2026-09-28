@@ -2953,6 +2953,59 @@
       "pre_split": "Voraufgeteilt",
       "multi_shard": "Multi-Shard Parquet",
       "unknown": "Unbekannt"
+    },
+    "msg": {
+      "empty": "Keine Dateien gefunden – Dataset scheint leer zu sein.",
+      "emptyHint": "Füge .jsonl, .json, .csv oder .parquet Dateien hinzu.",
+      "format": {
+        "jsonl": "JSONL ist das bevorzugte Format – jede Zeile ein JSON-Objekt mit text + label.",
+        "json": "JSON-Arrays mit {text, label} Einträgen werden vollständig unterstützt.",
+        "csv": "CSV mit text/label Spalten funktioniert direkt.",
+        "parquet": "Parquet wird von HuggingFace datasets nativ unterstützt.",
+        "tsv": "TSV (tab-separated) funktioniert, muss in CSV konvertiert werden.",
+        "txt": "Reine Textdateien brauchen eigenes Parsing-Skript.",
+        "arrow": "Arrow-Format wird von HuggingFace datasets unterstützt.",
+        "unknown": "Format \"{ext}\" wird nicht direkt erkannt – evtl. manuelles Parsing nötig."
+      },
+      "idealFormats": "{perfect} von {total} Formaten sind ideal für {model}.",
+      "usable": "Nutzbar, aber nicht optimale Formate vorhanden.",
+      "needsWork": "Einige Formate benötigen Aufbereitung.",
+      "textHint": "Verwende .jsonl, .csv oder .parquet mit Textspalten.",
+      "preSplit": "Voraufgeteiltes Dataset. {rest}",
+      "withOrphans": "{rest} {count} Dateien ohne Partner.",
+      "xlm": {
+        "imageDataset": "Bild-Dataset erkannt – XLM-RoBERTa braucht Textdaten.",
+        "audioDataset": "Audio-Dataset erkannt – XLM-RoBERTa ist ein Text-Modell.",
+        "audioHint": "Für Spracherkennung nutze ein Whisper-Plugin.",
+        "imageClassDataset": "Bild-Klassifikations-Dataset – nicht kompatibel mit XLM-RoBERTa.",
+        "multiShardReason": "Multi-Shard Parquet – ideal für große Datasets.",
+        "multiShard": "Multi-Shard Parquet wird nativ unterstützt."
+      },
+      "encoder": {
+        "modelName": "Encoder-Modelle",
+        "imageDataset": "Bild-Dataset erkannt – Encoder-Modelle brauchen Textdaten.",
+        "audioDataset": "Audio-Dataset – nicht kompatibel mit Text-Encodern.",
+        "multiShardReason": "Multi-Shard Parquet nativ unterstützt.",
+        "multiShard": "Multi-Shard Parquet wird direkt geladen."
+      },
+      "unknownModel": "Kompatibilität für dieses Modell noch unbekannt.",
+      "unknownModelHint": "Dieses Modell wird in einer späteren Version geprüft.",
+      "noCheck": "Keine Kompatibilitätsprüfung konfiguriert.",
+      "missing": {
+        "detect": "Keine Label-Dateien (.txt oder Pascal-VOC-.xml) gefunden – ohne Labels lernt ein Objekterkennungs-Modell nichts.",
+        "image": "Keine Bilddateien (oder Parquet mit Bildspalte) gefunden.",
+        "audio": "Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.",
+        "video": "Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.",
+        "table": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden."
+      },
+      "cannotTrain": "{model} kann dieses Dataset nicht trainieren.",
+      "typeUnknown": "Dataset-Typ nicht erkannt – {model} kann es eventuell nicht lesen.",
+      "formatsFit": "Dateiformate passen zu {model}.",
+      "typeUnsupported": "{type} kann {model} nicht lesen.",
+      "suitableTypes": "Geeignet: {types}",
+      "labelsPartial": "Nur {paired} von {total} Bildern haben ein Label.",
+      "unlabeledBackground": "Bilder ohne Label zählen im Training als Hintergrund.",
+      "typeFits": "{type} passt zu {model}."
     }
   },
   "pluginRegistry": {
@@ -3762,5 +3815,16 @@
         "clips_failed": "{count} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export."
       }
     }
+  },
+  "datasetHints": {
+    "orphan_images": "{count} Bild(er) ohne Label.",
+    "no_val_split": "Kein Validierungs-Split gefunden – nur Training.",
+    "orphan_audio": "{count} Audio-Datei(en) ohne Transkript.",
+    "mixed_file_types": "Dataset enthält gemischte Dateitypen.",
+    "images_labels_mismatch": "images/ und labels/ gefunden, aber die Struktur passt nicht: erwartet werden Bilder direkt in images/ oder gleich benannte Split-Ordner in beiden (images/train + labels/train).",
+    "type_unknown": "Dataset-Typ konnte nicht erkannt werden.",
+    "hf_configs": "Dataset hat {count} Konfigurationen ({configs}). Importiert wurde „{chosen}“.",
+    "hf_splits_skipped": "Splits ohne verwertbare Labels übersprungen: {splits}.",
+    "hf_no_standard_splits": "Keine Standard-Splits erkannt – alle Dateien werden als „train“ importiert."
   }
 }
