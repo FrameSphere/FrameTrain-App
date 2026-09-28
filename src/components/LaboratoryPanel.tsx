@@ -147,9 +147,49 @@ const deleteSession = (id: string, userId?: string) => {
 
 // ── Sample Parser ─────────────────────────────────────────────────────────
 
+/**
+ * LLM-Datenformate: Eingabe und erwartete Antwort. Ohne das bekam das Modell
+ * im Labor bei Chat-Daten die ganze JSON-Zeile — samt richtiger Antwort — und
+ * der Kopf zeigte "[object Object], [object Object]".
+ *   {"messages": [...]} / ShareGPT {"conversations": [{"from", "value"}]}
+ *   {"prompt", "completion"} · {"instruction", "input", "output"} · {"prompt", "chosen", "rejected"}
+ */
+export function llmParts(obj: unknown): { text: string; label?: string } | null {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return null;
+  const o = obj as Record<string, unknown>;
+  const turns = Array.isArray(o.messages) ? o.messages : Array.isArray(o.conversations) ? o.conversations : null;
+  if (turns) {
+    const msgs = turns
+      .filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null)
+      .map(m => ({
+        role: String(m.role ?? m.from ?? '').toLowerCase(),
+        content: typeof m.content === 'string' ? m.content : typeof m.value === 'string' ? m.value : '',
+      }));
+    const isAssistant = (r: string) => r === 'assistant' || r === 'gpt' || r === 'model' || r === 'bot';
+    const isUser = (r: string) => r === 'user' || r === 'human';
+    const last = msgs.length - 1;
+    const answerAt = last >= 0 && isAssistant(msgs[last].role) ? last : -1;
+    const userMsgs = msgs.slice(0, answerAt >= 0 ? answerAt : msgs.length).filter(m => isUser(m.role));
+    const question = userMsgs.length ? userMsgs[userMsgs.length - 1].content : '';
+    if (!question) return null;
+    return { text: question, label: answerAt >= 0 ? msgs[answerAt].content : undefined };
+  }
+  const str = (k: string) => (typeof o[k] === 'string' && (o[k] as string).length > 0 ? (o[k] as string) : undefined);
+  if (str('instruction')) {
+    const text = str('input') ? `${str('instruction')}\n\n${str('input')}` : str('instruction')!;
+    return { text, label: str('output') ?? str('response') };
+  }
+  if (str('prompt') && (str('completion') || str('chosen') || str('response'))) {
+    return { text: str('prompt')!, label: str('completion') ?? str('chosen') ?? str('response') };
+  }
+  return null;
+}
+
 function extractTextField(obj: unknown): string {
   if (typeof obj === 'string') return obj;
   if (typeof obj !== 'object' || obj === null) return String(obj);
+  const llm = llmParts(obj);
+  if (llm) return llm.text;
   const o = obj as Record<string, unknown>;
   // Bekannte Text-Keys
   for (const key of ['text', 'input', 'sentence', 'content', 'utterance', 'query', 'sample', 'data', 'value',
@@ -166,6 +206,8 @@ function extractTextField(obj: unknown): string {
 
 const TEXT_KEYS  = new Set(['text','input','sentence','content','utterance','query','sample','data','value','abstract','body','passage','document','description','context','premise','hypothesis','review','comment','message','title']);
 const LABEL_KEYS = new Set(['label','category','class','target','expected','output','intent']);
+// LLM-Felder sind Eingabe bzw. erwartete Antwort, keine Zusatzinfos.
+const LLM_KEYS   = new Set(['messages','conversations','prompt','completion','instruction','response','chosen','rejected']);
 
 function getSideInfo(sample: LabSample): Array<{ key: string; value: string }> {
   const rawObj = (() => {
@@ -178,7 +220,7 @@ function getSideInfo(sample: LabSample): Array<{ key: string; value: string }> {
   })();
   if (!rawObj) return [];
   return Object.entries(rawObj)
-    .filter(([k]) => !TEXT_KEYS.has(k) && !LABEL_KEYS.has(k))
+    .filter(([k]) => !TEXT_KEYS.has(k) && !LABEL_KEYS.has(k) && !LLM_KEYS.has(k))
     .map(([k, v]) => ({
       key: k,
       value: Array.isArray(v) ? v.join(', ') : String(v),
@@ -212,6 +254,8 @@ function getDisplayText(sample: LabSample): string {
 
 function extractLabelField(obj: unknown): string | undefined {
   if (typeof obj !== 'object' || obj === null) return undefined;
+  const llm = llmParts(obj);
+  if (llm) return llm.label;
   const o = obj as Record<string, unknown>;
   for (const key of ['label', 'category', 'class', 'target', 'expected', 'output', 'intent']) {
     if (typeof o[key] === 'string') return o[key] as string;

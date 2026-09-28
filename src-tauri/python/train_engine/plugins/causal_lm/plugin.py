@@ -140,6 +140,7 @@ class Plugin(TrainPlugin):
         self._last_train_loss: float = 0.0
         self._last_lr = config.learning_rate
         self._last_val_loss: Optional[float] = None
+        self._baseline_val_loss: Optional[float] = None
         self._steps_done = 0
         # MLX
         self._mlx_cfg: Dict[str, Any] = {}
@@ -679,9 +680,16 @@ class Plugin(TrainPlugin):
                     raise _StopTraining()
 
             def on_val_loss_report(self, info):
-                plugin._last_val_loss = float(info.get("val_loss", 0.0))
-                if int(info.get("iteration", 0)) > 0:
-                    MessageProtocol.status("training", f"Val-Loss {plugin._last_val_loss:.4f} (Schritt {info.get('iteration')})")
+                # mlx-lm misst einmal vor dem ersten Schritt (Iteration 0). Als
+                # aktueller Wert stand er sonst bis zur ersten echten Messung
+                # in jedem Fortschritt — die Analyse zeigte ihn als Val-Loss
+                # von Epoche 1 (6.27 statt 0.58). Er ist der Vorher-Wert.
+                loss = float(info.get("val_loss", 0.0))
+                if int(info.get("iteration", 0)) <= 0:
+                    plugin._baseline_val_loss = loss
+                else:
+                    plugin._last_val_loss = loss
+                    MessageProtocol.status("training", f"Val-Loss {loss:.4f} (Schritt {info.get('iteration')})")
                 if plugin.is_stopped:
                     raise _StopTraining()
 
@@ -737,6 +745,9 @@ class Plugin(TrainPlugin):
             metrics.update({k: float(v) for k, v in self.after.items()})
         if self.baseline:
             metrics.update({f"baseline_{k}": float(v) for k, v in self.baseline.items()})
+        if self._baseline_val_loss is not None and "baseline_perplexity" not in metrics:
+            # Die Analyse zeigt die Perplexitaet dann mit Vorher-Wert.
+            metrics["baseline_perplexity"] = float(math.exp(min(float(self._baseline_val_loss), 50)))
         metrics.update({
             "backend": self.backend, "device": self.device_used,
             "trainable_params": int(self.trainable_params), "total_params": int(self.total_params),

@@ -2115,7 +2115,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               >
                 <div className="grid grid-cols-2 gap-4">
                   {Object.entries(pluginParams).map(([key, value]) => (
-                    <Field key={key} label={key}>
+                    <Field key={key} label={t(`trainingPanel.pluginParamLabels.${key}`, key)}>
                       {typeof value === 'boolean' ? (
                         <Toggle checked={value} onChange={v => setPluginParams(p => ({ ...p, [key]: v }))} label="" />
                       ) : typeof value === 'number' ? (

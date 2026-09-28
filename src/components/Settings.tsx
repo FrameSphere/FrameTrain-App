@@ -9,6 +9,7 @@ import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG }
 import { usePageContext } from '../contexts/PageContext';
 import { buildPageContext, kv } from '../ai/coachContext';
 import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../plugins/hf-encoder/detect';
+import { PLUGINS } from '../plugins/registry';
 import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { PROVIDER_META } from '../ai/providerMeta';
@@ -286,8 +287,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
   const { getAll } = useStoredTickets(userData.userId);
 
-  const loadSystemInfo = useCallback(async () => {
-    setSystemLoading(true);
+  // silent: Hintergrund-Aktualisierung. Sie darf die Knoepfe nicht sperren —
+  // eine Pruefung dauert einige Sekunden, bei 10-Sekunden-Takt waren
+  // "Fehlende installieren" und die Gruppen-Knoepfe sonst fast immer grau.
+  const systemRefreshRef = useRef(false);
+  const loadSystemInfo = useCallback(async (silent = false) => {
+    if (systemRefreshRef.current) return;
+    systemRefreshRef.current = true;
+    if (!silent) setSystemLoading(true);
     try {
       const [deps, reqs, sleep] = await Promise.all([
         invoke<{ package: string; installed: boolean; version?: string }[]>('check_dependency_status'),
@@ -303,7 +310,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     } catch {
       // ignore
     } finally {
-      setSystemLoading(false);
+      systemRefreshRef.current = false;
+      if (!silent) setSystemLoading(false);
     }
   }, []);
 
@@ -441,8 +449,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     if (activeTab !== 'system') return;
     const id = setInterval(() => {
       if (systemLoading || systemInstalling) return;
-      loadSystemInfo();
-    }, 10000);
+      void loadSystemInfo(true);
+    }, 15000);
     return () => clearInterval(id);
   }, [activeTab, loadSystemInfo, systemInstalling, systemLoading]);
 
@@ -2130,7 +2138,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               {t('settings.system.installMissing')}
             </button>
             <button
-              onClick={loadSystemInfo}
+              onClick={() => void loadSystemInfo()}
               disabled={systemLoading || systemInstalling}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-400 hover:text-white text-sm transition-all disabled:opacity-50"
             >
@@ -2153,7 +2161,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   <span className="text-white font-mono text-sm">{dep.package}</span>
                 </div>
                 <span className={`text-xs font-mono ${dep.installed ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {dep.installed ? (dep.version ?? t('settings.system.installed')) : t('settings.system.missing')}
+                  {dep.installed
+                    ? (dep.version ?? t('settings.system.installed'))
+                    : dep.version ? `${dep.version} ${t('packageCheck.tooOld')}` : t('settings.system.missing')}
                 </span>
               </div>
             ))}
@@ -2301,6 +2311,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <p className="text-sm text-gray-400 mb-4">
           {t('settings.about.supportedModelsDesc')}
         </p>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {PLUGINS.map((p) => (
+            <span key={p.id} className="px-2.5 py-1 rounded-full text-xs bg-purple-500/10 border border-purple-500/20 text-purple-200">
+              {p.name}
+            </span>
+          ))}
+        </div>
+        <p className="text-sm text-gray-400 mb-2">{t('settings.about.textFamiliesDesc')}</p>
         <div className="flex flex-wrap gap-2">
           {HF_ENCODER_SUPPORTED_MODEL_TYPES.map((t) => (
             <span

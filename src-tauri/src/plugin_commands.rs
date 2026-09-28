@@ -599,6 +599,13 @@ pub async fn run_preflight_check() -> Result<PreFlightCheck, String> {
 
 #[tauri::command]
 pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginInfo>, String> {
+    // Blockierende Python-Aufrufe gehoeren nicht in den async-Runtime-Thread.
+    tauri::async_runtime::spawn_blocking(available_plugins_blocking)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn available_plugins_blocking() -> Result<Vec<PluginInfo>, String> {
     verify_python_available()?;
     let python = get_python_executable();
 
@@ -609,7 +616,19 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     // Abschnitte beim Export der Werkstatt.
     let nlp_packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
                             "numpy", "accelerate", "librosa", "soundfile", "pillow", "opencv-python"];
-    let nlp_installed = all_installed(&python, &nlp_packages);
+    let llm_packages = llm_package_list();
+    let gen_packages = vec!["diffusers", "peft", "transformers", "accelerate", "pillow"];
+    let yolo_packages = vec!["ultralytics", "torch", "numpy", "pillow", "opencv-python"];
+    // Ein Python-Prozess fuer alle Gruppen: je Gruppe einer kostete jedes Mal
+    // den torch-Import, zusammen ueber 20 Sekunden.
+    let mut all: Vec<&str> = Vec::new();
+    for p in nlp_packages.iter().chain(&llm_packages).chain(&gen_packages).chain(&yolo_packages) {
+        if !all.contains(p) { all.push(p); }
+    }
+    let ok: std::collections::HashSet<String> = check_packages_batch(&python, &all).into_iter()
+        .filter(|s| s.installed).map(|s| s.package).collect();
+    let installed = |pkgs: &[&str]| pkgs.iter().all(|p| ok.contains(*p));
+    let nlp_installed = installed(&nlp_packages);
     let nlp_plugin = PluginInfo {
         id: "seq_classification".to_string(),
         name: "firstLaunch.pluginRegistry.seq_classification.name".to_string(),
@@ -623,8 +642,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
 
     // LLM-Fine-Tuning (causal_lm): LoRA ueber peft; auf Apple Silicon zusaetzlich
     // MLX — dort schneller und das einzige lokale 4-bit-QLoRA.
-    let llm_packages = llm_package_list();
-    let llm_installed = all_installed(&python, &llm_packages);
+    let llm_installed = installed(&llm_packages);
     let llm_plugin = PluginInfo {
         id: "llm".to_string(),
         name: "firstLaunch.pluginRegistry.llm.name".to_string(),
@@ -637,8 +655,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     };
 
     // Generativ: Diffusion-LoRA (Stable Diffusion) und Vision-Language-Modelle.
-    let gen_packages = vec!["diffusers", "peft", "transformers", "accelerate", "pillow"];
-    let gen_installed = all_installed(&python, &gen_packages);
+    let gen_installed = installed(&gen_packages);
     let gen_plugin = PluginInfo {
         id: "generative".to_string(),
         name: "firstLaunch.pluginRegistry.generative.name".to_string(),
@@ -651,8 +668,7 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     };
 
     // YOLO-Stack
-    let yolo_packages = vec!["ultralytics", "torch", "numpy", "pillow", "opencv-python"];
-    let yolo_installed = all_installed(&python, &yolo_packages);
+    let yolo_installed = installed(&yolo_packages);
     let yolo_plugin = PluginInfo {
         id: "yolo".to_string(),
         name: "firstLaunch.pluginRegistry.yolo.name".to_string(),
@@ -665,11 +681,6 @@ pub async fn get_available_plugins(_app_handle: AppHandle) -> Result<Vec<PluginI
     };
 
     Ok(vec![nlp_plugin, yolo_plugin, llm_plugin, gen_plugin])
-}
-
-/// Alle Pakete da und neu genug? Ein Python-Prozess je Gruppe statt je Paket.
-fn all_installed(python: &str, packages: &[&str]) -> bool {
-    check_packages_batch(python, packages).iter().all(|s| s.installed)
 }
 
 /// Welche Paketgruppe (Erststart-Plugin) und welche Pakete eine Aufgabe braucht.
@@ -761,6 +772,12 @@ fn llm_package_list() -> Vec<&'static str> {
 
 #[tauri::command]
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
+    tauri::async_runtime::spawn_blocking(dependency_status_blocking)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn dependency_status_blocking() -> Result<Vec<DependencyStatus>, String> {
     verify_python_available()?;
     let python = get_python_executable();
     let packages = vec!["torch", "transformers", "datasets", "huggingface_hub", "scikit-learn",
@@ -769,7 +786,8 @@ pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> 
     // peft gehoert zu den Gruppen LLM/Generativ (Einstellungen → Paketgruppen);
     // hier stuende es sonst als "fehlend", ohne dass "Fehlende installieren" es
     // installiert (das installiert nur den HuggingFace-Stack).
-    let status: Vec<DependencyStatus> = packages.iter().map(|p| check_package_installed(&python, p)).collect();
+    // Ein Prozess statt vierzehn: die Einstellungen pruefen alle paar Sekunden.
+    let status = check_packages_batch(&python, &packages);
     let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
     if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
     else { println!("[Deps] Fehlende Pakete: {:?}", missing); }

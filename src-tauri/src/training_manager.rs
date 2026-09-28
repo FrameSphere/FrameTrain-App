@@ -1469,38 +1469,53 @@ pub struct RequirementsCheck {
 
 #[tauri::command]
 pub async fn check_training_requirements() -> Result<RequirementsCheck, String> {
+    tauri::async_runtime::spawn_blocking(training_requirements_blocking)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Ein Python-Prozess fuer alles. Frueher waren es sechs nacheinander, drei
+/// davon mit torch-Import — die Einstellungen pruefen das alle paar Sekunden.
+fn training_requirements_blocking() -> RequirementsCheck {
     let python = get_python_path();
-
-    let py_out = Command::new(&python).no_window().arg("--version").output();
-    let py_ok  = py_out.is_ok() && py_out.as_ref().unwrap().status.success();
-    let py_ver = if py_ok { String::from_utf8_lossy(&py_out.unwrap().stdout).trim().to_string() } else { "Nicht gefunden".to_string() };
-
-    let torch_out = Command::new(&python).no_window().args(["-c","import torch; print(torch.__version__)"]).output();
-    let torch_ok  = torch_out.is_ok() && torch_out.as_ref().unwrap().status.success();
-    let torch_ver = if torch_ok { String::from_utf8_lossy(&torch_out.unwrap().stdout).trim().to_string() } else { "Nicht installiert".to_string() };
-
-    let cuda = Command::new(&python).no_window().args(["-c","import torch; print(torch.cuda.is_available())"]).output();
-    let cuda_ok = cuda.is_ok() && String::from_utf8_lossy(&cuda.unwrap().stdout).trim() == "True";
-
-    let mps = Command::new(&python).no_window().args(["-c","import torch; print(hasattr(torch.backends,'mps') and torch.backends.mps.is_available())"]).output();
-    let mps_ok = mps.is_ok() && String::from_utf8_lossy(&mps.unwrap().stdout).trim() == "True";
-
-    let tf_out = Command::new(&python).no_window().args(["-c","import transformers; print(transformers.__version__)"]).output();
-    let tf_ok  = tf_out.is_ok() && tf_out.as_ref().unwrap().status.success();
-    let tf_ver = if tf_ok { String::from_utf8_lossy(&tf_out.unwrap().stdout).trim().to_string() } else { "Nicht installiert".to_string() };
-
-    let peft_out = Command::new(&python).no_window().args(["-c","import peft; print(peft.__version__)"]).output();
-    let peft_ok  = peft_out.is_ok() && peft_out.as_ref().unwrap().status.success();
-    let peft_ver = if peft_ok { String::from_utf8_lossy(&peft_out.unwrap().stdout).trim().to_string() } else { "Nicht installiert".to_string() };
-
-    Ok(RequirementsCheck {
-        python_installed: py_ok, python_version: py_ver,
-        torch_installed: torch_ok, torch_version: torch_ver,
-        cuda_available: cuda_ok, mps_available: mps_ok,
-        transformers_installed: tf_ok, transformers_version: tf_ver,
-        peft_installed: peft_ok, peft_version: peft_ver,
-        ready: py_ok && torch_ok && tf_ok,
-    })
+    let script = "import json, sys\n\
+out = {'python': 'Python %d.%d.%d' % sys.version_info[:3]}\n\
+def ver(mod):\n\
+    try:\n\
+        return __import__(mod).__version__\n\
+    except Exception:\n\
+        return None\n\
+out['torch'] = ver('torch')\n\
+out['transformers'] = ver('transformers')\n\
+out['peft'] = ver('peft')\n\
+out['cuda'] = out['mps'] = False\n\
+if out['torch']:\n\
+    import torch\n\
+    out['cuda'] = bool(torch.cuda.is_available())\n\
+    out['mps'] = bool(hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())\n\
+print('FT_REQ ' + json.dumps(out))";
+    let found: serde_json::Value = Command::new(&python).no_window()
+        .args(["-c", script]).output().ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).lines()
+            .find_map(|l| l.strip_prefix("FT_REQ ").map(|j| j.to_string())))
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let text = |k: &str| found.get(k).and_then(|v| v.as_str()).map(|v| v.to_string());
+    let flag = |k: &str| found.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let py_ver = text("python");
+    let torch_ver = text("torch");
+    let tf_ver = text("transformers");
+    let peft_ver = text("peft");
+    let missing = || "Nicht installiert".to_string();
+    RequirementsCheck {
+        python_installed: py_ver.is_some(),
+        python_version: py_ver.clone().unwrap_or_else(|| "Nicht gefunden".to_string()),
+        torch_installed: torch_ver.is_some(), torch_version: torch_ver.clone().unwrap_or_else(missing),
+        cuda_available: flag("cuda"), mps_available: flag("mps"),
+        transformers_installed: tf_ver.is_some(), transformers_version: tf_ver.clone().unwrap_or_else(missing),
+        peft_installed: peft_ver.is_some(), peft_version: peft_ver.unwrap_or_else(missing),
+        ready: py_ver.is_some() && torch_ver.is_some() && tf_ver.is_some(),
+    }
 }
 
 // ============ Metrics Templates ============
