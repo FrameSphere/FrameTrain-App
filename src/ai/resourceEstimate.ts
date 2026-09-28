@@ -44,6 +44,16 @@ export interface RamEstimate {
 /** Framework-Overhead: CUDA-Runtime, PyTorch-Caches, Tokenizer. */
 const FRAMEWORK_OVERHEAD_GB = 1.2;
 
+/** Architektur aus der config.json (get_model_ram_info). */
+export interface ModelArch {
+  hiddenSize: number;
+  numLayers: number;
+  numHeads: number;
+  vocabSize: number;
+  /** Parameter in Milliarden (aus der Architektur geschaetzt). */
+  paramBillion?: number;
+}
+
 export interface RamEstimateOptions {
   /**
    * Bildkantenlaenge in Pixeln (z. B. YOLO imgsz). Gesetzt fuer Bildmodelle:
@@ -51,7 +61,35 @@ export interface RamEstimateOptions {
    * das Feld existiert bei YOLO nicht einmal im Formular.
    */
   imageSize?: number;
+  /**
+   * Bekannte Architektur: dann rechnen die Aktivierungen mit Layern, Breite,
+   * Heads und Sequenzlaenge (quadratisch, Attention) statt mit einer
+   * Pauschale je Sample.
+   */
+  arch?: ModelArch | null;
+  /** Sprachmodell-Kopf (LLM, Seq2Seq): Logits ueber das ganze Vokabular. */
+  lmHead?: boolean;
 }
+
+/*
+ * Kalibriert am 28.09.2026 mit echten Trainingsschritten auf Apple Silicon
+ * (PyTorch/MPS, fp32, AdamW, Spitzenwert des Prozesses):
+ *   SmolLM2-135M + LoRA  b4×128: 2,7 GB  b4×512: 8,2  b1×1024: 5,9  b2×1024: 9,3  b4×1024: 17,4
+ *   SmolLM2-135M voll    b8×512: 20,1 GB
+ *   DistilBERT voll      b16×128: 3,4 GB  b8×512: 3,4  b16×512: 6,8
+ * Die alte Pauschale (0,3 GB je Sample bei 128 Tokens, linear) sagte fuer
+ * b4×1024 11 GB — gemessen 17: die Attention waechst quadratisch mit der
+ * Laenge, und ein 135M-Modell mit 30 Layern braucht mehr als ein BERT mit 6.
+ */
+/** Byte je Token, Layer und Hidden-Einheit (fp32). LoRA spart die Eingaben eingefrorener Schichten. */
+const ACT_BYTES_LINEAR_FULL = 128;
+const ACT_BYTES_LINEAR_ADAPTER = 86;
+/** Byte je Token², Layer und Head (fp32): Attention-Scores samt Softmax fuer die Rueckrechnung. */
+const ACT_BYTES_ATTENTION = 6.4;
+/** Byte je Token und Vokabel-Eintrag: Logits, fp32-Kopie fuer den Loss, Gradient. */
+const ACT_BYTES_LOGITS = 12;
+/** Gradient Checkpointing sparte in der Messung (LoRA, 1024 Tokens) nur ~7 % — die Attention bleibt. */
+const GRAD_CKPT_FACTOR_ARCH = 0.85;
 
 /** Referenz-Aufloesung, auf die sich der Aktivierungs-Faktor bezieht. */
 const REFERENCE_IMAGE_SIZE = 640;
@@ -67,7 +105,11 @@ export function estimateTrainingRam(
   modelSizeGb: number,
   options: RamEstimateOptions = {},
 ): RamEstimate {
-  const size = Number.isFinite(modelSizeGb) && modelSizeGb > 0 ? modelSizeGb : 0;
+  const arch = options.arch && options.arch.hiddenSize > 0 && options.arch.numLayers > 0 ? options.arch : null;
+  // Mit Architektur: Parameterzahl in "GB bei 16 Bit" — die Ordnergroesse
+  // taeuscht, wenn die Datei fp32 speichert (DistilBERT: doppelt so gross).
+  const fromArch = arch?.paramBillion && arch.paramBillion > 0 ? arch.paramBillion * 2 : 0;
+  const size = fromArch || (Number.isFinite(modelSizeGb) && modelSizeGb > 0 ? modelSizeGb : 0);
   const mixedPrecision = !!(config.fp16 || config.bf16);
   const is4bit = !!config.load_in_4bit;
   const is8bit = !!config.load_in_8bit;
@@ -101,12 +143,25 @@ export function estimateTrainingRam(
   //    Text skaliert linear mit der Sequenzlaenge, Bilder quadratisch mit der
   //    Kantenlaenge (die Pixelzahl waechst mit der Flaeche).
   const imageSize = options.imageSize;
-  const seqFactor = imageSize && Number.isFinite(imageSize) && imageSize > 0
-    ? (imageSize / REFERENCE_IMAGE_SIZE) ** 2
-    : Math.max(1, config.max_seq_length || 128) / 128;
-  const bytesPerSample = mixedPrecision ? 0.15 : 0.30;
   const batch = Math.max(1, config.batch_size || 1);
-  const activations = batch * seqFactor * bytesPerSample * (config.gradient_checkpointing ? 0.3 : 1.0);
+  let activations: number;
+  if (arch && !imageSize) {
+    const seq = Math.max(1, config.max_seq_length || 128);
+    const tokens = batch * seq;
+    const precision = mixedPrecision ? 0.5 : 1;
+    const linear = tokens * arch.numLayers * arch.hiddenSize
+      * (adapterOnly ? ACT_BYTES_LINEAR_ADAPTER : ACT_BYTES_LINEAR_FULL) * precision;
+    const attention = batch * seq * seq * arch.numLayers * Math.max(1, arch.numHeads) * ACT_BYTES_ATTENTION * precision;
+    // Die Logits rechnet der Loss auch bei Mixed Precision in fp32.
+    const logits = options.lmHead ? tokens * Math.max(0, arch.vocabSize) * ACT_BYTES_LOGITS : 0;
+    activations = (linear + attention + logits) / 1e9 * (config.gradient_checkpointing ? GRAD_CKPT_FACTOR_ARCH : 1);
+  } else {
+    const seqFactor = imageSize && Number.isFinite(imageSize) && imageSize > 0
+      ? (imageSize / REFERENCE_IMAGE_SIZE) ** 2
+      : Math.max(1, config.max_seq_length || 128) / 128;
+    const bytesPerSample = mixedPrecision ? 0.15 : 0.30;
+    activations = batch * seqFactor * bytesPerSample * (config.gradient_checkpointing ? 0.3 : 1.0);
+  }
 
   const overhead = FRAMEWORK_OVERHEAD_GB;
   const total = weights + gradients + optimizer + activations + overhead;

@@ -127,3 +127,46 @@ describe('estimateTrainingRam – Bildmodelle', () => {
     expect(longSeq.activations).toBeCloseTo(estimateTrainingRam(base, 0.28, { imageSize: 640 }).activations, 6);
   });
 });
+
+// Kalibrierung gegen echte Trainingsschritte (28.09.2026, PyTorch/MPS, fp32,
+// AdamW, Spitzen-RAM des Prozesses). Vorher: eine Pauschale je Sample, linear
+// in der Laenge — SmolLM2 bei 4×1024 Tokens "11 GB", gemessen 17,4 GB.
+describe('estimateTrainingRam mit Architektur', () => {
+  const smol = { hiddenSize: 576, numLayers: 30, numHeads: 9, vocabSize: 49152, paramBillion: 0.147 };
+  const lora = { ...base, use_lora: true };
+  const within = (got: number, measured: number, tol = 0.2) =>
+    expect(Math.abs(got - measured) / measured).toBeLessThan(tol);
+
+  it.each([
+    [4, 128, 2.67], [4, 256, 3.84], [4, 512, 8.21], [1, 1024, 5.87], [2, 1024, 9.28], [4, 1024, 17.39],
+  ])('SmolLM2-135M LoRA, Batch %i × %i Tokens ≈ %f GB', (batch, seq, measured) => {
+    const est = estimateTrainingRam({ ...lora, batch_size: batch, max_seq_length: seq }, 0.26, { arch: smol, lmHead: true });
+    within(est.total, measured);
+  });
+
+  it('volles Training braucht mehr als LoRA (SmolLM2, 8 × 512 ≈ 20,1 GB)', () => {
+    const est = estimateTrainingRam({ ...base, batch_size: 8, max_seq_length: 512 }, 0.26, { arch: smol, lmHead: true });
+    within(est.total, 20.07);
+  });
+
+  it('die Laenge geht quadratisch ein, die Batch-Groesse linear', () => {
+    const a = estimateTrainingRam({ ...lora, batch_size: 4, max_seq_length: 512 }, 0.26, { arch: smol, lmHead: true }).activations;
+    const b = estimateTrainingRam({ ...lora, batch_size: 4, max_seq_length: 1024 }, 0.26, { arch: smol, lmHead: true }).activations;
+    const c = estimateTrainingRam({ ...lora, batch_size: 8, max_seq_length: 512 }, 0.26, { arch: smol, lmHead: true }).activations;
+    expect(b / a).toBeGreaterThan(2.1);
+    expect(c / a).toBeCloseTo(2, 5);
+  });
+
+  it('Encoder ohne LM-Kopf: DistilBERT 16 × 512 ≈ 6,8 GB (lieber etwas darueber als darunter)', () => {
+    const distil = { hiddenSize: 768, numLayers: 6, numHeads: 12, vocabSize: 30522, paramBillion: 0.066 };
+    const est = estimateTrainingRam({ ...base, batch_size: 16, max_seq_length: 512 }, 0.25, { arch: distil });
+    expect(est.total).toBeGreaterThan(6.76 * 0.9);
+    expect(est.total).toBeLessThan(6.76 * 1.4);
+  });
+
+  it('Bildmodelle bleiben bei der Aufloesungs-Rechnung', () => {
+    const withArch = estimateTrainingRam(base, 0.2, { imageSize: 640, arch: smol });
+    const without = estimateTrainingRam(base, 0.2, { imageSize: 640 });
+    expect(withArch.activations).toBeCloseTo(without.activations, 6);
+  });
+});

@@ -1931,7 +1931,8 @@
         "imgsz": "imgsz verkleinern (z. B. 640)",
         "fp16": "FP16",
         "gradCkpt": "Grad Checkpointing"
-      }
+      },
+      "seqNote": "Gerechnet für Beispiele mit voller Länge ({seq} Tokens). Kürzere Texte brauchen deutlich weniger — die Sequenzlänge geht quadratisch ein."
     },
     "lossChart": {
       "waitingForData": "Warte auf Trainings-Daten…",

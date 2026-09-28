@@ -1432,24 +1432,77 @@ pub struct ModelRamInfo {
     pub readable_size: String,
     pub hidden_size: u32,
     pub num_hidden_layers: u32,
+    #[serde(default)] pub num_attention_heads: u32,
+    #[serde(default)] pub vocab_size: u32,
+    /// false: keine lesbare config.json (YOLO, Canvas, Diffusers) — die Werte
+    /// oben sind dann Platzhalter und die RAM-Schaetzung nimmt die Pauschale.
+    #[serde(default)] pub has_config: bool,
+}
+
+/// Erster Zahlenwert unter einem der Schluessel. Die Familien benennen
+/// dieselbe Groesse verschieden (BERT hidden_size, DistilBERT dim, GPT-2 n_embd).
+fn cfg_num(cfg: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|k| cfg.get(*k).and_then(|v| v.as_f64())).filter(|v| *v > 0.0)
+}
+
+/// Architekturwerte aus einer config.json; VLMs und Whisper tragen sie in
+/// text_config bzw. unter d_model/encoder_layers.
+pub fn ram_info_from_config(cfg: &serde_json::Value) -> ModelRamInfo {
+    let text = cfg.get("text_config").filter(|v| v.is_object()).unwrap_or(cfg);
+    let pick = |keys: &[&str]| cfg_num(text, keys).or_else(|| cfg_num(cfg, keys));
+    let h = pick(&["hidden_size", "dim", "n_embd", "d_model"]);
+    let layers = pick(&["num_hidden_layers", "n_layers", "n_layer", "num_layers", "decoder_layers", "encoder_layers"]);
+    let heads = pick(&["num_attention_heads", "n_heads", "n_head", "num_heads", "decoder_attention_heads", "encoder_attention_heads"]);
+    let vocab = pick(&["vocab_size"]).unwrap_or(32000.0);
+    let has = h.is_some() && layers.is_some();
+    let (h, layers) = (h.unwrap_or(768.0), layers.unwrap_or(12.0));
+    let heads = heads.unwrap_or((h / 64.0).max(1.0));
+    let params = vocab * h + layers * 12.0 * h * h;
+    let pb = params / 1e9;
+    let model_type = cfg.get("model_type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let readable = if pb < 0.5 { format!("{:.0}M", pb * 1000.0) } else { format!("{:.1}B", pb) };
+    ModelRamInfo {
+        param_billion: pb, model_type, readable_size: readable,
+        hidden_size: h as u32, num_hidden_layers: layers as u32,
+        num_attention_heads: heads as u32, vocab_size: vocab as u32, has_config: has,
+    }
 }
 
 #[tauri::command]
 pub fn get_model_ram_info(app_handle: tauri::AppHandle, model_id: String) -> Result<ModelRamInfo, String> {
     let cfg_path = get_models_dir(&app_handle)?.join(&model_id).join("config.json");
-    if !cfg_path.exists() {
-        return Ok(ModelRamInfo { param_billion: 0.28, model_type: "xlm-roberta".to_string(), readable_size: "278M".to_string(), hidden_size: 768, num_hidden_layers: 12 });
+    let cfg: serde_json::Value = fs::read_to_string(&cfg_path).ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or(serde_json::Value::Null);
+    Ok(ram_info_from_config(&cfg))
+}
+
+#[cfg(test)]
+mod ram_info_tests {
+    use super::ram_info_from_config;
+    use serde_json::json;
+
+    #[test]
+    fn liest_die_namen_der_familien() {
+        let llama = ram_info_from_config(&json!({"model_type":"llama","hidden_size":576,"num_hidden_layers":30,"num_attention_heads":9,"vocab_size":49152}));
+        assert!(llama.has_config);
+        assert_eq!((llama.hidden_size, llama.num_hidden_layers, llama.num_attention_heads, llama.vocab_size), (576, 30, 9, 49152));
+        assert!((llama.param_billion - 0.147).abs() < 0.01, "{}", llama.param_billion);
+
+        let distil = ram_info_from_config(&json!({"dim":768,"n_layers":6,"n_heads":12,"vocab_size":30522}));
+        assert_eq!((distil.hidden_size, distil.num_hidden_layers, distil.num_attention_heads), (768, 6, 12));
+
+        let gpt2 = ram_info_from_config(&json!({"n_embd":768,"n_layer":12,"n_head":12,"vocab_size":50257}));
+        assert_eq!((gpt2.hidden_size, gpt2.num_hidden_layers), (768, 12));
+
+        let vlm = ram_info_from_config(&json!({"text_config":{"hidden_size":576,"num_hidden_layers":30,"num_attention_heads":9,"vocab_size":49280}}));
+        assert_eq!(vlm.num_hidden_layers, 30);
     }
-    let content = fs::read_to_string(&cfg_path).map_err(|e| format!("config.json: {}", e))?;
-    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| format!("JSON: {}", e))?;
-    let h = cfg.get("hidden_size").and_then(|v| v.as_f64()).unwrap_or(768.0);
-    let layers = cfg.get("num_hidden_layers").and_then(|v| v.as_f64()).unwrap_or(12.0);
-    let vocab  = cfg.get("vocab_size").and_then(|v| v.as_f64()).unwrap_or(250002.0);
-    let params = vocab * h + layers * (4.0 * h * h + 2.0 * h * 4.0 * h);
-    let pb = params / 1e9;
-    let model_type = cfg.get("model_type").and_then(|v| v.as_str()).unwrap_or("xlm-roberta").to_string();
-    let readable = if pb < 0.5 { format!("{:.0}M", pb*1000.0) } else { format!("{:.1}B", pb) };
-    Ok(ModelRamInfo { param_billion: pb, model_type, readable_size: readable, hidden_size: h as u32, num_hidden_layers: layers as u32 })
+
+    #[test]
+    fn ohne_config_keine_architektur() {
+        assert!(!ram_info_from_config(&serde_json::Value::Null).has_config);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

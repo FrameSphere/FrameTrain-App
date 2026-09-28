@@ -1931,7 +1931,8 @@
         "imgsz": "reduce imgsz (e.g. 640)",
         "fp16": "FP16",
         "gradCkpt": "grad checkpointing"
-      }
+      },
+      "seqNote": "Calculated for samples at full length ({seq} tokens). Shorter texts need much less — sequence length counts quadratically."
     },
     "lossChart": {
       "waitingForData": "Waiting for training data…",

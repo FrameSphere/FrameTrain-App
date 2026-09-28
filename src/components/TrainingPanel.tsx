@@ -18,7 +18,10 @@ import { usePageContext } from '../contexts/PageContext';
 import { consumePendingCoachConfig, onApplyCoachConfig, onCoachCommand, consumePendingCoachCommand, getRecommendedParams, expandHiddenFields, setUnavailableConfigFields, withoutUnavailableFields, type CoachCommand } from '../ai/coachToolEvents';
 import { coercePatchFromRecord, SETTABLE_CONFIG } from '../ai/coachContext';
 import { canvasSettingsLocation } from '../ai/analysisTaskContext';
-import { estimateTrainingRam, ramVerdict, ramEstimateLines } from '../ai/resourceEstimate';
+import { estimateTrainingRam, ramVerdict, ramEstimateLines, type ModelArch } from '../ai/resourceEstimate';
+
+/** Aufgaben, deren Eingabe Tokens sind — dort gilt die Architektur-Rechnung. */
+const TEXT_RAM_TASKS = new Set(['seq_classification', 'token_classification', 'sentence_embedding', 'causal_lm', 'seq2seq']);
 import { clampNumber, parseNumberInput } from './numberInput';
 import { appendLossPoint } from './lossStats';
 import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
@@ -316,9 +319,9 @@ function Toggle({ checked, onChange, label, disabled, title }: { checked: boolea
 
 // ── RAM Calculator ─────────────────────────────────────────────────────────
 
-function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize, unavailable }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null; imageSize?: number; unavailable: ReadonlySet<string> }) {
+function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize, unavailable, arch, lmHead }: { config: TrainingConfig; modelSizeGb: number; systemRamGb: number | null; imageSize?: number; unavailable: ReadonlySet<string>; arch?: ModelArch | null; lmHead?: boolean }) {
   const { t } = useLanguage();
-  const est         = estimateTrainingRam(config, modelSizeGb, { imageSize });
+  const est         = estimateTrainingRam(config, modelSizeGb, { imageSize, arch, lmHead });
   const isFp16      = est.mixedPrecision;
   const is4bit      = config.load_in_4bit;
   const is8bit      = config.load_in_8bit;
@@ -350,6 +353,12 @@ function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize, unavailabl
           <div key={l as string} className="flex justify-between"><span className="text-gray-400">{l as string}</span><span className="text-gray-300 tabular-nums">{(v as number).toFixed(2)} GB</span></div>
         ))}
         <div className="flex justify-between pt-2 border-t border-white/10 font-semibold"><span className="text-gray-300">{t('trainingPanel.ramCalculator.total')}</span><span className={`${color} tabular-nums`}>~{total.toFixed(1)} GB</span></div>
+        {/* Die Zahl gilt fuer Beispiele in voller Laenge. Die Attention waechst
+            quadratisch — kurze Texte (Chat-Fragen, Kategorien) brauchen oft
+            nur einen Bruchteil. Ohne den Hinweis wirkte die Zahl "zu hoch". */}
+        {arch && !imageSize && (
+          <p className="text-[11px] text-gray-500">{t('trainingPanel.ramCalculator.seqNote').replace('{seq}', String(config.max_seq_length))}</p>
+        )}
         {/* Eine Zahl ohne Bezugsgroesse sagt nichts: ~17 GB sind auf 64 GB
             unkritisch und auf 16 GB ein sicherer Abbruch. */}
         {systemRamGb ? (
@@ -1145,6 +1154,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const [lossPoints, setLossPoints] = useState<LossPoint[]>([]);
   const [reqs, setReqs] = useState<RequirementsCheck | null>(null);
   const [modelSizeGb, setModelSizeGb] = useState(0.56);
+  /** Architektur aus der config.json — fuer die RAM-Schaetzung von Textmodellen. */
+  const [modelArch, setModelArch] = useState<ModelArch | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyJobs, setHistoryJobs] = useState<TrainingJob[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -1208,6 +1219,13 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   };
 
   const loadModelSize = async (modelId: string) => {
+    setModelArch(null);
+    invoke<{ has_config?: boolean; hidden_size: number; num_hidden_layers: number; num_attention_heads?: number; vocab_size?: number; param_billion?: number }>(
+      'get_model_ram_info', { modelId },
+    ).then(info => setModelArch(info.has_config ? {
+      hiddenSize: info.hidden_size, numLayers: info.num_hidden_layers,
+      numHeads: info.num_attention_heads ?? 0, vocabSize: info.vocab_size ?? 0, paramBillion: info.param_billion,
+    } : null)).catch(() => setModelArch(null));
     try {
       const m = models.find(x => x.id === modelId);
       if (m?.size_bytes) { setModelSizeGb(m.size_bytes / (1024 ** 3)); return; }
@@ -1369,6 +1387,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
     : typeof pluginParams.imgsz === 'string' && Number.isFinite(Number(pluginParams.imgsz)) ? Number(pluginParams.imgsz)
     : undefined;
   const isTorchvisionPlugin = detection?.supported === true && detection.plugin.id === 'image-classification';
+  // Architektur-Rechnung nur fuer Textmodelle: bei Audio, Bild, Video und
+  // Diffusion ist max_seq_length keine Tokenzahl.
+  const ramTask = detection?.supported === true ? detection.plugin.taskType : '';
+  const ramArch = TEXT_RAM_TASKS.has(ramTask) ? modelArch : null;
+  const ramLmHead = ramTask === 'causal_lm' || ramTask === 'seq2seq';
 
   useEffect(() => {
     const lines: string[] = [
@@ -1522,12 +1545,12 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       // beide getrennt und nannten auf demselben Bildschirm verschiedene Zahlen.
       lines.push('');
       lines.push('--- RESSOURCEN-SCHÄTZUNG (grob) ---');
-      lines.push(...ramEstimateLines(estimateTrainingRam(ramConfig, modelSizeGb, { imageSize: pluginImageSize }), modelSizeGb, systemRamGb));
+      lines.push(...ramEstimateLines(estimateTrainingRam(ramConfig, modelSizeGb, { imageSize: pluginImageSize, arch: ramArch, lmHead: ramLmHead }), modelSizeGb, systemRamGb));
       if (pluginImageSize) lines.push(`Aktivierungen skalieren hier mit imgsz=${pluginImageSize} (quadratisch) — imgsz senken ist bei diesem Modelltyp die wirksamste Sparmaßnahme neben der Batch-Größe.`);
     }
 
     setCurrentPageContent(lines.join('\n'), 'training');
-  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, systemRamGb, pluginParams, detectionKey, unavailableKey, setCurrentPageContent]);
+  }, [selectedModelId, selectedDatasetId, mode, currentJob, config, modelSizeGb, systemRamGb, pluginParams, detectionKey, unavailableKey, setCurrentPageContent, ramArch, ramLmHead]);
 
   // Beim Wechsel des Modelltyps sinnvolle Startwerte setzen. Vorher galt fuer
   // jedes Modell 2e-5 — fuer Bild- und Seq2Seq-Training deutlich zu klein.
@@ -2134,7 +2157,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             )}
 
             <SectionCard title={t('trainingPanel.ramCalculator.title')} icon={<MemoryStick className="w-4 h-4 text-amber-400" />} expanded={sections.ram} onToggle={() => toggleSection('ram')}>
-              <RamCalculator config={ramConfig} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} imageSize={pluginImageSize} unavailable={unavailableFields} />
+              <RamCalculator config={ramConfig} modelSizeGb={modelSizeGb} systemRamGb={systemRamGb} imageSize={pluginImageSize} unavailable={unavailableFields} arch={ramArch} lmHead={ramLmHead} />
             </SectionCard>
           </div>
 
