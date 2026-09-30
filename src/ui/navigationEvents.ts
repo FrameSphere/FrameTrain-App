@@ -4,7 +4,7 @@
 export type AppView =
   | 'home'
   | 'models' | 'training' | 'dataset' | 'analysis'
-  | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio';
+  | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio' | 'hosting';
 
 const EVENT_NAME = 'ft_navigate';
 

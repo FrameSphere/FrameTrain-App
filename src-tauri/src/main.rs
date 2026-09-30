@@ -18,6 +18,11 @@ mod analysis_manager;
 mod test_manager;
 mod plugin_commands;
 mod power_manager;
+mod model_host;
+mod hosting_manager;
+mod hosting_desktop;
+mod hosting_api;
+mod hotkey_tap;
 mod laboratory_manager;
 mod studio_manager;
 mod yolo_export;
@@ -157,6 +162,17 @@ fn main() {
         .manage(Arc::new(Mutex::new(test_manager::TestState::default())))
         .manage(Arc::new(Mutex::new(laboratory_manager::LabState::default())))
         .manage(std::sync::Mutex::new(power_manager::PowerState::default()))
+        .manage(hosting_desktop::DesktopState::default())
+        .manage(hosting_api::ApiState::default())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(|app| {
+            // Hosting: Einstellungen laden, Tray/Kuerzel/API anwenden, Modelle
+            // mit "beim Start laden" hochfahren.
+            let settings = hosting_manager::load_settings(app.handle());
+            app.manage(std::sync::Arc::new(hosting_manager::HostingState::new(settings)));
+            hosting_desktop::setup(app.handle());
+            Ok(())
+        })
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -296,7 +312,29 @@ fn main() {
             db_commands::delete_canvas_model_design,
             secret_store::secret_set,
             secret_store::secret_get,
+            secret_store::secret_exists,
             secret_store::secret_delete,
+            hosting_manager::hosting_list,
+            hosting_manager::hosting_get_settings,
+            hosting_manager::hosting_save_settings,
+            hosting_manager::hosting_rotate_token,
+            hosting_manager::hosting_start,
+            hosting_manager::hosting_stop,
+            hosting_manager::hosting_remove,
+            hosting_manager::hosting_update_model,
+            hosting_manager::hosting_infer,
+            hosting_manager::hosting_save_upload,
+            hosting_manager::hosting_chat_load,
+            hosting_manager::hosting_chat_save,
+            hosting_desktop::hosting_capture_screenshot,
+            hosting_desktop::hosting_show_quickchat,
+            hosting_desktop::hosting_hide_quickchat,
+            hosting_desktop::hosting_quickchat_resize,
+            hosting_desktop::hosting_quickchat_blur,
+            hosting_desktop::hosting_open_main,
+            hosting_desktop::hosting_hide_main,
+            hosting_desktop::hosting_set_ui_language,
+            hosting_desktop::hosting_desktop_status,
             ai_proxy::ai_http_post,
             studio_manager::studio_list_projects,
             studio_manager::studio_create_project,
@@ -332,9 +370,22 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.emit("app-close-requested", ());
+                if window.label() == hosting_desktop::QUICKCHAT {
+                    // Den Schnell-Chat nur ausblenden, er wird wiederverwendet.
+                    let _ = window.hide();
+                } else {
+                    let _ = window.emit("app-close-requested", ());
+                }
             }
         })
-        .run(context)
-        .expect("Fehler beim Starten der Tauri-Anwendung");
+        .build(context)
+        .expect("Fehler beim Starten der Tauri-Anwendung")
+        .run(|app, event| {
+            // macOS: Klick aufs Dock-Symbol holt das versteckte Hauptfenster zurueck.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                hosting_desktop::show_main(app, None);
+            }
+            let _ = (app, event);
+        });
 }

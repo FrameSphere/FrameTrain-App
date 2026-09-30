@@ -9,7 +9,8 @@
       "tests": "Tests",
       "laboratory": "Laboratory",
       "synapse": "Synapse Builder",
-      "versions": "Versionen"
+      "versions": "Versionen",
+      "hosting": "Hosting"
     },
     "settings": "Einstellungen",
     "logout": "Abmelden",
@@ -164,7 +165,8 @@
         "saved": "HuggingFace-Token gespeichert.",
         "removed": "HuggingFace-Token entfernt.",
         "createToken": "Token erstellen",
-        "hint": "Der Token wird sicher im Schlüsselbund deines Systems abgelegt, nicht im Klartext. Beim Export einer Version wird er automatisch verwendet."
+        "hint": "Der Token wird sicher im Schlüsselbund deines Systems abgelegt, nicht im Klartext. Beim Export einer Version wird er automatisch verwendet.",
+        "replacePlaceholder": "Gespeichert – zum Ersetzen neuen Token eingeben"
       },
       "communityName": {
         "title": "Community-Name",
@@ -3775,7 +3777,8 @@
         "http404": "Seite nicht gefunden (404)",
         "http429": "zu viele Anfragen – später noch einmal (429)"
       },
-      "limitsSummary": "{pages} Seiten · {files} Dateien · {mb} MB"
+      "limitsSummary": "{pages} Seiten · {files} Dateien · {mb} MB",
+      "labelNeedsClasses": "Leg zuerst Klassen an, dann kannst du allem Geholten gleich eine Klasse geben."
     },
     "generate": {
       "title": "Texte erzeugen lassen",
@@ -4015,6 +4018,176 @@
       "yolo": "YOLO",
       "llm": "LLM Fine-Tuning",
       "generative": "Generative Modelle"
+    }
+  },
+  "hosting": {
+    "status": {
+      "idle": "gestoppt",
+      "loading": "lädt",
+      "ready": "läuft",
+      "error": "Fehler",
+      "sleeping": "schläft",
+      "busy": "rechnet"
+    },
+    "task": {
+      "causal_lm": "LLM · Text rein, Text raus",
+      "seq2seq": "Seq2Seq · Text umformen",
+      "text_cls": "Textklassifikation",
+      "image_cls": "Bildklassifikation",
+      "audio_cls": "Audioklassifikation",
+      "video_cls": "Videoklassifikation",
+      "asr": "Spracherkennung",
+      "token": "Named Entities (NER)",
+      "embedding": "Sentence-Embeddings",
+      "vlm": "Vision-Language · Bild + Frage",
+      "text_to_image": "Text-zu-Bild",
+      "detect": "Objekterkennung (YOLO)",
+      "yolo_segment": "Segmentierung (YOLO)",
+      "yolo_pose": "Pose (YOLO)",
+      "yolo_obb": "Gedrehte Boxen (YOLO)",
+      "yolo_classify": "Bildklassifikation (YOLO)",
+      "canvas": "Synapse-Modell · Zahlenvektor",
+      "unknown": "Unbekannte Aufgabe"
+    },
+    "page": {
+      "title": "Hosting",
+      "subtitle": "Modelle lokal bereithalten und direkt befragen – hier, per Schnell-Chat von überall oder über die lokale API.",
+      "add": "Modell hosten",
+      "settings": "Schnell-Zugriff & API",
+      "hosted": "Gehostet",
+      "running": "{count} laufen · {gb} GB",
+      "emptyTitle": "Noch kein Modell gehostet",
+      "emptyText": "Wähle ein trainiertes Modell oder eines aus der Bibliothek. Es bleibt geladen und antwortet sofort – hier, im Schnell-Chat ({shortcut}) oder per API.",
+      "default": "Schnell-Chat-Standard",
+      "isDefault": "Schnell-Chat-Standard",
+      "makeDefault": "Als Standard",
+      "makeDefaultHint": "Der Schnell-Chat ({shortcut}) spricht dieses Modell an.",
+      "autoload": "Beim Start laden",
+      "load": "Laden",
+      "stop": "Stoppen",
+      "remove": "Aus dem Hosting entfernen",
+      "removeConfirm": "„{name}“ aus dem Hosting entfernen? Das Modell selbst bleibt in der Bibliothek.",
+      "notLoadedYet": "noch nicht geladen",
+      "requests": "{count} Anfragen",
+      "emptyChat": "Schick dem Modell eine erste Anfrage.",
+      "quickHint": "Schnell-Chat von überall: {shortcut}",
+      "composerHint": "Enter senden · Umschalt+Enter neue Zeile · Dateien ins Fenster ziehen oder einfügen",
+      "clear": "Verlauf leeren"
+    },
+    "dialog": {
+      "title": "Modell hosten",
+      "search": "Modell suchen …",
+      "loading": "Modelle werden geladen …",
+      "empty": "Keine Modelle gefunden. Importiere eines unter „Modelle“ oder trainiere eines.",
+      "versions": "{count} Versionen",
+      "library": "Bibliothek",
+      "hostedCount": "{count} gehostet",
+      "version": "Version",
+      "original": "Original (ohne Training)",
+      "alreadyHosted": "gehostet",
+      "makeDefault": "Als Schnell-Chat-Standard",
+      "autoload": "Beim App-Start laden",
+      "ramTight": "Knapp: das Modell braucht grob {need} GB, laufende Modelle belegen {running} GB von {total} GB Arbeitsspeicher. Stoppe vorher ein anderes Modell.",
+      "cancel": "Abbrechen",
+      "submit": "Laden & hosten",
+      "reload": "Neu laden"
+    },
+    "chat": {
+      "thinking": "Modell rechnet …",
+      "waking": "Modell wird geladen …"
+    },
+    "composer": {
+      "noModel": "Kein Modell gewählt",
+      "send": "Senden",
+      "attach": "Datei wählen",
+      "screenshot": "Bildschirmfoto aufnehmen",
+      "record": "Mit dem Mikrofon aufnehmen",
+      "stopRecording": "Aufnahme beenden",
+      "recording": "Aufnahme",
+      "pasted": "Eingefügt",
+      "noFileNeeded": "Dieses Modell arbeitet mit Text – Dateien braucht es nicht.",
+      "wrongFile": "Dieses Modell erwartet: {kind}.",
+      "micError": "Mikrofon nicht verfügbar: {detail}",
+      "kind": {
+        "image": "Bild",
+        "audio": "Audio",
+        "video": "Video"
+      },
+      "placeholder": {
+        "text": "Text für {name} …",
+        "causal_lm": "Nachricht an {name} …",
+        "seq2seq": "Text zum Umformen …",
+        "token": "Text, in dem {name} Entitäten sucht …",
+        "embedding": "Satz – oder „Satz A ||| Satz B“ zum Vergleichen",
+        "text_to_image": "Beschreibe das Bild …",
+        "image": "Bild einfügen, ziehen oder aufnehmen",
+        "vlm": "Bild anhängen und Frage stellen (optional) …",
+        "audio": "Audio anhängen oder aufnehmen",
+        "asr": "Sprache aufnehmen oder Audio anhängen",
+        "video": "Video anhängen oder hineinziehen",
+        "tensor": "Zahlen, z. B. 0.5, 1.2, 3.0"
+      }
+    },
+    "result": {
+      "copy": "Kopieren",
+      "noObjects": "Keine Objekte erkannt",
+      "tokensPerSecond": "{value} Token/s"
+    },
+    "quick": {
+      "keys": "Enter senden · Esc schließen · ⌘/Strg+N neu",
+      "new": "Neu",
+      "openApp": "In FrameTrain öffnen",
+      "noModels": "Es ist noch kein Modell gehostet."
+    },
+    "settings": {
+      "quickTitle": "Schnell-Zugriff",
+      "shortcut": "Tastenkürzel",
+      "shortcutHint": "Öffnet den Schnell-Chat über jeder App. Standard {def} – mit keiner verbreiteten App belegt.",
+      "pressKeys": "Tasten drücken …",
+      "off": "aus",
+      "reset": "Standard",
+      "disable": "Aus",
+      "shortcutTaken": "Das Kürzel ist schon von einer anderen App belegt. Wähle ein anderes.",
+      "conflict": "Achtung: dieses Kürzel nutzt bereits {app}.",
+      "doubleTap": "Doppeltipp",
+      "doubleTapHint": "Zweimal kurz auf die Taste tippen öffnet den Schnell-Chat. Doppeltipp Option nutzt schon Claude.",
+      "doubleTapWayland": "Unter Wayland kann keine App Tasten systemweit abfragen – nutze das Tastenkürzel.",
+      "tap": {
+        "off": "Aus",
+        "control": "Control (Strg)",
+        "alt": "Alt",
+        "altMac": "Option ⌥ (belegt von Claude)",
+        "shift": "Umschalt",
+        "meta": "Windows-Taste",
+        "metaMac": "Command ⌘"
+      },
+      "tray": "Symbol in der Menüleiste",
+      "trayHint": {
+        "macos": "Klick öffnet den Schnell-Chat direkt unter dem Symbol.",
+        "windows": "Symbol im Infobereich der Taskleiste; Klick öffnet den Schnell-Chat.",
+        "linux": "Unter Linux zeigt das Symbol ein Menü; der erste Eintrag öffnet den Schnell-Chat."
+      },
+      "idle": "Bei Leerlauf entladen",
+      "idleHint": "Gibt den Arbeitsspeicher frei. Die nächste Anfrage lädt das Modell wieder.",
+      "never": "nie",
+      "minutes": "nach {count} min",
+      "apiTitle": "Lokale API",
+      "apiHint": "Andere Programme auf diesem Rechner schicken Anfragen an die gehosteten Modelle – OpenAI-kompatibel für LLMs. Nur 127.0.0.1, nur mit Token.",
+      "apiRunning": "Läuft auf {url}",
+      "port": "Port",
+      "token": "Token",
+      "tokenHint": "Als „Authorization: Bearer …“ mitschicken.",
+      "showToken": "Token zeigen",
+      "rotate": "Neuen Token erzeugen",
+      "snippetFor": "Beispiel für „{name}“"
+    },
+    "conflict": {
+      "assistants": "Claude, ChatGPT oder Raycast",
+      "spotlight": "Spotlight",
+      "finder": "die Finder-Suche",
+      "inputSources": "der Wechsel der Eingabequelle",
+      "inputLanguage": "der Wechsel der Eingabesprache",
+      "office": "Microsoft Office"
     }
   }
 }

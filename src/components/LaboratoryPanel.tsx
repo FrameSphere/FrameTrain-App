@@ -69,7 +69,7 @@ interface ModelWithVersionTree { id: string; name: string; versions: VersionTree
 type LabInputKind = 'text' | 'image' | 'audio' | 'video' | 'tensor';
 
 /** Eine Detektion in Pixelkoordinaten des Originalbildes (YOLO). */
-interface DetectionBox {
+export interface DetectionBox {
   label: string;
   confidence: number;
   x1: number; y1: number; x2: number; y2: number;

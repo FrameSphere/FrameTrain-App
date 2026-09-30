@@ -17,6 +17,9 @@ import { onNavigate } from '../ui/navigationEvents';
 import TrainingDashboard from './TrainingDashboard';
 import SynapseBuilder from './synapse/SynapseBuilder';
 import StudioPanel from './studio/StudioPanel';
+import HostingPanel from './hosting/HostingPanel';
+import { listen } from '@tauri-apps/api/event';
+import { useLanguage } from '../contexts/LanguageContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 
@@ -32,7 +35,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio';
+type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio' | 'hosting';
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('home');
@@ -75,6 +78,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         return <TestPanel userData={userData} />;
       case 'laboratory':
         return <LaboratoryPanel userId={userData.userId} />;
+      case 'hosting':
+        return <HostingPanel />;
       case 'versions':
         return <VersionManager />;
       case 'settings':
@@ -88,6 +93,18 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
 
   // Globale Navigation (aus Rechtsklick-Menü / Aktionen)
   useEffect(() => onNavigate((view) => setCurrentView(view)), []);
+
+  // Hosting: Schnell-Chat/Tray oeffnen eine Seite im Hauptfenster; Tray-Texte
+  // folgen der Sprache der App.
+  const { language } = useLanguage();
+  useEffect(() => { void invoke('hosting_set_ui_language', { lang: language }).catch(() => {}); }, [language]);
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    let disposed = false;
+    listen<string>('hosting-open-view', e => { if (e.payload === 'hosting') setCurrentView('hosting'); })
+      .then(fn => { if (disposed) fn(); else un = fn; }).catch(() => {});
+    return () => { disposed = true; un?.(); };
+  }, []);
 
   const handleStopFromGlobal = async () => {
     try {

@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Upload, Trash2, Infinity as InfinityIcon } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
-import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
+import { useLanguage, translate, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
@@ -156,16 +156,18 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     if (activeTab === 'ai-assistant') ensureProviderKeysLoaded();
   }, [activeTab, ensureProviderKeysLoaded]);
 
-  // HuggingFace-Token aus dem Schluesselbund laden, sobald der Konto-Tab offen ist
+  // Nur nachsehen, OB ein HuggingFace-Token hinterlegt ist. Das Auslesen
+  // loeste beim Oeffnen der Einstellungen (Konto ist der erste Tab) den
+  // macOS-Passwortdialog aus, weil sich die Signatur mit jedem Release aendert.
+  // Gelesen wird der Token erst beim Hochladen einer Version.
   useEffect(() => {
     if (activeTab !== 'account') return;
     let cancelled = false;
     (async () => {
       try {
-        const value = await invoke<string | null>('secret_get', { key: HF_TOKEN_ACCOUNT });
+        const exists = await invoke<boolean>('secret_exists', { key: HF_TOKEN_ACCOUNT });
         if (cancelled) return;
-        setHfTokenInput(value || '');
-        setHfTokenStored(!!value);
+        setHfTokenStored(exists);
       } catch {
         if (!cancelled) setHfTokenStored(false);
       }
@@ -175,16 +177,15 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
   const handleSaveHfToken = async () => {
     const token = hfTokenInput.trim();
+    // Das Feld zeigt den gespeicherten Token nicht mehr; leer heisst hier
+    // "nichts geaendert", entfernt wird ueber den eigenen Knopf.
+    if (!token) return;
     setSavingHfToken(true);
     setHfTokenSaved(false);
     try {
-      if (token) {
-        await invoke('secret_set', { key: HF_TOKEN_ACCOUNT, value: token });
-        setHfTokenStored(true);
-      } else {
-        await invoke('secret_delete', { key: HF_TOKEN_ACCOUNT });
-        setHfTokenStored(false);
-      }
+      await invoke('secret_set', { key: HF_TOKEN_ACCOUNT, value: token });
+      setHfTokenStored(true);
+      setHfTokenInput('');
       setHfTokenSaved(true);
       setNotification({ type: 'success', message: t('settings.account.huggingface.saved') });
     } catch (e) {
@@ -770,7 +771,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             type={showHfToken ? 'text' : 'password'}
             value={hfTokenInput}
             onChange={e => { setHfTokenInput(e.target.value); setHfTokenSaved(false); }}
-            placeholder="hf_..."
+            placeholder={hfTokenStored ? t('settings.account.huggingface.replacePlaceholder') : 'hf_...'}
             spellCheck={false}
             autoCapitalize="none"
             className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500/40"
@@ -786,7 +787,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="flex items-center gap-2 mt-3">
           <button
             onClick={handleSaveHfToken}
-            disabled={savingHfToken}
+            disabled={savingHfToken || !hfTokenInput.trim()}
             className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors disabled:opacity-50"
           >
             {savingHfToken ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -1540,7 +1541,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   key={lang}
                   onClick={() => {
                     setLanguage(lang);
-                    setNotification({ type: 'success', message: t('settings.language.changed').replace('{lang}', meta.nativeLabel) });
+                    // In der neuen Sprache: `t` haengt bis zum naechsten Render noch an der alten.
+                    setNotification({ type: 'success', message: translate(lang, 'settings.language.changed', { lang: meta.nativeLabel }) });
                     setTimeout(() => setNotification(null), 2500);
                   }}
                   className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 transition-all duration-200 ${

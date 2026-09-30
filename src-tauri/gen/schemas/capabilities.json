@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for FrameTrain","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open","os:default","dialog:default","fs:default","updater:default","process:allow-restart"]}}
+{"default":{"identifier":"default","description":"Default capabilities for FrameTrain","local":true,"windows":["main","quickchat"],"permissions":["core:default","shell:allow-open","os:default","dialog:default","fs:default","updater:default","process:allow-restart","core:window:allow-start-dragging"]}}

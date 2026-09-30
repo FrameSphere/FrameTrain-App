@@ -13,6 +13,7 @@ import {
   Microscope,
   Zap,
   Network,
+  Server,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -41,6 +42,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
     { id: 'analysis',   label: t('sidebar.nav.analysis'),  icon: BarChart3 },
     { id: 'tests',      label: t('sidebar.nav.tests'),     icon: FlaskConical },
     { id: 'laboratory', label: t('sidebar.nav.laboratory'),icon: Microscope },
+    { id: 'hosting',    label: t('sidebar.nav.hosting'),   icon: Server },
     { id: 'synapse',    label: t('sidebar.nav.synapse'),   icon: Network },
     { id: 'versions',   label: t('sidebar.nav.versions'),  icon: GitBranch },
   ];

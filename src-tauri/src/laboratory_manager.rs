@@ -3,14 +3,24 @@
 // Architektur: Rust startet einmalig einen Python-Prozess der das Modell
 // laedt und dann via stdin/stdout auf Inferenz-Anfragen wartet.
 // Jeder Sample-Test braucht nur noch ~50ms statt 3-5s.
+// Start, Anfrage und Antwort teilt sich das Labor mit dem Hosting (model_host.rs).
 
 use serde::{Deserialize, Serialize};
 use crate::command_ext::{NoWindow, PythonUtf8};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use crate::model_host::{self, InferInput, ServerProc};
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
+
+fn get_python_path() -> String {
+    // Gemeinsame Auswahl fuer Training, Tests, Labor und Einrichtung.
+    crate::python_env::resolve_python()
+}
+
+pub use crate::model_host::InferResult;
+#[allow(unused_imports)]
+pub(crate) use crate::model_host::{get_model_server_path, get_version_info, get_yolo_server_path};
 
 // ============ Typen ============
 
@@ -28,128 +38,17 @@ impl Default for ServerStatus {
 }
 
 pub struct LabServer {
-    pub child:      Child,
-    pub stdin:      std::io::BufWriter<std::process::ChildStdin>,
-    pub receiver:   std::sync::mpsc::Receiver<String>,
+    pub proc:       ServerProc,
     pub version_id: String,
-    pub model_path: String,
-    /// Canvas-Modell (DynamicGraphModule) statt HuggingFace — anderes Request-Format
-    pub is_canvas:  bool,
-    /// Was der Server erwartet: "text" | "image" | "audio" (vom Python-Server gemeldet)
-    pub input_kind: String,
-    /// Aufgabenbereich: "text" | "image" | "audio" | "seq2seq" | "canvas"
-    pub modality:   String,
 }
 
 #[derive(Default)]
 pub struct LabState {
     pub server: Option<LabServer>,
     pub status: ServerStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InferResult {
-    pub predicted:        String,
-    pub confidence:       Option<f64>,
-    pub top_predictions:  Option<Vec<serde_json::Value>>,
-    pub inference_ms:     f64,
-    /// Objekterkennung: Boxen in Pixelkoordinaten des Originalbildes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub boxes:            Option<Vec<serde_json::Value>>,
-    /// Bildmasse zu den Boxen – ohne sie laesst sich nichts massstabsgetreu zeichnen.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_width:      Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_height:     Option<u32>,
-    /// Die ganze Antwort des Modell-Servers. Jede Aufgabe meldet eigene
-    /// Felder (Entitaeten, Aehnlichkeit, Bildpfad, YOLO-Task, Frage …); ohne
-    /// sie konnte das Labor nur Klasse und Konfidenz zeigen.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra:            Option<serde_json::Value>,
-}
-
-// ============ Hilfsfunktionen ============
-
-fn get_python_path() -> String {
-    // Gemeinsame Auswahl fuer Training, Tests, Labor und Einrichtung.
-    crate::python_env::resolve_python()
-}
-
-pub(crate) fn get_model_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let candidates = vec![
-        app_handle.path().resource_dir().ok()
-            .map(|p| p.join("python").join("test_engine").join("model_server.py")),
-        Some(std::path::PathBuf::from("src-tauri/python/test_engine/model_server.py")),
-        Some(std::path::PathBuf::from(
-            "/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app/src-tauri/python/test_engine/model_server.py"
-        )),
-    ];
-    for p in candidates.into_iter().flatten() {
-        if p.exists() {
-            println!("[LabServer] Script gefunden: {:?}", p);
-            return Ok(p);
-        }
-    }
-    Err("model_server.py nicht gefunden".to_string())
-}
-
-fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) -> Result<String, String> {
-    get_version_info(app_handle, version_id).map(|(p, _)| p)
-}
-
-/// Liefert (Versions-Pfad, model_id) — model_id wird für Canvas-Modelle gebraucht,
-/// deren Inferenz-Dateien im Modell-Ordner liegen (nicht zwingend im Versions-Pfad).
-pub(crate) fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) -> Result<(String, String), String> {
-    let db_path = app_handle.path().app_data_dir()
-        .map_err(|e| format!("AppDataDir: {}", e))?
-        .join("frametrain.db");
-    let conn = rusqlite::Connection::open(&db_path)
-        .map_err(|e| format!("DB: {}", e))?;
-    conn.query_row(
-        "SELECT path, model_id FROM model_versions_new WHERE id = ?1",
-        [version_id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    ).map_err(|e| format!("Version nicht gefunden: {}", e))
-}
-
-/// Script für Canvas-Modelle (gleiches stdin/stdout-Protokoll wie model_server.py)
-/// Pfad zum YOLO-Server – dritter Servertyp neben HuggingFace und Canvas.
-pub(crate) fn get_yolo_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let rel = std::path::Path::new("python").join("train_engine").join("plugins")
-        .join("yolo").join("yolo_inference_server.py");
-    let candidates = vec![
-        app_handle.path().resource_dir().ok().map(|p| p.join(&rel)),
-        Some(std::path::PathBuf::from("src-tauri").join(&rel)),
-        Some(std::path::PathBuf::from(
-            "/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app/src-tauri"
-        ).join(&rel)),
-    ];
-    for p in candidates.into_iter().flatten() {
-        if p.exists() {
-            println!("[LabServer] YOLO-Script gefunden: {:?}", p);
-            return Ok(p);
-        }
-    }
-    Err("yolo_inference_server.py nicht gefunden".to_string())
-}
-
-fn get_canvas_server_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let rel = std::path::Path::new("python").join("train_engine").join("plugins")
-        .join("canvas").join("canvas_inference_server.py");
-    let candidates = vec![
-        app_handle.path().resource_dir().ok().map(|p| p.join(&rel)),
-        Some(std::path::PathBuf::from("src-tauri").join(&rel)),
-        Some(std::path::PathBuf::from(
-            "/Users/karol/Desktop/Laufende_Projekte/FrameTrain/desktop-app/src-tauri"
-        ).join(&rel)),
-    ];
-    for p in candidates.into_iter().flatten() {
-        if p.exists() {
-            println!("[LabServer] Canvas-Script gefunden: {:?}", p);
-            return Ok(p);
-        }
-    }
-    Err("canvas_inference_server.py nicht gefunden".to_string())
+    /// Zaehlt die Ladeversuche. Ein langsamer alter Start darf das Modell
+    /// eines neueren nicht mehr ersetzen.
+    pub generation: u64,
 }
 
 // ============ Commands ============
@@ -163,28 +62,16 @@ pub async fn lab_start_model_server(
     version_id: String,
     state: tauri::State<'_, Arc<Mutex<LabState>>>,
 ) -> Result<(), String> {
-    // Alten Server beenden
-    {
+    // Alten Server beenden (Drop von ServerProc beendet den Prozess)
+    let generation = {
         let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
-        if let Some(ref mut srv) = s.server {
-            let _ = srv.child.kill();
-        }
         s.server = None;
         s.status = ServerStatus::Loading;
-    }
+        s.generation += 1;
+        s.generation
+    };
 
     let _ = app_handle.emit("lab-server-status", serde_json::json!({ "status": "loading" }));
-
-    let (version_path, model_id) = match get_version_info(&app_handle, &version_id) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = app_handle.emit("lab-server-status",
-                serde_json::json!({ "status": "error", "message": e }));
-            let mut s = state.lock().unwrap();
-            s.status = ServerStatus::Error;
-            return Err(e);
-        }
-    };
 
     let fail = |msg: String| -> Result<(), String> {
         let _ = app_handle.emit("lab-server-status",
@@ -193,288 +80,50 @@ pub async fn lab_start_model_server(
         Err(msg)
     };
 
-    // ── Preflight + Server-Typ bestimmen (HuggingFace vs. Canvas) ─────────
-    let vp = std::path::PathBuf::from(&version_path);
-    let models_root = app_handle.path().app_data_dir()
-        .map(|d| d.join("models"))
-        .unwrap_or_default();
-    let canvas_model_dir = models_root.join(&model_id);
-
-    let is_canvas = model_id.starts_with("canvas_")
-        || vp.join("graph_metadata.json").exists()
-        || canvas_model_dir.join("graph_metadata.json").exists();
-
-    // YOLO: eigener Server. Erkannt wird es am Checkpoint selbst (Ultralytics
-    // schreibt seine Modulpfade in die .pt) oder an der Zuordnung, die der
-    // Nutzer beim Import getroffen hat — Dateinamen wie best.pt sagen nichts.
-    let is_yolo = !is_canvas && (
-        crate::model_manager::read_plugin_override(&canvas_model_dir).as_deref() == Some("yolo")
-            || crate::model_manager::dir_has_ultralytics_checkpoint(&vp)
-            || crate::model_manager::dir_has_ultralytics_checkpoint(&canvas_model_dir)
-    );
-
-    let (model_path, is_canvas) = if is_yolo {
-        // Die Version hat Vorrang: dort liegen die Gewichte des eigenen Laufs.
-        let dir = if crate::model_manager::dir_has_ultralytics_checkpoint(&vp) {
-            vp.clone()
-        } else {
-            canvas_model_dir.clone()
-        };
-        (dir.to_string_lossy().to_string(), false)
-    } else if is_canvas {
-        // Canvas braucht graph_metadata.json + model.pt im selben Ordner.
-        // Versions-Pfad bevorzugen, sonst der Modell-Ordner (dorthin kopiert
-        // das Training die Gewichte für list_canvas_models_with_pt).
-        let dir = if vp.join("graph_metadata.json").exists() && vp.join("model.pt").exists() {
-            vp.clone()
-        } else {
-            canvas_model_dir.clone()
-        };
-        if !dir.join("graph_metadata.json").exists() {
-            return fail(format!(
-                "Canvas-Modell: graph_metadata.json nicht gefunden in {} — \
-                 Modell im Synapse Builder erneut speichern.", dir.display()
-            ));
-        }
-        if !dir.join("model.pt").exists() {
-            return fail(
-                "Canvas-Modell ist noch nicht trainiert (kein model.pt). \
-                 Trainiere es zuerst im Synapse Builder oder Training-Panel — \
-                 danach kann es hier geladen werden.".to_string()
-            );
-        }
-        (dir.to_string_lossy().to_string(), true)
-    } else {
-        if !vp.exists() {
-            return fail(format!(
-                "Versions-Pfad existiert nicht: {} — das Modell wurde evtl. verschoben oder gelöscht.",
-                version_path
-            ));
-        }
-        if !has_lab_model_marker(&vp) {
-            let contents: Vec<String> = std::fs::read_dir(&vp).ok().into_iter().flatten().flatten()
-                .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
-                .filter(|n| !n.starts_with('.'))
-                .take(8)
-                .collect();
-            return fail(format!(
-                "Keine config.json in {} — kein HuggingFace-Format. \
-                 Die Lab-Inferenz benötigt ein HuggingFace-Modell \
-                 (Text, Bild, Audio oder Seq2Seq). Vorhandene Dateien: {}",
-                version_path,
-                if contents.is_empty() { "(leer)".to_string() } else { contents.join(", ") }
-            ));
-        }
-        (version_path.clone(), false)
-    };
-
-    let python        = get_python_path();
-    let server_script = match if is_yolo {
-        get_yolo_server_path(&app_handle)
-    } else if is_canvas {
-        get_canvas_server_path(&app_handle)
-    } else {
-        get_model_server_path(&app_handle)
-    } {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = app_handle.emit("lab-server-status",
-                serde_json::json!({ "status": "error", "message": e }));
-            let mut s = state.lock().unwrap();
-            s.status = ServerStatus::Error;
-            return Err(e);
-        }
+    // ── Preflight + Server-Typ bestimmen (HuggingFace vs. YOLO vs. Canvas) ──
+    let model = match model_host::resolve_model(&app_handle, &version_id) {
+        Ok(m) => m,
+        Err(e) => return fail(e),
     };
 
     // Hintergrund-Thread fuer den blockierenden Startup
     let state_arc = Arc::clone(&*state);
     let ah        = app_handle.clone();
     let vid       = version_id.clone();
-    let mp        = model_path.clone();
-    let canvas    = is_canvas;
-    let yolo      = is_yolo;
-    // Canvas- und YOLO-Server erwarten --model-dir, der HF-Server --model-path
-    let path_arg  = if is_canvas || is_yolo { "--model-dir" } else { "--model-path" };
 
     std::thread::spawn(move || {
-        println!("[LabServer] Starte Python: {} {} {} (canvas={}, yolo={})", python, path_arg, mp, canvas, yolo);
-
-        let mut child = match Command::new(&python).no_window().python_utf8()
-            .arg(server_script.to_string_lossy().to_string())
-            .arg(path_arg).arg(&mp)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = format!("Python konnte nicht gestartet werden: {}", e);
-                let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": msg }));
-                if let Ok(mut s) = state_arc.lock() { s.status = ServerStatus::Error; }
-                return;
-            }
-        };
-
-        // Stderr in separatem Thread loggen
-        if let Some(stderr) = child.stderr.take() {
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().flatten() {
-                    eprintln!("[LabServer STDERR] {}", line);
-                }
-            });
-        }
-
-        let stdin = match child.stdin.take() {
-            Some(s) => s,
-            None => {
-                let _ = child.kill();
-                let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": "Kein stdin" }));
-                return;
-            }
-        };
-
-        let stdout = match child.stdout.take() {
-            Some(s) => s,
-            None => {
-                let _ = child.kill();
-                let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": "Kein stdout" }));
-                return;
-            }
-        };
-
-        // stdout-Lese-Thread -> Channel
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().flatten() {
-                if tx.send(line).is_err() { break; }
-            }
-        });
-
-        // Auf "ready" warten (max. 120 Sekunden – grosse Modelle auf CPU brauchen Zeit)
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let mut server_ready = false;
-        let mut input_kind   = if canvas { "tensor".to_string() }
-                               else if yolo { "image".to_string() }
-                               else { "text".to_string() };
-        let mut modality     = if canvas { "canvas".to_string() }
-                               else if yolo { "detect".to_string() }
-                               else { "text".to_string() };
-        // Klassennamen des Modells. Sie kommen aus dem Checkpoint, nicht aus
-        // einer Liste in FrameTrain — jedes Modell bringt seine eigenen mit.
-        let mut classes: Vec<String> = Vec::new();
-        // YOLO-Aufgabe (detect/segment/pose/obb/classify): bestimmt, wie das
-        // Labor die Soll-Labels liest und was es ueber das Bild zeichnet.
-        let mut task: Option<String> = None;
-
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                let _ = child.kill();
-                let msg = "Timeout beim Laden des Modells (120s). Versuche es erneut.".to_string();
-                let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": msg }));
-                if let Ok(mut s) = state_arc.lock() { s.status = ServerStatus::Error; }
-                return;
-            }
-
-            match rx.recv_timeout(remaining) {
-                Ok(line) => {
-                    let line = line.trim().to_string();
-                    println!("[LabServer] Startup-Zeile: {}", line);
-                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
-                        match msg.get("type").and_then(|t| t.as_str()) {
-                            Some("ready") => {
-                                if let Some(k) = msg.get("input_kind").and_then(|v| v.as_str()) {
-                                    input_kind = k.to_string();
-                                }
-                                if let Some(m) = msg.get("modality").and_then(|v| v.as_str()) {
-                                    modality = m.to_string();
-                                }
-                                task = msg.get("task_type").and_then(|v| v.as_str()).map(str::to_string);
-                                if let Some(c) = msg.get("classes").and_then(|v| v.as_array()) {
-                                    classes = c.iter()
-                                        .filter_map(|v| v.as_str().map(str::to_string))
-                                        .collect();
-                                }
-                                server_ready = true;
-                                break;
-                            }
-                            Some("error") => {
-                                let m = msg.get("message").and_then(|m| m.as_str())
-                                    .unwrap_or("Unbekannter Fehler").to_string();
-                                let _ = child.kill();
-                                let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": m }));
-                                if let Ok(mut s) = state_arc.lock() { s.status = ServerStatus::Error; }
-                                return;
-                            }
-                            _ => { /* Ignoriere andere Nachrichten waehrend Startup */ }
-                        }
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = child.kill();
-                    let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": "Timeout beim Modell-Laden" }));
-                    if let Ok(mut s) = state_arc.lock() { s.status = ServerStatus::Error; }
-                    return;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": "Server-Prozess unerwartet beendet" }));
-                    if let Ok(mut s) = state_arc.lock() { s.status = ServerStatus::Error; }
-                    return;
-                }
-            }
-        }
-
-        if server_ready {
-            if let Ok(mut s) = state_arc.lock() {
-                s.server = Some(LabServer {
-                    child,
-                    stdin: std::io::BufWriter::new(stdin),
-                    receiver: rx,
-                    version_id: vid.clone(),
-                    model_path: mp,
-                    is_canvas: canvas,
-                    input_kind: input_kind.clone(),
-                    modality: modality.clone(),
+        match model_host::spawn_server(&ah, &model, "LabServer") {
+            Ok(proc) => {
+                let payload = serde_json::json!({
+                    "status": "ready",
+                    "version_id": vid,
+                    "input_kind": proc.input_kind,
+                    "modality": proc.modality,
+                    "classes": proc.classes,
+                    "task": proc.task,
                 });
-                s.status = ServerStatus::Ready;
+                if let Ok(mut s) = state_arc.lock() {
+                    if s.generation != generation {
+                        // Inzwischen wurde ein anderes Modell angefordert.
+                        return;
+                    }
+                    s.server = Some(LabServer { proc, version_id: vid });
+                    s.status = ServerStatus::Ready;
+                }
+                let _ = ah.emit("lab-server-status", payload);
+                println!("[LabServer] Bereit fuer Inferenz.");
             }
-            let _ = ah.emit("lab-server-status", serde_json::json!({
-                "status": "ready",
-                "version_id": vid,
-                "input_kind": input_kind,
-                "modality": modality,
-                "classes": classes,
-                "task": task,
-            }));
-            println!("[LabServer] Bereit fuer Inferenz.");
+            Err(msg) => {
+                if let Ok(mut s) = state_arc.lock() {
+                    if s.generation != generation { return; }
+                    s.status = ServerStatus::Error;
+                }
+                let _ = ah.emit("lab-server-status", serde_json::json!({ "status": "error", "message": msg }));
+            }
         }
     });
 
     Ok(())
-}
-
-/// Kann der Modell-Server diesen Ordner laden? HuggingFace-Modelle tragen
-/// config.json; Diffusers-Pipelines stattdessen model_index.json, der
-/// LoRA-Export des Text-zu-Bild-Trainings text_to_image_lora.json (wie
-/// is_diffusion_model in model_server.py). Nur config.json zu verlangen
-/// sperrte jedes Stable-Diffusion-Modell aus dem Labor aus (Live-Test 1.4.2).
-fn has_lab_model_marker(dir: &std::path::Path) -> bool {
-    ["config.json", "model_index.json", "text_to_image_lora.json"].iter().any(|f| dir.join(f).is_file())
-}
-
-/// Wartezeit auf eine Antwort des Modell-Servers je Modalitaet.
-fn infer_timeout_secs(modality: &str) -> u64 {
-    match modality {
-        "text_to_image" => 600,
-        "vlm" => 120,
-        // Ein LLM schreibt Token fuer Token — 256 Tokens eines 7B-Modells
-        // brauchen auf dem Mac leicht ueber 30 s.
-        "causal_lm" => 180,
-        // Lange Aufnahmen laufen in 30-s-Stuecken durch, Videos werden erst dekodiert.
-        "asr" | "video" => 120,
-        _ => 30,
-    }
 }
 
 /// Fuehrt Inferenz auf einem einzelnen Sample durch (Text oder Datei).
@@ -493,107 +142,36 @@ pub async fn lab_infer_sample(
     // Asynchron: ein Text-zu-Bild-Lauf dauert Minuten. Als synchroner Befehl
     // lief er auf dem Haupt-Thread und die ganze App stand still.
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || infer_blocking(text, file_path, question, start, end, &state))
+    let input = InferInput { text, file_path, question, start, end, ..Default::default() };
+    tauri::async_runtime::spawn_blocking(move || infer_blocking(input, &state))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn infer_blocking(
-    text: String,
-    file_path: Option<String>,
-    question: Option<String>,
-    start: Option<f64>,
-    end: Option<f64>,
-    state: &Arc<Mutex<LabState>>,
-) -> Result<InferResult, String> {
-    let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
-    let mut timeout_secs = 30;
-
+fn infer_blocking(input: InferInput, state: &Arc<Mutex<LabState>>) -> Result<InferResult, String> {
     // Schreiben + Lesen atomar (Mutex haelt waehrend beider Operationen)
-    let recv_result = {
-        let server = s.server.as_mut()
-            .ok_or_else(|| "Kein Modell geladen. Bitte warte bis das Modell fertig geladen ist.".to_string())?;
-
-        // Datei-Sample (Bild/Audio): Pfad statt Text an den Server
-        let file = file_path.as_deref().map(str::trim).filter(|p| !p.is_empty());
-
-        let req = if let (Some(path), true) = (file, server.is_canvas) {
-            // Canvas: Preprocessing per IR im Python
-            serde_json::json!({ "input": path, "input_type": "image" }).to_string()
-        } else if !server.is_canvas && server.input_kind == "video" {
-            let path = file.ok_or_else(||
-                "Dieses Modell erwartet eine Video-Datei. Lade im Labor Video-Samples aus einem Dataset.".to_string())?;
-            serde_json::json!({ "file_path": path, "start": start, "end": end }).to_string()
-        } else if !server.is_canvas && matches!(server.input_kind.as_str(), "image" | "audio") {
-            let kind = if server.input_kind == "image" { "Bild" } else { "Audio" };
-            let path = file.ok_or_else(|| format!(
-                "Dieses Modell erwartet eine {}-Datei. Lade im Labor {}-Samples aus einem Dataset.",
-                kind, kind
-            ))?;
-            let q = question.as_deref().map(str::trim).filter(|q| !q.is_empty());
-            match q {
-                Some(q) if server.modality == "vlm" => serde_json::json!({ "file_path": path, "question": q }).to_string(),
-                _ => serde_json::json!({ "file_path": path }).to_string(),
-            }
-        } else if !server.is_canvas && file.is_some() {
-            return Err(format!(
-                "Dieses Modell erwartet {}, es wurde aber eine Datei ausgewählt.                  Passt das Dataset zum Modell?",
-                if server.modality == "seq2seq" { "Text zum Umformulieren" } else { "Text" }
-            ));
-        } else if server.is_canvas {
-            // Canvas-Modelle erwarten einen Zahlen-Tensor statt Text
-            let nums: Vec<f64> = text
-                .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.parse::<f64>())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| "Canvas-Modell erwartet numerische Eingaben, z.B. \"0.5, 1.2, 3.0\" — freier Text wird nicht unterstützt.".to_string())?;
-            if nums.is_empty() {
-                return Err("Keine Zahlen in der Eingabe. Canvas-Modelle erwarten einen Feature-Vektor, z.B. \"0.5, 1.2, 3.0\".".to_string());
-            }
-            serde_json::json!({ "input": nums, "input_type": "tensor" }).to_string()
+    let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
+    let server = s.server.as_mut()
+        .ok_or_else(|| "Kein Modell geladen. Bitte warte bis das Modell fertig geladen ist.".to_string())?;
+    let p = &mut server.proc;
+    let req = model_host::build_request(p.is_canvas, &p.input_kind, &p.modality, &input)
+        .map_err(|e| if p.is_canvas || !matches!(p.input_kind.as_str(), "image" | "audio" | "video") {
+            e
         } else {
-            serde_json::json!({ "text": text }).to_string()
-        };
-        writeln!(server.stdin, "{}", req).map_err(|e| format!("Schreibfehler: {}", e))?;
-        server.stdin.flush().map_err(|e| format!("Flush-Fehler: {}", e))?;
-
-        // Auf Antwort warten. Bilderzeugung braucht je nach Modell und Geraet
-        // deutlich laenger als eine Klassifikation (SD 1.5 auf der CPU: Minuten).
-        timeout_secs = infer_timeout_secs(&server.modality);
-        server.receiver.recv_timeout(Duration::from_secs(timeout_secs))
-    }; // server-Borrow endet hier
-
-    match recv_result {
-        Ok(line) => {
-            let resp: serde_json::Value = serde_json::from_str(line.trim())
-                .map_err(|e| format!("JSON parse: {} (Zeile: {})", e, line))?;
-
-            if let Some("error") = resp.get("type").and_then(|t| t.as_str()) {
-                return Err(resp.get("message").and_then(|m| m.as_str())
-                    .unwrap_or("Unbekannter Inferenz-Fehler").to_string());
-            }
-
-            Ok(InferResult {
-                predicted: resp["predicted"].as_str().unwrap_or("?").to_string(),
-                confidence: resp["confidence"].as_f64(),
-                top_predictions: resp["top_predictions"].as_array().cloned(),
-                inference_ms: resp["inference_time"].as_f64().unwrap_or(0.0) * 1000.0,
-                boxes: resp["boxes"].as_array().cloned(),
-                image_width: resp["image_width"].as_u64().map(|v| v as u32),
-                image_height: resp["image_height"].as_u64().map(|v| v as u32),
-                extra: Some(resp),
-            })
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err(format!("Inferenz-Timeout ({}s) – Modell antwortet nicht. Bitte neu laden.", timeout_secs))
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            format!("{} Lade im Labor passende Samples aus einem Dataset.", e)
+        })?;
+    // Bilderzeugung braucht je nach Modell und Geraet deutlich laenger als
+    // eine Klassifikation (SD 1.5 auf der CPU: Minuten).
+    let timeout = model_host::infer_timeout_secs(&p.modality);
+    match p.request(&req, timeout, &mut |_| {}) {
+        Ok(resp) => model_host::parse_result(resp),
+        Err(model_host::RequestError::Crashed) => {
             // Prozess ist abgestuerzt – Server-Referenz bereinigen
             s.server = None;
             s.status = ServerStatus::Error;
-            Err("Modell-Server ist abgestuerzt. Bitte Modell neu laden.".to_string())
+            Err(model_host::RequestError::Crashed.message())
         }
+        Err(e) => Err(e.message()),
     }
 }
 
@@ -603,11 +181,10 @@ pub fn lab_stop_model_server(
     state: tauri::State<'_, Arc<Mutex<LabState>>>,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
-    if let Some(ref mut srv) = s.server {
-        let _ = srv.child.kill();
+    s.generation += 1;
+    if s.server.take().is_some() {
         println!("[LabServer] Server gestoppt.");
     }
-    s.server = None;
     s.status = ServerStatus::Idle;
     Ok(())
 }
@@ -621,9 +198,9 @@ pub fn lab_get_server_status(
     Ok(serde_json::json!({
         "status": s.status,
         "version_id": s.server.as_ref().map(|srv| &srv.version_id),
-        "model_path": s.server.as_ref().map(|srv| &srv.model_path),
-        "input_kind": s.server.as_ref().map(|srv| &srv.input_kind),
-        "modality":   s.server.as_ref().map(|srv| &srv.modality),
+        "model_path": s.server.as_ref().map(|srv| &srv.proc.model_path),
+        "input_kind": s.server.as_ref().map(|srv| &srv.proc.input_kind),
+        "modality":   s.server.as_ref().map(|srv| &srv.proc.modality),
     }))
 }
 
@@ -1041,7 +618,7 @@ mod export_tests {
 
 #[cfg(test)]
 mod infer_timeout_tests {
-    use super::{has_lab_model_marker, infer_timeout_secs};
+    use crate::model_host::{has_lab_model_marker, infer_timeout_secs};
 
     #[test]
     fn bilderzeugung_bekommt_mehr_zeit_als_klassifikation() {

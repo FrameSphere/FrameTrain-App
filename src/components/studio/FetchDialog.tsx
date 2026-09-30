@@ -97,8 +97,8 @@ export default function FetchDialog({ project, onClose, onDone }: {
   const [showLimits, setShowLimits] = useState(false);
   // Klasse fuer alles Geholte — nur wo es Klassen gibt (nicht bei Boxen,
   // Paaren und Transkripten).
-  const klassenProjekt = project.classes.length > 0
-    && !['bbox', 'pairs', 'transcript'].includes(project.task);
+  const klassenArt = !['bbox', 'pairs', 'transcript'].includes(project.task);
+  const klassenProjekt = klassenArt && project.classes.length > 0;
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -262,6 +262,10 @@ export default function FetchDialog({ project, onClose, onDone }: {
                 </select>
                 <span className="text-gray-600 text-[11px]">{t('studio.fetch.labelHint')}</span>
               </label>
+            )}
+            {/* Ohne Klassen gibt es nichts zu waehlen — sonst fehlt die Option ohne Erklaerung. */}
+            {klassenArt && !klassenProjekt && (
+              <p className="text-gray-600 text-[11px]" data-testid="label-needs-classes">{t('studio.fetch.labelNeedsClasses')}</p>
             )}
 
             {ist === 'text' && (

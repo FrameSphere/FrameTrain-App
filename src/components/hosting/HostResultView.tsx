@@ -1,0 +1,122 @@
+// Ergebnis einer Hosting-Anfrage, passend zur Aufgabe des Modells. Nutzt die
+// Ansichten des Labors weiter (Boxen, Entitaeten, Aehnlichkeit, Bilder).
+
+import { useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { Copy, Check } from 'lucide-react';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { DetectionOverlay, type DetectionBox } from '../LaboratoryPanel';
+import { EntityText, SimilarityView, type EntitySpan } from '../LabTaskViews';
+import { MarkdownText } from '../ui/MarkdownText';
+import { summarizeBoxes } from '../labGroundTruth';
+import { formatMs, tokensPerSecond, topPredictions, type Attachment, type HostInfo, type InferResult } from './hostingModel';
+
+export function CopyButton({ text, label }: { text: string; label: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => { void navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }); }}
+      className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-200 transition-colors"
+    >
+      {done ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {label}
+    </button>
+  );
+}
+
+function Scores({ r }: { r: InferResult }) {
+  const top = topPredictions(r);
+  if (!top.length) return null;
+  return (
+    <div className="space-y-1 mt-2">
+      {top.slice(0, 5).map((p, i) => (
+        <div key={`${p.label}-${i}`} className="flex items-center gap-2 text-xs">
+          <span className={`w-28 truncate ${i === 0 ? 'text-white' : 'text-gray-400'}`}>{p.label}</span>
+          <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div className={`h-full rounded-full ${i === 0 ? 'bg-emerald-400' : 'bg-white/30'}`} style={{ width: `${Math.max(2, Math.min(100, p.score * 100))}%` }} />
+          </div>
+          <span className="w-12 text-right tabular-nums text-gray-500">{(p.score * 100).toFixed(1)} %</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Detection({ r, file, classes }: { r: InferResult; file?: Attachment; classes: string[] }) {
+  const { t } = useLanguage();
+  const boxes = (r.boxes ?? []) as unknown as DetectionBox[];
+  const w = r.image_width ?? 0;
+  const h = r.image_height ?? 0;
+  return (
+    <div className="space-y-2">
+      {file && (
+        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30" style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined}>
+          <img src={convertFileSrc(file.path)} alt={file.name} className="absolute inset-0 w-full h-full object-contain" />
+          <DetectionOverlay boxes={boxes} classes={classes} width={w} height={h} />
+        </div>
+      )}
+      <p className="text-sm text-white">
+        {boxes.length ? summarizeBoxes(boxes) : t('hosting.result.noObjects')}
+      </p>
+    </div>
+  );
+}
+
+export default function HostResultView({ result, host, file, inputText = '' }: { result: InferResult; host: HostInfo | null; file?: Attachment; inputText?: string }) {
+  const { t } = useLanguage();
+  const extra = (result.extra ?? {}) as Record<string, unknown>;
+  const modality = host?.modality ?? '';
+  const meta: string[] = [];
+  const ms = formatMs(result.inference_ms);
+  if (ms) meta.push(ms);
+  const tps = tokensPerSecond(result);
+  if (tps) meta.push(t('hosting.result.tokensPerSecond', { value: tps }));
+
+  let body: JSX.Element;
+  let copyText = result.predicted;
+
+  if (modality === 'detect' && (host?.task ?? 'detect') !== 'classify') {
+    body = <Detection r={result} file={file} classes={host?.classes ?? []} />;
+    copyText = JSON.stringify(result.boxes ?? [], null, 2);
+  } else if (modality === 'text_to_image' && typeof extra.image_path === 'string') {
+    const p = extra.image_path;
+    body = (
+      <figure className="space-y-1">
+        <img src={convertFileSrc(p)} alt={t('laboratoryPanel.taskViews.generated')} className="w-full max-h-96 object-contain rounded-xl border border-white/10 bg-black/20" />
+        <figcaption className="text-[11px] text-gray-500 break-all">{p}</figcaption>
+      </figure>
+    );
+    copyText = p;
+  } else if (modality === 'token' && Array.isArray(extra.entities)) {
+    body = <EntityText text={inputText} entities={extra.entities as EntitySpan[]} />;
+  } else if (modality === 'embedding' && typeof extra.similarity === 'number') {
+    body = <SimilarityView similarity={extra.similarity} />;
+  } else if (modality === 'causal_lm') {
+    body = <MarkdownText text={result.predicted} className="text-sm text-gray-100" />;
+  } else if (['seq2seq', 'vlm', 'asr', 'embedding'].includes(modality)) {
+    body = <p className="text-sm text-gray-100 whitespace-pre-wrap break-words leading-relaxed">{result.predicted}</p>;
+  } else {
+    body = (
+      <div>
+        <p className="text-sm text-white">
+          <span className="font-medium">{result.predicted}</span>
+          {typeof result.confidence === 'number' && (
+            <span className="ml-2 text-gray-500 tabular-nums">{(result.confidence * 100).toFixed(1)} %</span>
+          )}
+        </p>
+        <Scores r={result} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {body}
+      <div className="flex items-center gap-3 text-[11px] text-gray-500">
+        {meta.length > 0 && <span className="tabular-nums">{meta.join(' · ')}</span>}
+        <CopyButton text={copyText} label={t('hosting.result.copy')} />
+      </div>
+    </div>
+  );
+}

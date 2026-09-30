@@ -10,7 +10,9 @@ Protokoll:
                             {"file_path": "/pfad/bild.png"}\n (Bild / Audio / ASR)
                             {"file_path": "/v.mp4", "start": 2.0, "end": 6.0}\n (Video)
                             {"file_path": "/bild.png", "question": "..."}\n (VLM)
+                            {"text": "...", "messages": [...], "stream": true}\n (LLM-Chat, Hosting)
   Python -> Rust (stdout):  {"predicted": "...", "confidence": 0.95, ...}\n
+                            vorher bei "stream": {"type": "token", "text": "..."}\n je Textstueck
 
 Startup:
   Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video|causal_lm|token|embedding|vlm|text_to_image",
@@ -42,6 +44,30 @@ def emit(obj: dict):
 
 def emit_error(message: str):
     emit({"type": "error", "message": message})
+
+
+def build_chat_messages(system_prompt: str, text: str, history=None) -> list:
+    """Nachrichtenliste fuer das Chat-Template.
+
+    `history` kommt vom Hosting: fruehere Runden als [{role, content}]. Nur
+    user/assistant/system mit Text werden uebernommen; `text` ist die neue
+    Frage. Ein System-Prompt aus dem Training steht vorn, sofern der Verlauf
+    keinen eigenen mitbringt.
+    """
+    msgs = []
+    for m in history or []:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        content = m.get("content")
+        if role in ("user", "assistant", "system") and isinstance(content, str) and content.strip():
+            msgs.append({"role": role, "content": content})
+    # Liegt die neue Frage schon als letzte Nachricht vor, nicht doppelt anhaengen.
+    if text and not (msgs and msgs[-1]["role"] == "user" and msgs[-1]["content"] == text):
+        msgs.append({"role": "user", "content": text})
+    if system_prompt and not any(m["role"] == "system" for m in msgs):
+        msgs.insert(0, {"role": "system", "content": system_prompt})
+    return msgs
 
 
 # Modell-Typen, die eine Audio-Wellenform statt Text erwarten
@@ -696,18 +722,65 @@ class ModelServer:
 
     def _infer_causal_lm(self, text: str, req: dict) -> dict:
         torch = self._torch
-        msgs = [{"role": "user", "content": text}]
-        if self.system_prompt:
-            msgs.insert(0, {"role": "system", "content": self.system_prompt})
+        msgs = build_chat_messages(self.system_prompt, text, req.get("messages"))
         prompt = self._llm.render_chat(self.tokenizer, msgs, add_generation_prompt=True)
         enc = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
         enc = {k: v.to(self.device) for k, v in enc.items()}
+        gen_kwargs = dict(max_new_tokens=int(req.get("max_new_tokens") or 256),
+                          pad_token_id=self.tokenizer.pad_token_id)
+        temperature = float(req.get("temperature") or 0)
+        if temperature > 0:
+            gen_kwargs.update(do_sample=True, temperature=temperature,
+                              top_p=float(req.get("top_p") or 0.95))
+        else:
+            gen_kwargs["do_sample"] = False
         t0 = time.time()
-        with torch.no_grad():
-            out = self.model.generate(**enc, max_new_tokens=int(req.get("max_new_tokens", 256)),
-                                      do_sample=False, pad_token_id=self.tokenizer.pad_token_id)
-        answer = self.tokenizer.decode(out[0][enc["input_ids"].shape[1]:], skip_special_tokens=True).strip()
-        return {"predicted": answer, "inference_time": time.time() - t0}
+        if req.get("stream"):
+            answer, n_tokens = self._stream_generate(enc, gen_kwargs)
+        else:
+            with torch.no_grad():
+                out = self.model.generate(**enc, **gen_kwargs)
+            new_ids = out[0][enc["input_ids"].shape[1]:]
+            n_tokens = int(new_ids.shape[0])
+            answer = self.tokenizer.decode(new_ids, skip_special_tokens=True).strip()
+        elapsed = time.time() - t0
+        return {"predicted": answer, "inference_time": elapsed,
+                "prompt_tokens": int(enc["input_ids"].shape[1]),
+                "completion_tokens": n_tokens}
+
+    def _stream_generate(self, enc: dict, gen_kwargs: dict):
+        """Erzeugt im Hintergrund-Thread und meldet jedes Textstueck sofort.
+
+        Hosting zeigt die Antwort so beim Schreiben; das Ergebnis kommt am Ende
+        wie gewohnt als eine Zeile.
+        """
+        import threading
+        from transformers import TextIteratorStreamer
+        torch = self._torch
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        box = {}
+
+        def run():
+            try:
+                with torch.no_grad():
+                    box["out"] = self.model.generate(**enc, **gen_kwargs, streamer=streamer)
+            except Exception as e:  # im Haupt-Thread erneut werfen
+                box["error"] = e
+                streamer.end()
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        parts = []
+        for piece in streamer:
+            if piece:
+                parts.append(piece)
+                emit({"type": "token", "text": piece})
+        worker.join()
+        if "error" in box:
+            raise box["error"]
+        out = box.get("out")
+        n_tokens = int(out[0].shape[0] - enc["input_ids"].shape[1]) if out is not None else len(parts)
+        return "".join(parts).strip(), n_tokens
 
     def _infer_seq2seq(self, text: str) -> dict:
         torch = self._torch

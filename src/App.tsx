@@ -33,11 +33,14 @@ interface UserData {
 
 interface CloseDialogProps {
   isTraining: boolean;
+  /** Hosting hat Modelle geladen: statt Beenden im Hintergrund weiterlaufen. */
+  hostingActive?: boolean;
+  onBackground?: () => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function CloseConfirmDialog({ isTraining, onConfirm, onCancel }: CloseDialogProps) {
+function CloseConfirmDialog({ isTraining, hostingActive = false, onBackground, onConfirm, onCancel }: CloseDialogProps) {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
@@ -62,6 +65,20 @@ function CloseConfirmDialog({ isTraining, onConfirm, onCancel }: CloseDialogProp
               </p>
             </div>
           </div>
+
+          {hostingActive && !isTraining && onBackground && (
+            <div className="mb-4 space-y-2">
+              <p className="text-gray-400 text-xs leading-relaxed">
+                Es sind Modelle gehostet. Im Hintergrund bleiben Schnell-Chat, Tastenkürzel, Menüleisten-Symbol und API erreichbar.
+              </p>
+              <button
+                onClick={onBackground}
+                className="w-full py-2.5 px-4 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl text-emerald-300 text-sm font-medium transition-all"
+              >
+                Im Hintergrund weiterlaufen
+              </button>
+            </div>
+          )}
 
           {isTraining && (
             <div className="mb-5 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
@@ -101,6 +118,7 @@ function App() {
   // Close-Dialog State
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [isTrainingActive, setIsTrainingActive] = useState(false);
+  const [hostingActive, setHostingActive] = useState(false);
 
   // App-Close abfangen
   useEffect(() => {
@@ -120,6 +138,12 @@ function App() {
         setIsTrainingActive(training);
       } catch {
         setIsTrainingActive(false);
+      }
+      try {
+        const st = await invoke<{ any_loaded: boolean }>('hosting_desktop_status');
+        setHostingActive(!!st?.any_loaded);
+      } catch {
+        setHostingActive(false);
       }
       setShowCloseDialog(true);
     }).then(fn => {
@@ -149,6 +173,11 @@ function App() {
 
   const handleCancelClose = () => {
     setShowCloseDialog(false);
+  };
+
+  const handleBackground = async () => {
+    setShowCloseDialog(false);
+    try { await invoke('hosting_hide_main'); } catch { /* ignore */ }
   };
 
   useEffect(() => {
@@ -341,6 +370,8 @@ function App() {
               {showCloseDialog && (
                 <CloseConfirmDialog
                   isTraining={isTrainingActive}
+                  hostingActive={hostingActive}
+                  onBackground={handleBackground}
                   onConfirm={handleConfirmClose}
                   onCancel={handleCancelClose}
                 />

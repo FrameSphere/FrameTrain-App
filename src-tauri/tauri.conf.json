@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "FrameTrain",
-  "version": "1.4.7",
+  "version": "1.5.0",
   "identifier": "com.frametrain.desktop",
   "build": {
     "beforeDevCommand": "npx vite --port 5003",
@@ -26,6 +26,7 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "FrameTrain",

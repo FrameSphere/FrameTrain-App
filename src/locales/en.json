@@ -9,7 +9,8 @@
       "tests": "Tests",
       "laboratory": "Laboratory",
       "synapse": "Synapse Builder",
-      "versions": "Versions"
+      "versions": "Versions",
+      "hosting": "Hosting"
     },
     "settings": "Settings",
     "logout": "Log Out",
@@ -164,7 +165,8 @@
         "saved": "HuggingFace token saved.",
         "removed": "HuggingFace token removed.",
         "createToken": "Create a token",
-        "hint": "The token is stored securely in your system keychain, not in plain text. It is used automatically when you export a version."
+        "hint": "The token is stored securely in your system keychain, not in plain text. It is used automatically when you export a version.",
+        "replacePlaceholder": "Saved – enter a new token to replace it"
       },
       "communityName": {
         "title": "Community Name",
@@ -3775,7 +3777,8 @@
         "http404": "page not found (404)",
         "http429": "too many requests – try again later (429)"
       },
-      "limitsSummary": "{pages} pages · {files} files · {mb} MB"
+      "limitsSummary": "{pages} pages · {files} files · {mb} MB",
+      "labelNeedsClasses": "Add classes first, then you can give everything fetched a class right away."
     },
     "generate": {
       "title": "Have texts written",
@@ -4015,6 +4018,176 @@
       "yolo": "YOLO",
       "llm": "LLM fine-tuning",
       "generative": "Generative models"
+    }
+  },
+  "hosting": {
+    "status": {
+      "idle": "stopped",
+      "loading": "loading",
+      "ready": "running",
+      "error": "error",
+      "sleeping": "sleeping",
+      "busy": "working"
+    },
+    "task": {
+      "causal_lm": "LLM · text in, text out",
+      "seq2seq": "Seq2Seq · rewrite text",
+      "text_cls": "Text classification",
+      "image_cls": "Image classification",
+      "audio_cls": "Audio classification",
+      "video_cls": "Video classification",
+      "asr": "Speech recognition",
+      "token": "Named entities (NER)",
+      "embedding": "Sentence embeddings",
+      "vlm": "Vision-language · image + question",
+      "text_to_image": "Text to image",
+      "detect": "Object detection (YOLO)",
+      "yolo_segment": "Segmentation (YOLO)",
+      "yolo_pose": "Pose (YOLO)",
+      "yolo_obb": "Rotated boxes (YOLO)",
+      "yolo_classify": "Image classification (YOLO)",
+      "canvas": "Synapse model · number vector",
+      "unknown": "Unknown task"
+    },
+    "page": {
+      "title": "Hosting",
+      "subtitle": "Keep models loaded and ask them directly – here, from anywhere via quick chat, or through the local API.",
+      "add": "Host a model",
+      "settings": "Quick access & API",
+      "hosted": "Hosted",
+      "running": "{count} running · {gb} GB",
+      "emptyTitle": "No model hosted yet",
+      "emptyText": "Pick a trained model or one from your library. It stays loaded and answers instantly – here, in quick chat ({shortcut}) or via the API.",
+      "default": "Quick chat default",
+      "isDefault": "Quick chat default",
+      "makeDefault": "Make default",
+      "makeDefaultHint": "Quick chat ({shortcut}) talks to this model.",
+      "autoload": "Load on start",
+      "load": "Load",
+      "stop": "Stop",
+      "remove": "Remove from hosting",
+      "removeConfirm": "Remove “{name}” from hosting? The model itself stays in your library.",
+      "notLoadedYet": "not loaded yet",
+      "requests": "{count} requests",
+      "emptyChat": "Send the model a first request.",
+      "quickHint": "Quick chat from anywhere: {shortcut}",
+      "composerHint": "Enter to send · Shift+Enter for a new line · drop or paste files",
+      "clear": "Clear history"
+    },
+    "dialog": {
+      "title": "Host a model",
+      "search": "Search models …",
+      "loading": "Loading models …",
+      "empty": "No models found. Import one under “Models” or train one.",
+      "versions": "{count} versions",
+      "library": "Library",
+      "hostedCount": "{count} hosted",
+      "version": "Version",
+      "original": "Original (untrained)",
+      "alreadyHosted": "hosted",
+      "makeDefault": "Use for quick chat",
+      "autoload": "Load when the app starts",
+      "ramTight": "Tight: the model needs about {need} GB, running models use {running} GB of {total} GB RAM. Stop another model first.",
+      "cancel": "Cancel",
+      "submit": "Load & host",
+      "reload": "Reload"
+    },
+    "chat": {
+      "thinking": "Model is working …",
+      "waking": "Loading model …"
+    },
+    "composer": {
+      "noModel": "No model selected",
+      "send": "Send",
+      "attach": "Choose file",
+      "screenshot": "Take a screenshot",
+      "record": "Record with microphone",
+      "stopRecording": "Stop recording",
+      "recording": "Recording",
+      "pasted": "Pasted",
+      "noFileNeeded": "This model works with text – it doesn't need files.",
+      "wrongFile": "This model expects: {kind}.",
+      "micError": "Microphone unavailable: {detail}",
+      "kind": {
+        "image": "Image",
+        "audio": "Audio",
+        "video": "Video"
+      },
+      "placeholder": {
+        "text": "Text for {name} …",
+        "causal_lm": "Message {name} …",
+        "seq2seq": "Text to rewrite …",
+        "token": "Text for {name} to find entities in …",
+        "embedding": "Sentence – or “Sentence A ||| Sentence B” to compare",
+        "text_to_image": "Describe the image …",
+        "image": "Paste, drop or capture an image",
+        "vlm": "Attach an image and ask (optional) …",
+        "audio": "Attach or record audio",
+        "asr": "Record speech or attach audio",
+        "video": "Attach or drop a video",
+        "tensor": "Numbers, e.g. 0.5, 1.2, 3.0"
+      }
+    },
+    "result": {
+      "copy": "Copy",
+      "noObjects": "No objects detected",
+      "tokensPerSecond": "{value} tokens/s"
+    },
+    "quick": {
+      "keys": "Enter to send · Esc to close · ⌘/Ctrl+N new",
+      "new": "New",
+      "openApp": "Open in FrameTrain",
+      "noModels": "No model is hosted yet."
+    },
+    "settings": {
+      "quickTitle": "Quick access",
+      "shortcut": "Keyboard shortcut",
+      "shortcutHint": "Opens quick chat above any app. Default {def} – not used by any common app.",
+      "pressKeys": "Press keys …",
+      "off": "off",
+      "reset": "Default",
+      "disable": "Off",
+      "shortcutTaken": "Another app already uses this shortcut. Pick a different one.",
+      "conflict": "Heads-up: {app} already uses this shortcut.",
+      "doubleTap": "Double tap",
+      "doubleTapHint": "Tapping the key twice opens quick chat. Double-tap Option is taken by Claude.",
+      "doubleTapWayland": "On Wayland no app can read keys system-wide – use the keyboard shortcut.",
+      "tap": {
+        "off": "Off",
+        "control": "Control (Ctrl)",
+        "alt": "Alt",
+        "altMac": "Option ⌥ (used by Claude)",
+        "shift": "Shift",
+        "meta": "Windows key",
+        "metaMac": "Command ⌘"
+      },
+      "tray": "Menu bar icon",
+      "trayHint": {
+        "macos": "Clicking opens quick chat right below the icon.",
+        "windows": "Icon in the taskbar notification area; clicking opens quick chat.",
+        "linux": "On Linux the icon shows a menu; its first entry opens quick chat."
+      },
+      "idle": "Unload when idle",
+      "idleHint": "Frees memory. The next request loads the model again.",
+      "never": "never",
+      "minutes": "after {count} min",
+      "apiTitle": "Local API",
+      "apiHint": "Other programs on this computer can send requests to hosted models – OpenAI-compatible for LLMs. 127.0.0.1 only, token required.",
+      "apiRunning": "Running at {url}",
+      "port": "Port",
+      "token": "Token",
+      "tokenHint": "Send as “Authorization: Bearer …”.",
+      "showToken": "Show token",
+      "rotate": "Generate new token",
+      "snippetFor": "Example for “{name}”"
+    },
+    "conflict": {
+      "assistants": "Claude, ChatGPT or Raycast",
+      "spotlight": "Spotlight",
+      "finder": "Finder search",
+      "inputSources": "switching input sources",
+      "inputLanguage": "switching input language",
+      "office": "Microsoft Office"
     }
   }
 }

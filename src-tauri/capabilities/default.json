@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for FrameTrain",
-  "windows": ["main"],
+  "windows": ["main", "quickchat"],
   "permissions": [
     "core:default",
     "shell:allow-open",
@@ -10,6 +10,7 @@
     "dialog:default",
     "fs:default",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-start-dragging"
   ]
 }

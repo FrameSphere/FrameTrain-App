@@ -27,7 +27,9 @@ export default function ExportReportView({ report, modality }: { report: ExportR
   const groesste = Math.max(1, ...report.per_class.map(([, n]) => n));
 
   return (
-    <div className="space-y-3" data-testid="export-report">
+    // Eigene Scrollflaeche: bei vielen Klassen (15 im Ski-Projekt) wurde der
+    // Bericht hoeher als das Fenster, Titel und "Fertig" waren abgeschnitten.
+    <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1" data-testid="export-report">
       <div className="rounded-lg bg-white/[0.04] border border-white/10 p-3 space-y-1.5">
         {zeile(t('studio.report.total'), report.total)}
         {report.per_split.map(([teil, n]) => (

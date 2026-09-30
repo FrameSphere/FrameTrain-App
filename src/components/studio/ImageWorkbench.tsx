@@ -1228,7 +1228,7 @@ function ExportDialog({ project, confirmed, suggested, onClose, onDone }: {
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
       onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4"
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
         {ergebnis ? (<>
           <h3 className="text-white font-semibold">{t('studio.report.title')}</h3>
