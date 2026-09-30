@@ -16,6 +16,8 @@ import { PROVIDER_META } from '../ai/providerMeta';
 import { testAIConnection } from '../ai/aiClient';
 import { getStoredAuthorName, saveAuthorName } from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
+import QuickAccessSettings from './hosting/QuickAccessSettings';
+import { takeRequestedSettingsTab } from '../ui/navigationEvents';
 
 interface UserData {
   apiKey: string;
@@ -54,7 +56,7 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system';
+type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system' | 'quick';
 
 // Schluesselbund-Konto fuer den HuggingFace-Token — identisch im Versionen-Export.
 const HF_TOKEN_ACCOUNT = 'ft_hf_token';
@@ -125,7 +127,7 @@ function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () 
 }
 
 export default function Settings({ userData, onLogout }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('account');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => (takeRequestedSettingsTab() as SettingsTab | null) ?? 'account');
   const [showApiKey, setShowApiKey] = useState(false);
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const { currentTheme, setTheme, themes: allThemes } = useTheme();
@@ -656,6 +658,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     { id: 'language'     as SettingsTab, label: t('settings.tabs.language'),             icon: Globe },
     { id: 'notifications'as SettingsTab, label: t('settings.tabs.notifications'),  icon: Bell },
     { id: 'ai-assistant' as SettingsTab, label: t('settings.tabs.aiAssistant'),        icon: Brain },
+    { id: 'quick'        as SettingsTab, label: t('settings.tabs.quick'),              icon: Zap },
     { id: 'system'       as SettingsTab, label: t('settings.tabs.system'),              icon: Monitor },
     { id: 'updates'      as SettingsTab, label: t('settings.tabs.updates'),             icon: Download },
     { id: 'docs'         as SettingsTab, label: t('settings.tabs.docs'),       icon: BookOpen },
@@ -2438,6 +2441,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'notifications'  && renderNotificationsTab()}
           {activeTab === 'ai-assistant'   && renderAIAssistantTab()}
           {activeTab === 'system'         && renderSystemTab()}
+          {activeTab === 'quick'          && <QuickAccessSettings />}
           {activeTab === 'updates'        && renderUpdatesTab()}
           {activeTab === 'docs'           && renderDocsTab()}
           {activeTab === 'support'        && renderSupportTab()}

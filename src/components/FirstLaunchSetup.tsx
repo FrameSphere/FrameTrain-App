@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from '@tauri-apps/api/event';
-import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain, ScanEye, MessageSquare, Sparkles } from 'lucide-react';
+import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain, ScanEye, MessageSquare, Sparkles, Zap } from 'lucide-react';
 import { useTheme, type Theme, type ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import AIAssistantSettingsPanel from './AIAssistantSettingsPanel';
+import { QuickAccessCard } from './hosting/QuickAccessSettings';
+import { useHostingSettings } from './hosting/useHosting';
 
 interface PluginInfo {
   id: string;
@@ -104,6 +106,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
 
   // Screen 0.75: KI-Einstellungen — direkt nach der Design-Auswahl (überspringbar)
   const [aiSetupDone, setAiSetupDone] = useState(false);
+  const [quickDone, setQuickDone] = useState(false);
 
   // Screen 1: Pre-Flight-Check
   const [preFlightDone, setPreFlightDone] = useState(false);
@@ -378,8 +381,13 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
           />
         )}
 
+        {/* Screen 0.9: Schnell-Zugriff fuer das Hosting */}
+        {languageSelected && themeSelected && aiSetupDone && !quickDone && (
+          <QuickAccessScreen currentTheme={currentTheme} onContinue={() => setQuickDone(true)} />
+        )}
+
         {/* Screen 1: Pre-Flight-Check */}
-        {languageSelected && themeSelected && aiSetupDone && !preFlightDone && (
+        {languageSelected && themeSelected && aiSetupDone && quickDone && !preFlightDone && (
           <PreFlightScreen
             loading={preFlightLoading}
             result={preFlightResult}
@@ -390,7 +398,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
         )}
 
         {/* Screen 2: Python Setup */}
-        {languageSelected && themeSelected && aiSetupDone && preFlightDone && pythonSetupPhase !== 'complete' && (
+        {languageSelected && themeSelected && aiSetupDone && quickDone && preFlightDone && pythonSetupPhase !== 'complete' && (
           <PythonSetupScreen 
             phase={pythonSetupPhase}
             dependencyStatus={dependencyStatus}
@@ -401,7 +409,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
         )}
         
         {/* Screen 3: Plugin-Auswahl */}
-        {languageSelected && themeSelected && aiSetupDone && preFlightDone && pythonSetupPhase === 'complete' && (
+        {languageSelected && themeSelected && aiSetupDone && quickDone && preFlightDone && pythonSetupPhase === 'complete' && (
           <PluginSelectionScreen
             plugins={plugins}
             pluginsLoading={pluginsLoading}
@@ -810,6 +818,47 @@ const AISetupScreen: React.FC<AISetupScreenProps> = ({ currentTheme, onContinue,
           >
             {t('firstLaunch.aiSetup.skip')}
           </button>
+          <button
+            onClick={onContinue}
+            className={`px-8 py-3 rounded-xl font-semibold text-white bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 transition-all shadow-lg flex items-center gap-2`}
+          >
+            {t('firstLaunch.aiSetup.btn')}
+            <span className="text-lg">→</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ Screen: Schnell-Zugriff (Hosting) ============
+// Einmal festlegen, wie der Schnell-Chat aufgeht — danach steht es in den
+// Einstellungen, die Hosting-Seite zeigt nur noch den Stand.
+const QuickAccessScreen: React.FC<{ currentTheme: Theme; onContinue: () => void }> = ({ currentTheme, onContinue }) => {
+  const { t } = useLanguage();
+  const { settings, status, save } = useHostingSettings();
+  return (
+    <>
+      <div className="flex-shrink-0 p-8 border-b border-white/10">
+        <div className="flex items-center gap-4">
+          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
+            <Zap className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.quick.headline')}</h1>
+            <p className="text-gray-300 mt-1">{t('firstLaunch.quick.sub')}</p>
+          </div>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="max-w-2xl mx-auto space-y-4">
+          <p className="text-sm text-gray-300 leading-relaxed">{t('firstLaunch.quick.body')}</p>
+          {settings && <QuickAccessCard settings={settings} status={status} save={save} compact />}
+          <p className="text-xs text-gray-500">{t('firstLaunch.quick.later')}</p>
+        </div>
+      </div>
+      <div className="flex-shrink-0 p-6 border-t border-white/10 bg-black/20">
+        <div className="flex justify-end items-center">
           <button
             onClick={onContinue}
             className={`px-8 py-3 rounded-xl font-semibold text-white bg-gradient-to-r ${currentTheme.colors.gradient} hover:opacity-90 transition-all shadow-lg flex items-center gap-2`}

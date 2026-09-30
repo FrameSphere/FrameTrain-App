@@ -21,12 +21,16 @@ use tauri::{Emitter, Manager};
 pub const EV_STATUS: &str = "hosting-status";
 pub const EV_TOKEN: &str = "hosting-token";
 
-/// Standard-Kuerzel fuer den Schnell-Chat. Absichtlich nicht ⌥Leertaste
-/// (Claude, ChatGPT, Raycast) und nicht ⌘Leertaste (Spotlight): ⌃⌥⌘K bzw.
-/// Strg+Alt+Umschalt+K belegt weder macOS, Windows, GNOME/KDE noch eine
-/// verbreitete App.
-pub const DEFAULT_SHORTCUT: &str = "Control+Alt+Super+K";
-pub const DEFAULT_SHORTCUT_OTHER: &str = "Control+Alt+Shift+K";
+/// Standard-Kuerzel fuer den Schnell-Chat: ⌘⇧Leertaste bzw. Strg+Umschalt+Leertaste.
+/// Nicht ⌥Leertaste (Claude, ChatGPT, Raycast), nicht ⌘Leertaste (Spotlight),
+/// nicht ⌃Leertaste (Eingabequelle). Der schnellere Weg ist ohnehin der
+/// Doppeltipp auf Control (Standard, braucht keine Freigabe).
+pub const DEFAULT_SHORTCUT: &str = "Super+Shift+Space";
+pub const DEFAULT_SHORTCUT_OTHER: &str = "Control+Shift+Space";
+/// Das Kuerzel aus 1.5.0 — viel zu umstaendlich, wird beim Laden ersetzt.
+const OLD_SHORTCUTS: [&str; 2] = ["Control+Alt+Super+K", "Control+Alt+Shift+K"];
+/// Stand des Einstellungsformats (fuer Umstellungen alter hosting.json).
+const SETTINGS_VERSION: u32 = 2;
 /// Port der lokalen API. 7860 (Gradio), 8000/8080 (Dev-Server), 11434
 /// (Ollama) und 1234 (LM Studio) sind haeufig schon belegt.
 pub const DEFAULT_API_PORT: u16 = 47_860;
@@ -42,12 +46,23 @@ pub struct HostedModel {
     /// Beim Start der App laden.
     #[serde(default)]
     pub autoload:   bool,
+    /// Zuletzt gemeldete Aufgabe — damit Schnell-Chat und Seite schon vor dem
+    /// Laden die richtige Eingabe zeigen (Bild statt Text bei YOLO).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modality:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task:       Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct HostingSettings {
     pub hosted:       Vec<HostedModel>,
+    pub version:      u32,
+    /// Hauptschalter fuer den Schnell-Zugriff (Kuerzel, Doppeltipp, Tray).
+    pub quick_enabled: bool,
     /// Modell, das der Schnell-Chat anspricht.
     pub default_id:   Option<String>,
     /// Tastenkombination fuer den Schnell-Chat ("" = aus).
@@ -68,9 +83,11 @@ impl Default for HostingSettings {
     fn default() -> Self {
         HostingSettings {
             hosted: Vec::new(),
+            version: SETTINGS_VERSION,
+            quick_enabled: true,
             default_id: None,
             shortcut: default_shortcut().to_string(),
-            double_tap: "off".to_string(),
+            double_tap: "control".to_string(),
             idle_minutes: 30,
             api_enabled: false,
             api_port: DEFAULT_API_PORT,
@@ -96,11 +113,32 @@ fn settings_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("hosting.json"))
 }
 
+/// Alte hosting.json (1.5.0) auf die neuen Standards heben: das
+/// umstaendliche Kuerzel ersetzen und den Doppeltipp einschalten.
+pub fn migrate(s: &mut HostingSettings) {
+    if s.version < 2 {
+        if OLD_SHORTCUTS.contains(&s.shortcut.as_str()) {
+            s.shortcut = default_shortcut().to_string();
+        }
+        if s.double_tap == "off" {
+            s.double_tap = "control".to_string();
+        }
+        s.quick_enabled = true;
+    }
+    s.version = SETTINGS_VERSION;
+}
+
 pub fn load_settings(app: &tauri::AppHandle) -> HostingSettings {
     let mut s: HostingSettings = settings_path(app)
         .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| serde_json::from_str(&t).ok())
+        .and_then(|t| {
+            let mut v: serde_json::Value = serde_json::from_str(&t).ok()?;
+            // Fehlt "version", stammt die Datei aus 1.5.0.
+            if v.get("version").is_none() { v["version"] = 1.into(); }
+            serde_json::from_value(v).ok()
+        })
         .unwrap_or_default();
+    migrate(&mut s);
     if s.api_token.is_empty() {
         s.api_token = new_token();
     }
@@ -110,7 +148,7 @@ pub fn load_settings(app: &tauri::AppHandle) -> HostingSettings {
     s
 }
 
-fn save_settings_file(app: &tauri::AppHandle, s: &HostingSettings) -> Result<(), String> {
+pub fn save_settings_file(app: &tauri::AppHandle, s: &HostingSettings) -> Result<(), String> {
     let p = settings_path(app).ok_or("Kein App-Datenordner")?;
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -227,10 +265,10 @@ fn info_for(cfg: &HostedModel, default_id: &Option<String>) -> HostInfo {
         api_name: api_slug(&cfg.name),
         status: HostStatus::Idle,
         error: None,
-        modality: None,
-        input_kind: None,
+        modality: cfg.modality.clone(),
+        input_kind: cfg.input_kind.clone(),
         classes: Vec::new(),
-        task: None,
+        task: cfg.task.clone(),
         is_default: default_id.as_deref() == Some(cfg.version_id.as_str()),
         autoload: cfg.autoload,
         busy: false,
@@ -331,7 +369,86 @@ fn load_blocking(app: &tauri::AppHandle, state: &HostingState, id: &str) -> Resu
     let info = slot.info.clone();
     drop(slots);
     emit_info(app, &info);
+    if out.is_ok() {
+        remember_task(app, state, &info);
+    }
     out
+}
+
+/// Vorlaeufige Aufgabe aus den Dateien, ohne Python zu starten — damit ein
+/// nie geladenes Modell trotzdem die passende Eingabe zeigt (YOLO: Bild).
+/// Vereinfachte Form von detect_modality in model_server.py; beim ersten
+/// Laden gilt, was der Server meldet.
+pub fn guess_task(dir: &Path, is_yolo: bool, is_canvas: bool) -> (String, String) {
+    let pair = |m: &str, k: &str| (m.to_string(), k.to_string());
+    if is_yolo { return pair("detect", "image"); }
+    if is_canvas { return pair("canvas", "tensor"); }
+    if dir.join("model_index.json").is_file() || dir.join("text_to_image_lora.json").is_file() {
+        return pair("text_to_image", "text");
+    }
+    if dir.join("modules.json").is_file() || dir.join("sentence_bert_config.json").is_file() {
+        return pair("embedding", "text");
+    }
+    let cfg: serde_json::Value = std::fs::read_to_string(dir.join("config.json")).ok()
+        .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let arch = cfg["architectures"][0].as_str().unwrap_or("");
+    let mt = cfg["model_type"].as_str().unwrap_or("").to_lowercase();
+    let audio = ["wav2vec2", "hubert", "wavlm", "whisper", "audio-spectrogram-transformer", "ast", "data2vec-audio"];
+    let image = ["resnet", "vit", "deit", "beit", "convnext", "swin", "efficientnet", "mobilenet_v2", "mobilevit", "regnet", "dinov2"];
+    let video = ["videomae", "timesformer", "vivit"];
+    let vlm = cfg.get("vision_config").is_some() && cfg.get("text_config").is_some() && !mt.contains("whisper");
+    if vlm { return pair("vlm", "image"); }
+    if arch.ends_with("ForImageClassification") || image.contains(&mt.as_str()) { return pair("image", "image"); }
+    if arch.ends_with("ForVideoClassification") || video.contains(&mt.as_str()) { return pair("video", "video"); }
+    if arch.ends_with("ForCTC") || arch.ends_with("ForSpeechSeq2Seq") || mt == "whisper" { return pair("asr", "audio"); }
+    if arch.ends_with("ForAudioClassification") || audio.contains(&mt.as_str()) { return pair("audio", "audio"); }
+    if arch.ends_with("ForTokenClassification") { return pair("token", "text"); }
+    if arch.ends_with("ForConditionalGeneration") || arch.ends_with("ForSeq2SeqLM") { return pair("seq2seq", "text"); }
+    if arch.ends_with("ForCausalLM") || arch.ends_with("LMHeadModel") { return pair("causal_lm", "text"); }
+    pair("text", "text")
+}
+
+/// Fuer gehostete Modelle ohne gemerkte Aufgabe eine vorlaeufige eintragen.
+pub fn prime_tasks(app: &tauri::AppHandle, state: &HostingState) {
+    let missing: Vec<String> = state.settings.lock().unwrap().hosted.iter()
+        .filter(|h| h.modality.is_none()).map(|h| h.version_id.clone()).collect();
+    if missing.is_empty() { return; }
+    for id in &missing {
+        let Ok(m) = model_host::resolve_model(app, id) else { continue };
+        let (modality, input_kind) = guess_task(Path::new(&m.model_path), m.is_yolo, m.is_canvas);
+        {
+            let mut s = state.settings.lock().unwrap();
+            if let Some(h) = s.hosted.iter_mut().find(|h| &h.version_id == id) {
+                h.modality = Some(modality.clone());
+                h.input_kind = Some(input_kind.clone());
+            }
+        }
+        let mut slots = state.slots.lock().unwrap();
+        if let Some(slot) = slots.get_mut(id) {
+            if slot.info.modality.is_none() {
+                slot.info.modality = Some(modality);
+                slot.info.input_kind = Some(input_kind);
+            }
+        }
+    }
+    let snapshot = state.settings.lock().unwrap().clone();
+    let _ = save_settings_file(app, &snapshot);
+}
+
+/// Aufgabe in hosting.json merken (nur wenn sie sich geaendert hat).
+fn remember_task(app: &tauri::AppHandle, state: &HostingState, info: &HostInfo) {
+    let snapshot = {
+        let mut s = state.settings.lock().unwrap();
+        let Some(h) = s.hosted.iter_mut().find(|h| h.version_id == info.id) else { return };
+        if h.modality == info.modality && h.input_kind == info.input_kind && h.task == info.task {
+            return;
+        }
+        h.modality = info.modality.clone();
+        h.input_kind = info.input_kind.clone();
+        h.task = info.task.clone();
+        s.clone()
+    };
+    let _ = save_settings_file(app, &snapshot);
 }
 
 pub fn start_in_background(app: &tauri::AppHandle, state: &SharedHosting, id: &str) {
@@ -489,7 +606,9 @@ pub fn stop_all(app: &tauri::AppHandle, state: &HostingState) {
 type St<'a> = tauri::State<'a, SharedHosting>;
 
 #[tauri::command]
-pub fn hosting_list(state: St<'_>) -> Vec<HostInfo> {
+pub fn hosting_list(app: tauri::AppHandle, state: St<'_>) -> Vec<HostInfo> {
+    sync_slots(&state);
+    prime_tasks(&app, &state);
     list(&state)
 }
 
@@ -507,7 +626,7 @@ pub fn hosting_save_settings(app: tauri::AppHandle, state: St<'_>, settings: Hos
         let mut cur = state.settings.lock().unwrap();
         let hosted = cur.hosted.clone();
         let default_id = cur.default_id.clone();
-        *cur = HostingSettings { hosted, default_id, ..settings };
+        *cur = HostingSettings { hosted, default_id, version: SETTINGS_VERSION, ..settings };
         if cur.api_token.is_empty() { cur.api_token = new_token(); }
         if cur.api_port < 1024 { cur.api_port = DEFAULT_API_PORT; }
         cur.clone()
@@ -551,6 +670,9 @@ pub fn hosting_start(
                 model_id,
                 name,
                 autoload: autoload.unwrap_or(false),
+                modality: None,
+                input_kind: None,
+                task: None,
             }),
         }
         if make_default.unwrap_or(false) || s.default_id.is_none() {
@@ -707,19 +829,48 @@ mod tests {
     }
 
     #[test]
-    fn standard_kuerzel_ist_nicht_option_leertaste() {
+    fn standard_kuerzel_kollidiert_nicht() {
         let s = default_shortcut().to_lowercase();
-        assert!(!s.contains("space"), "Leertaste kollidiert mit Claude/Spotlight/Raycast");
-        assert!(s.matches('+').count() >= 3, "drei Modifier, damit keine App es belegt");
+        // ⌥Leertaste (Claude/Raycast), ⌘Leertaste (Spotlight), ⌃Leertaste (Eingabequelle)
+        assert!(!["alt+space", "super+space", "control+space"].contains(&s.as_str()));
+        assert!(s.contains("shift"), "mit Umschalt, damit es frei ist");
+        assert_eq!(s.matches('+').count(), 2, "nur zwei Sondertasten – einfach zu druecken");
     }
 
     #[test]
-    fn alte_einstellungsdatei_bekommt_standardwerte() {
-        let s: HostingSettings = serde_json::from_str(r#"{"hosted":[]}"#).unwrap();
+    fn neue_einstellungen_haben_doppeltipp_und_schnellzugriff() {
+        let s = HostingSettings::default();
+        assert_eq!(s.double_tap, "control");
+        assert!(s.quick_enabled && s.tray_enabled && !s.api_enabled);
         assert_eq!(s.api_port, DEFAULT_API_PORT);
-        assert_eq!(s.double_tap, "off");
-        assert!(!s.api_enabled);
-        assert!(s.tray_enabled);
+    }
+
+    #[test]
+    fn datei_aus_150_wird_umgestellt() {
+        let mut s: HostingSettings = serde_json::from_str(
+            r#"{"hosted":[],"version":1,"shortcut":"Control+Alt+Super+K","double_tap":"off"}"#).unwrap();
+        migrate(&mut s);
+        assert_eq!(s.shortcut, default_shortcut());
+        assert_eq!(s.double_tap, "control");
+        assert_eq!(s.version, SETTINGS_VERSION);
+        // Eigene Wahl bleibt
+        let mut e: HostingSettings = serde_json::from_str(
+            r#"{"hosted":[],"version":2,"shortcut":"Alt+Shift+J","double_tap":"off","quick_enabled":false}"#).unwrap();
+        migrate(&mut e);
+        assert_eq!(e.shortcut, "Alt+Shift+J");
+        assert_eq!(e.double_tap, "off");
+        assert!(!e.quick_enabled);
+    }
+
+    #[test]
+    fn gemerkte_aufgabe_gilt_schon_vor_dem_laden() {
+        let mut s = HostingSettings::default();
+        s.hosted.push(HostedModel { version_id: "y".into(), model_id: "m".into(), name: "YOLO".into(), autoload: false,
+            modality: Some("detect".into()), input_kind: Some("image".into()), task: Some("detect".into()) });
+        let st = HostingState::new(s);
+        let l = list(&st);
+        assert_eq!(l[0].input_kind.as_deref(), Some("image"));
+        assert_eq!(l[0].status, HostStatus::Idle);
     }
 
     #[test]
@@ -727,6 +878,24 @@ mod tests {
         let a = new_token();
         assert!(a.starts_with("ft-") && a.len() == 35);
         assert_ne!(a, new_token());
+    }
+
+    #[test]
+    fn aufgabe_wird_ohne_python_geschaetzt() {
+        let dir = std::env::temp_dir().join(format!("ft_guess_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(guess_task(&dir, true, false).1, "image");
+        std::fs::write(dir.join("config.json"), r#"{"architectures":["LlamaForCausalLM"],"model_type":"llama"}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false).0, "causal_lm");
+        std::fs::write(dir.join("config.json"), r#"{"architectures":["WhisperForConditionalGeneration"],"model_type":"whisper"}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false), ("asr".to_string(), "audio".to_string()));
+        std::fs::write(dir.join("config.json"), r#"{"architectures":["ViTForImageClassification"],"model_type":"vit"}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false).1, "image");
+        std::fs::write(dir.join("config.json"), r#"{"model_type":"idefics3","vision_config":{},"text_config":{}}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false).0, "vlm");
+        std::fs::write(dir.join("modules.json"), "[]").unwrap();
+        assert_eq!(guess_task(&dir, false, false).0, "embedding");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -739,8 +908,8 @@ mod tests {
     #[test]
     fn slots_folgen_den_einstellungen() {
         let mut s = HostingSettings::default();
-        s.hosted.push(HostedModel { version_id: "v1".into(), model_id: "m".into(), name: "A".into(), autoload: false });
-        s.hosted.push(HostedModel { version_id: "v2".into(), model_id: "m".into(), name: "B".into(), autoload: true });
+        s.hosted.push(HostedModel { version_id: "v1".into(), model_id: "m".into(), name: "A".into(), autoload: false, modality: None, input_kind: None, task: None });
+        s.hosted.push(HostedModel { version_id: "v2".into(), model_id: "m".into(), name: "B".into(), autoload: true, modality: None, input_kind: None, task: None });
         s.default_id = Some("v2".into());
         let st = HostingState::new(s);
         let l = list(&st);

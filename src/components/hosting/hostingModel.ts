@@ -24,6 +24,9 @@ export interface HostInfo {
 
 export interface HostingSettings {
   hosted: { version_id: string; model_id: string; name: string; autoload: boolean }[];
+  version?: number;
+  /** Hauptschalter Schnell-Zugriff (Kuerzel, Doppeltipp, Tray) */
+  quick_enabled: boolean;
   default_id: string | null;
   shortcut: string;
   double_tap: 'off' | 'control' | 'alt' | 'shift' | 'meta';
@@ -187,8 +190,8 @@ export function shortcutLabel(accel: string, mac: boolean): string {
 }
 
 /**
- * Tastendruck → Accelerator fuer tauri-plugin-global-shortcut. Mindestens
- * zwei Sondertasten, damit das Kuerzel nicht beim normalen Tippen stoert.
+ * Tastendruck → Accelerator fuer tauri-plugin-global-shortcut. Mindestens eine
+ * Sondertaste ausser Umschalt (sonst stoert es beim normalen Tippen).
  * null = (noch) kein gueltiges Kuerzel.
  */
 export function acceleratorFromEvent(e: Pick<KeyboardEvent, 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey' | 'code'>): string | null {
@@ -204,8 +207,15 @@ export function acceleratorFromEvent(e: Pick<KeyboardEvent, 'ctrlKey' | 'altKey'
   else if (/^F([1-9]|1[0-2])$/.test(c)) key = c;
   else if (c === 'Space') key = 'Space';
   else if (['Period', 'Comma', 'Slash', 'Semicolon', 'Quote', 'BracketLeft', 'BracketRight', 'Backslash', 'Minus', 'Equal', 'Backquote'].includes(c)) key = c;
-  if (!key || mods.length < 2) return null;
+  if (!key || mods.length === 0 || (mods.length === 1 && mods[0] === 'Shift')) return null;
   return [...mods, key].join('+');
+}
+
+/** Gerade gehaltene Sondertasten fuer die Anzeige beim Aufnehmen ("⌘⇧…"). */
+export function heldModifiers(e: Pick<KeyboardEvent, 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>, mac: boolean): string {
+  const parts = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean) as string[];
+  if (!parts.length) return '';
+  return shortcutLabel([...parts, '…'].join('+'), mac);
 }
 
 /** Bekannte Belegungen, vor denen die Einstellungen warnen (i18n-Schluessel unter hosting.conflict.*). */
@@ -218,7 +228,6 @@ export function knownConflict(accel: string, mac: boolean): string | null {
     ['control+space', 'inputSources', true],
     ['alt+control+space', 'inputSources', true],
     ['shift+space+super', 'inputLanguage', false],
-    ['control+shift+space', 'office', false],
   ];
   const hit = table.find(([k, , plat]) => k === n && (plat === null || plat === mac));
   return hit ? hit[1] : null;

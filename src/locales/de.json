@@ -139,7 +139,8 @@
       "updates": "Updates",
       "docs": "Dokumentation",
       "support": "Support",
-      "about": "Über"
+      "about": "Über",
+      "quick": "Schnell-Zugriff"
     },
     "account": {
       "title": "Benutzerinformationen",
@@ -508,6 +509,12 @@
       "errorsTitle": "Das muss vor dem Weitermachen behoben werden:",
       "recheck": "Erneut prüfen",
       "continue": "Weiter"
+    },
+    "quick": {
+      "headline": "Schnell-Zugriff",
+      "sub": "Deine Modelle von überall befragen",
+      "body": "Modelle, die du unter „Hosting“ bereithältst, erreichst du mit einem kleinen Chatfenster über jeder App – für Text, Bilder, Screenshots oder Audio. Lass es an oder stell es hier ein.",
+      "later": "Später jederzeit änderbar unter Einstellungen → Schnell-Zugriff."
     }
   },
   "aiCoach": {
@@ -4072,7 +4079,11 @@
       "emptyChat": "Schick dem Modell eine erste Anfrage.",
       "quickHint": "Schnell-Chat von überall: {shortcut}",
       "composerHint": "Enter senden · Umschalt+Enter neue Zeile · Dateien ins Fenster ziehen oder einfügen",
-      "clear": "Verlauf leeren"
+      "clear": "Verlauf leeren",
+      "quickLabel": "Schnell-Chat:",
+      "manage": "Verwalten",
+      "apiOn": "an",
+      "apiOff": "aus"
     },
     "dialog": {
       "title": "Modell hosten",
@@ -4137,27 +4148,29 @@
       "keys": "Enter senden · Esc schließen · ⌘/Strg+N neu",
       "new": "Neu",
       "openApp": "In FrameTrain öffnen",
-      "noModels": "Es ist noch kein Modell gehostet."
+      "noModels": "Es ist noch kein Modell gehostet.",
+      "off": "aus"
     },
     "settings": {
-      "quickTitle": "Schnell-Zugriff",
+      "quickTitle": "Schnell-Chat",
       "shortcut": "Tastenkürzel",
-      "shortcutHint": "Öffnet den Schnell-Chat über jeder App. Standard {def} – mit keiner verbreiteten App belegt.",
+      "shortcutHint": "Anklicken und die neue Kombination drücken (z. B. ⌘⇧J). Esc bricht ab.",
       "pressKeys": "Tasten drücken …",
       "off": "aus",
       "reset": "Standard",
       "disable": "Aus",
       "shortcutTaken": "Das Kürzel ist schon von einer anderen App belegt. Wähle ein anderes.",
       "conflict": "Achtung: dieses Kürzel nutzt bereits {app}.",
-      "doubleTap": "Doppeltipp",
-      "doubleTapHint": "Zweimal kurz auf die Taste tippen öffnet den Schnell-Chat. Doppeltipp Option nutzt schon Claude.",
+      "doubleTap": "Zweimal tippen",
+      "doubleTapHint": "Die Taste zweimal kurz hintereinander drücken öffnet den Schnell-Chat. Braucht keine Freigabe.",
       "doubleTapWayland": "Unter Wayland kann keine App Tasten systemweit abfragen – nutze das Tastenkürzel.",
       "tap": {
         "off": "Aus",
-        "control": "Control (Strg)",
+        "control": "Strg",
+        "controlMac": "Control ⌃",
         "alt": "Alt",
         "altMac": "Option ⌥ (belegt von Claude)",
-        "shift": "Umschalt",
+        "shift": "Umschalt ⇧",
         "meta": "Windows-Taste",
         "metaMac": "Command ⌘"
       },
@@ -4179,7 +4192,25 @@
       "tokenHint": "Als „Authorization: Bearer …“ mitschicken.",
       "showToken": "Token zeigen",
       "rotate": "Neuen Token erzeugen",
-      "snippetFor": "Beispiel für „{name}“"
+      "snippetFor": "Beispiel für „{name}“",
+      "tabTitle": "Schnell-Zugriff & API",
+      "tabIntro": "Wie du gehostete Modelle von überall erreichst – einmal einstellen, dann läuft es im Hintergrund.",
+      "quickIntro": "Ein kleines Chatfenster über jeder App, das dein Standardmodell anspricht.",
+      "tapShort": "2× {key}",
+      "tapKey": {
+        "control": "Strg",
+        "controlMac": "⌃",
+        "shift": "⇧",
+        "shiftMac": "⇧",
+        "meta": "Win",
+        "metaMac": "⌘",
+        "alt": "Alt",
+        "altMac": "⌥"
+      },
+      "or": "oder",
+      "trayOnly": "nur über das Menüleisten-Symbol",
+      "tryHint": "Öffnen mit: {how}",
+      "tryNow": "Jetzt ausprobieren"
     },
     "conflict": {
       "assistants": "Claude, ChatGPT oder Raycast",

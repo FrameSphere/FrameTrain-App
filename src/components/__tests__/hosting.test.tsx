@@ -3,6 +3,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
+// Wie auf dem Mac: Kuerzel erscheinen als Symbole (IS_MAC wird beim Import gelesen).
+vi.hoisted(() => { Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true }); });
+
 const invokeMock = vi.fn();
 const listeners: Record<string, ((e: { payload: unknown }) => void)[]> = {};
 vi.mock('@tauri-apps/api/core', () => ({
@@ -27,7 +30,7 @@ vi.mock('../../contexts/ThemeContext', () => ({
 }));
 
 import {
-  acceleratorFromEvent, apiSnippets, canSend, composerSpec, fileKindOf, historyFor, knownConflict,
+  acceleratorFromEvent, apiSnippets, heldModifiers, canSend, composerSpec, fileKindOf, historyFor, knownConflict,
   shortcutLabel, taskKey, tokensPerSecond, type ChatMsg, type HostInfo,
 } from '../hosting/hostingModel';
 import HostingPanel from '../hosting/HostingPanel';
@@ -42,7 +45,7 @@ const host = (over: Partial<HostInfo> = {}): HostInfo => ({
 });
 
 const SETTINGS = {
-  hosted: [], default_id: 'v1', shortcut: 'Control+Alt+Super+K', double_tap: 'off', idle_minutes: 30,
+  hosted: [], version: 2, quick_enabled: true, default_id: 'v1', shortcut: 'Super+Shift+Space', double_tap: 'control', idle_minutes: 30,
   api_enabled: false, api_port: 47860, api_token: 'ft-geheim', tray_enabled: true,
 };
 
@@ -102,8 +105,8 @@ describe('Eingabe je Modell', () => {
 
 describe('Tastenkuerzel', () => {
   it('Standard kollidiert mit nichts Bekanntem', () => {
-    expect(knownConflict('Control+Alt+Super+K', true)).toBeNull();
-    expect(knownConflict('Control+Alt+Shift+K', false)).toBeNull();
+    expect(knownConflict('Super+Shift+Space', true)).toBeNull();
+    expect(knownConflict('Control+Shift+Space', false)).toBeNull();
     expect(knownConflict('Alt+Space', true)).toBe('assistants');
     expect(knownConflict('Super+Space', true)).toBe('spotlight');
   });
@@ -112,14 +115,18 @@ describe('Tastenkuerzel', () => {
     expect(shortcutLabel('Control+Alt+Super+K', true)).toBe('⌃⌥⌘K');
     expect(shortcutLabel('Super+Shift+Alt+Control+K', true)).toBe('⌃⌥⇧⌘K');
     expect(shortcutLabel('Control+Alt+Shift+K', false)).toBe('Ctrl+Alt+Shift+K');
+    expect(shortcutLabel('Super+Shift+Space', true)).toBe('⇧⌘␣');
     expect(shortcutLabel('', false)).toBe('');
   });
 
-  it('Aufnahme verlangt zwei Sondertasten', () => {
+  it('Aufnahme: eine Sondertaste reicht, nur Umschalt nicht', () => {
     const ev = (o: Partial<KeyboardEvent>) => ({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, code: 'KeyK', ...o });
-    expect(acceleratorFromEvent(ev({ ctrlKey: true }))).toBeNull();
-    expect(acceleratorFromEvent(ev({ ctrlKey: true, altKey: true, metaKey: true }))).toBe('Control+Alt+Super+K');
+    expect(acceleratorFromEvent(ev({}))).toBeNull();
+    expect(acceleratorFromEvent(ev({ shiftKey: true }))).toBeNull();
+    expect(acceleratorFromEvent(ev({ metaKey: true, code: 'KeyJ' }))).toBe('Super+J');
+    expect(acceleratorFromEvent(ev({ metaKey: true, shiftKey: true, code: 'Space' }))).toBe('Shift+Super+Space');
     expect(acceleratorFromEvent(ev({ ctrlKey: true, shiftKey: true, code: 'ShiftLeft' }))).toBeNull();
+    expect(heldModifiers({ ctrlKey: false, altKey: false, shiftKey: true, metaKey: true }, true)).toBe('⇧⌘…');
   });
 });
 
@@ -198,6 +205,65 @@ describe('Hosting-Seite', { timeout: 15000 }, () => {
     wrap(<HostingPanel />);
     expect(await screen.findByLabelText('Bildschirmfoto aufnehmen')).toBeInTheDocument();
     expect(screen.getByLabelText('Senden')).toBeDisabled();
+  });
+});
+
+describe('Schnell-Zugriff auf der Hosting-Seite', { timeout: 15000 }, () => {
+  beforeEach(() => invokeMock.mockReset());
+
+  it('zeigt nur den Stand und fuehrt in die Einstellungen', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'hosting_list') return Promise.resolve([host()]);
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_chat_load') return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    const nav = vi.fn();
+    window.addEventListener('ft_navigate', (e: Event) => nav((e as CustomEvent).detail));
+    wrap(<HostingPanel />);
+    expect((await screen.findAllByText('2× ⌃ oder ⇧⌘␣')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Tastenkürzel')).toBeNull();
+    fireEvent.click(screen.getByText('Verwalten'));
+    expect(nav).toHaveBeenCalledWith('settings');
+    const { takeRequestedSettingsTab } = await import('../../ui/navigationEvents');
+    expect(takeRequestedSettingsTab()).toBe('quick');
+  });
+
+  it('YOLO zeigt schon vor dem Laden die Bild-Eingabe (gemerkte Aufgabe)', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'hosting_list') return Promise.resolve([host({ status: 'idle', modality: 'detect', input_kind: 'image', task: 'detect', name: 'YOLO11 v4' })]);
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_chat_load') return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    wrap(<HostingPanel />);
+    expect(await screen.findByPlaceholderText('Bild einfügen, ziehen oder aufnehmen')).toBeInTheDocument();
+  });
+});
+
+describe('Einstellungen Schnell-Zugriff', { timeout: 15000 }, () => {
+  beforeEach(() => invokeMock.mockReset());
+
+  it('Hauptschalter aus blendet die Wege aus, Kuerzel-Aufnahme setzt das alte aus', async () => {
+    let saved: Record<string, unknown> | null = null;
+    invokeMock.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_list') return Promise.resolve([]);
+      if (cmd === 'hosting_save_settings') { saved = args.settings as Record<string, unknown>; return Promise.resolve(saved); }
+      return Promise.resolve(null);
+    });
+    const { default: QuickAccessSettings } = await import('../hosting/QuickAccessSettings');
+    wrap(<QuickAccessSettings />);
+    const rec = await screen.findByText('⇧⌘␣');
+    fireEvent.click(rec);
+    expect(invokeMock).toHaveBeenCalledWith('hosting_pause_shortcut', { paused: true });
+    fireEvent.keyDown(window, { code: 'KeyJ', key: 'j', metaKey: true, shiftKey: true });
+    await waitFor(() => expect(saved?.shortcut).toBe('Shift+Super+J'));
+    expect(invokeMock).toHaveBeenCalledWith('hosting_pause_shortcut', { paused: false });
+
+    fireEvent.click(screen.getAllByRole('switch')[0]);
+    await waitFor(() => expect(saved?.quick_enabled).toBe(false));
+    expect(screen.queryByText('Zweimal tippen')).toBeNull();
   });
 });
 

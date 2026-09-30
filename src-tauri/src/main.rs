@@ -334,6 +334,7 @@ fn main() {
             hosting_desktop::hosting_open_main,
             hosting_desktop::hosting_hide_main,
             hosting_desktop::hosting_set_ui_language,
+            hosting_desktop::hosting_pause_shortcut,
             hosting_desktop::hosting_desktop_status,
             ai_proxy::ai_http_post,
             studio_manager::studio_list_projects,

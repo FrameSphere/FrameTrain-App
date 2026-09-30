@@ -156,7 +156,7 @@ export function MessageList({ messages, host, compact = false }: { messages: Cha
                 <span className="whitespace-pre-wrap break-words">{m.error}</span>
               </div>
             )}
-            {m.result && <HostResultView result={m.result} host={host} file={prev?.file} inputText={prev?.text ?? ''} />}
+            {m.result && <HostResultView result={m.result} host={host} file={prev?.file} inputText={prev?.text ?? ''} compact={compact} />}
           </div>
         );
       })}

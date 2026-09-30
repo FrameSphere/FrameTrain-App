@@ -43,7 +43,7 @@ function Scores({ r }: { r: InferResult }) {
   );
 }
 
-function Detection({ r, file, classes }: { r: InferResult; file?: Attachment; classes: string[] }) {
+function Detection({ r, file, classes, compact }: { r: InferResult; file?: Attachment; classes: string[]; compact: boolean }) {
   const { t } = useLanguage();
   const boxes = (r.boxes ?? []) as unknown as DetectionBox[];
   const w = r.image_width ?? 0;
@@ -51,7 +51,10 @@ function Detection({ r, file, classes }: { r: InferResult; file?: Attachment; cl
   return (
     <div className="space-y-2">
       {file && (
-        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30" style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined}>
+        // Feste Hoehe statt volle Breite: ein 512er-Bild fuellte sonst die ganze
+        // Seite. Die Breite folgt dem Seitenverhaeltnis, Boxen bleiben deckungsgleich.
+        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30 max-w-full"
+          style={{ height: compact ? 220 : 300, aspectRatio: w && h ? `${w} / ${h}` : '4 / 3' }}>
           <img src={convertFileSrc(file.path)} alt={file.name} className="absolute inset-0 w-full h-full object-contain" />
           <DetectionOverlay boxes={boxes} classes={classes} width={w} height={h} />
         </div>
@@ -63,7 +66,7 @@ function Detection({ r, file, classes }: { r: InferResult; file?: Attachment; cl
   );
 }
 
-export default function HostResultView({ result, host, file, inputText = '' }: { result: InferResult; host: HostInfo | null; file?: Attachment; inputText?: string }) {
+export default function HostResultView({ result, host, file, inputText = '', compact = false }: { result: InferResult; host: HostInfo | null; file?: Attachment; inputText?: string; compact?: boolean }) {
   const { t } = useLanguage();
   const extra = (result.extra ?? {}) as Record<string, unknown>;
   const modality = host?.modality ?? '';
@@ -76,14 +79,16 @@ export default function HostResultView({ result, host, file, inputText = '' }: {
   let body: JSX.Element;
   let copyText = result.predicted;
 
-  if (modality === 'detect' && (host?.task ?? 'detect') !== 'classify') {
-    body = <Detection r={result} file={file} classes={host?.classes ?? []} />;
+  // Auch ohne bekannte Aufgabe (alter Verlauf): Boxen samt Bildmassen sind YOLO.
+  const isDetect = modality === 'detect' || (!!result.boxes?.length && !!result.image_width);
+  if (isDetect && (host?.task ?? 'detect') !== 'classify') {
+    body = <Detection r={result} file={file} classes={host?.classes ?? []} compact={compact} />;
     copyText = JSON.stringify(result.boxes ?? [], null, 2);
   } else if (modality === 'text_to_image' && typeof extra.image_path === 'string') {
     const p = extra.image_path;
     body = (
       <figure className="space-y-1">
-        <img src={convertFileSrc(p)} alt={t('laboratoryPanel.taskViews.generated')} className="w-full max-h-96 object-contain rounded-xl border border-white/10 bg-black/20" />
+        <img src={convertFileSrc(p)} alt={t('laboratoryPanel.taskViews.generated')} className={`max-w-full ${compact ? 'max-h-56' : 'max-h-80'} object-contain rounded-xl border border-white/10 bg-black/20`} />
         <figcaption className="text-[11px] text-gray-500 break-all">{p}</figcaption>
       </figure>
     );

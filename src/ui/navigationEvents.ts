@@ -19,3 +19,17 @@ export function onNavigate(handler: (view: AppView) => void) {
   window.addEventListener(EVENT_NAME, listener as EventListener);
   return () => window.removeEventListener(EVENT_NAME, listener as EventListener);
 }
+
+// Welcher Einstellungs-Tab beim naechsten Oeffnen der Einstellungen aktiv sein
+// soll (z. B. "Schnell-Zugriff" aus dem Hosting). Wird beim Lesen geleert.
+let requestedSettingsTab: string | null = null;
+
+export function requestSettingsTab(tab: string) {
+  requestedSettingsTab = tab;
+}
+
+export function takeRequestedSettingsTab(): string | null {
+  const t = requestedSettingsTab;
+  requestedSettingsTab = null;
+  return t;
+}

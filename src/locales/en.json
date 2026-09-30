@@ -139,7 +139,8 @@
       "updates": "Updates",
       "docs": "Documentation",
       "support": "Support",
-      "about": "About"
+      "about": "About",
+      "quick": "Quick access"
     },
     "account": {
       "title": "User Information",
@@ -508,6 +509,12 @@
       "errorsTitle": "Fix these before continuing:",
       "recheck": "Re-check",
       "continue": "Continue"
+    },
+    "quick": {
+      "headline": "Quick access",
+      "sub": "Ask your models from anywhere",
+      "body": "Models you keep ready under “Hosting” are one small chat window away, above any app – for text, images, screenshots or audio. Leave it on or adjust it here.",
+      "later": "You can change this anytime under Settings → Quick access."
     }
   },
   "aiCoach": {
@@ -4072,7 +4079,11 @@
       "emptyChat": "Send the model a first request.",
       "quickHint": "Quick chat from anywhere: {shortcut}",
       "composerHint": "Enter to send · Shift+Enter for a new line · drop or paste files",
-      "clear": "Clear history"
+      "clear": "Clear history",
+      "quickLabel": "Quick chat:",
+      "manage": "Manage",
+      "apiOn": "on",
+      "apiOff": "off"
     },
     "dialog": {
       "title": "Host a model",
@@ -4137,12 +4148,13 @@
       "keys": "Enter to send · Esc to close · ⌘/Ctrl+N new",
       "new": "New",
       "openApp": "Open in FrameTrain",
-      "noModels": "No model is hosted yet."
+      "noModels": "No model is hosted yet.",
+      "off": "off"
     },
     "settings": {
-      "quickTitle": "Quick access",
+      "quickTitle": "Quick chat",
       "shortcut": "Keyboard shortcut",
-      "shortcutHint": "Opens quick chat above any app. Default {def} – not used by any common app.",
+      "shortcutHint": "Click and press the new combination (e.g. ⌘⇧J). Esc cancels.",
       "pressKeys": "Press keys …",
       "off": "off",
       "reset": "Default",
@@ -4150,14 +4162,15 @@
       "shortcutTaken": "Another app already uses this shortcut. Pick a different one.",
       "conflict": "Heads-up: {app} already uses this shortcut.",
       "doubleTap": "Double tap",
-      "doubleTapHint": "Tapping the key twice opens quick chat. Double-tap Option is taken by Claude.",
+      "doubleTapHint": "Pressing the key twice in quick succession opens quick chat. Needs no permission.",
       "doubleTapWayland": "On Wayland no app can read keys system-wide – use the keyboard shortcut.",
       "tap": {
         "off": "Off",
-        "control": "Control (Ctrl)",
+        "control": "Ctrl",
+        "controlMac": "Control ⌃",
         "alt": "Alt",
         "altMac": "Option ⌥ (used by Claude)",
-        "shift": "Shift",
+        "shift": "Shift ⇧",
         "meta": "Windows key",
         "metaMac": "Command ⌘"
       },
@@ -4179,7 +4192,25 @@
       "tokenHint": "Send as “Authorization: Bearer …”.",
       "showToken": "Show token",
       "rotate": "Generate new token",
-      "snippetFor": "Example for “{name}”"
+      "snippetFor": "Example for “{name}”",
+      "tabTitle": "Quick access & API",
+      "tabIntro": "How you reach hosted models from anywhere – set it once, then it runs in the background.",
+      "quickIntro": "A small chat window above any app that talks to your default model.",
+      "tapShort": "2× {key}",
+      "tapKey": {
+        "control": "Ctrl",
+        "controlMac": "⌃",
+        "shift": "⇧",
+        "shiftMac": "⇧",
+        "meta": "Win",
+        "metaMac": "⌘",
+        "alt": "Alt",
+        "altMac": "⌥"
+      },
+      "or": "or",
+      "trayOnly": "via the menu bar icon only",
+      "tryHint": "Open with: {how}",
+      "tryNow": "Try it now"
     },
     "conflict": {
       "assistants": "Claude, ChatGPT or Raycast",

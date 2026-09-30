@@ -4,14 +4,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Server, Plus, Play, Square, Trash2, Star, Loader2, AlertTriangle, Moon, MessageSquarePlus, Settings2, ChevronDown } from 'lucide-react';
+import { Server, Plus, Play, Square, Trash2, Star, Loader2, AlertTriangle, Moon, MessageSquarePlus, Settings2, Zap, Plug } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import HostModelDialog from './HostModelDialog';
-import HostingSettingsPanel, { IS_MAC } from './HostingSettingsPanel';
+import { quickSummary } from './QuickAccessSettings';
+import { navigateTo, requestSettingsTab } from '../../ui/navigationEvents';
 import { Composer, MessageList, useHostChat } from './HostChat';
 import { useHosting, useHostingSettings } from './useHosting';
-import { shortcutLabel, taskKey, type HostInfo, type HostStatus } from './hostingModel';
+import { taskKey, type HostInfo, type HostStatus } from './hostingModel';
 
 export function StatusPill({ status, busy }: { status: HostStatus; busy?: boolean }) {
   const { t } = useLanguage();
@@ -129,10 +130,10 @@ export default function HostingPanel() {
   const { t } = useLanguage();
   const { currentTheme } = useTheme();
   const { hosts, loaded } = useHosting();
-  const { settings, status, save, rotateToken, reloadStatus } = useHostingSettings();
+  const { settings, status, reloadStatus } = useHostingSettings();
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const openSettings = () => { requestSettingsTab('quick'); navigateTo('settings'); };
 
   useEffect(() => {
     if (!hosts.length) { setSelected(null); return; }
@@ -146,7 +147,7 @@ export default function HostingPanel() {
   const host = hosts.find(h => h.id === selected) ?? null;
   const running = hosts.filter(h => h.status === 'ready');
   const ramGb = useMemo(() => running.reduce((s, h) => s + (h.size_gb ?? 0), 0), [running]);
-  const shortcut = settings?.shortcut ? shortcutLabel(settings.shortcut, IS_MAC) : '';
+  const shortcut = settings?.quick_enabled ? quickSummary(settings, t) : '';
 
   return (
     <div className="space-y-5">
@@ -155,19 +156,38 @@ export default function HostingPanel() {
           <h1 className="text-3xl font-bold text-white flex items-center gap-3"><Server className="w-8 h-8" />{t('hosting.page.title')}</h1>
           <p className="text-gray-400 mt-1">{t('hosting.page.subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowSettings(s => !s)} className="px-3.5 py-2 rounded-xl text-sm text-gray-300 bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-2">
-            <Settings2 className="w-4 h-4" />{t('hosting.page.settings')}
-            <ChevronDown className={`w-4 h-4 transition-transform ${showSettings ? 'rotate-180' : ''}`} />
-          </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button onClick={() => setDialog(true)} className={`px-4 py-2 rounded-xl text-sm font-medium text-white flex items-center gap-2 bg-gradient-to-r ${currentTheme.colors.gradient}`}>
             <Plus className="w-4 h-4" />{t('hosting.page.add')}
           </button>
         </div>
       </div>
 
-      {showSettings && settings && (
-        <HostingSettingsPanel settings={settings} status={status} save={save} rotateToken={rotateToken} host={host} />
+      {settings && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5">
+          <div className="flex items-center gap-5 text-sm min-w-0">
+            <span className="flex items-center gap-2 min-w-0">
+              <Zap className={`w-4 h-4 flex-shrink-0 ${settings.quick_enabled ? 'text-amber-300' : 'text-gray-500'}`} />
+              <span className="text-gray-400">{t('hosting.page.quickLabel')}</span>
+              <span className="text-white truncate">{quickSummary(settings, t)}</span>
+            </span>
+            <span className="flex items-center gap-2">
+              <Plug className={`w-4 h-4 ${settings.api_enabled ? 'text-emerald-300' : 'text-gray-500'}`} />
+              <span className="text-gray-400">API</span>
+              <span className="text-white">{settings.api_enabled ? (status?.api.url ?? t('hosting.page.apiOn')) : t('hosting.page.apiOff')}</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {settings.quick_enabled && hosts.length > 0 && (
+              <button onClick={() => { void invoke('hosting_show_quickchat').catch(() => {}); }} className="px-3 py-1.5 rounded-lg text-xs text-gray-300 border border-white/10 hover:bg-white/10">
+                {t('hosting.settings.tryNow')}
+              </button>
+            )}
+            <button onClick={openSettings} className="px-3 py-1.5 rounded-lg text-xs text-gray-300 border border-white/10 hover:bg-white/10 flex items-center gap-1.5">
+              <Settings2 className="w-3.5 h-3.5" />{t('hosting.page.manage')}
+            </button>
+          </div>
+        </div>
       )}
 
       {loaded && hosts.length === 0 ? (

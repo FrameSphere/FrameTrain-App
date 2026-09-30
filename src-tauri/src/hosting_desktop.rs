@@ -37,6 +37,9 @@ pub struct DesktopState {
     /// Zeitpunkt des letzten Oeffnens — ein Fokusverlust direkt danach
     /// (Tray-Klick auf Windows) soll das Fenster nicht gleich wieder schliessen.
     pub shown_at: Mutex<Option<std::time::Instant>>,
+    /// Waehrend in den Einstellungen ein neues Kuerzel aufgenommen wird, darf
+    /// das alte nicht greifen — sonst schluckt das System den Tastendruck.
+    paused: Mutex<bool>,
 }
 
 fn tr(app: &tauri::AppHandle, de: &'static str, en: &'static str) -> &'static str {
@@ -85,6 +88,7 @@ fn place(win: &tauri::WebviewWindow, a: Anchor) {
 
 fn show_with_anchor(app: &tauri::AppHandle, anchor: Anchor, mode: &str) -> Result<(), String> {
     let win = quickchat_window(app)?;
+    println!("[Hosting] Schnell-Chat oeffnen ({}) bei {:?}", mode, anchor);
     *app.state::<DesktopState>().anchor.lock().unwrap() = Some(anchor);
     place(&win, anchor);
     *app.state::<DesktopState>().shown_at.lock().unwrap() = Some(std::time::Instant::now());
@@ -277,6 +281,7 @@ fn apply_shortcut(app: &tauri::AppHandle, wanted: &str) {
     }
     match gs.on_shortcut(wanted, |app, _sc, ev| {
         if ev.state() == ShortcutState::Pressed {
+            println!("[Hosting] Kuerzel ausgeloest");
             toggle_quickchat(app);
         }
     }) {
@@ -291,9 +296,11 @@ fn apply_shortcut(app: &tauri::AppHandle, wanted: &str) {
 /// Setzt Kuerzel, Doppeltipp, Tray und API nach den gespeicherten Einstellungen.
 pub fn apply_settings(app: &tauri::AppHandle) {
     let s = app.state::<SharedHosting>().settings.lock().unwrap().clone();
-    apply_shortcut(app, &s.shortcut);
-    crate::hotkey_tap::set_key(&s.double_tap);
-    if s.tray_enabled {
+    let paused = *app.state::<DesktopState>().paused.lock().unwrap();
+    // Hauptschalter aus → weder Kuerzel noch Doppeltipp noch Tray.
+    apply_shortcut(app, if s.quick_enabled && !paused { &s.shortcut } else { "" });
+    crate::hotkey_tap::set_key(if s.quick_enabled && !paused { &s.double_tap } else { "off" });
+    if s.quick_enabled && s.tray_enabled {
         if let Err(e) = ensure_tray(app) { eprintln!("[Hosting] Tray: {}", e); }
         refresh_tray(app);
     } else {
@@ -312,6 +319,7 @@ pub fn setup(app: &tauri::AppHandle) {
         let ah2 = ah.clone();
         let _ = ah.run_on_main_thread(move || toggle_quickchat(&ah2));
     });
+    hosting_manager::prime_tasks(app, &hosting);
     hosting_manager::spawn_idle_watch(app.clone(), hosting.clone());
     hosting_manager::autoload(app, &hosting);
     hosting_manager::clean_uploads(app);
@@ -481,6 +489,13 @@ pub fn hosting_hide_main(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
     }
+}
+
+/// Kuerzel und Doppeltipp kurz aussetzen (Aufnahme eines neuen Kuerzels).
+#[tauri::command]
+pub fn hosting_pause_shortcut(app: tauri::AppHandle, paused: bool) {
+    *app.state::<DesktopState>().paused.lock().unwrap() = paused;
+    apply_settings(&app);
 }
 
 #[tauri::command]
