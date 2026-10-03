@@ -17,7 +17,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
     <button
       type="button"
       onClick={() => { void navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }); }}
-      className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-200 transition-colors"
+      className="inline-flex items-center gap-1 text-[11px] text-inherit opacity-90 hover:opacity-100 hover:text-white transition-colors"
     >
       {done ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
       {label}
@@ -25,18 +25,18 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-function Scores({ r }: { r: InferResult }) {
+function Scores({ r, compact }: { r: InferResult; compact: boolean }) {
   const top = topPredictions(r);
   if (!top.length) return null;
   return (
     <div className="space-y-1 mt-2">
       {top.slice(0, 5).map((p, i) => (
         <div key={`${p.label}-${i}`} className="flex items-center gap-2 text-xs">
-          <span className={`w-28 truncate ${i === 0 ? 'text-white' : 'text-gray-400'}`}>{p.label}</span>
+          <span className={`w-28 truncate ${i === 0 ? 'text-white' : compact ? 'text-white/65' : 'text-gray-400'}`}>{p.label}</span>
           <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
             <div className={`h-full rounded-full ${i === 0 ? 'bg-emerald-400' : 'bg-white/30'}`} style={{ width: `${Math.max(2, Math.min(100, p.score * 100))}%` }} />
           </div>
-          <span className="w-12 text-right tabular-nums text-gray-500">{(p.score * 100).toFixed(1)} %</span>
+          <span className={`w-12 text-right tabular-nums ${compact ? 'text-white/65' : 'text-gray-500'}`}>{(p.score * 100).toFixed(1)} %</span>
         </div>
       ))}
     </div>
@@ -48,20 +48,27 @@ function Detection({ r, file, classes, compact }: { r: InferResult; file?: Attac
   const boxes = (r.boxes ?? []) as unknown as DetectionBox[];
   const w = r.image_width ?? 0;
   const h = r.image_height ?? 0;
+  const shown = compact ? 200 : 300;
   return (
-    <div className="space-y-2">
+    // Schnell-Chat: Bild links, Ergebnis rechts daneben; Seite: untereinander.
+    <div className={compact ? 'flex items-start gap-3' : 'space-y-2'}>
       {file && (
         // Feste Hoehe statt volle Breite: ein 512er-Bild fuellte sonst die ganze
         // Seite. Die Breite folgt dem Seitenverhaeltnis, Boxen bleiben deckungsgleich.
-        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30 max-w-full"
-          style={{ height: compact ? 220 : 300, aspectRatio: w && h ? `${w} / ${h}` : '4 / 3' }}>
+        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30 max-w-full flex-shrink-0"
+          style={{ height: shown, aspectRatio: w && h ? `${w} / ${h}` : '4 / 3', maxWidth: compact ? '62%' : undefined }}>
           <img src={convertFileSrc(file.path)} alt={file.name} className="absolute inset-0 w-full h-full object-contain" />
-          <DetectionOverlay boxes={boxes} classes={classes} width={w} height={h} />
+          <DetectionOverlay boxes={boxes} classes={classes} width={w} height={h} displayHeight={shown} />
         </div>
       )}
-      <p className="text-sm text-white">
-        {boxes.length ? summarizeBoxes(boxes) : t('hosting.result.noObjects')}
-      </p>
+      <div className="min-w-0">
+        <p className="text-sm text-white">
+          {boxes.length ? summarizeBoxes(boxes) : t('hosting.result.noObjects')}
+        </p>
+        {compact && boxes.slice(0, 6).map((b, i) => (
+          <p key={i} className="text-[12px] text-white/60 tabular-nums truncate">{b.label} · {(b.confidence * 100).toFixed(0)} %</p>
+        ))}
+      </div>
     </div>
   );
 }
@@ -107,10 +114,10 @@ export default function HostResultView({ result, host, file, inputText = '', com
         <p className="text-sm text-white">
           <span className="font-medium">{result.predicted}</span>
           {typeof result.confidence === 'number' && (
-            <span className="ml-2 text-gray-500 tabular-nums">{(result.confidence * 100).toFixed(1)} %</span>
+            <span className={`ml-2 tabular-nums ${compact ? 'text-white/65' : 'text-gray-500'}`}>{(result.confidence * 100).toFixed(1)} %</span>
           )}
         </p>
-        <Scores r={result} />
+        <Scores r={result} compact={compact} />
       </div>
     );
   }
@@ -118,7 +125,7 @@ export default function HostResultView({ result, host, file, inputText = '', com
   return (
     <div className="space-y-2">
       {body}
-      <div className="flex items-center gap-3 text-[11px] text-gray-500">
+      <div className={`flex items-center gap-3 text-[11px] ${compact ? 'text-white/55' : 'text-gray-500'}`}>
         {meta.length > 0 && <span className="tabular-nums">{meta.join(' · ')}</span>}
         <CopyButton text={copyText} label={t('hosting.result.copy')} />
       </div>

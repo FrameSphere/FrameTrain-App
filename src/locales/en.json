@@ -4105,7 +4105,8 @@
     },
     "chat": {
       "thinking": "Model is working …",
-      "waking": "Loading model …"
+      "waking": "Loading model …",
+      "fromQuick": "from quick chat"
     },
     "composer": {
       "noModel": "No model selected",
@@ -4137,7 +4138,9 @@
         "asr": "Record speech or attach audio",
         "video": "Attach or drop a video",
         "tensor": "Numbers, e.g. 0.5, 1.2, 3.0"
-      }
+      },
+      "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain.",
+      "openSettings": "Open settings"
     },
     "result": {
       "copy": "Copy",
@@ -4145,11 +4148,22 @@
       "tokensPerSecond": "{value} tokens/s"
     },
     "quick": {
-      "keys": "Enter to send · Esc to close · ⌘/Ctrl+N new",
       "new": "New",
-      "openApp": "Open in FrameTrain",
+      "openApp": "In FrameTrain",
       "noModels": "No model is hosted yet.",
-      "off": "off"
+      "off": "off",
+      "ago": {
+        "now": "just now",
+        "sec": "{value} s ago",
+        "min": "{value} min ago",
+        "hour": "{value} h ago"
+      },
+      "lastChat": "Last chat · {ago}",
+      "switchModel": "Switch model",
+      "suggestFile": "{kind} detected – open with {name}",
+      "suggestText": "Text? Ask {name}",
+      "dismiss": "Dismiss suggestion",
+      "finishedWhileAway": "Earlier answer · finished {ago}"
     },
     "settings": {
       "quickTitle": "Quick chat",
@@ -4210,7 +4224,14 @@
       "or": "or",
       "trayOnly": "via the menu bar icon only",
       "tryHint": "Open with: {how}",
-      "tryNow": "Try it now"
+      "tryNow": "Try it now",
+      "session": "On open",
+      "sessionHint": "The previous chat stays one ⌘↑ away and is kept in the model’s history. An answer still in progress is never lost.",
+      "sessionOpt": {
+        "smart": "New chat (unless after a short break)",
+        "always": "Always a new chat",
+        "never": "Continue the last chat"
+      }
     },
     "conflict": {
       "assistants": "Claude, ChatGPT or Raycast",

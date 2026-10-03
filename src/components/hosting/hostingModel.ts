@@ -35,7 +35,11 @@ export interface HostingSettings {
   api_port: number;
   api_token: string;
   tray_enabled: boolean;
+  /** Wann der Schnell-Chat beim Oeffnen neu beginnt. */
+  quick_session?: QuickPolicy;
 }
+
+export type QuickPolicy = 'smart' | 'always' | 'never';
 
 export interface DesktopStatus {
   shortcut_error: string | null;
@@ -43,6 +47,8 @@ export interface DesktopStatus {
   api: { running: boolean; url: string | null; error: string | null };
   any_loaded: boolean;
   platform: string;
+  /** Schnell-Chat-Fenster hat echtes Systemglas (macOS, Windows). */
+  glass?: boolean;
 }
 
 export interface InferResult {
@@ -73,6 +79,8 @@ export interface ChatMsg {
   error?: string;
   pending?: boolean;
   at: number;
+  /** Aus dem Schnell-Chat (auf der Hosting-Seite markiert). */
+  source?: 'quick';
 }
 
 // ── Eingabe je Modell ────────────────────────────────────────────────────
@@ -287,4 +295,61 @@ print(r.json()["result"]["predicted"])`,
 
 export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ── Schnell-Chat: Sitzungen ─────────────────────────────────────────────
+
+/** Kurze Unterbrechung (etwas kopieren, nachsehen): derselbe Chat geht weiter. */
+export const QUICK_RESUME_MS = 30_000;
+
+/**
+ * Was beim Oeffnen des Schnell-Chats passiert. "smart": neuer Chat, ausser
+ * es laeuft noch eine Antwort, eine wurde im Hintergrund fertig, oder das
+ * Fenster war nur kurz zu.
+ */
+export function sessionAction(o: {
+  policy: QuickPolicy;
+  pending: boolean;
+  unread: boolean;
+  hiddenForMs: number | null;
+  hasMessages: boolean;
+}): 'keep' | 'new' {
+  if (!o.hasMessages) return 'keep';
+  // Eine laufende oder ungelesene Antwort geht nie verloren — egal welche Einstellung.
+  if (o.pending || o.unread) return 'keep';
+  if (o.policy === 'never') return 'keep';
+  if (o.policy === 'always') return 'new';
+  return o.hiddenForMs !== null && o.hiddenForMs < QUICK_RESUME_MS ? 'keep' : 'new';
+}
+
+/** Naechstes/voriges Modell fuer Tab / Umschalt+Tab (im Kreis). */
+export function cycleHost(hosts: Pick<HostInfo, 'id'>[], currentId: string | null, dir: 1 | -1): string | null {
+  if (!hosts.length) return null;
+  const i = hosts.findIndex(h => h.id === currentId);
+  if (i < 0) return hosts[0].id;
+  return hosts[(i + dir + hosts.length) % hosts.length].id;
+}
+
+/**
+ * Gehostetes Modell, das diese Eingabe annimmt (Bild, Audio, Video oder Text) —
+ * fuer den Vorschlag "Mit … oeffnen", wenn das aktive Modell nicht passt.
+ * Laufende Modelle zuerst.
+ */
+export function hostAccepting<T extends Pick<HostInfo, 'id' | 'modality' | 'input_kind' | 'status'>>(
+  hosts: T[], kind: 'text' | Exclude<FileKind, 'file'>, excludeId: string | null,
+): T | null {
+  const fits = hosts.filter(h => h.id !== excludeId).filter(h => {
+    const spec = composerSpec(h);
+    return kind === 'text' ? spec.file === null && spec.text === 'required' && h.input_kind !== 'tensor' : spec.file === kind;
+  });
+  return fits.find(h => h.status === 'ready') ?? fits[0] ?? null;
+}
+
+/** "gerade eben" / "vor 12 min" / "vor 3 h" als Bausteine fuer die Uebersetzung. */
+export function agoParts(ms: number): { key: 'now' | 'sec' | 'min' | 'hour'; value: number } {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 10) return { key: 'now', value: 0 };
+  if (s < 60) return { key: 'sec', value: s };
+  if (s < 3600) return { key: 'min', value: Math.round(s / 60) };
+  return { key: 'hour', value: Math.round(s / 3600) };
 }

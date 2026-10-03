@@ -1001,7 +1001,7 @@ type LabPhase = 'setup' | 'testing' | 'analysis';
  * preserveAspectRatio wie object-contain, also passen die Koordinaten ohne
  * Umrechnung auf die dargestellte Groesse.
  */
-export function DetectionOverlay({ boxes, truthBoxes = [], draftBox = null, classes = [], width, height }: {
+export function DetectionOverlay({ boxes, truthBoxes = [], draftBox = null, classes = [], width, height, displayHeight }: {
   boxes: DetectionBox[];
   /** Soll-Boxen aus der Labeldatei des Datasets, gestrichelt gezeichnet. */
   truthBoxes?: TruthBox[];
@@ -1011,11 +1011,16 @@ export function DetectionOverlay({ boxes, truthBoxes = [], draftBox = null, clas
   classes?: string[];
   width: number;
   height: number;
+  /** Hoehe auf dem Bildschirm (px). Damit bleiben Schrift und Linien lesbar,
+   *  wenn ein grosses Bild klein gezeigt wird (Hosting). Ohne Angabe wie bisher. */
+  displayHeight?: number;
 }) {
   if ((!boxes.length && !truthBoxes.length && !draftBox) || width <= 0 || height <= 0) return null;
   // Schrift und Linien in Bildpixeln — bei einem 4000px-Foto waere 12px unsichtbar.
-  const stroke = Math.max(1.5, width / 320);
-  const font   = Math.max(9, width / 40);
+  // Mit displayHeight: 11 px Schrift und 1.5 px Linie auf dem Bildschirm, in Bildpixel umgerechnet.
+  const perPx  = displayHeight && displayHeight > 0 ? height / displayHeight : 0;
+  const stroke = perPx ? 1.5 * perPx : Math.max(1.5, width / 320);
+  const font   = perPx ? 11 * perPx : Math.max(9, width / 40);
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}

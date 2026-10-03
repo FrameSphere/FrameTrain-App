@@ -4105,7 +4105,8 @@
     },
     "chat": {
       "thinking": "Modell rechnet …",
-      "waking": "Modell wird geladen …"
+      "waking": "Modell wird geladen …",
+      "fromQuick": "aus dem Schnell-Chat"
     },
     "composer": {
       "noModel": "Kein Modell gewählt",
@@ -4137,7 +4138,9 @@
         "asr": "Sprache aufnehmen oder Audio anhängen",
         "video": "Video anhängen oder hineinziehen",
         "tensor": "Zahlen, z. B. 0.5, 1.2, 3.0"
-      }
+      },
+      "screenPermission": "macOS erlaubt FrameTrain die Bildschirmaufnahme noch nicht. Erlaube sie unter Datenschutz & Sicherheit → Bildschirmaufnahme und starte FrameTrain neu.",
+      "openSettings": "Einstellungen öffnen"
     },
     "result": {
       "copy": "Kopieren",
@@ -4145,11 +4148,22 @@
       "tokensPerSecond": "{value} Token/s"
     },
     "quick": {
-      "keys": "Enter senden · Esc schließen · ⌘/Strg+N neu",
       "new": "Neu",
-      "openApp": "In FrameTrain öffnen",
+      "openApp": "In FrameTrain",
       "noModels": "Es ist noch kein Modell gehostet.",
-      "off": "aus"
+      "off": "aus",
+      "ago": {
+        "now": "gerade eben",
+        "sec": "vor {value} s",
+        "min": "vor {value} min",
+        "hour": "vor {value} h"
+      },
+      "lastChat": "Letzter Chat · {ago}",
+      "switchModel": "Modell wechseln",
+      "suggestFile": "{kind} erkannt – mit {name} öffnen",
+      "suggestText": "Text? Mit {name} fragen",
+      "dismiss": "Vorschlag verwerfen",
+      "finishedWhileAway": "Antwort von vorhin · fertig {ago}"
     },
     "settings": {
       "quickTitle": "Schnell-Chat",
@@ -4210,7 +4224,14 @@
       "or": "oder",
       "trayOnly": "nur über das Menüleisten-Symbol",
       "tryHint": "Öffnen mit: {how}",
-      "tryNow": "Jetzt ausprobieren"
+      "tryNow": "Jetzt ausprobieren",
+      "session": "Beim Öffnen",
+      "sessionHint": "Der vorige Chat bleibt per ⌘↑ erreichbar und steht im Verlauf des Modells. Läuft noch eine Antwort, geht sie nie verloren.",
+      "sessionOpt": {
+        "smart": "Neuer Chat (außer nach kurzer Pause)",
+        "always": "Immer neuer Chat",
+        "never": "Letzten Chat fortsetzen"
+      }
     },
     "conflict": {
       "assistants": "Claude, ChatGPT oder Raycast",

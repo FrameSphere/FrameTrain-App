@@ -20,6 +20,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 pub const QUICKCHAT: &str = "quickchat";
 const TRAY_ID: &str = "frametrain-hosting";
 const QC_WIDTH: f64 = 640.0;
+/// Eckenradius des Glasfensters (macOS); die Oberflaeche nutzt denselben Wert.
+const QC_RADIUS: f64 = 26.0;
+const QC_MIN_HEIGHT: f64 = 52.0;
 
 /// Wo der Schnell-Chat haengt: oben fest (Kuerzel, macOS-Menueleiste) oder
 /// unten fest (Windows-Taskleiste) — beim Wachsen bleibt diese Kante stehen.
@@ -55,17 +58,46 @@ fn quickchat_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, Stri
     }
     let b = WebviewWindowBuilder::new(app, QUICKCHAT, WebviewUrl::App("index.html".into()))
         .title("FrameTrain")
-        .inner_size(QC_WIDTH, 96.0)
+        .inner_size(QC_WIDTH, QC_MIN_HEIGHT)
         .decorations(false)
         .transparent(true)
-        .shadow(false)
+        .shadow(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(false)
         .visible(false)
         .focused(true)
         .visible_on_all_workspaces(true);
+    let b = match glass_effects() {
+        Some(fx) => b.effects(fx),
+        None => b,
+    };
     b.build().map_err(|e| format!("Schnell-Chat-Fenster: {}", e))
+}
+
+/// Blendet den Schnell-Chat aus und sagt es dem Fenster — es merkt sich den
+/// Zeitpunkt und entscheidet beim naechsten Oeffnen, ob ein neuer Chat beginnt.
+pub fn hide_quickchat(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window(QUICKCHAT) {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+            let _ = app.emit_to(QUICKCHAT, "quickchat-hidden", ());
+        }
+    }
+}
+
+/// Echtes Systemglas hinter dem Fenster. CSS kann den Desktop hinter einem
+/// durchsichtigen Fenster nicht weichzeichnen — das geht nur nativ:
+/// macOS Vibrancy, Windows Acrylic. Linux bleibt deckend (siehe QuickChatApp).
+fn glass_effects() -> Option<tauri::utils::config::WindowEffectsConfig> {
+    use tauri::window::{Effect, EffectState, EffectsBuilder};
+    if cfg!(target_os = "macos") {
+        Some(EffectsBuilder::new().effect(Effect::HudWindow).state(EffectState::Active).radius(QC_RADIUS).build())
+    } else if cfg!(target_os = "windows") {
+        Some(EffectsBuilder::new().effect(Effect::Acrylic).color(tauri::window::Color(22, 20, 34, 150)).build())
+    } else {
+        None
+    }
 }
 
 /// Legt das Fenster beim Start an, damit das erste Oeffnen ohne Ladezeit geht.
@@ -80,7 +112,7 @@ fn monitor_at(app: &tauri::AppHandle, x: f64, y: f64) -> Option<tauri::Monitor> 
 
 fn place(win: &tauri::WebviewWindow, a: Anchor) {
     let scale = win.scale_factor().unwrap_or(1.0);
-    let size = win.outer_size().unwrap_or(PhysicalSize::new((QC_WIDTH * scale) as u32, (96.0 * scale) as u32));
+    let size = win.outer_size().unwrap_or(PhysicalSize::new((QC_WIDTH * scale) as u32, (QC_MIN_HEIGHT * scale) as u32));
     let x = a.x_center - size.width as f64 / 2.0;
     let y = if a.from_bottom { a.y - size.height as f64 } else { a.y };
     let _ = win.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
@@ -114,7 +146,7 @@ pub fn show_quickchat(app: &tauri::AppHandle) -> Result<(), String> {
 pub fn toggle_quickchat(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window(QUICKCHAT) {
         if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
-            let _ = w.hide();
+            hide_quickchat(app);
             return;
         }
     }
@@ -241,7 +273,7 @@ fn ensure_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 let app = tray.app_handle();
                 if let Some(w) = app.get_webview_window(QUICKCHAT) {
                     if w.is_visible().unwrap_or(false) {
-                        let _ = w.hide();
+                        hide_quickchat(app);
                         return;
                     }
                 }
@@ -327,13 +359,29 @@ pub fn setup(app: &tauri::AppHandle) {
 
 // ============ Bildschirmfoto ============
 
+/// Kennung im Fehlertext: macOS hat die Aufnahme verweigert (Freigabe fehlt).
+pub const SCREEN_PERMISSION: &str = "SCREEN_PERMISSION";
+
+/// Ausgabe von `screencapture`, wenn die Freigabe "Bildschirmaufnahme" fehlt:
+/// der Bereich laesst sich waehlen, aber es entsteht kein Bild.
+pub fn is_permission_error(stderr: &str) -> bool {
+    stderr.contains("could not create image")
+}
+
 #[cfg(target_os = "macos")]
 fn capture_to(path: &std::path::Path) -> Result<bool, String> {
     // -i: Bereich waehlen (Leertaste: Fenster), -x: ohne Ton. Abbruch mit Esc
     // liefert Status 0 ohne Datei.
-    Command::new("screencapture").args(["-i", "-x"]).arg(path)
-        .status().map_err(|e| format!("screencapture: {}", e))?;
-    Ok(path.exists())
+    let out = Command::new("screencapture").args(["-i", "-x"]).arg(path)
+        .output().map_err(|e| format!("screencapture: {}", e))?;
+    if path.exists() {
+        return Ok(true);
+    }
+    // Ohne Freigabe sah das wie ein stiller Abbruch aus (Live-Test 1.5.2).
+    if is_permission_error(&String::from_utf8_lossy(&out.stderr)) {
+        return Err(SCREEN_PERMISSION.to_string());
+    }
+    Ok(false)
 }
 
 #[cfg(target_os = "windows")]
@@ -409,6 +457,15 @@ fn capture_to(path: &std::path::Path) -> Result<bool, String> {
     Ok(false)
 }
 
+/// Oeffnet die Systemeinstellung, in der die Bildschirmaufnahme erlaubt wird.
+#[tauri::command]
+pub fn hosting_open_screen_permission() {
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        .spawn();
+}
+
 /// Bildschirmfoto fuer den Schnell-Chat: Fenster verstecken, Bereich waehlen
 /// lassen, Pfad zurueck (None = abgebrochen).
 #[tauri::command]
@@ -448,16 +505,14 @@ pub fn hosting_show_quickchat(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn hosting_hide_quickchat(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window(QUICKCHAT) {
-        let _ = w.hide();
-    }
+    hide_quickchat(&app);
 }
 
 /// Der Schnell-Chat meldet seine Inhaltshoehe; die verankerte Kante bleibt stehen.
 #[tauri::command]
 pub fn hosting_quickchat_resize(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     let win = app.get_webview_window(QUICKCHAT).ok_or("Kein Schnell-Chat")?;
-    let h = height.clamp(56.0, 720.0);
+    let h = height.clamp(QC_MIN_HEIGHT, 720.0);
     win.set_size(tauri::LogicalSize::new(QC_WIDTH, h)).map_err(|e| e.to_string())?;
     if let Some(a) = *app.state::<DesktopState>().anchor.lock().unwrap() {
         place(&win, a);
@@ -472,14 +527,12 @@ pub fn hosting_quickchat_blur(app: tauri::AppHandle) {
     let recent = app.state::<DesktopState>().shown_at.lock().unwrap()
         .map(|t| t.elapsed() < std::time::Duration::from_millis(400)).unwrap_or(false);
     if recent { return; }
-    if let Some(w) = app.get_webview_window(QUICKCHAT) {
-        let _ = w.hide();
-    }
+    hide_quickchat(&app);
 }
 
 #[tauri::command]
 pub fn hosting_open_main(app: tauri::AppHandle, view: Option<String>) {
-    if let Some(w) = app.get_webview_window(QUICKCHAT) { let _ = w.hide(); }
+    hide_quickchat(&app);
     show_main(&app, view.as_deref());
 }
 
@@ -489,6 +542,18 @@ pub fn hosting_hide_main(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
     }
+}
+
+/// Punkt neben dem Tray-Symbol: im Schnell-Chat wartet eine Antwort, die bei
+/// geschlossenem Fenster fertig wurde (macOS zeigt den Text neben dem Symbol;
+/// Windows/Linux bekommen den Hinweis in den Tooltip).
+#[tauri::command]
+pub fn hosting_set_tray_badge(app: tauri::AppHandle, on: bool) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+    #[cfg(target_os = "macos")]
+    let _ = tray.set_title(if on { Some("●") } else { None::<&str> });
+    let tip = if on { tr(&app, "FrameTrain Hosting – Antwort wartet", "FrameTrain Hosting – answer waiting") } else { "FrameTrain Hosting" };
+    let _ = tray.set_tooltip(Some(tip));
 }
 
 /// Kuerzel und Doppeltipp kurz aussetzen (Aufnahme eines neuen Kuerzels).
@@ -515,5 +580,19 @@ pub fn hosting_desktop_status(app: tauri::AppHandle) -> serde_json::Value {
         "api": crate::hosting_api::status(&app),
         "any_loaded": hosting_manager::any_loaded(&hosting),
         "platform": std::env::consts::OS,
+        // Hat das Schnell-Chat-Fenster echtes Systemglas? Sonst zeichnet die Oberflaeche deckend.
+        "glass": glass_effects().is_some(),
     })
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::is_permission_error;
+
+    #[test]
+    fn fehlende_freigabe_ist_kein_stiller_abbruch() {
+        assert!(is_permission_error("could not create image from rect\n"));
+        assert!(is_permission_error("could not create image from display"));
+        assert!(!is_permission_error(""));
+    }
 }

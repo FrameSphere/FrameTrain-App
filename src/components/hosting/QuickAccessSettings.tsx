@@ -3,13 +3,13 @@
 
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Zap, Plug, RefreshCw, Eye, EyeOff, AlertTriangle, CheckCircle2, MousePointerClick, Keyboard, PanelTop, Timer } from 'lucide-react';
+import { Zap, Plug, RefreshCw, Eye, EyeOff, AlertTriangle, CheckCircle2, MousePointerClick, Keyboard, PanelTop, Timer, MessageSquarePlus } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { CopyButton } from './HostResultView';
 import { useHosting, useHostingSettings } from './useHosting';
 import {
   acceleratorFromEvent, apiSnippets, heldModifiers, knownConflict, shortcutLabel,
-  type DesktopStatus, type HostingSettings,
+  type DesktopStatus, type HostingSettings, type QuickPolicy,
 } from './hostingModel';
 
 export const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
@@ -133,6 +133,14 @@ export function QuickAccessCard({ settings, status, save, compact = false }: {
           <Row icon={PanelTop} label={t('hosting.settings.tray')} hint={t(`hosting.settings.trayHint.${platform}`)}>
             <Toggle on={settings.tray_enabled} onChange={v => save({ tray_enabled: v })} label={t('hosting.settings.tray')} />
           </Row>
+          {!compact && (
+            <Row icon={MessageSquarePlus} label={t('hosting.settings.session')} hint={t('hosting.settings.sessionHint')}>
+              <select value={settings.quick_session ?? 'smart'} onChange={e => save({ quick_session: e.target.value as QuickPolicy })}
+                className="rounded-lg bg-black/30 border border-white/15 text-sm text-white px-2.5 py-1.5 max-w-[240px]">
+                {(['smart', 'always', 'never'] as QuickPolicy[]).map(k => <option key={k} value={k}>{t(`hosting.settings.sessionOpt.${k}`)}</option>)}
+              </select>
+            </Row>
+          )}
           <div className="flex items-center justify-between gap-3 py-3">
             <p className="text-xs text-gray-400">{t('hosting.settings.tryHint', { how: quickSummary(settings, t) })}</p>
             <button onClick={() => { void invoke('hosting_show_quickchat').catch(() => {}); }}

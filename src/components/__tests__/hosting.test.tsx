@@ -31,7 +31,7 @@ vi.mock('../../contexts/ThemeContext', () => ({
 
 import {
   acceleratorFromEvent, apiSnippets, heldModifiers, canSend, composerSpec, fileKindOf, historyFor, knownConflict,
-  shortcutLabel, taskKey, tokensPerSecond, type ChatMsg, type HostInfo,
+  shortcutLabel, taskKey, tokensPerSecond, sessionAction, cycleHost, hostAccepting, agoParts, type ChatMsg, type HostInfo,
 } from '../hosting/hostingModel';
 import HostingPanel from '../hosting/HostingPanel';
 import QuickChatApp from '../hosting/QuickChatApp';
@@ -306,5 +306,213 @@ describe('Schnell-Chat', () => {
     expect(invokeMock).toHaveBeenCalledWith('hosting_update_model', { id: 'v2', makeDefault: true });
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(invokeMock).toHaveBeenCalledWith('hosting_hide_quickchat');
+  });
+});
+
+describe('Schnell-Chat: Sitzungsregeln', () => {
+  const base = { policy: 'smart' as const, pending: false, unread: false, hiddenForMs: 120_000, hasMessages: true };
+
+  it('neu nach laengerer Pause, weiter nach kurzer', () => {
+    expect(sessionAction(base)).toBe('new');
+    expect(sessionAction({ ...base, hiddenForMs: 5_000 })).toBe('keep');
+    expect(sessionAction({ ...base, hiddenForMs: null })).toBe('new');
+    expect(sessionAction({ ...base, hasMessages: false })).toBe('keep');
+  });
+
+  it('laufende oder ungelesene Antwort geht nie verloren', () => {
+    expect(sessionAction({ ...base, pending: true })).toBe('keep');
+    expect(sessionAction({ ...base, unread: true })).toBe('keep');
+    expect(sessionAction({ ...base, policy: 'always', unread: true })).toBe('keep');
+  });
+
+  it('Einstellung immer / nie', () => {
+    expect(sessionAction({ ...base, policy: 'always', hiddenForMs: 1_000 })).toBe('new');
+    expect(sessionAction({ ...base, policy: 'never' })).toBe('keep');
+  });
+
+  it('Tab laeuft im Kreis durch die Modelle', () => {
+    const hs = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    expect(cycleHost(hs, 'a', 1)).toBe('b');
+    expect(cycleHost(hs, 'c', 1)).toBe('a');
+    expect(cycleHost(hs, 'a', -1)).toBe('c');
+    expect(cycleHost([], 'a', 1)).toBeNull();
+  });
+
+  it('passendes Modell fuer eine Eingabe, laufende zuerst', () => {
+    const hs = [
+      host({ id: 'llm' }),
+      host({ id: 'y1', modality: 'detect', input_kind: 'image', status: 'idle' }),
+      host({ id: 'y2', modality: 'image', input_kind: 'image', status: 'ready' }),
+      host({ id: 'asr', modality: 'asr', input_kind: 'audio' }),
+    ];
+    expect(hostAccepting(hs, 'image', 'llm')?.id).toBe('y2');
+    expect(hostAccepting(hs, 'audio', 'llm')?.id).toBe('asr');
+    expect(hostAccepting(hs, 'text', 'y1')?.id).toBe('llm');
+    expect(hostAccepting(hs, 'video', 'llm')).toBeNull();
+    expect(hostAccepting(hs, 'text', 'llm')).toBeNull();
+  });
+
+  it('Zeitangaben', () => {
+    expect(agoParts(3_000)).toEqual({ key: 'now', value: 0 });
+    expect(agoParts(40_000)).toEqual({ key: 'sec', value: 40 });
+    expect(agoParts(12 * 60_000)).toEqual({ key: 'min', value: 12 });
+  });
+});
+
+describe('Schnell-Chat: Verhalten im Fenster', { timeout: 15000 }, () => {
+  const fire = (name: string) => act(() => { (listeners[name] ?? []).forEach(f => f({ payload: {} })); });
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    for (const k of Object.keys(listeners)) delete listeners[k];
+  });
+
+  const setup = (hostsList: HostInfo[], answer: unknown = { predicted: 'Antwort A', inference_ms: 100 }) => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'hosting_list') return Promise.resolve(hostsList);
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_infer') return Promise.resolve(answer);
+      return Promise.resolve(null);
+    });
+    wrap(<QuickChatApp />);
+  };
+
+  it('Antwort landet im Verlauf des Modells; erneutes Oeffnen nach Pause beginnt neu, ⌘↑ holt zurueck', async () => {
+    setup([host()]);
+    const box = await screen.findByPlaceholderText('Nachricht an SmolLM2 · v4 …');
+    await waitFor(() => expect(listeners['quickchat-shown']?.length).toBeGreaterThan(0));
+    await fire('quickchat-shown');
+    fireEvent.change(box, { target: { value: 'Frage 1' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(await screen.findByText('Antwort A')).toBeInTheDocument();
+    const append = invokeMock.mock.calls.find(c => c[0] === 'hosting_chat_append')![1] as { id: string; messages: ChatMsg[] };
+    expect(append.id).toBe('v1');
+    expect(append.messages.map(m => m.source)).toEqual(['quick', 'quick']);
+
+    // Zu, mehr als 30 s spaeter wieder auf → leerer Chat mit Chip "Letzter Chat"
+    await fire('quickchat-hidden');
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60_000);
+    await fire('quickchat-shown');
+    await waitFor(() => expect(screen.queryByText('Antwort A')).toBeNull());
+    expect(await screen.findByText(/Letzter Chat/)).toBeInTheDocument();
+    spy.mockRestore();
+
+    fireEvent.keyDown(window, { key: 'ArrowUp', metaKey: true });
+    expect(await screen.findByText('Antwort A')).toBeInTheDocument();
+  });
+
+  it('kurze Unterbrechung: derselbe Chat bleibt', async () => {
+    setup([host()]);
+    const box = await screen.findByPlaceholderText('Nachricht an SmolLM2 · v4 …');
+    await waitFor(() => expect(listeners['quickchat-shown']?.length).toBeGreaterThan(0));
+    await fire('quickchat-shown');
+    fireEvent.change(box, { target: { value: 'Frage' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(await screen.findByText('Antwort A')).toBeInTheDocument();
+    await fire('quickchat-hidden');
+    await fire('quickchat-shown');
+    expect(screen.getByText('Antwort A')).toBeInTheDocument();
+  });
+
+  it('Antwort wird bei geschlossenem Fenster fertig: Punkt am Tray, naechstes Oeffnen zeigt sie', async () => {
+    let finish: (v: unknown) => void = () => {};
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'hosting_list') return Promise.resolve([host()]);
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_infer') return new Promise(r => { finish = r; });
+      return Promise.resolve(null);
+    });
+    wrap(<QuickChatApp />);
+    const box = await screen.findByPlaceholderText('Nachricht an SmolLM2 · v4 …');
+    await waitFor(() => expect(listeners['quickchat-shown']?.length).toBeGreaterThan(0));
+    await fire('quickchat-shown');
+    fireEvent.change(box, { target: { value: 'Lange Frage' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(invokeMock.mock.calls.some(c => c[0] === 'hosting_infer')).toBe(true));
+    await fire('quickchat-hidden');
+    await act(async () => { finish({ predicted: 'Spaete Antwort', inference_ms: 9000 }); });
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('hosting_set_tray_badge', { on: true }));
+
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * 60_000);
+    await fire('quickchat-shown');
+    expect(await screen.findByText('Spaete Antwort')).toBeInTheDocument();
+    expect(screen.getByText(/Antwort von vorhin/)).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith('hosting_set_tray_badge', { on: false });
+    spy.mockRestore();
+  });
+
+  it('Bildschirmfoto (Knopf und ⌘⇧S) haengt das Bild an; Abbruch laesst alles, wie es war', async () => {
+    let shot: string | null = '/cache/screenshot_1.png';
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'hosting_list') return Promise.resolve([host({ name: 'Teile', modality: 'detect', input_kind: 'image' })]);
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_capture_screenshot') return Promise.resolve(shot);
+      return Promise.resolve(null);
+    });
+    wrap(<QuickChatApp />);
+    const box = await screen.findByPlaceholderText('Bild einfügen, ziehen oder aufnehmen');
+    expect(screen.getByLabelText('Senden')).toBeDisabled();
+    fireEvent.keyDown(box, { key: 's', metaKey: true, shiftKey: true });
+    expect(await screen.findByText('screenshot_1.png')).toBeInTheDocument();
+    expect(screen.getByLabelText('Senden')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('remove'));
+    shot = null;
+    fireEvent.click(screen.getByLabelText('Bildschirmfoto aufnehmen'));
+    await waitFor(() => expect(invokeMock.mock.calls.filter(c => c[0] === 'hosting_capture_screenshot').length).toBe(2));
+    expect(screen.queryByText('screenshot_1.png')).toBeNull();
+    expect(screen.getByLabelText('Senden')).toBeDisabled();
+  });
+
+  it('Bildschirmfoto ohne macOS-Freigabe: klare Meldung mit Weg in die Einstellungen', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'hosting_list') return Promise.resolve([host({ name: 'Teile', modality: 'detect', input_kind: 'image' })]);
+      if (cmd === 'hosting_get_settings') return Promise.resolve(SETTINGS);
+      if (cmd === 'hosting_capture_screenshot') return Promise.reject('SCREEN_PERMISSION');
+      return Promise.resolve(null);
+    });
+    wrap(<QuickChatApp />);
+    fireEvent.click(await screen.findByLabelText('Bildschirmfoto aufnehmen'));
+    expect(await screen.findByText(/erlaubt FrameTrain die Bildschirmaufnahme noch nicht/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Einstellungen öffnen'));
+    expect(invokeMock).toHaveBeenCalledWith('hosting_open_screen_permission');
+  });
+
+  it('Esc in Stufen: Liste zu, Entwurf leeren, dann Fenster zu', async () => {
+    setup([host(), host({ id: 'v2', name: 'Teile', is_default: false, modality: 'detect', input_kind: 'image' })]);
+    const box = await screen.findByPlaceholderText('Nachricht an SmolLM2 · v4 …') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'Entwurf' } });
+    fireEvent.click(screen.getByText('SmolLM2 · v4'));
+    expect(await screen.findByText('Objekterkennung (YOLO)')).toBeInTheDocument();
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(screen.queryByText('Objekterkennung (YOLO)')).toBeNull();
+    expect(box.value).toBe('Entwurf');
+    expect(invokeMock).not.toHaveBeenCalledWith('hosting_hide_quickchat');
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(box.value).toBe('');
+    expect(invokeMock).not.toHaveBeenCalledWith('hosting_hide_quickchat');
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(invokeMock).toHaveBeenCalledWith('hosting_hide_quickchat');
+  });
+
+  it('Tab wechselt das Modell und damit die Eingabe', async () => {
+    setup([host(), host({ id: 'v2', name: 'Teile', is_default: false, modality: 'detect', input_kind: 'image' })]);
+    const box = await screen.findByPlaceholderText('Nachricht an SmolLM2 · v4 …');
+    fireEvent.keyDown(box, { key: 'Tab' });
+    expect(await screen.findByPlaceholderText('Bild einfügen, ziehen oder aufnehmen')).toBeInTheDocument();
+    expect(screen.getByLabelText('Bildschirmfoto aufnehmen')).toBeInTheDocument();
+  });
+
+  it('Text bei einem Bildmodell: Textmodell wird vorgeschlagen, Tab uebernimmt samt Entwurf', async () => {
+    setup([host({ id: 'y', name: 'Teile', modality: 'detect', input_kind: 'image' }), host({ id: 'llm', name: 'Smol', is_default: false })]);
+    const box = await screen.findByPlaceholderText('Bild einfügen, ziehen oder aufnehmen');
+    fireEvent.change(box, { target: { value: 'Was ist ein Adapter?' } });
+    expect(await screen.findByText('Text? Mit Smol fragen')).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: 'Tab' });
+    const next = await screen.findByPlaceholderText('Nachricht an Smol …') as HTMLTextAreaElement;
+    await waitFor(() => expect(next.value).toBe('Was ist ein Adapter?'));
   });
 });

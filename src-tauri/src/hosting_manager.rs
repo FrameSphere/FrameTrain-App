@@ -77,6 +77,9 @@ pub struct HostingSettings {
     pub api_token:    String,
     /// Symbol in der Menueleiste / im Infobereich zeigen.
     pub tray_enabled: bool,
+    /// Wann der Schnell-Chat beim Oeffnen neu beginnt: "smart" (neu, ausser
+    /// nach kurzer Unterbrechung oder wenn eine Antwort wartet) | "always" | "never"
+    pub quick_session: String,
 }
 
 impl Default for HostingSettings {
@@ -93,6 +96,7 @@ impl Default for HostingSettings {
             api_port: DEFAULT_API_PORT,
             api_token: String::new(),
             tray_enabled: true,
+            quick_session: "smart".to_string(),
         }
     }
 }
@@ -814,6 +818,29 @@ pub fn hosting_chat_save(app: tauri::AppHandle, id: String, messages: Vec<serde_
     let start = messages.len().saturating_sub(200);
     let text = serde_json::to_string(&messages[start..]).map_err(|e| e.to_string())?;
     std::fs::write(p, text).map_err(|e| e.to_string())
+}
+
+/// Haengt Nachrichten aus dem Schnell-Chat an den Verlauf des Modells an —
+/// so findet man sie spaeter auf der Hosting-Seite wieder.
+#[tauri::command]
+pub fn hosting_chat_append(app: tauri::AppHandle, id: String, messages: Vec<serde_json::Value>) -> Result<(), String> {
+    if messages.is_empty() { return Ok(()); }
+    let p = chat_file(&app, &id)?;
+    let mut all: Vec<serde_json::Value> = std::fs::read_to_string(&p).ok()
+        .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    // Dieselbe Nachricht nicht doppelt (ein Chat wird nach jeder Antwort gesichert).
+    for m in messages {
+        let mid = m.get("id").and_then(|v| v.as_str()).map(str::to_string);
+        match mid.and_then(|mid| all.iter().position(|x| x.get("id").and_then(|v| v.as_str()) == Some(mid.as_str()))) {
+            Some(i) => all[i] = m,
+            None => all.push(m),
+        }
+    }
+    let start = all.len().saturating_sub(200);
+    let text = serde_json::to_string(&all[start..]).map_err(|e| e.to_string())?;
+    std::fs::write(p, text).map_err(|e| e.to_string())?;
+    let _ = app.emit("hosting-chat-changed", serde_json::json!({ "id": id }));
+    Ok(())
 }
 
 #[cfg(test)]

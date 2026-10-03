@@ -88,3 +88,28 @@ body {
 .animate-shimmer {
   animation: shimmer 2s ease-in-out infinite;
 }
+
+/* ── Hosting: Druck-Rueckmeldung und Einblenden von Antworten ──────────────
+   Nur transform/opacity (GPU), ease-out mit kraeftiger Kurve, unter 200 ms. */
+.ft-press {
+  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), background-color 140ms ease, color 140ms ease;
+}
+.ft-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.ft-answer {
+  transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@starting-style {
+  .ft-answer {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ft-press:active:not(:disabled) { transform: none; }
+  .ft-answer { transition: opacity 160ms ease; }
+  @starting-style {
+    .ft-answer { opacity: 0; transform: none; }
+  }
+}
