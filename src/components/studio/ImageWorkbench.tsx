@@ -86,7 +86,7 @@ interface FolderInspection {
 }
 
 export default function ImageWorkbench({ project, onBack, onProjectChanged }: Props) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { success, error, warning, info } = useNotification();
 
   const [samples, setSamples]   = useState<StudioSample[]>([]);
@@ -998,7 +998,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                   <span className="tabular-nums">{index + 1} / {total}</span>
                   <span>{imgW} x {imgH}</span>
                   <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
-                  {zoom > 1 && <span className="tabular-nums">{t('studio.workbench.zoomLevel', { factor: zoom.toFixed(1).replace('.', ',') })}</span>}
+                  {zoom > 1 && <span className="tabular-nums">{t('studio.workbench.zoomLevel', { factor: language === 'en' ? zoom.toFixed(1) : zoom.toFixed(1).replace('.', ',') })}</span>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button onClick={() => void confirmAndNext()}

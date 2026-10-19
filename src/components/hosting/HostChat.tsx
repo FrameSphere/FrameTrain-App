@@ -19,6 +19,8 @@ import {
   type Attachment, type ChatMsg, type HostInfo, type InferResult,
 } from './hostingModel';
 import { guardBlur } from './quickchatGuard';
+import BrokenPackageNotice from '../BrokenPackageNotice';
+import { brokenPackageFromError } from '../usePackageInstall';
 
 const MOD = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl+';
 
@@ -90,8 +92,11 @@ export function useHostChat(host: HostInfo | null, persist: boolean) {
     let un: (() => void) | undefined;
     listen<{ id: string }>('hosting-chat-changed', e => {
       if (e.payload.id === hostId && !sendingRef.current) void load(hostId, () => alive);
-    }).then(fn => { if (alive) un = fn; else fn(); }).catch(() => {});
-    return () => { alive = false; un?.(); };
+    }).then(fn => {
+      if (alive) un = fn;
+      else { try { fn(); } catch { /* already unregistered */ } }
+    }).catch(() => {});
+    return () => { alive = false; try { un?.(); } catch { /* already unregistered */ } };
   }, [hostId, persist, load]);
 
   const save = useCallback((list: ChatMsg[]) => {
@@ -203,7 +208,10 @@ export function MessageList({ messages, host, compact = false, plainUser = false
                 {m.text}<span className="inline-block w-1.5 h-4 ml-0.5 align-text-bottom bg-white/70 animate-pulse" />
               </p>
             )}
-            {m.error && (
+            {m.error && brokenPackageFromError(m.error) && (
+              <BrokenPackageNotice broken={brokenPackageFromError(m.error)!} compact />
+            )}
+            {m.error && !brokenPackageFromError(m.error) && (
               <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-300">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                 <span className="whitespace-pre-wrap break-words">{m.error}</span>

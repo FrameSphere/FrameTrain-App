@@ -657,7 +657,7 @@ export default function HomePanel({ userEmail, userId }: HomePanelProps) {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-gray-500 mb-4">{t('home.trend.subtitle', { count: String(trend.length) })}</p>
+              <p className="text-xs text-gray-500 mb-4">{t('home.trend.subtitleModel', { count: String(trend.length), model: trend[trend.length - 1]?.label ?? '' })}</p>
 
               {/* Sparkline: kleiner Loss liegt oben, aelteste Laeufe links. */}
               <svg viewBox="0 0 300 60" preserveAspectRatio="none" className="w-full h-16" role="img"

@@ -40,6 +40,16 @@ export function detectScriptModality(model: ModelLike | null): ScriptModality {
   }
 }
 
+/** Decoder-LLM (Aufgabe "LLM Fine-Tuning") — braucht eine eigene Vorlage. */
+export function isCausalLmModel(model: ModelLike | null): boolean {
+  if (!model) return false;
+  const r = detectPlugin(
+    model.source_path || model.local_path || model.name,
+    model.model_type ? { model_type: model.model_type } : undefined,
+  );
+  return r.supported && r.plugin.taskType === 'causal_lm';
+}
+
 /**
  * Pfad als Inhalt eines Python-String-Literals ("...").
  * Ohne Escaping war jede Vorlage auf Windows kaputt: "C:\Users\..." ist in

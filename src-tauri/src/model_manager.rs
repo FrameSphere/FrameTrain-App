@@ -70,6 +70,16 @@ fn is_safe_relative_filename(name: &str) -> bool {
         && !name.contains(':')
 }
 
+/// Zeitpunkt aus der DB: RFC 3339 (eigene Inserts) oder SQLite-`datetime('now')`
+/// ("YYYY-MM-DD HH:MM:SS", UTC). Vorher stand auf jeder Modellkarte die
+/// Uhrzeit des Seitenaufrufs.
+fn parse_db_time(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|d| d.with_timezone(&Utc))
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map(|n| n.and_utc()))
+        .unwrap_or_else(|_| Utc::now())
+}
+
 fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data_dir = app_handle.path().app_data_dir()
         .map_err(|e| format!("AppDataDir: {}", e))?;
@@ -378,7 +388,7 @@ pub fn list_models(
                 local_path: model_path.to_string_lossy().to_string(),
                 size_bytes: size,
                 file_count: files,
-                created_at: Utc::now(),
+                created_at: parse_db_time(&m.created_at),
                 model_type: mtype,
                 plugin_override: read_plugin_override(&model_path),
             }
@@ -1306,5 +1316,15 @@ mod diffusers_tests {
         fs::write(dir.join("config.json"), br#"{"model_type":"idefics3"}"#).unwrap();
         assert_eq!(detect_model_type(&dir).as_deref(), Some("idefics3"));
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod parse_db_time_tests {
+    use super::parse_db_time;
+    #[test]
+    fn liest_beide_formate() {
+        assert_eq!(parse_db_time("2026-09-28 14:05:00").to_rfc3339(), "2026-09-28T14:05:00+00:00");
+        assert_eq!(parse_db_time("2026-09-28T16:05:00+02:00").to_rfc3339(), "2026-09-28T14:05:00+00:00");
     }
 }

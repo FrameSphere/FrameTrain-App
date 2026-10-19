@@ -18,6 +18,8 @@ export interface TrainingConfig {
   canvasGraphMetadata?: any; // Graph topology info for debugging
 }
 
+const INITIAL_GPU = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent) ? 'mps' : 'cuda:0';
+
 export interface TrainingMetrics {
   epoch: number;
   loss: number;
@@ -42,6 +44,8 @@ interface TrainingConsoleProps {
   userId: string;
   /** Output directory from SynapseBuilder (model.pt, metrics.json, canvas_model.py) */
   outputDir?: string;
+  /** Gerade im Builder geladenes Modell — im Inference-Tab vorgewaehlt. */
+  activeCanvasModelId?: string | null;
 }
 
 // ─── Mini Sparkline ───────────────────────────────────────────────────────────
@@ -256,13 +260,16 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
   completedVersionId,
   userId,
   outputDir,
+  activeCanvasModelId,
 }) => {
   const { t } = useLanguage();
   const [config, setConfig] = useState<TrainingConfig>({
     epochs: 10,
     batchSize: 32,
     learningRate: 0.001,
-    gpu: "cuda:0",
+    // Vorlaeufig nach Plattform (Mac: MPS), bis die Pruefung unten antwortet —
+    // sonst stand einige Sekunden "cuda:0" auf einem Mac.
+    gpu: INITIAL_GPU,
     precision: "fp32",
     gradAccum: 1,
   });
@@ -273,7 +280,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
     invoke<{ cuda_available: boolean; mps_available: boolean }>('check_training_requirements')
       .then(r => {
         const gpu = r.cuda_available ? 'cuda:0' : r.mps_available ? 'mps' : 'cpu';
-        setConfig(c => (c.gpu === 'cuda:0' ? { ...c, gpu } : c));
+        setConfig(c => (c.gpu === INITIAL_GPU ? { ...c, gpu } : c));
       })
       .catch(() => {});
   }, []);
@@ -613,7 +620,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
 
           {/* INFERENCE TAB */}
           {activeTab === "inference" && (
-            <CanvasInferenceTab userId={userId ?? ""} />
+            <CanvasInferenceTab userId={userId ?? ""} preferredModelId={activeCanvasModelId ?? null} />
           )}
 
           {/* LOG TAB */}

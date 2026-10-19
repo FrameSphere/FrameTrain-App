@@ -74,6 +74,9 @@ import {
   MANAGER_API, readStoredTickets, submitSupportTicket, type StoredTicket,
 } from '../utils/supportTicket';
 import ModalPortal from './ui/ModalPortal';
+import { pluginName } from '../plugins/pluginText';
+import BrokenPackageNotice from './BrokenPackageNotice';
+import type { BrokenPackage } from './usePackageInstall';
 
 // Support hook – persists ticket list in localStorage
 function useStoredTickets(userId: string) {
@@ -286,6 +289,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const [systemInstallError, setSystemInstallError] = useState<string>('');
   // Paketgruppen (HF-Stack, YOLO, LLM, Generativ) und das Python der App
   const [pluginGroups, setPluginGroups] = useState<{ id: string; name: string; description: string; is_installed: boolean; required_packages: string[] }[] | null>(null);
+  const [brokenPkg, setBrokenPkg] = useState<BrokenPackage | null>(null);
   const [pythonInfo, setPythonInfo] = useState<{ path?: string | null; version?: string | null; supported: boolean; install_hint: string } | null>(null);
 
   const { getAll } = useStoredTickets(userData.userId);
@@ -306,6 +310,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       ]);
       setSystemDeps(deps);
       setSystemReqs(reqs);
+      invoke<BrokenPackage | null>('get_broken_python_package').then(setBrokenPkg).catch(() => setBrokenPkg(null));
       setPreventSleepActive(sleep);
       // Gruppen und Python-Pfad getrennt: ein Fehler hier soll die Paketliste nicht verdecken.
       invoke<typeof pluginGroups>('get_available_plugins').then(setPluginGroups).catch(() => setPluginGroups(null));
@@ -1104,7 +1109,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 </div>
                 
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">{meta.keyHint}</label>
+                  <label className="block text-sm text-gray-400 mb-2">{t(`settings.ai.keyHints.${aiSettings.provider}`, meta.keyHint)}</label>
                   <div className="flex items-center gap-2">
                     <input
                       type={showApiKeyField ? 'text' : 'password'}
@@ -1393,8 +1398,10 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </>
         )}
 
-        {/* Speichern-Leiste: Änderungen werden erst nach dem Speichern wirksam */}
-        <div className="sticky bottom-0 pt-2">
+        {/* Speichern-Leiste: Änderungen werden erst nach dem Speichern wirksam.
+            Klebt nur mit ungespeicherten Änderungen am unteren Rand (sonst lag sie
+            über Hinweisen und dem Modell-Bereich); rechts Platz für den KI-Knopf. */}
+        <div className={`${aiDirty || aiTestMsg ? 'sticky bottom-0' : ''} pt-2 pr-16`}>
           {aiTestMsg && (
             <div className={`mb-2 flex items-start gap-2 p-3 rounded-lg border text-xs ${aiTestMsg.ok ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
               {aiTestMsg.ok ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
@@ -1472,7 +1479,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             <button
               key={theme.id}
               onClick={() => handleThemeChange(theme.id)}
-              className={`relative p-5 bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
+              className={`ft-keep-colors relative p-5 bg-black bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
                 currentTheme.id === theme.id
                   ? 'border-white/40 shadow-lg ring-2 ring-white/20'
                   : 'border-white/10 hover:border-white/20'
@@ -1494,7 +1501,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               {/* Theme info */}
               <div className="text-center">
                 <div className={`${textColor} font-semibold text-sm mb-1`}>{theme.name}</div>
-                <div className={`text-xs ${descColor}`}>{theme.description}</div>
+                <div className={`text-xs ${descColor}`}>{t(`themes.${theme.id}`, theme.description)}</div>
               </div>
             </button>
             );
@@ -1959,8 +1966,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                       <p className="text-xs text-gray-500 flex-1">
-                        Deine User-ID <code className="text-purple-400 bg-white/5 px-1 rounded">{userData.userId}</code> wird automatisch
-                        mitgeschickt.
+                        {t('settings.support.userIdNoteBefore')} <code className="text-purple-400 bg-white/5 px-1 rounded">{userData.userId}</code> {t('settings.support.userIdNoteAfter')}
                       </p>
                       <button
                         onClick={submitTicket}
@@ -2153,8 +2159,12 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </div>
         </div>
 
+        {brokenPkg && <div className="mb-3"><BrokenPackageNotice broken={brokenPkg} onRepaired={() => void loadSystemInfo()} /></div>}
         {!systemDeps ? (
-          <div className="text-gray-500 text-sm">{t('settings.system.statusNotLoaded')}</div>
+          <div className="text-gray-500 text-sm flex items-center gap-2">
+            {systemLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {t(systemLoading ? 'settings.system.checking' : 'settings.system.statusNotLoaded')}
+          </div>
         ) : (
           <div className="space-y-2">
             {systemDeps.map(dep => (
@@ -2217,7 +2227,10 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </div>
         )}
         {!pluginGroups ? (
-          <div className="text-gray-500 text-sm">{t('settings.system.statusNotLoaded')}</div>
+          <div className="text-gray-500 text-sm flex items-center gap-2">
+            {systemLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {t(systemLoading ? 'settings.system.checking' : 'settings.system.statusNotLoaded')}
+          </div>
         ) : pluginGroups.map(g => (
           <div key={g.id} className="flex items-start justify-between gap-3 px-4 py-3 bg-white/[0.03] rounded-xl border border-white/10">
             <div className="flex items-start gap-3 min-w-0">
@@ -2256,14 +2269,34 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             ].map(row => (
               <div key={row.label} className="flex items-center justify-between px-4 py-3 bg-white/[0.03] rounded-xl border border-white/10">
                 <span className="text-gray-400 text-sm">{row.label}</span>
-                <span className={`text-xs font-mono ${row.ok ? 'text-emerald-400' : 'text-gray-500'}`}>{row.value}</span>
+                <span className={`text-xs font-mono ${row.ok ? 'text-emerald-400' : 'text-gray-500'}`}>
+                  {row.value === 'Nicht installiert' ? t('settings.system.notInstalled')
+                    : row.value === 'Nicht gefunden' ? t('settings.system.notFound') : row.value}
+                </span>
               </div>
             ))}
           </div>
-          <div className={`mt-4 p-3 rounded-xl border text-sm flex items-center gap-2 ${systemReqs.ready ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
-            {systemReqs.ready ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            {systemReqs.ready ? t('settings.system.systemReady') : t('settings.system.systemNotReady')}
-          </div>
+          {(() => {
+            // "Bereit" nur, wenn auch die Paketliste vollstaendig ist — vorher
+            // stand es gruen da, obwohl PEFT, scikit-learn & Co. fehlten.
+            const missing = (systemDeps ?? []).filter(d => !d.installed).map(d => d.package);
+            const level = !systemReqs.ready ? 'red' : (missing.length > 0 || brokenPkg) ? 'amber' : 'green';
+            const cls = level === 'green' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+              : level === 'amber' ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+              : 'bg-red-500/10 border-red-500/20 text-red-300';
+            return (
+              <div className={`mt-4 p-3 rounded-xl border text-sm flex items-start gap-2 ${cls}`}>
+                {level === 'green' ? <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+                <span>
+                  {level === 'green' ? t('settings.system.systemReady')
+                    : level === 'amber' ? (brokenPkg
+                      ? t('settings.system.systemBroken', { package: brokenPkg.package })
+                      : t('settings.system.systemPartlyReady', { list: missing.join(', ') }))
+                    : t('settings.system.systemNotReady')}
+                </span>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2319,7 +2352,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <div className="flex flex-wrap gap-2 mb-4">
           {PLUGINS.map((p) => (
             <span key={p.id} className="px-2.5 py-1 rounded-full text-xs bg-purple-500/10 border border-purple-500/20 text-purple-200">
-              {p.name}
+              {pluginName(p, t)}
             </span>
           ))}
         </div>
@@ -2410,8 +2443,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       )}
 
       <div className="grid grid-cols-4 gap-6">
-        {/* Sidebar Tabs */}
-        <div className="space-y-2">
+        {/* Sidebar Tabs — bleiben beim Scrollen langer Reiter stehen */}
+        <div className="space-y-2 self-start sticky top-0">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -2422,7 +2455,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                 onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
                   isActive
-                    ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg'
+                    ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
                     : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white border border-white/10'
                 }`}
               >

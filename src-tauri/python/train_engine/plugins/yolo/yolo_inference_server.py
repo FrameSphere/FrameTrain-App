@@ -208,12 +208,18 @@ class YoloInferenceServer:
     def _summary(boxes: list, best_per_label: dict) -> str:
         """Kurzfassung fuer die Ergebnisspalte und den CSV-Export."""
         if not boxes:
+            # Feste Kennung; die Oberflaeche zeigt sie in ihrer Sprache an.
             return "Keine Objekte"
-        labels = list(best_per_label.keys())
-        head = ", ".join(labels[:3])
+        # Je Klasse zaehlen: "3x Person, Emptyspace" las sich wie drei
+        # Personen, waren aber zwei Personen und ein Emptyspace.
+        counts: dict = {}
+        for b in boxes:
+            counts[b["label"]] = counts.get(b["label"], 0) + 1
+        labels = [l for l in best_per_label.keys() if l in counts] or list(counts.keys())
+        head = ", ".join(f"{counts[l]}x {l}" for l in labels[:3])
         if len(labels) > 3:
             head += f" +{len(labels) - 3}"
-        return f"{len(boxes)}x {head}"
+        return head
 
     def run(self) -> None:
         try:

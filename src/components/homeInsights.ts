@@ -50,6 +50,7 @@ export interface InsightInput {
 export type InsightKind =
   | 'sleepRisk'
   | 'trainingFailed'
+  | 'trainingStopped'
   | 'overfitting'
   | 'weakAccuracy'
   | 'untestedModels'
@@ -107,11 +108,14 @@ export function buildInsights(input: InsightInput): Insight[] {
     if (!latestPerModel.has(key)) latestPerModel.set(key, job);
   }
   for (const job of latestPerModel.values()) {
+    // Abgebrochen ist nicht fehlgeschlagen: die Startseite meldete "YOLO11
+    // fehlgeschlagen", im Verlauf stand der Lauf unter "Gestoppt".
     if (job.status === 'failed' || job.status === 'stopped') {
+      const stopped = job.status === 'stopped';
       out.push({
-        id: `failed:${job.id}`,
-        kind: 'trainingFailed',
-        severity: 'warn',
+        id: `${stopped ? 'stopped' : 'failed'}:${job.id}`,
+        kind: stopped ? 'trainingStopped' : 'trainingFailed',
+        severity: stopped ? 'info' : 'warn',
         params: { model: job.model_name },
         target: 'training',
       });
@@ -194,8 +198,15 @@ export interface TrendPoint {
  * fallen raus, sonst kippt die Kurve auf die Grundlinie.
  */
 export function lossTrend(trainings: TrainingLike[], limit = 10): TrendPoint[] {
-  return byNewest(trainings)
-    .filter(j => j.status === 'completed' && typeof j.progress?.train_loss === 'number' && j.progress.train_loss > 0)
+  const usable = byNewest(trainings)
+    .filter(j => j.status === 'completed' && typeof j.progress?.train_loss === 'number' && j.progress.train_loss > 0);
+  // Nur Laeufe desselben Modells wie der juengste: ueber YOLO, LLM und
+  // Textklassifikator gemittelt stand da "+490 %" — Losses verschiedener
+  // Aufgaben sind nicht vergleichbar.
+  const key = (j: TrainingLike) => j.model_id || j.model_name;
+  const newest = usable[0];
+  return usable
+    .filter(j => !newest || key(j) === key(newest))
     .slice(0, limit)
     .map(j => ({ id: j.id, label: j.model_name, loss: j.progress!.train_loss as number, at: endedAt(j) }))
     .reverse();
@@ -282,6 +293,13 @@ export function buildBriefingFacts(input: InsightInput): string {
   lines.push(`Modelle: ${models.length}`);
   lines.push(`Datasets: ${datasets.length}${datasets.filter(d => (d.training_count ?? 0) === 0).length ? ` (davon ${datasets.filter(d => (d.training_count ?? 0) === 0).length} nie benutzt)` : ''}`);
   lines.push(`Trainings insgesamt: ${trainings.length}`);
+  // Dieselbe Zaehlung wie der Hinweis "nie getestet" auf der Startseite — das
+  // Briefing nannte sonst eine eigene, kleinere Zahl.
+  {
+    const tested = new Set(tests.filter(t => t.status === 'completed').map(t => t.model_id || t.model_name));
+    const untested = models.filter(m => !tested.has(m.id) && !tested.has(m.name)).length;
+    lines.push(`Nie getestete Modelle: ${untested} von ${models.length}`);
+  }
   lines.push(`Laeuft gerade ein Training: ${hasActiveTraining ? 'ja' : 'nein'}`);
 
   const recent = byNewest(trainings).slice(0, 8);

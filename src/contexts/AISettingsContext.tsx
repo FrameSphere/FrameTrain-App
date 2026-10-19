@@ -350,6 +350,7 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
   }, [draft.provider, draft.apiKey, keysByProvider, userId, keyLoading]);
 
   const probedAll = useRef(false);
+  const [storedKeyProviders, setStoredKeyProviders] = useState<KeyProvider[]>([]);
   const [probeRequested, setProbeRequested] = useState(false);
 
   /**
@@ -366,16 +367,18 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
     if (!probeRequested || keyLoading || probedAll.current) return;
     probedAll.current = true;
     let cancelled = false;
+    // Nur nachsehen, OB ein Key existiert — das Auslesen loeste beim Oeffnen
+    // des Reiters den macOS-Passwortdialog aus (die Signatur aendert sich mit
+    // jedem Release). Gelesen wird ein Key erst, wenn man den Anbieter waehlt.
     (async () => {
       for (const provider of KEY_PROVIDERS) {
         if (cancelled) return;
         if (keysByProvider[provider] !== undefined) continue;
-        const acc = secretAccount(userId, provider);
-        if (fetchedAccounts.current.has(acc)) continue;
-        fetchedAccounts.current.add(acc);
-        const got = await keychainGet(acc);
-        if (cancelled) return;
-        if (got.ok) setKeysByProvider(cache => ({ ...cache, [provider]: got.value ?? '' }));
+        try {
+          const exists = await invoke<boolean>('secret_exists', { key: secretAccount(userId, provider) });
+          if (cancelled) return;
+          if (exists) setStoredKeyProviders(prev => (prev.includes(provider) ? prev : [...prev, provider]));
+        } catch { /* ohne Schluesselbund: keine Anzeige */ }
       }
     })();
     return () => { cancelled = true; };
@@ -435,10 +438,11 @@ export function AISettingsProvider({ children, userId }: { children: ReactNode; 
   const providersWithKey = useMemo<KeyProvider[]>(() => {
     const set = new Set<KeyProvider>();
     for (const p of KEY_PROVIDERS) if ((keysByProvider[p] ?? '').trim()) set.add(p);
+    for (const p of storedKeyProviders) if (keysByProvider[p] === undefined) set.add(p);
     if (needsKey(draft.provider) && draft.apiKey.trim()) set.add(draft.provider);
     if (needsKey(settings.provider) && settings.apiKey.trim()) set.add(settings.provider);
     return KEY_PROVIDERS.filter(p => set.has(p));
-  }, [keysByProvider, draft.provider, draft.apiKey, settings.provider, settings.apiKey]);
+  }, [keysByProvider, storedKeyProviders, draft.provider, draft.apiKey, settings.provider, settings.apiKey]);
 
   const value = useMemo<AISettingsContextType>(() => ({
     settings,

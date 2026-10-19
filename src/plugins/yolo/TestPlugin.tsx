@@ -3,7 +3,7 @@
 // Keypoints, gedrehte Boxen und Klassifikation (die Aufgabe meldet das Backend).
 
 import { useState, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Upload, Target, AlertTriangle, Loader2, FolderOpen } from 'lucide-react';
 import type { TestPluginProps } from '../types';
@@ -45,6 +45,36 @@ export function summarizeYoloResult(result: InferenceResult) {
   return { task, masks, keypoints, classes: result.classifications ?? [] };
 }
 
+/**
+ * Boxen (bzw. Polygone bei segment/obb) ueber der Vorschau. Bewusst nicht das
+ * DetectionOverlay des Labors: der Import von LaboratoryPanel hier schloss
+ * einen Kreis ueber die Plugin-Registry, YOLO war dann beim Laden undefined.
+ */
+function BoxOverlay({ detections, width, height, displayHeight }: {
+  detections: Detection[]; width: number; height: number; displayHeight: number;
+}) {
+  if (!detections.length || width <= 0 || height <= 0) return null;
+  const px = height / displayHeight; // Bildpixel je Bildschirmpixel
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" className="absolute inset-0 w-full h-full pointer-events-none">
+      {detections.map((d, i) => {
+        const [x1, y1, x2, y2] = d.bbox;
+        return (
+          <g key={i}>
+            {d.polygon && d.polygon.length >= 3
+              ? <polygon points={d.polygon.map(([x, y]) => `${x},${y}`).join(' ')} fill="rgba(249,115,22,0.18)" stroke="#f97316" strokeWidth={1.5 * px} />
+              : <rect x={x1} y={y1} width={x2 - x1} height={y2 - y1} fill="none" stroke="#f97316" strokeWidth={1.5 * px} />}
+            <text x={x1 + 3 * px} y={Math.max(y1 - 4 * px, 11 * px)} fill="#fdba74" fontSize={11 * px} fontWeight={600}
+              style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.7)', strokeWidth: 3 * px }}>
+              {d.label} {(d.confidence * 100).toFixed(0)}%
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export default function YOLOTestPlugin({ modelPath, modelName, versionId }: TestPluginProps) {
   const { t } = useLanguage();
   const [imagePath, setImagePath] = useState<string | null>(null);
@@ -54,13 +84,16 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
   const [confThreshold, setConfThreshold] = useState(0.25);
   const [iouThreshold, setIouThreshold] = useState(0.45);
   const summary = result ? summarizeYoloResult(result) : null;
+  // Bildgroesse fuer die Boxen (das Backend liefert nur Pixelkoordinaten).
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const PREVIEW_H = 320;
 
   const handlePickImage = async () => {
     const sel = await open({
       filters: [{ name: t('testPlugins.common.imageFilter'), extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'] }],
       multiple: false,
     });
-    if (sel && typeof sel === 'string') setImagePath(sel);
+    if (sel && typeof sel === 'string') { setImagePath(sel); setResult(null); setNatural(null); }
   };
 
   const handleRunInference = async () => {
@@ -124,13 +157,23 @@ export default function YOLOTestPlugin({ modelPath, modelName, versionId }: Test
 
       {/* Bild auswählen */}
       <div
-        className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all ${
+        className={`border-2 border-dashed rounded-2xl ${imagePath ? 'p-4' : 'p-8'} text-center transition-all ${
           imagePath ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-white/15 hover:border-white/30'
         }`}
       >
         {imagePath ? (
           <div className="space-y-2">
-            <p className="text-white font-medium text-xs truncate">{imagePath.split('/').pop()}</p>
+            {/* Vorschau mit den erkannten Boxen — vorher stand nur der Dateiname da. */}
+            <div className="relative mx-auto rounded-xl overflow-hidden border border-white/10 bg-black/30 max-w-full"
+              style={{ height: PREVIEW_H, aspectRatio: natural ? `${natural.w} / ${natural.h}` : '4 / 3' }}>
+              <img src={convertFileSrc(imagePath)} alt={imagePath.split('/').pop()}
+                className="absolute inset-0 w-full h-full object-contain"
+                onLoad={e => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
+              {result && natural && summary?.task !== 'classify' && (
+                <BoxOverlay detections={result.detections} width={natural.w} height={natural.h} displayHeight={PREVIEW_H} />
+              )}
+            </div>
+            <p className="text-white font-medium text-xs truncate">{imagePath.split(/[\\/]/).pop()}</p>
             <button
               onClick={handlePickImage}
               className="text-xs text-gray-400 hover:text-white underline transition-colors"

@@ -2828,7 +2828,7 @@ Herkunft je Datei steht in PROVENANCE.csv, Verteilung und Prüfungen in EXPORT_R
 ///
 /// Die Daten liegen in `<out>/dataset/`, die Beipackzettel eine Ebene darueber.
 /// Die Train Engine liest bei ungeteiltem Text *jede* CSV im Ordner
-/// (seq_classification: `path.glob("*.csv")`) — PROVENANCE.csv neben daten.csv
+/// (seq_classification: `path.glob("*.csv")`) — PROVENANCE.csv neben data.csv
 /// waere als Trainingsdaten mitgelaufen. Zurueckgegeben wird der Ordner, der
 /// registriert werden soll.
 fn write_text_export(
@@ -2850,7 +2850,7 @@ fn write_text_export(
                 csv_field(s.src.license.as_deref().unwrap_or("")),
                 csv_field(&s.status)));
         }
-        fs::write(daten.join("daten.jsonl"), zeilen).map_err(|e| format!("JSONL: {}", e))?;
+        fs::write(daten.join("data.jsonl"), zeilen).map_err(|e| format!("JSONL: {}", e))?;
     } else {
         let mut zeilen = String::from("text,label\n");
         for s in samples {
@@ -2861,7 +2861,7 @@ fn write_text_export(
                 csv_field(s.src.license.as_deref().unwrap_or("")),
                 csv_field(&s.status)));
         }
-        fs::write(daten.join("daten.csv"), zeilen).map_err(|e| format!("CSV: {}", e))?;
+        fs::write(daten.join("data.csv"), zeilen).map_err(|e| format!("CSV: {}", e))?;
     }
 
     fs::write(out.join("PROVENANCE.csv"), provenance)
@@ -2882,8 +2882,8 @@ Herkunft je Text steht in PROVENANCE.csv.
         date = Utc::now().format("%Y-%m-%d"),
         count = samples.len(),
         classes = if project.classes.is_empty() { "—".to_string() } else { project.classes.join(", ") },
-        format = if seq2seq { "dataset/daten.jsonl mit source und target" }
-                 else { "dataset/daten.csv mit text und label" });
+        format = if seq2seq { "dataset/data.jsonl mit source und target" }
+                 else { "dataset/data.csv mit text und label" });
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
     Ok(daten)
 }
@@ -3338,7 +3338,7 @@ mod tests {
         fs::create_dir_all(&out).unwrap();
         let daten = write_text_export(&project, &[&s1, &s2], &out).unwrap();
 
-        let csv = fs::read_to_string(daten.join("daten.csv")).unwrap();
+        let csv = fs::read_to_string(daten.join("data.csv")).unwrap();
         let tabelle = parse_csv(&csv);
         assert_eq!(tabelle[0], vec!["text", "label"]);
         assert_eq!(tabelle[1], vec!["Der Lift stand still, zweimal", "beschwerde"]);
@@ -3350,7 +3350,7 @@ mod tests {
     #[test]
     fn textexport_legt_nur_trainingsdaten_in_den_registrierten_ordner() {
         // Die Train Engine liest bei ungeteiltem Text jede CSV im Ordner. Lag
-        // PROVENANCE.csv neben daten.csv, lief die Herkunftstabelle als
+        // PROVENANCE.csv neben data.csv, lief die Herkunftstabelle als
         // Trainingsdaten mit — und die App warnte vor gemischten Dateitypen.
         let dir = TempDir::new("textexport_ordner");
         let project = StudioProject {
@@ -3368,7 +3368,7 @@ mod tests {
         assert_ne!(daten, out, "registriert werden darf nicht der Ordner mit den Beipackzetteln");
         let dateien: Vec<String> = fs::read_dir(&daten).unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
-        assert_eq!(dateien, vec!["daten.csv".to_string()]);
+        assert_eq!(dateien, vec!["data.csv".to_string()]);
 
         let analysis = crate::dataset_manager::detect_dataset_type(&daten);
         assert_eq!(analysis.detected_type.as_str(), "flat_file");
@@ -3393,7 +3393,7 @@ mod tests {
         fs::create_dir_all(&out).unwrap();
         let daten = write_text_export(&project, &[&s1, &s2], &out).unwrap();
 
-        let jsonl = fs::read_to_string(daten.join("daten.jsonl")).unwrap();
+        let jsonl = fs::read_to_string(daten.join("data.jsonl")).unwrap();
         let zeilen: Vec<&str> = jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
         assert_eq!(zeilen.len(), 1, "die Zeile ohne Ziel darf nicht mit");
         let v: serde_json::Value = serde_json::from_str(zeilen[0]).unwrap();

@@ -37,6 +37,7 @@ import type { ModelConfig } from '../plugins/types';
 import { dateLocale } from '../utils/dateLocale';
 import { submitSupportTicket } from '../utils/supportTicket';
 import ModalPortal from './ui/ModalPortal';
+import { pluginName, pluginDescription } from '../plugins/pluginText';
 
 // ============ Types ============
 
@@ -169,7 +170,7 @@ function PluginBadge({ model, modelNameOrPath, configJson }: {
         title={manual ? t('modelManager.pluginAssignedManually') : undefined}
       >
         <Puzzle className="w-3 h-3" />
-        {result.plugin.name}
+        {pluginName(result.plugin, t)}
         {manual && <span className="text-emerald-500/70">·</span>}
       </span>
     );
@@ -214,6 +215,11 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   useEscapeKey(onClose);
+  // Die aktuelle Zuordnung steht oft weit unten — beim Oeffnen dorthin rollen.
+  const initialRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    initialRef.current?.scrollIntoView?.({ block: 'center' });
+  }, []);
 
   // Canvas-Netze entstehen im Synapse Builder, nicht beim Import — als
   // Auswahl waeren sie hier nur eine falsche Faehrte.
@@ -224,7 +230,8 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
     setBusy(true);
     try {
       await invoke('set_model_plugin', { modelId: model.id, pluginId });
-      const name = choices.find((p) => p.id === pluginId)?.name ?? pluginId;
+      const chosen = choices.find((p) => p.id === pluginId);
+      const name = chosen ? pluginName(chosen, t) : pluginId;
       success(
         t('modelManager.unknownModel.assignedTitle'),
         t('modelManager.unknownModel.assignedDetail', { model: model.name, plugin: name }),
@@ -318,6 +325,7 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
               {choices.map((p) => (
                 <button
                   key={p.id}
+                  ref={mode === 'change' && detected.supported && detected.plugin.id === p.id ? initialRef : undefined}
                   onClick={() => setPluginId(p.id)}
                   className={`w-full text-left p-3 rounded-xl border transition-all ${
                     pluginId === p.id
@@ -326,11 +334,11 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-white text-sm font-medium">{p.name}</span>
+                    <span className="text-white text-sm font-medium">{pluginName(p, t)}</span>
                     {pluginId === p.id && <CheckCircle className="w-4 h-4 text-emerald-400" />}
                   </div>
                   <p className="text-gray-400 text-xs mt-1 leading-relaxed">
-                    {t(`modelManager.unknownModel.pluginDesc.${p.id}`, p.description)}
+                    {pluginDescription(p, t)}
                   </p>
                 </button>
               ))}
@@ -1082,7 +1090,7 @@ function ModelCard({ model, onDelete, onChangePlugin, gradientClass }: ModelCard
   const { t, language } = useLanguage();
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/[0.07] transition-all group flex flex-col gap-4">
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 transition-all group flex flex-col gap-4">
       {/* Top row */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0">
@@ -1107,7 +1115,7 @@ function ModelCard({ model, onDelete, onChangePlugin, gradientClass }: ModelCard
         </div>
         <button
           onClick={onDelete}
-          className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+          className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition-all flex-shrink-0"
           title={t('modelManager.card.deleteTooltip')}
         >
           <Trash2 className="w-4 h-4" />
@@ -1119,7 +1127,7 @@ function ModelCard({ model, onDelete, onChangePlugin, gradientClass }: ModelCard
         <PluginBadge model={model} />
         <button
           onClick={onChangePlugin}
-          className="text-[11px] text-gray-600 hover:text-gray-300 transition-colors"
+          className="text-[11px] text-gray-400 hover:text-white underline decoration-dotted underline-offset-2 transition-colors"
           title={t('modelManager.unknownModel.changeTitle')}
         >
           {t('modelManager.changePlugin')}
@@ -1346,14 +1354,18 @@ function HuggingFaceImportPanel({
           />
           {searching && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />}
         </div>
-        <p className="text-gray-600 text-xs">{t('modelManager.importModal.hf.searchHint')}</p>
+        {query.trim().length < 2 && (
+          <p className="text-gray-600 text-xs">{t('modelManager.importModal.hf.searchHint')}</p>
+        )}
       </div>
 
       {/* Results */}
       {results.length > 0 && !downloading && (
         <div className="space-y-2">
           <p className="text-gray-500 text-xs">{t('modelManager.importModal.hf.resultsCount').replace('{count}', results.length.toString())}</p>
-          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+          {/* Ohne Auswahl darf die Liste den Platz nutzen; mit Auswahl bleibt
+              sie kurz, damit Details und Download-Knopf im Fenster bleiben. */}
+          <div className={`space-y-1.5 overflow-y-auto pr-1 ${selected ? 'max-h-44' : 'max-h-[min(24rem,45vh)]'}`}>
             {results.map((m) => (
               <button
                 key={m.id}

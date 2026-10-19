@@ -161,6 +161,18 @@ pub async fn get_training_logs(
     serde_json::from_str::<Vec<Value>>(&content).map_err(|e| format!("Logs JSON: {}", e))
 }
 
+/// Analyse-Export an den Ort, den der Nutzer im Speichern-Dialog gewaehlt hat.
+/// Vorher schrieb ein <a download> still in ~/Downloads — macOS fragte dafuer
+/// nach der Ordner-Freigabe, und die App sagte nicht, wo die Datei liegt.
+#[tauri::command]
+pub async fn write_analysis_export(path: String, contents: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("json")) != Some(true) {
+        return Err("Nur .json-Dateien".to_string());
+    }
+    fs::write(p, contents).map_err(|e| format!("Export schreiben: {}", e))
+}
+
 #[tauri::command]
 pub async fn save_training_logs(
     app_handle: tauri::AppHandle,
@@ -461,12 +473,14 @@ pub fn save_full_analysis_data(
         },
         // Objekterkennung wird nicht ueber Accuracy beurteilt, sondern ueber
         // mAP. Die Werte lagen in final_metrics, wurden aber nirgends gezeigt.
-        "detection_metrics": {
+        // Precision/Recall nur mit mAP: sonst stand bei jedem Textklassifikator
+        // eine Karte "Detection metrics" mit dessen Precision/Recall.
+        "detection_metrics": if final_metrics.get("mAP50").or_else(|| final_metrics.get("mAP50-95")).is_some() { json!({
             "map50":     final_metrics.get("mAP50").and_then(|v| v.as_f64()),
             "map50_95":  final_metrics.get("mAP50-95").and_then(|v| v.as_f64()),
             "precision": final_metrics.get("precision").and_then(|v| v.as_f64()),
             "recall":    final_metrics.get("recall").and_then(|v| v.as_f64()),
-        },
+        }) } else { json!(null) },
         // Alles, was nur eine Aufgabe kennt (Perplexitaet, WER, ROUGE, Recall@k,
         // Masken-mAP, DPO …). Ohne diesen Block blieben diese Zahlen unsichtbar.
         "task_metrics": task_metrics(final_metrics),

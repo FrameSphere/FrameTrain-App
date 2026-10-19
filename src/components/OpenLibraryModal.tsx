@@ -820,13 +820,18 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
     setLoading(true);
     setLoadError(false);
     try {
-      const res = await fetch(`${API_BASE}/scripts?script_type=${mode}`, {
+      // 5 s waren fuer einen Kaltstart des Servers zu knapp — die Bibliothek
+      // galt dann als "nicht erreichbar", obwohl das Internet lief. Laenger
+      // warten und einmal neu versuchen.
+      const request = () => fetch(`${API_BASE}/scripts?script_type=${mode}`, {
         // API-Key mitschicken, damit der Server auch die EIGENEN abgelehnten
         // Skripte des Nutzers mitliefert (mit Warnung angezeigt).
         headers: userData?.apiKey ? { Authorization: `Bearer ${userData.apiKey}` } : {},
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(15000),
       });
-      if (!res.ok) throw new Error('API unavailable');
+      let res = await request().catch(() => null);
+      if (!res || res.status >= 500) res = await request();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       // API gibt { scripts, total } zurück
       const list = Array.isArray(data) ? data : (data.scripts ?? null);

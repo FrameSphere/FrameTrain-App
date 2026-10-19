@@ -44,6 +44,7 @@ export const msgDe = (msg: Msg): string =>
 const LEGACY: [RegExp, (m: RegExpMatchArray) => DatasetHint][] = [
   [/^(\d+) Bild\(er\) ohne Label\.$/, m => ({ code: 'orphan_images', params: { count: Number(m[1]) } })],
   [/^Kein Validierungs-Split gefunden/, () => ({ code: 'no_val_split' })],
+  [/^(\d+) Bild\(er\) liegen in mehreren Splits/, m => ({ code: 'split_overlap', params: { count: Number(m[1]) } })],
   [/^(\d+) Audio-Datei\(en\) ohne Transkript\.$/, m => ({ code: 'orphan_audio', params: { count: Number(m[1]) } })],
   [/^Dataset enth(ae|ä)lt gemischte Dateitypen\.$/, () => ({ code: 'mixed_file_types' })],
   [/^images\/ und labels\/ gefunden, aber die Struktur passt nicht/, () => ({ code: 'images_labels_mismatch' })],

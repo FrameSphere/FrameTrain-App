@@ -63,10 +63,10 @@ export function audioExtForMime(mime: string): string {
   }
 }
 
-/** Abschnitt als "2,0–6,0 s". */
-export function abschnittText(start?: number | null, end?: number | null): string | null {
+/** Abschnitt als "2,0–6,0 s" (englisch "2.0–6.0 s"). */
+export function abschnittText(start?: number | null, end?: number | null, language: string = 'de'): string | null {
   if (start == null && end == null) return null;
-  const f = (x: number) => x.toFixed(1).replace('.', ',');
+  const f = (x: number) => language === 'en' ? x.toFixed(1) : x.toFixed(1).replace('.', ',');
   return `${f(start ?? 0)}–${end != null ? f(end) : '…'} s`;
 }
 
@@ -81,7 +81,7 @@ interface Props {
 }
 
 export default function MediaWorkbench({ project, onBack, onProjectChanged, convertToWav = toWav16kMono }: Props) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { success, error, warning, info } = useNotification();
   const medium: Medium = project.modality === 'image' ? 'image' : project.modality === 'video' ? 'video' : 'audio';
 
@@ -287,7 +287,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
         projectId: project.id, sampleId: current.id, at: v.currentTime,
         duration: Number.isFinite(v.duration) ? v.duration : null,
       });
-      success(t('studio.media.splitDone'), abschnittText(current.meta.start ?? 0, v.currentTime) ?? '');
+      success(t('studio.media.splitDone'), abschnittText(current.meta.start ?? 0, v.currentTime, language) ?? '');
       await neuLaden();
     } catch (err: unknown) {
       error(t('studio.media.splitError'), String(err));
@@ -612,7 +612,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   const EmptyIcon = medium === 'image' ? ImageIcon : medium === 'video' ? Film : AudioLines;
 
   const listenText = (s: StudioSample) => {
-    const teil = abschnittText(s.meta.start, s.meta.end);
+    const teil = abschnittText(s.meta.start, s.meta.end, language);
     const name = s.ann.label ?? ((s.ann.target ?? '').slice(0, 26) || t('studio.audio.noLabel'));
     return teil ? `${name} · ${teil}` : name;
   };
@@ -797,10 +797,10 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
 
                 <div className="flex items-center gap-3 text-[11px] text-gray-500">
                   <span className="tabular-nums">{index + 1} / {total}</span>
-                  {abschnittText(current.meta.start, current.meta.end) && (
-                    <span className="tabular-nums">{abschnittText(current.meta.start, current.meta.end)}</span>
+                  {abschnittText(current.meta.start, current.meta.end, language) && (
+                    <span className="tabular-nums">{abschnittText(current.meta.start, current.meta.end, language)}</span>
                   )}
-                  <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
+                  <span className="truncate max-w-xs">{current.src.kind === 'record' ? t('studio.workbench.recording') : current.src.origin?.split(/[\\/]/).pop()}</span>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">

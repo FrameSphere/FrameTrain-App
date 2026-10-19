@@ -149,7 +149,11 @@ export default function GenerateDialog({
         onClick={e => e.stopPropagation()}>
         <div>
           <h3 className="text-white font-semibold">{t('studio.generate.title')}</h3>
-          <p className="text-gray-500 text-xs mt-1">{t('studio.generate.subtitle')}</p>
+          <p className="text-gray-500 text-xs mt-1">
+            {vorhanden.length > 0
+              ? t('studio.generate.subtitleMore', { count: vorhanden.length })
+              : t('studio.generate.subtitle')}
+          </p>
         </div>
 
         {!bereit && (

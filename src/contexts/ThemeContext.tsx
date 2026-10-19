@@ -343,6 +343,10 @@ export const themes: Record<ThemeId, Theme> = {
   },
 };
 
+export function isLightTheme(id: string): boolean {
+  return id === 'light-gray' || id === 'pure-white';
+}
+
 interface ThemeContextType {
   currentTheme: Theme;
   setTheme: (themeId: ThemeId) => void;
@@ -358,6 +362,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // Load saved theme
     loadSavedTheme();
   }, []);
+
+  // Helle Themes brauchen eigene Textfarben (index.css, [data-theme="light"]),
+  // und das Fenster dasselbe Erscheinungsbild: macOS zeichnet Auswahllisten
+  // (<select>) als System-Menue — bei hellem System erschien es sonst hell
+  // lila auf der dunklen App.
+  useEffect(() => {
+    const light = isLightTheme(currentThemeId);
+    void import('@tauri-apps/api/window')
+      .then(({ getCurrentWindow }) => {
+        const win = getCurrentWindow();
+        // Der Schnell-Chat hat sein eigenes Glas-Design und bleibt, wie er ist.
+        if (win.label === 'quickchat') return;
+        document.documentElement.dataset.theme = light ? 'light' : 'dark';
+        return win.setTheme(light ? 'light' : 'dark');
+      })
+      .catch(() => { document.documentElement.dataset.theme = light ? 'light' : 'dark'; });
+  }, [currentThemeId]);
 
   const loadSavedTheme = async () => {
     try {

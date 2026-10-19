@@ -135,7 +135,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         onLogout={onLogout}
       />
       
-      <main className={`flex-1 ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+      <main className={`flex-1 ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto p-8 pb-28'}`}>
         <div className={currentView === 'synapse' ? 'h-full' : 'max-w-7xl mx-auto'}>
           {renderView()}
         </div>

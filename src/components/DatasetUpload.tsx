@@ -28,6 +28,7 @@ import { detectPluginForModel } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
 import { navigateTo } from '../ui/navigationEvents';
 import ModalPortal from './ui/ModalPortal';
+import { pluginName, pluginDescription } from '../plugins/pluginText';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -133,11 +134,11 @@ function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
           ok: isSupported,
           preferred: isPreferred,
           label: isPreferred
-            ? t('datasetUpload.analysisPreview.preferredType').replace('{name}', plugin.name)
+            ? t('datasetUpload.analysisPreview.preferredType').replace('{name}', pluginName(plugin, t))
             : isSupported
-            ? t('datasetUpload.analysisPreview.compatible').replace('{name}', plugin.name)
+            ? t('datasetUpload.analysisPreview.compatible').replace('{name}', pluginName(plugin, t))
             : t('datasetUpload.analysisPreview.notRecommended')
-                .replace('{name}', plugin.name)
+                .replace('{name}', pluginName(plugin, t))
                 .replace('{types}', supported.map(ty => typeLabel(t, ty)).join(', ')),
         };
       }
@@ -297,10 +298,33 @@ const STRUCTURE_TYPES = [
   },
 ];
 
-function DatasetStructureGuide() {
-  const { t } = useLanguage();
+// Beispiel-Dateinamen im Baum sind deutsch geschrieben; in der englischen
+// Oberflaeche sollen sie nicht als Uebersetzungsrest auffallen.
+const TREE_NAMES_EN: Record<string, string> = {
+  'mein-dataset/': 'my-dataset/', 'foto1.jpg': 'photo1.jpg', 'foto2.jpg': 'photo2.jpg',
+  'foto1.txt': 'photo1.txt', 'foto2.txt': 'photo2.txt', 'katze/': 'cat/', 'hund/': 'dog/',
+  'bild1.jpg': 'image1.jpg', 'bild2.jpg': 'image2.jpg', 'bild1.xml': 'image1.xml',
+  'aufnahme1.wav': 'recording1.wav', 'aufnahme1.txt': 'recording1.txt',
+  'aufnahme2.mp3': 'recording2.mp3', 'aufnahme2.txt': 'recording2.txt',
+};
+
+/** Passender Reiter zum bevorzugten Datensatztyp des gewaehlten Modells. */
+function structureTabFor(type: DatasetType | undefined): string {
+  switch (type) {
+    case 'yolo_bbox': return 'yolo';
+    case 'pascal_voc': case 'coco_json': return 'pascal';
+    case 'folder_class': return 'folderclass';
+    case 'audio_transcript': case 'common_voice': return 'audio';
+    case 'flat_file': case 'pre_split': case 'multi_shard': return 'flatfile';
+    default: return 'yolo';
+  }
+}
+
+function DatasetStructureGuide({ preferredType }: { preferredType?: DatasetType }) {
+  const { t, language } = useLanguage();
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState('yolo');
+  const [active, setActive] = useState(() => structureTabFor(preferredType));
+  useEffect(() => { setActive(structureTabFor(preferredType)); }, [preferredType]);
   const current = STRUCTURE_TYPES.find(t => t.id === active)!;
 
   return (
@@ -319,7 +343,7 @@ function DatasetStructureGuide() {
       {open && (
         <div className="border-t border-white/10">
           {/* Typ-Tabs */}
-          <div className="flex overflow-x-auto gap-1 p-2 border-b border-white/10 scrollbar-hide">
+          <div className="flex flex-wrap gap-1 p-2 border-b border-white/10">
             {STRUCTURE_TYPES.map(type => (
               <button
                 key={type.id}
@@ -344,7 +368,7 @@ function DatasetStructureGuide() {
                 <div key={i} className="flex items-center gap-1.5">
                   <span className="text-gray-600 select-none">{row.marker}</span>
                   <span className={row.bold ? `font-semibold ${current.color}` : 'text-gray-300'}>
-                    {row.text}
+                    {language === 'en' ? (TREE_NAMES_EN[row.text] ?? row.text) : row.text}
                   </span>
                 </div>
               ))}
@@ -361,8 +385,8 @@ function DatasetStructureGuide() {
                 </p>
                 <div className="font-mono text-xs text-gray-300 bg-black/30 rounded-md p-2 overflow-x-auto">
                   text,label<br />
-                  Der Film war grossartig,1<br />
-                  Totale Zeitverschwendung,0
+                  {language === 'en' ? 'The film was great,1' : 'Der Film war großartig,1'}<br />
+                  {language === 'en' ? 'Total waste of time,0' : 'Totale Zeitverschwendung,0'}
                 </div>
                 <p className="text-xs text-gray-400 leading-relaxed">
                   {t('datasetUpload.structureGuide.schema.columns')}
@@ -1230,7 +1254,9 @@ export default function DatasetUpload() {
               {importMode === 'local' ? (
                 <div className="space-y-5">
                   {/* Struktur-Guide */}
-              <DatasetStructureGuide />
+              <DatasetStructureGuide
+                preferredType={selectedModel ? (() => { const r = detectPluginForModel(selectedModel); return r.supported ? r.plugin.preferredDatasetType : undefined; })() : undefined}
+              />
 
               {/* Phase 7: Plugin-Empfehlung basierend auf ausgewähltem Modell */}
               {selectedModel && (() => {
@@ -1245,7 +1271,7 @@ export default function DatasetUpload() {
                   <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-blue-500/8 border border-blue-500/20">
                     <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
                     <div className="text-xs text-blue-300 space-y-0.5">
-                      <p className="font-medium">{plugin.name}</p>
+                      <p className="font-medium">{pluginName(plugin, t)}</p>
                       {preferredMeta && (
                       <p className="flex items-center gap-1">{t('datasetUpload.importModal.local.pluginPreferredType')} <span className={`inline-flex items-center gap-1 ${preferredMeta.color}`}><DatasetTypeIcon icon={preferredMeta.icon} className="w-3.5 h-3.5" /> {t(preferredMeta.labelKey, preferredMeta.label)}</span></p>
                       )}
@@ -1367,7 +1393,9 @@ export default function DatasetUpload() {
                         className="w-full pl-10 pr-10 py-3 bg-white/5 border border-white/10 rounded-xl text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-white/30 transition-all" />
                       {hfSearching && <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 animate-spin" />}
                     </div>
-                    <p className="text-gray-600 text-xs">{t('datasetUpload.importModal.hf.searchHint')}</p>
+                    {hfQuery.trim().length < 2 && (
+                      <p className="text-gray-600 text-xs">{t('datasetUpload.importModal.hf.searchHint')}</p>
+                    )}
                   </div>
 
                   {hfResults.length > 0 && (
@@ -1652,13 +1680,13 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
         return (
           <div className="grid grid-cols-3 gap-2 pt-1">
             {[
-              { label: t('datasetUpload.card.splitTrain'), color: 'blue',   count: info.train_count },
-              { label: t('datasetUpload.card.splitVal'),   color: 'purple', count: info.val_count },
-              { label: t('datasetUpload.card.splitTest'),  color: 'green',  count: info.test_count },
-            ].map(({ label, color, count }) => (
-              <div key={label} className={`p-2 rounded-xl bg-${color}-500/10 text-center`}>
-                <div className={`text-${color}-400 font-semibold text-sm`}>{count}</div>
-                <div className="text-gray-600 text-[11px]">{label}</div>
+              { label: t('datasetUpload.card.splitTrain'), box: 'bg-blue-500/10',   num: 'text-blue-400',   count: info.train_count },
+              { label: t('datasetUpload.card.splitVal'),   box: 'bg-purple-500/10', num: 'text-purple-400', count: info.val_count },
+              { label: t('datasetUpload.card.splitTest'),  box: 'bg-green-500/10',  num: 'text-green-400',  count: info.test_count },
+            ].map(({ label, box, num, count }) => (
+              <div key={label} className={`p-2 rounded-xl ${box} text-center`}>
+                <div className={`${num} font-semibold text-sm`}>{count}</div>
+                <div className="text-gray-300 text-[11px]">{label}</div>
               </div>
             ))}
           </div>

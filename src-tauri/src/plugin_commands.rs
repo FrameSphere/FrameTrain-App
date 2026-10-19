@@ -236,15 +236,23 @@ fn status_for(package: &str, version: String) -> DependencyStatus {
     DependencyStatus { package: package.to_string(), installed: true, version: Some(version) }
 }
 
+/// Ergebnis eines Import-Versuchs: Version aus den Metadaten (falls
+/// installiert) und die Fehlermeldung, falls der Import scheiterte.
+#[derive(Debug, Clone, Default)]
+pub struct ImportProbe {
+    pub version: Option<String>,
+    pub error: Option<String>,
+}
+
 /// Prueft mehrere Pakete in EINEM Python-Prozess. Einzeln kostete jeder
 /// Aufruf einen Interpreterstart samt torch-Import — acht Pakete vor dem
 /// Training dauerten so leicht zehn Sekunden.
-pub fn check_packages_batch(python: &str, packages: &[&str]) -> Vec<DependencyStatus> {
+pub fn probe_packages(python: &str, packages: &[&str]) -> std::collections::HashMap<String, ImportProbe> {
     let pairs: Vec<String> = packages.iter()
         .map(|p| format!("({:?}, {:?})", p, import_name_of(p)))
         .collect();
     let script = format!(
-        "import importlib, importlib.metadata, json\nout = {{}}\nfor pkg, mod in [{}]:\n    try:\n        importlib.import_module(mod)\n        out[pkg] = importlib.metadata.version(pkg)\n    except Exception:\n        out[pkg] = None\nprint('FT_DEPS ' + json.dumps(out))",
+        "import importlib, importlib.metadata, json\nout = {{}}\nfor pkg, mod in [{}]:\n    try:\n        importlib.import_module(mod)\n        out[pkg] = {{'v': importlib.metadata.version(pkg)}}\n    except Exception as e:\n        try:\n            v = importlib.metadata.version(pkg)\n        except Exception:\n            v = None\n        out[pkg] = {{'v': None, 'meta': v, 'e': (type(e).__name__ + ': ' + str(e))[:800]}}\nprint('FT_DEPS ' + json.dumps(out))",
         pairs.join(", ")
     );
     let found: serde_json::Map<String, serde_json::Value> = Command::new(python).no_window()
@@ -253,10 +261,97 @@ pub fn check_packages_batch(python: &str, packages: &[&str]) -> Vec<DependencySt
             .find_map(|l| l.strip_prefix("FT_DEPS ").map(|j| j.to_string())))
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
-    packages.iter().map(|p| match found.get(*p).and_then(|v| v.as_str()) {
-        Some(v) => status_for(p, v.to_string()),
+    packages.iter().map(|p| {
+        let v = found.get(*p);
+        let probe = ImportProbe {
+            version: v.and_then(|v| v.get("v")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+            error: v.and_then(|v| v.get("e")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+        };
+        (p.to_string(), probe)
+    }).collect()
+}
+
+pub fn check_packages_batch(python: &str, packages: &[&str]) -> Vec<DependencyStatus> {
+    let probes = probe_packages(python, packages);
+    packages.iter().map(|p| match probes.get(*p).and_then(|pr| pr.version.clone()) {
+        Some(v) => status_for(p, v),
         None => DependencyStatus { package: p.to_string(), installed: false, version: None },
     }).collect()
+}
+
+/// Ein installiertes Paket, das sich nicht laden laesst und andere mitreisst.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrokenPackage {
+    /// pip-Name, z.B. "scipy"
+    pub package: String,
+    /// Erste Zeile der Fehlermeldung (gekuerzt)
+    pub error: String,
+}
+
+/// pip-Name zu einem Modulordner aus einer Fehlermeldung.
+fn pip_name_of_module(module: &str) -> String {
+    match module {
+        "sklearn" => "scikit-learn".to_string(),
+        "PIL" => "pillow".to_string(),
+        "cv2" => "opencv-python".to_string(),
+        "sentence_transformers" => "sentence-transformers".to_string(),
+        "mlx_lm" => "mlx-lm".to_string(),
+        "rouge_score" => "rouge-score".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Findet in einer Importfehlermeldung das Paket, dessen Binaerdatei nicht
+/// laedt ("dlopen(.../site-packages/scipy/sparse/...so"). So steht im Hinweis
+/// "scipy ist kaputt" statt "scikit-learn, peft, mlx-lm fehlen" — die waren
+/// alle installiert, scheiterten aber am selben scipy (macOS 27, Okt. 2026).
+pub fn broken_culprit(error: &str) -> Option<BrokenPackage> {
+    let binary_fail = error.contains("dlopen(") || error.contains("DLL load failed")
+        || error.contains("cannot open shared object") || error.contains("binary incompatibility")
+        || error.contains("undefined symbol") || error.contains("Symbol not found");
+    if !binary_fail { return None; }
+    let marker = "site-packages";
+    let idx = error.find(marker)?;
+    let rest = &error[idx + marker.len()..];
+    let rest = rest.trim_start_matches(|c| c == '/' || c == '\\');
+    let module: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    if module.is_empty() { return None; }
+    let first_line = error.lines().next().unwrap_or(error);
+    let short: String = first_line.chars().take(300).collect();
+    Some(BrokenPackage { package: pip_name_of_module(&module), error: short })
+}
+
+/// Erstes kaputtes Paket aus einer Reihe von Import-Versuchen.
+pub fn first_broken(probes: &std::collections::HashMap<String, ImportProbe>) -> Option<BrokenPackage> {
+    let mut names: Vec<&String> = probes.keys().collect();
+    names.sort();
+    names.into_iter().find_map(|n| probes[n].error.as_deref().and_then(broken_culprit))
+}
+
+/// Laedt ein kaputtes Paket neu (neueste Version, ohne Abhaengigkeiten
+/// anzufassen). Gedacht fuer den Knopf "reparieren" neben dem Hinweis.
+#[tauri::command]
+pub async fn repair_python_package(package: String) -> Result<String, String> {
+    if package.is_empty() || !package.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        return Err(format!("Ungueltiger Paketname: {}", package));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let python = get_python_executable();
+        let out = Command::new(&python).no_window()
+            .args(["-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-deps", "--progress-bar", "off", &package])
+            .output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let tail: Vec<&str> = err.lines().rev().take(6).collect();
+            return Err(tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
+        }
+        // Gleich pruefen, ob es jetzt laedt.
+        let probe = probe_packages(&python, &[package.as_str()]);
+        match probe.get(&package).and_then(|p| p.version.clone()) {
+            Some(v) => Ok(v),
+            None => Err(probe.get(&package).and_then(|p| p.error.clone()).unwrap_or_else(|| "Import schlaegt weiter fehl".to_string())),
+        }
+    }).await.map_err(|e| e.to_string())?
 }
 
 fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
@@ -713,6 +808,10 @@ pub struct TaskPackageStatus {
     pub missing: Vec<DependencyStatus>,
     /// Der Interpreter, in den installiert wird — fuer ehrliche Hinweise.
     pub python: String,
+    /// Installiert, aber nicht ladbar (z.B. scipy unter macOS 27) — dann sind
+    /// die "fehlenden" Pakete oft nur Folgefehler.
+    #[serde(default)]
+    pub broken: Option<BrokenPackage>,
 }
 
 /// Vor dem Training: hat der Interpreter der App alles, was diese Aufgabe
@@ -723,11 +822,13 @@ pub async fn check_task_packages(task_type: String) -> Result<TaskPackageStatus,
     tauri::async_runtime::spawn_blocking(move || {
         let python = get_python_executable();
         let (group, pkgs) = packages_for_task(&task_type);
-        let missing = check_packages_batch(&python, &pkgs)
-            .into_iter()
-            .filter(|s| !s.installed)
-            .collect();
-        TaskPackageStatus { group: group.to_string(), missing, python }
+        let probes = probe_packages(&python, &pkgs);
+        let missing = pkgs.iter().map(|p| match probes.get(*p).and_then(|pr| pr.version.clone()) {
+            Some(v) => status_for(p, v),
+            None => DependencyStatus { package: p.to_string(), installed: false, version: None },
+        }).filter(|s| !s.installed).collect();
+        let broken = first_broken(&probes);
+        TaskPackageStatus { group: group.to_string(), missing, python, broken }
     }).await.map_err(|e| e.to_string())
 }
 
@@ -770,6 +871,15 @@ fn llm_package_list() -> Vec<&'static str> {
     v
 }
 
+/// Letztes kaputte Paket aus check_dependency_status — die Einstellungen
+/// fragen es danach ab, ohne einen zweiten Python-Prozess zu starten.
+static LAST_BROKEN: std::sync::Mutex<Option<BrokenPackage>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+pub fn get_broken_python_package() -> Option<BrokenPackage> {
+    LAST_BROKEN.lock().ok().and_then(|b| b.clone())
+}
+
 #[tauri::command]
 pub async fn check_dependency_status() -> Result<Vec<DependencyStatus>, String> {
     tauri::async_runtime::spawn_blocking(dependency_status_blocking)
@@ -787,7 +897,12 @@ fn dependency_status_blocking() -> Result<Vec<DependencyStatus>, String> {
     // hier stuende es sonst als "fehlend", ohne dass "Fehlende installieren" es
     // installiert (das installiert nur den HuggingFace-Stack).
     // Ein Prozess statt vierzehn: die Einstellungen pruefen alle paar Sekunden.
-    let status = check_packages_batch(&python, &packages);
+    let probes = probe_packages(&python, &packages);
+    let status: Vec<DependencyStatus> = packages.iter().map(|p| match probes.get(*p).and_then(|pr| pr.version.clone()) {
+        Some(v) => status_for(p, v),
+        None => DependencyStatus { package: p.to_string(), installed: false, version: None },
+    }).collect();
+    if let Ok(mut b) = LAST_BROKEN.lock() { *b = first_broken(&probes); }
     let missing: Vec<_> = status.iter().filter(|s| !s.installed).map(|s| s.package.as_str()).collect();
     if missing.is_empty() { println!("[Deps] Alle Pakete installiert"); }
     else { println!("[Deps] Fehlende Pakete: {:?}", missing); }
@@ -1555,5 +1670,24 @@ mod dependency_real_python_tests {
         let s = super::check_package_installed(&py, "bitsandbytes");
         println!("einzeln: {:?}", s);
         assert!(!s.version.unwrap_or_default().contains(' '));
+    }
+}
+
+#[cfg(test)]
+mod broken_package_tests {
+    use super::*;
+    #[test]
+    fn findet_scipy_hinter_sklearn() {
+        let e = "ImportError: dlopen(/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/scipy/sparse/_sparsetools.cpython-311-darwin.so, 0x0002): tried: ... has a zero-fill section type, but offset field is not zero";
+        assert_eq!(broken_culprit(e).unwrap().package, "scipy");
+    }
+    #[test]
+    fn fehlendes_modul_ist_nicht_kaputt() {
+        assert!(broken_culprit("ModuleNotFoundError: No module named 'peft'").is_none());
+    }
+    #[test]
+    fn windows_pfad_und_pip_name() {
+        let e = r"ImportError: DLL load failed while importing _imaging: C:\Python311\Lib\site-packages\PIL\_imaging.pyd";
+        assert_eq!(broken_culprit(e).unwrap().package, "pillow");
     }
 }

@@ -49,6 +49,8 @@ function Detection({ r, file, classes, compact }: { r: InferResult; file?: Attac
   const w = r.image_width ?? 0;
   const h = r.image_height ?? 0;
   const shown = compact ? 200 : 300;
+  // Aelterer Verlauf: die hochgeladene Datei kann aufgeraeumt sein.
+  const [imgGone, setImgGone] = useState(false);
   return (
     // Schnell-Chat: Bild links, Ergebnis rechts daneben; Seite: untereinander.
     <div className={compact ? 'flex items-start gap-3' : 'space-y-2'}>
@@ -57,7 +59,14 @@ function Detection({ r, file, classes, compact }: { r: InferResult; file?: Attac
         // Seite. Die Breite folgt dem Seitenverhaeltnis, Boxen bleiben deckungsgleich.
         <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30 max-w-full flex-shrink-0"
           style={{ height: shown, aspectRatio: w && h ? `${w} / ${h}` : '4 / 3', maxWidth: compact ? '62%' : undefined }}>
-          <img src={convertFileSrc(file.path)} alt={file.name} className="absolute inset-0 w-full h-full object-contain" />
+          {imgGone ? (
+            <span className="absolute inset-0 flex items-center justify-center p-3 text-center text-[11px] text-gray-500">
+              {t('hosting.result.imageGone')}
+            </span>
+          ) : (
+            <img src={convertFileSrc(file.path)} alt={file.name} className="absolute inset-0 w-full h-full object-contain"
+              onError={() => setImgGone(true)} />
+          )}
           <DetectionOverlay boxes={boxes} classes={classes} width={w} height={h} displayHeight={shown} />
         </div>
       )}

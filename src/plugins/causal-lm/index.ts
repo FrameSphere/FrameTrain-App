@@ -5,7 +5,7 @@ import CausalLMTestPlugin from './TestPlugin';
 const causalLMPlugin: ModelPlugin = {
   id: 'causal-lm',
   name: 'LLM Fine-Tuning (LoRA)',
-  description: 'Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Praeferenzpaare (chosen/rejected) per DPO.',
+  description: 'Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Präferenzpaare (chosen/rejected) per DPO.',
   taskType: 'causal_lm',
   // LoRA ist der Normalfall: volles Fine-Tuning eines 7B-Modells braucht
   // >100 GB. LoRA-Lernraten liegen etwa 10x ueber denen des vollen Trainings.

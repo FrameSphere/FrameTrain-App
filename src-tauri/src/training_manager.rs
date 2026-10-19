@@ -1025,6 +1025,12 @@ fn run_training(
         .unwrap_or(serde_json::Value::Null);
 
     let mut json_error = false;
+
+    // Fehlergrund fuer den Verlauf: vorher stand er nur im Event, im Verlauf
+
+    // unter "Fehlgeschlagen" war nicht zu sehen, warum.
+
+    let mut last_error: Option<String> = None;
     let mut json_complete = false;
 
     if let Some(stdout) = child.stdout.take() {
@@ -1123,6 +1129,7 @@ fn run_training(
                 }
                 "error" => {
                     json_error = true;
+                    last_error = msg.get("data").map(error_summary);
                     let _ = ah.emit("training-error", serde_json::json!({"job_id":jid,"data":msg.get("data")}));
                 }
                 _ => {}
@@ -1141,6 +1148,10 @@ fn run_training(
         .unwrap_or(false);
 
     if !ok && !json_error && !was_stopped {
+        last_error = Some(stderr_lines.lock().ok()
+            .and_then(|v| v.iter().rev().find(|l| !l.trim().is_empty()).cloned())
+            .map(|l| format!("Training unerwartet beendet: {}", l.trim()))
+            .unwrap_or_else(|| "Training unerwartet beendet".to_string()));
         let stderr_ctx = stderr_lines.lock().ok()
             .map(|v| if v.is_empty() { String::new() } else { format!("\n\nStderr:\n{}", v.join("\n")) })
             .unwrap_or_default();
@@ -1154,6 +1165,7 @@ fn run_training(
     // extern gekillt oder App-Neustart während tauri dev). Vorher bekam das
     // Frontend dann NIE ein Event und das Dashboard blieb ewig auf "läuft".
     if ok && !json_error && !json_complete && !was_stopped {
+        last_error = Some("Training ohne Ergebnis beendet".to_string());
         let _ = app_handle.emit("training-error", serde_json::json!({
             "job_id": job_id,
             "data": {
@@ -1171,6 +1183,9 @@ fn run_training(
                 // Exit 0 — der Verlauf darf den Lauf dann nicht als abgeschlossen fuehren.
                 job.status = if ok && !(json_error && !json_complete) { TrainingStatus::Completed } else { TrainingStatus::Failed };
             }
+            if job.status == TrainingStatus::Failed && job.error.is_none() {
+                job.error = last_error.clone();
+            }
             let _ = save_job(&app_handle, job.clone());
         }
         sl.current_job = None; sl.process = None; sl.process_pid = None;
@@ -1184,6 +1199,16 @@ fn run_training(
     }
 
     let _ = app_handle.emit("training-finished", serde_json::json!({"job_id":job_id,"success":ok}));
+}
+
+/// Titel plus erste Detailzeile aus einem Engine-Fehler ({error, details}).
+fn error_summary(data: &serde_json::Value) -> String {
+    let title = data.get("error").and_then(|v| v.as_str()).unwrap_or("Fehler");
+    let detail = data.get("details").and_then(|v| v.as_str())
+        .and_then(|d| d.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("Traceback") && !l.starts_with("File \"")))
+        .unwrap_or("");
+    let s = if detail.is_empty() || detail == title { title.to_string() } else { format!("{}: {}", title, detail) };
+    s.chars().take(400).collect()
 }
 
 #[tauri::command]
@@ -2073,5 +2098,14 @@ mod canvas_config_tests {
         assert_eq!((c.epochs, c.batch_size, c.gradient_accumulation_steps), (10, 32, 2));
         assert_eq!(c.learning_rate, 0.001);
         assert_eq!(c.scheduler, "cosine");
+    }
+}
+
+#[cfg(test)]
+mod error_summary_tests {
+    #[test]
+    fn titel_und_erste_detailzeile() {
+        let d = serde_json::json!({"error": "Fehlendes Python-Paket", "details": "Traceback (most recent call last):\nNo module named 'peft'"});
+        assert_eq!(super::error_summary(&d), "Fehlendes Python-Paket: No module named 'peft'");
     }
 }

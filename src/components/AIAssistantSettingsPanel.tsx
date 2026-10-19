@@ -184,7 +184,7 @@ export default function AIAssistantSettingsPanel() {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-400 mb-2">{meta.keyHint}</label>
+                <label className="block text-sm text-gray-400 mb-2">{t(`settings.ai.keyHints.${aiSettings.provider}`, meta.keyHint)}</label>
                 <div className="flex items-center gap-2">
                   <input
                     type={showApiKeyField ? 'text' : 'password'}

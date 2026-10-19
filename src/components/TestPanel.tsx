@@ -9,6 +9,7 @@ import DevTestPanel from './DevTestPanel';
 import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import PackageCheckBanner from './PackageCheckBanner';
+import { pluginName, pluginDescription } from '../plugins/pluginText';
 
 // ── Types (analog zu TrainingPanel) ───────────────────────────────────────
 
@@ -353,8 +354,8 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
                   <CheckCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
                   <div>
-                    <span className="text-amber-300 text-xs font-medium">{detectedPlugin.name}</span>
-                    <span className="text-gray-500 text-xs"> – {detectedPlugin.description}</span>
+                    <span className="text-amber-300 text-xs font-medium">{pluginName(detectedPlugin, t)}</span>
+                    <span className="text-gray-300 text-xs"> – {pluginDescription(detectedPlugin, t)}</span>
                   </div>
                 </div>
               ) : (
@@ -373,6 +374,11 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
                 </div>
               )
             )}
+
+            {/* Fehlende/kaputte Python-Pakete schon bei der Modellwahl zeigen —
+                erschien der Hinweis erst nach "Start Test", schob er das
+                Formular unter dem Mauszeiger weg. */}
+            {mode === 'test' && detectedPlugin && <PackageCheckBanner taskType={detectedPlugin.taskType} />}
 
             {/* Start / Reset – nur im Test Engine Mode */}
             {mode === 'test' && (
@@ -431,7 +437,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
               <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-white/5 border border-white/10">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-gray-400">{t('testPanel.pluginBanner.pluginLabel')}</span>
-                  <span className="text-white font-medium">{panelState.plugin.name}</span>
+                  <span className="text-white font-medium">{pluginName(panelState.plugin, t)}</span>
                   <span className="text-gray-600">·</span>
                   <span className="text-gray-400 text-xs">{selectedVersionTree.name}</span>
                 </div>
@@ -441,8 +447,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
                 </div>
               </div>
 
-              {/* Fehlende Python-Pakete fuer diese Aufgabe — Knopf installiert sie. */}
-              <PackageCheckBanner taskType={panelState.plugin.taskType} />
+
 
               {/* Plugin-Komponente */}
               <panelState.plugin.TestComponent

@@ -59,7 +59,8 @@
       "untestedModels": "{count} models have never been tested (e.g. {first})",
       "untestedModels_one": "{first} has never been tested",
       "unusedDatasets": "{count} datasets have never been used for training (e.g. {first})",
-      "unusedDatasets_one": "Dataset {first} has never been used for training"
+      "unusedDatasets_one": "Dataset {first} has never been used for training",
+      "trainingStopped": "The last run of {model} was stopped — no new attempt since"
     },
     "stats": {
       "models": "Models",
@@ -77,7 +78,8 @@
     },
     "trend": {
       "title": "Loss trend",
-      "subtitle": "Final loss of the last {count} completed trainings"
+      "subtitle": "Final loss of the last {count} completed trainings",
+      "subtitleModel": "{model}: final loss of the last {count} completed trainings"
     },
     "ranking": {
       "title": "Best results"
@@ -288,7 +290,13 @@
       "testConnection": "Test connection",
       "testing": "Testing…",
       "testOk": "Connection successful – key and model work.",
-      "testFailed": "Test failed: {error}"
+      "testFailed": "Test failed: {error}",
+      "keyHints": {
+        "anthropic": "Console key (sk-ant-api…, prepaid credit) or subscription token (sk-ant-oat…, claude setup-token)",
+        "openai": "platform.openai.com/api-keys",
+        "groq": "console.groq.com",
+        "ollama": "No account needed — install ollama.com"
+      }
     },
     "system": {
       "packagesTitle": "Python Packages (Training)",
@@ -314,7 +322,12 @@
       "pythonUsed": "FrameTrain uses: {path} (Python {version})",
       "pythonUnsupported": "This Python version is not supported (required: 3.10 to 3.13).",
       "groupInstall": "Install",
-      "groupUpdate": "Check / update"
+      "groupUpdate": "Check / update",
+      "checking": "Checking packages …",
+      "notInstalled": "Not installed",
+      "notFound": "Not found",
+      "systemPartlyReady": "Core setup ready — some tasks still need: {list}",
+      "systemBroken": "Core setup ready — {package} needs repairing (see above), otherwise tasks that need it fail."
     },
     "updates": {
       "checking": "Checking for updates...",
@@ -386,7 +399,9 @@
       "senderSupport": "Support",
       "ticketCount": "{count} ticket",
       "ticketCountPlural": "{count} tickets",
-      "userIdNote": "Your user ID is automatically included."
+      "userIdNote": "Your user ID is automatically included.",
+      "userIdNoteBefore": "Your user ID",
+      "userIdNoteAfter": "is sent along automatically."
     },
     "about": {
       "versionLabel": "Version {version}",
@@ -2045,7 +2060,8 @@
       "datasetLabel": "Dataset:",
       "epochLabel": "Epoch {epoch}/{total}",
       "lossLabel": "Loss:",
-      "valLabel": "Val:"
+      "valLabel": "Val:",
+      "noErrorSaved": "No failure reason saved – older runs did not record it. New failures show the cause here."
     },
     "notifications": {
       "missingSelection": "Missing Selection",
@@ -2353,7 +2369,8 @@
       "nameInput": "Template Name",
       "descriptionInput": "Description (optional)",
       "aiDescription": "AI-recommended parameters · {date} · {provider}",
-      "savedDetail": "“{name}” is now available in the training panel."
+      "savedDetail": "“{name}” is now available in the training panel.",
+      "aiDescriptionPrefix": "AI-recommended parameters"
     },
     "noJsonNote": "This analysis contains no parameters that can be applied.",
     "classification": {
@@ -2401,7 +2418,9 @@
         "r2": "R²",
         "token_accuracy": "Token accuracy"
       }
-    }
+    },
+    "exportFilePrefix": "training_analysis",
+    "exportSavedTitle": "Analysis exported"
   },
   "datasetUpload": {
     "title": "Datasets",
@@ -2916,7 +2935,8 @@
       "prompt": "Prompt",
       "vectorInfo": "Vector with {dim} dimensions, norm {norm}",
       "pairHint": "Separate two sentences with ||| to measure their similarity."
-    }
+    },
+    "noObjects": "No objects"
   },
   "openLibrary": {
     "title": "Open Script Library",
@@ -2936,7 +2956,7 @@
     "noScripts": "No scripts found",
     "noScriptsHint": "Adjust your filters or be the first to upload a script!",
     "loadErrorTitle": "Library unreachable",
-    "loadErrorHint": "The script library could not be loaded. Check your internet connection.",
+    "loadErrorHint": "The script library did not respond. Usually the server is only briefly busy – please try again. If it persists, check your internet connection.",
     "retry": "Try again",
     "inLibrary": "In Library",
     "unverified": "Unverified",
@@ -3010,7 +3030,21 @@
   "canvasInferenceTab": {
     "modelSelectPlaceholder": "— Select Model —",
     "inputPlaceholder": "0.1, 0.5, 0.3 …",
-    "invalidInput": "Invalid input – enter comma-separated numbers, e.g. 0.1, 0.5, 0.3"
+    "invalidInput": "Invalid input – enter comma-separated numbers, e.g. 0.1, 0.5, 0.3",
+    "selectModel": "Select model",
+    "loadingModels": "Loading models…",
+    "noModels": "No canvas models found. Export and train a model in the builder first.",
+    "noWeightsShort": "no model.pt",
+    "classes": "{count} classes",
+    "noWeightsTag": "No model.pt",
+    "inputHint": "Comma-separated numbers, e.g.:",
+    "running": "Running inference…",
+    "run": "Run inference",
+    "shortcut": "⌘↵ or Ctrl+↵",
+    "result": "Result",
+    "classN": "Class {n}",
+    "noWeightsBefore": "This model has no",
+    "noWeightsAfter": "yet – train it first."
   },
   "synapseBuilder": {
     "title": "Synapse Builder",
@@ -3396,8 +3430,8 @@
         "imageClassify": "Give each image a class, export as one folder per class",
         "video": "Give each video segment a class, export as clips per class"
       },
-      "formatNote_text": "Exports daten.csv with the columns text and label — the format classification reads.",
-      "formatNote_pairs": "Exports daten.jsonl with source and target — the format seq2seq reads.",
+      "formatNote_text": "Exports data.csv with the columns text and label — the format classification reads.",
+      "formatNote_pairs": "Exports data.jsonl with source and target — the format seq2seq reads.",
       "kindAudio": "Class per recording",
       "kindTranscript": "Words (transcript)",
       "formatNote_audio": "Exports one folder per class — the layout the app recognises as classification.",
@@ -3436,7 +3470,8 @@
       "zoomLevel": "Zoom {factor}x",
       "classHotkey": "{name} — key {key}",
       "selectHint": "Click a box to change its class",
-      "classCountHint": "Confirmed samples of this class"
+      "classCountHint": "Confirmed samples of this class",
+      "recording": "Recording"
     },
     "filter": {
       "all": "All",
@@ -3650,8 +3685,8 @@
       "shortcutPair": "Cmd+Enter — confirm and continue",
       "doneTitle": "Texts imported",
       "doneDetail": "{added} new, {duplicates} duplicate, {labels} with a class",
-      "exportClasses": "Writes daten.csv with the columns text and label — exactly what the train engine reads.",
-      "exportPairs": "Writes daten.jsonl with source and target — exactly what seq2seq reads.",
+      "exportClasses": "Writes data.csv with the columns text and label — exactly what the train engine reads.",
+      "exportPairs": "Writes data.jsonl with source and target — exactly what seq2seq reads.",
       "suggestedHint": "Model suggestion — Enter accepts it, a number picks another class",
       "doubtHint": "Model says “{model}”, the label says “{label}”",
       "addButton": "Add texts",
@@ -3816,7 +3851,8 @@
       "promptTopic": "Topic and style:",
       "promptExamples": "Existing examples to follow (do not repeat them):",
       "editItem": "Edit suggestion {n}",
-      "editTarget": "Edit answer to suggestion {n}"
+      "editTarget": "Edit answer to suggestion {n}",
+      "subtitleMore": "The project already has {count} texts. The AI assistant writes more examples in the same style — none of them enter the project unseen."
     },
     "remove": {
       "button": "Remove",
@@ -4011,7 +4047,8 @@
     "type_unknown": "Dataset type could not be detected.",
     "hf_configs": "Dataset has {count} configurations ({configs}). Imported: “{chosen}”.",
     "hf_splits_skipped": "Skipped splits without usable labels: {splits}.",
-    "hf_no_standard_splits": "No standard splits detected – all files are imported as “train”."
+    "hf_no_standard_splits": "No standard splits detected – all files are imported as “train”.",
+    "split_overlap": "{count} image(s) appear in more than one split (train/val/test) – validation and test scores are too optimistic."
   },
   "packageCheck": {
     "title": "Python packages are missing for this task ({group})",
@@ -4025,6 +4062,15 @@
       "yolo": "YOLO",
       "llm": "LLM fine-tuning",
       "generative": "Generative models"
+    },
+    "broken": {
+      "title": "Python package {package} is installed but cannot be loaded",
+      "detail": "The {package} installation is damaged or does not match this system. Everything that needs {package} fails with it (e.g. scikit-learn, peft, sentence-transformers) – those packages then show as missing although they are installed.",
+      "repair": "Repair {package}",
+      "repairing": "Reinstalling …",
+      "repaired": "{package} {version} loads now – please try again.",
+      "showRaw": "Show original message",
+      "hideRaw": "Hide original message"
     }
   },
   "hosting": {
@@ -4145,7 +4191,8 @@
     "result": {
       "copy": "Copy",
       "noObjects": "No objects detected",
-      "tokensPerSecond": "{value} tokens/s"
+      "tokensPerSecond": "{value} tokens/s",
+      "imageGone": "Original image no longer available"
     },
     "quick": {
       "new": "New",
@@ -4226,9 +4273,9 @@
       "tryHint": "Open with: {how}",
       "tryNow": "Try it now",
       "session": "On open",
-      "sessionHint": "The previous chat stays one ⌘↑ away and is kept in the model’s history. An answer still in progress is never lost.",
+      "sessionHint": "Automatic: a new chat, unless the window was closed for less than 30 s or an answer is still running. The previous chat stays one ⌘↑ away and is kept in the model’s history.",
       "sessionOpt": {
-        "smart": "New chat (unless after a short break)",
+        "smart": "Automatic",
         "always": "Always a new chat",
         "never": "Continue the last chat"
       }
@@ -4241,5 +4288,99 @@
       "inputLanguage": "switching input language",
       "office": "Microsoft Office"
     }
+  },
+  "plugins": {
+    "causal-lm": {
+      "name": "LLM Fine-Tuning (LoRA)",
+      "description": "Fine-tunes decoder LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) with LoRA or QLoRA on chat, question-answer or plain text data; preference pairs (chosen/rejected) via DPO."
+    },
+    "hf-encoder": {
+      "name": "HF Encoder (Generic)",
+      "description": "Text classification with HuggingFace encoders (BERT, DistilBERT, RoBERTa, DeBERTa and relatives)."
+    },
+    "canvas": {
+      "name": "Canvas Neural Net",
+      "description": "Neural network built in the Synapse Builder — trainable on any dataset."
+    },
+    "audio-classification": {
+      "name": "Audio Classification",
+      "description": "Audio classification with Wav2Vec2, HuBERT, WavLM, AST or the Whisper encoder."
+    },
+    "seq2seq": {
+      "name": "Seq2Seq (T5/BART)",
+      "description": "Text to text: summarization, translation, rewriting (T5, BART, Pegasus, Marian)."
+    },
+    "image-classification": {
+      "name": "Image Classification",
+      "description": "Image classification via transfer learning: ResNet, EfficientNet, ViT, MobileNet. Expects one folder per class (ImageFolder)."
+    },
+    "hf-image-classification": {
+      "name": "Image Classification (HuggingFace)",
+      "description": "Trains the downloaded HuggingFace vision model itself (ViT, DeiT, ConvNeXt, Swin, ResNet)."
+    },
+    "sentence-embedding": {
+      "name": "Sentence Embeddings (Search/RAG)",
+      "description": "Trains embedding models for semantic search, RAG and similarity (all-MiniLM, BGE, E5, GTE, MPNet or any BERT encoder)."
+    },
+    "video-classification": {
+      "name": "Video Classification",
+      "description": "Classifies video clips with VideoMAE, TimeSformer or ViViT."
+    },
+    "token-classification": {
+      "name": "Token Classification (NER/POS)",
+      "description": "One label per word: named entity recognition (people, places, companies) or part of speech, with BERT, RoBERTa, DeBERTa and friends."
+    },
+    "text-to-image-lora": {
+      "name": "Text-to-Image LoRA (Stable Diffusion)",
+      "description": "Teaches Stable Diffusion 1.x/2.x or SDXL your own style or object via LoRA."
+    },
+    "speech-recognition": {
+      "name": "Speech Recognition (ASR)",
+      "description": "Speech recognition: Whisper/Moonshine as seq2seq, wav2vec2/HuBERT/WavLM with CTC. Measures WER and CER."
+    },
+    "yolo": {
+      "name": "YOLO Object Detection",
+      "description": "YOLOv5 / YOLOv8 / YOLOv9 / YOLO11 – detection, segmentation, keypoints, rotated boxes and classification via Ultralytics"
+    },
+    "xlm-roberta": {
+      "name": "XLM-RoBERTa",
+      "description": "Keyword recognition and text classification with XLM-RoBERTa base/large, multilingual."
+    },
+    "vision-language": {
+      "name": "Vision-Language (VLM, LoRA)",
+      "description": "Image + question → answer, captioning, text recognition: SmolVLM, Qwen2-VL, PaliGemma, LLaVA, BLIP."
+    }
+  },
+  "engineErrors": {
+    "missingPackage": "Missing Python package",
+    "fileNotFound": "File not found",
+    "datasetNotFound": "Dataset not found",
+    "configNotFound": "Config not found",
+    "configError": "Configuration error",
+    "modelNotInitialized": "Model not initialized",
+    "modelUnavailable": "Model not available",
+    "tooFewClasses": "Too few classes",
+    "ultralyticsMissing": "Ultralytics not installed",
+    "pipelineUnsupported": "Pipeline not supported"
+  },
+  "themes": {
+    "purple-passion": "Classic purple and pink",
+    "ocean-breeze": "Calm blue and turquoise",
+    "forest-green": "Natural green",
+    "sunset-orange": "Warm orange and red",
+    "midnight-blue": "Deep dark blue",
+    "rose-gold": "Elegant rose gold",
+    "dark-minimal": "Minimal black",
+    "cyber-yellow": "Black with a neon yellow accent",
+    "arctic-white": "Icy white and blue tones",
+    "neon-pink": "Electric neon pink",
+    "blood-red": "Intense dark red",
+    "toxic-green": "Toxic neon green",
+    "golden-hour": "Warm gold and amber",
+    "monochrome": "Classic black and white",
+    "lavender-dream": "Soft lavender and violet",
+    "fire-ice": "Orange-red meets ice blue",
+    "light-gray": "Light neutral gray",
+    "pure-white": "Clean bright white"
   }
 }

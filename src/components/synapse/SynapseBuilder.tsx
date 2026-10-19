@@ -500,6 +500,32 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     }
   }, []);
 
+  // Ein geladenes, schon trainiertes Modell zeigte unter "Metrics" nur
+  // "No metrics yet": die Werte kamen bisher nur live aus dem Training.
+  // Jetzt aus den gespeicherten Logs der neuesten Version — je Epoche der
+  // letzte Eintrag.
+  const loadSavedMetrics = useCallback(async (canvasModelId: string) => {
+    try {
+      const tree = await invoke<{ id: string; versions: { id: string; is_root: boolean; version_number: number }[] }[]>('list_models_with_version_tree');
+      const versions = tree.find(m => m.id === canvasModelId)?.versions ?? [];
+      const latest = [...versions].sort((a, b) => b.version_number - a.version_number)
+        .find(v => !v.is_root) ?? versions[0];
+      if (!latest) return;
+      const logs = await invoke<{ epoch: number; step: number; train_loss: number; val_loss: number | null; learning_rate: number }[]>(
+        'get_training_logs', { versionId: latest.id });
+      const perEpoch = new Map<number, TrainingMetrics>();
+      let lastStep = -Infinity;
+      for (const l of logs) {
+        if (typeof l.epoch !== 'number' || typeof l.train_loss !== 'number') continue;
+        // Abschlusszeilen wiederholen den letzten Step mit Start-Lernrate.
+        if (typeof l.step === 'number') { if (l.step <= lastStep) continue; lastStep = l.step; }
+        perEpoch.set(l.epoch, { epoch: l.epoch, loss: l.train_loss, valLoss: l.val_loss ?? undefined, lr: l.learning_rate });
+      }
+      const list = [...perEpoch.values()].sort((a, b) => a.epoch - b.epoch);
+      setMetrics(m => (m.length === 0 ? list : m));
+    } catch { /* keine gespeicherten Werte */ }
+  }, []);
+
   const parseStatusLogLine = useCallback((message: string) => {
     setLogLines((p) => [...p, message]);
     const metric = parseMetricLine(message);
@@ -1449,6 +1475,7 @@ Keine Floskeln, nur Fakten.`;
         completedVersionId={completedVersionId}
         outputDir={trainingStatus === "done" ? outputDir : undefined}
         userId={userId}
+        activeCanvasModelId={activeCanvasModelId}
       />
 
       {showLibrary && (
@@ -1464,6 +1491,8 @@ Keine Floskeln, nur Fakten.`;
             setActiveCanvasModelId(model.canvasModelId ?? null);
             setActiveModelName(model.name);
             setHasUnsavedChanges(false);
+            setMetrics([]);
+            if (model.canvasModelId) void loadSavedMetrics(model.canvasModelId);
             setTimeout(() => {
               if (model.viewport && rfRef.current) {
                 rfRef.current.setViewport(model.viewport, { duration: 300 });

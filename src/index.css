@@ -113,3 +113,63 @@ body {
     .ft-answer { opacity: 0; transform: none; }
   }
 }
+
+/* ── Helle Themes (Light Gray, Pure White) ─────────────────────────────────
+   Die Oberflaeche ist fuer dunkle Hintergruende gebaut: weisser Text, weisse
+   Flaechen mit wenig Deckkraft. Auf hellem Hintergrund war dadurch fast alles
+   unsichtbar (Seitentitel, Modellnamen, Seitenleiste). ThemeContext setzt
+   data-theme="light"; hier werden die haeufigen Klassen umgedreht. Text auf
+   Verlaufs- und Vollfarb-Knoepfen bleibt weiss. */
+[data-theme="light"] { color-scheme: light; }
+[data-theme="light"] .text-white { color: #0f172a; }
+[data-theme="light"] .text-gray-100,
+[data-theme="light"] .text-gray-200 { color: #1e293b; }
+[data-theme="light"] .text-gray-300 { color: #334155; }
+[data-theme="light"] .text-gray-400 { color: #475569; }
+[data-theme="light"] .text-gray-500 { color: #64748b; }
+[data-theme="light"] .text-gray-600 { color: #64748b; }
+[data-theme="light"] .hover\:text-white:hover { color: #020617; }
+[data-theme="light"] .placeholder\:text-gray-600::placeholder,
+[data-theme="light"] .placeholder\:text-gray-500::placeholder { color: #94a3b8; }
+
+[data-theme="light"] .bg-white\/5,
+[data-theme="light"] .bg-white\/\[0\.03\],
+[data-theme="light"] .bg-white\/\[0\.04\] { background-color: rgba(15, 23, 42, 0.04); }
+[data-theme="light"] .bg-white\/10,
+[data-theme="light"] .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.07); }
+[data-theme="light"] .hover\:bg-white\/10:hover,
+[data-theme="light"] .bg-white\/15 { background-color: rgba(15, 23, 42, 0.1); }
+[data-theme="light"] .border-white\/5 { border-color: rgba(15, 23, 42, 0.08); }
+[data-theme="light"] .border-white\/10,
+[data-theme="light"] .border-white\/15 { border-color: rgba(15, 23, 42, 0.14); }
+[data-theme="light"] .bg-black\/20,
+[data-theme="light"] .bg-black\/30 { background-color: rgba(15, 23, 42, 0.05); }
+[data-theme="light"] .bg-slate-900,
+[data-theme="light"] .bg-slate-950,
+[data-theme="light"] .bg-gray-900,
+[data-theme="light"] .bg-\[\#101218\] { background-color: #ffffff; }
+
+/* Farbiger Text in 200er/300er-Toenen ist auf Weiss zu blass. */
+[data-theme="light"] .text-emerald-300, [data-theme="light"] .text-emerald-400 { color: #047857; }
+[data-theme="light"] .text-amber-200, [data-theme="light"] .text-amber-300, [data-theme="light"] .text-amber-400 { color: #b45309; }
+[data-theme="light"] .text-red-200, [data-theme="light"] .text-red-300, [data-theme="light"] .text-red-400 { color: #b91c1c; }
+[data-theme="light"] .text-blue-200, [data-theme="light"] .text-blue-300, [data-theme="light"] .text-blue-400 { color: #1d4ed8; }
+[data-theme="light"] .text-purple-200, [data-theme="light"] .text-purple-300, [data-theme="light"] .text-purple-400 { color: #6d28d9; }
+[data-theme="light"] .text-yellow-200, [data-theme="light"] .text-yellow-300, [data-theme="light"] .text-yellow-400 { color: #a16207; }
+[data-theme="light"] .text-orange-300, [data-theme="light"] .text-orange-400 { color: #c2410c; }
+[data-theme="light"] .text-cyan-300, [data-theme="light"] .text-cyan-400 { color: #0e7490; }
+
+/* Weiss bleibt weiss auf Verlaufs- und Vollfarbflaechen (aktiver Reiter,
+   Primaerknoepfe). Nur direkte Kinder: die ganze Seite liegt selbst auf
+   einem Verlauf. */
+[data-theme="light"] [class*="bg-gradient-to-"].text-white,
+[data-theme="light"] [class*="bg-gradient-to-"] > .text-white,
+[data-theme="light"] [class*="bg-purple-6"].text-white,
+[data-theme="light"] [class*="bg-purple-7"].text-white,
+[data-theme="light"] [class*="bg-blue-6"].text-white,
+[data-theme="light"] [class*="bg-emerald-6"].text-white,
+[data-theme="light"] [class*="bg-red-6"].text-white,
+[data-theme="light"] [class*="bg-yellow-6"].text-white { color: #ffffff; }
+/* Theme-Karten zeigen jedes Theme in seinen eigenen Farben. */
+[data-theme="light"] .ft-keep-colors .text-white { color: #ffffff; }
+[data-theme="light"] .ft-keep-colors .text-gray-400 { color: #9ca3af; }

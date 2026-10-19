@@ -5,6 +5,7 @@ import { ImageIcon, Loader2, Play, RefreshCw, AlertTriangle, Upload } from 'luci
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import type { TestPluginProps } from '../types';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { engineErrorText } from '../engineError';
 
 type Prediction = { label: string; confidence: number };
 
@@ -45,7 +46,7 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
       );
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', e => {
         if (e.payload.test_id !== testId) return;
-        setError(e.payload.data?.error ?? t('testPlugins.imageClassification.error')); setLoading(false);
+        setError(engineErrorText(e.payload.data, t, t('testPlugins.imageClassification.error'))); setLoading(false);
       });
       unlistenRef.current = [u1, u2];
     } catch (e) { setError(String(e)); setLoading(false); }
@@ -72,7 +73,7 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
       );
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', e => {
         if (e.payload.test_id !== job.id) return;
-        setDsError(e.payload.data?.error ?? t('testPlugins.imageClassification.error')); setDsLoading(false);
+        setDsError(engineErrorText(e.payload.data, t, t('testPlugins.imageClassification.error'))); setDsLoading(false);
       });
       unlistenRef.current = [u1, u2];
     } catch (e) { setDsError(String(e)); setDsLoading(false); }

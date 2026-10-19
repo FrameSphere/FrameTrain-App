@@ -17,7 +17,7 @@ import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry'
 import { buildTaskSamples, folderLabel, labTaskFor, type ExpectedEntity, type MediaKind } from './labTaskSamples';
 import { EntityText, GeneratedImage, GeneratedText, PairView, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
 import {
-  labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes,
+  labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes, shownPrediction,
   compareClassSets, classColor, legendEntries, type TruthBox,
 } from './labGroundTruth';
 import {
@@ -908,7 +908,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
             ? <p className="text-gray-600 text-xs">{t('laboratoryPanel.analysis.topWrongEmpty')}</p>
             : topWrongPreds.map(([label, count]) => (
               <div key={label} className="flex items-center gap-2">
-                <span className="text-gray-400 text-xs flex-1 truncate">{label}</span>
+                <span className="text-gray-400 text-xs flex-1 truncate">{shownPrediction(label, t)}</span>
                 <span className="text-red-400 text-xs font-semibold tabular-nums">{count}×</span>
               </div>
             ))}
@@ -956,7 +956,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
                     }
                   </span>
                   <span className="text-gray-300 text-xs flex-1 truncate">{r.inputText}</span>
-                  <span className="text-white text-xs font-medium flex-shrink-0">{r.predicted}</span>
+                  <span className="text-white text-xs font-medium flex-shrink-0">{shownPrediction(r.predicted, t)}</span>
                   {r.confidence != null && <span className="text-gray-500 text-xs font-mono tabular-nums flex-shrink-0">{(r.confidence * 100).toFixed(0)}%</span>}
                   {expandedIdx === i ? <ChevronUp className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />}
                 </button>
@@ -964,7 +964,7 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
                   <div className="px-5 pb-4 space-y-2 bg-white/[0.02] border-t border-white/5">
                     <div className="grid grid-cols-2 gap-3 pt-3 text-xs">
                       <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailInput')}</span><p className="text-gray-300 mt-0.5">{r.inputText}</p></div>
-                      <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailPredicted')}</span><p className="text-white font-semibold mt-0.5">{r.predicted}</p></div>
+                      <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailPredicted')}</span><p className="text-white font-semibold mt-0.5">{shownPrediction(r.predicted, t)}</p></div>
                       {r.expectedLabel && <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailExpected')}</span><p className="text-gray-300 mt-0.5">{r.expectedLabel}</p></div>}
                       {r.userNote && <div className="col-span-2"><span className="text-gray-500">{t('laboratoryPanel.analysis.detailNote')}</span><p className="text-gray-400 italic mt-0.5">{r.userNote}</p></div>}
                     </div>
@@ -2606,7 +2606,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                         }
                         return (
                           <div className="px-4 py-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-3">
-                            <span className="text-amber-300 text-lg font-bold break-words min-w-0">{testResult.predicted}</span>
+                            <span className="text-amber-300 text-lg font-bold break-words min-w-0">{shownPrediction(testResult.predicted, t)}</span>
                             <div className="text-right flex-shrink-0">
                               {testResult.confidence != null && (
                                 <p className="text-amber-400 font-mono text-base font-semibold">{(testResult.confidence * 100).toFixed(1)}%</p>

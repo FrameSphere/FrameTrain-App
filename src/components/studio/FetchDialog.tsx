@@ -333,7 +333,9 @@ export default function FetchDialog({ project, onClose, onDone }: {
                 : t('studio.fetch.count', { count: adressen.length })}
             </p>
 
-            <div className="flex gap-2">
+            {/* Fusszeile bleibt sichtbar, auch wenn das Fenster scrollen muss
+                (bei ~715 px Fensterhoehe lagen die Knoepfe sonst unterhalb). */}
+            <div className="flex gap-2 sticky -bottom-6 -mx-6 -mb-6 px-6 py-4 bg-[#101218] border-t border-white/10">
               {busy ? (
                 <button onClick={() => void stop()} disabled={stopping}
                   className="flex-1 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-200 text-sm inline-flex items-center justify-center gap-2 disabled:opacity-50">

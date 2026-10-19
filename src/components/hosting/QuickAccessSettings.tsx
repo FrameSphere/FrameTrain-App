@@ -8,7 +8,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { CopyButton } from './HostResultView';
 import { useHosting, useHostingSettings } from './useHosting';
 import {
-  acceleratorFromEvent, apiSnippets, heldModifiers, knownConflict, shortcutLabel,
+  acceleratorFromEvent, apiSnippets, TOKEN_PLACEHOLDER, heldModifiers, knownConflict, shortcutLabel,
   type DesktopStatus, type HostingSettings, type QuickPolicy,
 } from './hostingModel';
 
@@ -136,7 +136,7 @@ export function QuickAccessCard({ settings, status, save, compact = false }: {
           {!compact && (
             <Row icon={MessageSquarePlus} label={t('hosting.settings.session')} hint={t('hosting.settings.sessionHint')}>
               <select value={settings.quick_session ?? 'smart'} onChange={e => save({ quick_session: e.target.value as QuickPolicy })}
-                className="rounded-lg bg-black/30 border border-white/15 text-sm text-white px-2.5 py-1.5 max-w-[240px]">
+                className="rounded-lg bg-black/30 border border-white/15 text-sm text-white px-2.5 py-1.5 min-w-[11rem]">
                 {(['smart', 'always', 'never'] as QuickPolicy[]).map(k => <option key={k} value={k}>{t(`hosting.settings.sessionOpt.${k}`)}</option>)}
               </select>
             </Row>
@@ -158,7 +158,7 @@ function ApiCard({ settings, status, save, rotateToken }: {
   settings: HostingSettings; status: DesktopStatus | null;
   save: (patch: Partial<HostingSettings>) => void; rotateToken: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { hosts } = useHosting();
   const [showToken, setShowToken] = useState(false);
   const [lang, setLang] = useState<'curl' | 'python'>('curl');
@@ -166,7 +166,7 @@ function ApiCard({ settings, status, save, rotateToken }: {
   useEffect(() => setPort(String(settings.api_port)), [settings.api_port]);
   const host = hosts.find(h => h.is_default) ?? hosts[0] ?? null;
   const apiUrl = status?.api.url ?? `http://127.0.0.1:${settings.api_port}/v1`;
-  const snippets = host ? apiSnippets(apiUrl, showToken ? settings.api_token : '$FRAMETRAIN_TOKEN', host) : null;
+  const snippets = host ? apiSnippets(apiUrl, showToken ? settings.api_token : TOKEN_PLACEHOLDER, host, language) : null;
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-2">

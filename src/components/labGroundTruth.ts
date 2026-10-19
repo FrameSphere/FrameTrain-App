@@ -184,11 +184,27 @@ export function parseYoloLabelFile(
  * nebeneinander stehen.
  */
 export function summarizeBoxes(boxes: { label: string }[]): string {
-  if (boxes.length === 0) return 'Keine Objekte';
-  const seen: string[] = [];
-  for (const b of boxes) if (!seen.includes(b.label)) seen.push(b.label);
-  const head = seen.slice(0, 3).join(', ');
-  return `${boxes.length}x ${head}${seen.length > 3 ? ` +${seen.length - 3}` : ''}`;
+  if (boxes.length === 0) return NO_OBJECTS;
+  // Je Klasse zaehlen: "3x Person, Emptyspace" las sich wie drei Personen,
+  // waren aber zwei Personen und ein Emptyspace.
+  const counts = new Map<string, number>();
+  for (const b of boxes) counts.set(b.label, (counts.get(b.label) ?? 0) + 1);
+  const seen = [...counts.entries()];
+  const head = seen.slice(0, 3).map(([l, n]) => `${n}x ${l}`).join(', ');
+  return `${head}${seen.length > 3 ? ` +${seen.length - 3}` : ''}`;
+}
+
+/** Feste Kennung fuer "keine Treffer" — so liefern sie der YOLO-Server und
+ *  gespeicherte Sitzungen; angezeigt wird sie mit {@link shownPrediction}. */
+export const NO_OBJECTS = 'Keine Objekte';
+
+/** Vorhersage fuer die Anzeige: die interne Kennung "Keine Objekte" in der
+ *  Sprache der Oberflaeche, alles andere unveraendert. */
+export function shownPrediction(
+  predicted: string,
+  t: (key: string, fallback?: string | Record<string, string | number>) => string,
+): string {
+  return predicted === NO_OBJECTS ? t('laboratoryPanel.noObjects', NO_OBJECTS) : predicted;
 }
 
 /**

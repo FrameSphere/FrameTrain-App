@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AlertTriangle, Download, Loader2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { describeMissing, usePackageInstall, type TaskPackageStatus } from './usePackageInstall';
+import BrokenPackageNotice from './BrokenPackageNotice';
 
 export default function PackageCheckBanner({ taskType }: { taskType?: string | null }) {
   const { t } = useLanguage();
@@ -24,6 +25,7 @@ export default function PackageCheckBanner({ taskType }: { taskType?: string | n
   useEffect(() => { void check(); }, [check]);
   const { install, running, progress, error } = usePackageInstall(() => { void check(); });
 
+  if (status?.broken) return <BrokenPackageNotice broken={status.broken} onRepaired={() => void check()} />;
   if (!status || status.missing.length === 0) return null;
   const group = t(`packageCheck.groups.${status.group}`, status.group);
 

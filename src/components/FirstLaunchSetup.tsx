@@ -734,7 +734,7 @@ const ThemeSelectScreen: React.FC<ThemeSelectScreenProps> = ({
               <button
                 key={theme.id}
                 onClick={() => onSelectTheme(theme.id)}
-                className={`relative p-5 bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
+                className={`ft-keep-colors relative p-5 bg-black bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
                   active
                     ? 'border-white/40 shadow-lg ring-2 ring-white/20'
                     : 'border-white/10 hover:border-white/20'
@@ -753,7 +753,7 @@ const ThemeSelectScreen: React.FC<ThemeSelectScreenProps> = ({
 
                 <div className="text-center">
                   <div className={`${textColor} font-semibold text-sm mb-1`}>{theme.name}</div>
-                  <div className={`text-xs ${descColor}`}>{theme.description}</div>
+                  <div className={`text-xs ${descColor}`}>{t(`themes.${theme.id}`, theme.description)}</div>
                 </div>
               </button>
             );

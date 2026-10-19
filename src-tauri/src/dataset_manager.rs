@@ -556,6 +556,28 @@ fn pairing_across_splits(path: &Path, layout: &SplitLayout) -> PairingStatus {
     total
 }
 
+/// Bilder, die in mehr als einem Split liegen (gleicher Name und gleiche
+/// Groesse). Ein solches Datenleck machte Val/Test-Werte zu optimistisch und
+/// wurde nirgends gemeldet — im Labor standen dieselben Bilder unter train und val.
+fn split_overlap(path: &Path, layout: &SplitLayout) -> usize {
+    use std::collections::HashMap;
+    let mut seen: HashMap<(String, u64), std::collections::HashSet<String>> = HashMap::new();
+    for (canon, dir_name, _) in &layout.splits {
+        let img_dir = if layout.style == "nested" {
+            path.join(&layout.images_dir).join(dir_name)
+        } else {
+            path.join(dir_name).join(&layout.images_dir)
+        };
+        for e in fs::read_dir(&img_dir).into_iter().flatten().flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() { continue; }
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            seen.entry((name, meta.len())).or_default().insert(canon.clone());
+        }
+    }
+    seen.values().filter(|splits| splits.len() > 1).count()
+}
+
 /// Liest eine vorhandene data.yaml/dataset.yaml als flache Key-Value-Map.
 fn read_existing_dataset_yaml(path: &Path) -> Option<serde_json::Value> {
     ["dataset.yaml", "data.yaml", "yolov5.yaml", "yolov8.yaml"].iter().find_map(|name| {
@@ -601,6 +623,11 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
         }
         if layout.count_of("val") == 0 {
             hints.push(hint("no_val_split", serde_json::json!({}), "Kein Validierungs-Split gefunden – nur Training.".to_string()));
+        }
+        let overlap = split_overlap(path, &layout);
+        if overlap > 0 {
+            hints.push(hint("split_overlap", serde_json::json!({ "count": overlap }),
+                format!("{} Bild(er) liegen in mehreren Splits – Val/Test-Werte sind dadurch zu optimistisch.", overlap)));
         }
         let splits_json: serde_json::Map<String, serde_json::Value> = layout.splits.iter()
             .map(|(canon, dir, n)| (canon.clone(), serde_json::json!({ "dir": dir, "count": n })))
@@ -1593,6 +1620,22 @@ pub async fn list_datasets_for_model(
                     .map(|p| p.to_string_lossy().to_string());
                 let exts = collect_extensions(&storage);
                 if !exts.is_empty() { d.extensions = exts; }
+
+                // Datenleck zwischen den Splits auch bei Datasets melden, die vor
+                // dieser Pruefung importiert wurden (Hinweise sind gespeichert).
+                if matches!(d.dataset_type, DatasetType::YoloBbox | DatasetType::PascalVoc)
+                    && !d.hints.iter().any(|h| h.code == "split_overlap")
+                {
+                    if let Some(layout) = detect_split_layout(&storage) {
+                        let n = split_overlap(&storage, &layout);
+                        if n > 0 {
+                            let h = hint("split_overlap", serde_json::json!({ "count": n }),
+                                format!("{} Bild(er) liegen in mehreren Splits – Val/Test-Werte sind dadurch zu optimistisch.", n));
+                            d.warnings.push(h.text.clone());
+                            d.hints.push(h);
+                        }
+                    }
+                }
 
                 // FIX: split_info live aus den tatsaechlichen train/val/test-Ordnern
                 // berechnen statt dem evtl. veralteten gespeicherten Wert zu vertrauen.
@@ -3740,5 +3783,27 @@ mod lab_samples_file_tests {
         fs::write(dir.join("bild.png"), b"x").unwrap();
         assert!(read_text_for_samples(&dir.join("bild.png"), LAB_TEXT_MAX_BYTES).is_err());
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod split_overlap_tests {
+    use super::*;
+    #[test]
+    fn meldet_gleiche_bilder_in_train_und_val() {
+        let root = std::env::temp_dir().join(format!("ft_overlap_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        struct D(PathBuf); impl D { fn path(&self) -> &Path { &self.0 } }
+        impl Drop for D { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let d = D(root);
+        for (split, name) in [("train", "a.jpg"), ("train", "b.jpg"), ("val", "a.jpg"), ("val", "c.jpg")] {
+            let img = d.path().join("images").join(split);
+            let lbl = d.path().join("labels").join(split);
+            fs::create_dir_all(&img).unwrap(); fs::create_dir_all(&lbl).unwrap();
+            fs::write(img.join(name), b"same-bytes").unwrap();
+            fs::write(lbl.join(name.replace(".jpg", ".txt")), b"0 0.5 0.5 0.1 0.1").unwrap();
+        }
+        let a = detect_dataset_type(d.path());
+        assert!(a.hints.iter().any(|h| h.code == "split_overlap" && h.params["count"] == 1), "{:?}", a.hints);
     }
 }

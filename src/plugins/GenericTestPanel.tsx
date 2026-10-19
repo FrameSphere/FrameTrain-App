@@ -11,6 +11,9 @@ import { listen } from '@tauri-apps/api/event';
 import { AlertTriangle, Loader2, Play, Square } from 'lucide-react';
 import type { TestPluginProps } from './types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { engineErrorText, engineErrorBroken, type EngineErrorData } from './engineError';
+import BrokenPackageNotice from '../components/BrokenPackageNotice';
+import type { BrokenPackage } from '../components/usePackageInstall';
 
 interface TopPred { label?: string; score?: number }
 
@@ -91,6 +94,7 @@ export default function GenericTestPanel({
   const [singleBusy, setSingleBusy] = useState(false);
   const [single, setSingle] = useState<{ predicted: string; confidence?: number; top: TopPred[]; ms: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [broken, setBroken] = useState<BrokenPackage | null>(null);
 
   // Die Engine meldet waehrend des Ladens Status-Zeilen ("Lade Bildmodell...").
   // Ohne sie sieht der Nutzer bei einem langsamen Kaltstart nur einen Spinner.
@@ -137,9 +141,10 @@ export default function GenericTestPanel({
           setStatus(null);
           setSingleBusy(false);
         });
-      const offErr = await listen<{ test_id?: string; data?: { error?: string } }>(
+      const offErr = await listen<{ test_id?: string; data?: EngineErrorData }>(
         'test-error', e => {
-          setError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
+          setError(engineErrorText(e.payload.data, t, t('testPlugins.common.unknownError')));
+          setBroken(engineErrorBroken(e.payload.data));
           setStatus(null);
           setSingleBusy(false);
         });
@@ -191,8 +196,9 @@ export default function GenericTestPanel({
           setStatus(null);
           setRunning(false);
         });
-      const offE = await listen<{ data?: { error?: string } }>('test-error', e => {
-        setError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
+      const offE = await listen<{ data?: EngineErrorData }>('test-error', e => {
+        setError(engineErrorText(e.payload.data, t, t('testPlugins.common.unknownError')));
+        setBroken(engineErrorBroken(e.payload.data));
         setStatus(null);
         setRunning(false);
       });
@@ -207,7 +213,8 @@ export default function GenericTestPanel({
 
   return (
     <div className="space-y-4">
-      {error && (
+      {error && broken && <BrokenPackageNotice broken={broken} compact onRepaired={() => { setError(null); setBroken(null); }} />}
+      {error && !broken && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/30">
           <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
           <p className="text-red-200/90 text-xs break-words">{error}</p>

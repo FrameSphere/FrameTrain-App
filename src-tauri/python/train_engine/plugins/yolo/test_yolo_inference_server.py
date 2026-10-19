@@ -55,13 +55,13 @@ class SummaryTest(unittest.TestCase):
     def test_zaehlt_boxen_nennt_klassen(self):
         boxes = [{"label": "Sky"}, {"label": "Sky"}, {"label": "Tree"}]
         best = {"Sky": 0.86, "Tree": 0.80}
-        self.assertEqual(YoloInferenceServer._summary(boxes, best), "3x Sky, Tree")
+        self.assertEqual(YoloInferenceServer._summary(boxes, best), "2x Sky, 1x Tree")
 
     def test_kuerzt_lange_klassenlisten(self):
         boxes = [{"label": f"K{i}"} for i in range(6)]
         best = {f"K{i}": 0.5 for i in range(6)}
         # Drei Namen plus Zaehler – die Spalte im Labor ist schmal.
-        self.assertEqual(YoloInferenceServer._summary(boxes, best), "6x K0, K1, K2 +3")
+        self.assertEqual(YoloInferenceServer._summary(boxes, best), "1x K0, 1x K1, 1x K2 +3")
 
 
 class _L(list):

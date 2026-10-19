@@ -39,6 +39,8 @@ interface CanvasInferenceResult {
 
 interface Props {
   userId: string;
+  /** Im Builder geladenes Modell; vorher stand das erste Modell mit Gewichten da. */
+  preferredModelId?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,7 +65,7 @@ function pct(v: number) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
+export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }) => {
   const { t } = useLanguage();
   const [models, setModels] = useState<CanvasModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
@@ -79,14 +81,15 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
     try {
       const list = await invoke<CanvasModelInfo[]>("list_canvas_models_with_pt", { userId });
       setModels(list);
-      const withPt = list.find((m) => m.has_weights);
-      if (withPt) setSelectedModelId((prev) => prev ?? withPt.model_id);
+      const preferred = list.find((m) => m.model_id === preferredModelId && m.has_weights);
+      const withPt = preferred ?? list.find((m) => m.has_weights);
+      if (withPt) setSelectedModelId((prev) => (preferred ? preferred.model_id : prev ?? withPt.model_id));
     } catch (e: unknown) {
       setError(String(e));
     } finally {
       setLoadingModels(false);
     }
-  }, [userId]);
+  }, [userId, preferredModelId]);
 
   useEffect(() => {
     fetchModels();
@@ -215,12 +218,12 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
 
       {/* ── Modell-Auswahl ─────────────────────────────────────────────────── */}
       <div style={S.section}>
-        <div style={S.label}>Modell auswählen</div>
+        <div style={S.label}>{t('canvasInferenceTab.selectModel')}</div>
         {loadingModels ? (
-          <div style={{ fontSize: 11, color: "#475569" }}>Lade Modelle…</div>
+          <div style={{ fontSize: 11, color: "#475569" }}>{t('canvasInferenceTab.loadingModels')}</div>
         ) : models.length === 0 ? (
           <div style={{ fontSize: 11, color: "#475569" }}>
-            Keine Canvas-Modelle gefunden. Erst im Builder ein Modell exportieren und trainieren.
+            {t('canvasInferenceTab.noModels')}
           </div>
         ) : (
           <select
@@ -236,7 +239,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
             {models.map((m) => (
               <option key={m.model_id} value={m.model_id} disabled={!m.has_weights}>
                 {m.name}
-                {!m.has_weights ? " (kein model.pt)" : ""}
+                {!m.has_weights ? ` (${t('canvasInferenceTab.noWeightsShort')})` : ""}
               </option>
             ))}
           </select>
@@ -246,11 +249,11 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
         {selected && (
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" as const }}>
             <span style={S.tag("#6366f1")}>{selected.task_type}</span>
-            <span style={S.tag("#0ea5e9")}>{selected.num_classes} Klassen</span>
+            <span style={S.tag("#0ea5e9")}>{t('canvasInferenceTab.classes', { count: selected.num_classes })}</span>
             {selected.has_weights ? (
               <span style={S.tag("#22c55e")}>model.pt ✓</span>
             ) : (
-              <span style={S.tag("#ef4444")}>Kein model.pt</span>
+              <span style={S.tag("#ef4444")}>{t('canvasInferenceTab.noWeightsTag')}</span>
             )}
           </div>
         )}
@@ -260,7 +263,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
       <div style={S.section}>
         <div style={S.label}>Tensor-Input</div>
         <div style={{ fontSize: 10, color: "#334155", marginBottom: 6 }}>
-          Kommagetrennte Zahlen, z.B.:{" "}
+          {t('canvasInferenceTab.inputHint')}{" "}
           <code style={{ color: "#475569" }}>0.1, 0.5, 0.3, 0.8</code>
         </div>
         <textarea
@@ -288,13 +291,13 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
                 >
                   ⟳
                 </span>
-                Inferenz läuft…
+                {t('canvasInferenceTab.running')}
               </>
             ) : (
-              <>▶ Inferenz starten</>
+              <>▶ {t('canvasInferenceTab.run')}</>
             )}
           </button>
-          <span style={{ fontSize: 10, color: "#334155" }}>⌘↵ oder Ctrl+↵</span>
+          <span style={{ fontSize: 10, color: "#334155" }}>{t('canvasInferenceTab.shortcut')}</span>
         </div>
       </div>
 
@@ -327,7 +330,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
               marginBottom: 10,
             }}
           >
-            <div style={S.label}>Ergebnis</div>
+            <div style={S.label}>{t('canvasInferenceTab.result')}</div>
             <span style={{ fontSize: 10, color: "#334155" }}>
               {result.inference_ms.toFixed(1)} ms
             </span>
@@ -355,7 +358,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
                 }}
               >
                 <span style={{ fontSize: 22, color: "#e2e8f0", fontWeight: 700 }}>
-                  Klasse {result.predicted_class ?? "?"}
+                  {t('canvasInferenceTab.classN', { n: String(result.predicted_class ?? "?") })}
                 </span>
                 <span style={{ fontSize: 13, color: "#22c55e", fontWeight: 600 }}>
                   {result.confidence != null ? pct(result.confidence) : ""}
@@ -377,7 +380,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
                               tp.class_idx === result.predicted_class ? "#a78bfa" : "#64748b",
                           }}
                         >
-                          Klasse {tp.class_idx}
+                          {t('canvasInferenceTab.classN', { n: tp.class_idx })}
                         </span>
                         <span style={{ color: "#94a3b8" }}>{pct(tp.score)}</span>
                       </div>
@@ -412,7 +415,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId }) => {
             color: "#fbbf24",
           }}
         >
-          ⚠️ Dieses Modell hat noch kein <code>model.pt</code> – erst Training durchführen.
+          {t('canvasInferenceTab.noWeightsBefore')} <code>model.pt</code> {t('canvasInferenceTab.noWeightsAfter')}
         </div>
       )}
 

@@ -29,7 +29,9 @@ import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPyth
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { sendAppErrorReport } from '../utils/errorReport';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
-import { detectScriptModality, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { detectScriptModality, isCausalLmModel, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { generateCausalLmTrainScript } from './llmDevScript';
+import { localizeScript } from './scriptLocale';
 import { generateYoloTrainScript } from './yoloDevScripts';
 import DiffViewer from './DiffViewer';
 import { dateLocale } from '../utils/dateLocale';
@@ -1420,7 +1422,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   // Template generieren
   const generateTemplate = () => {
     if (!modelInfo || !outputPath) return;
-    const template = generateDefaultScript(modelInfo, datasets, outputPath);
+    const template = localizeScript(generateDefaultScript(modelInfo, datasets, outputPath), language);
     setScript(template);
     setIsDirty(true);
   };
@@ -2439,6 +2441,14 @@ export function devProgressPercent(p: {
 // ── Default Script Generator ──────────────────────────────────────────────
 
 function generateDefaultScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
+  // LLMs bekamen die Klassifikations-Vorlage (AutoModelForSequenceClassification).
+  if (isCausalLmModel(model)) {
+    return generateCausalLmTrainScript({
+      modelPath:   pyPath(model?.local_path || model?.source_path || model?.name),
+      datasetPath: pyPath(datasets[0]?.storage_path),
+      outputPath:  pyPath(templateOutputPath(outputPath, 'dev_train')),
+    });
+  }
   const modality = detectScriptModality(model);
   if (modality === 'detection') {
     const ds = datasets[0];

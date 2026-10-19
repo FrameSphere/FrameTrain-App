@@ -27,6 +27,8 @@ import GradientChatInput from './ui/GradientChatInput';
 import { openAICoach } from '../ai/aiCoachEvents';
 import { dateLocale } from '../utils/dateLocale';
 import { unwrapBoldHeading } from './ui/MarkdownText';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { templateName as tplName, templateDescription as tplDescription } from '../utils/templateText';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -43,6 +45,28 @@ interface LogEntry {
   epoch: number; step: number; train_loss: number; val_loss: number | null;
   learning_rate: number; grad_norm?: number | null; elapsed_seconds?: number; timestamp: string;
 }
+/**
+ * Nach dem letzten Schritt haengt das Training Abschlusszeilen an — gleicher
+ * Step, Durchschnitts-Loss und die Start-Lernrate aus der Konfiguration. In
+ * der LR-Kurve sprang die Linie dadurch am Ende senkrecht aufs Maximum.
+ * Behalten wird je Step die erste Zeile; ein spaeter nachgereichter Val-Loss
+ * wird uebernommen.
+ */
+export function stepLogs<T extends { step: number; val_loss: number | null }>(logs: T[]): T[] {
+  const out: T[] = [];
+  for (const l of logs) {
+    const last = out[out.length - 1];
+    if (last && l.step <= last.step) {
+      if (last.val_loss == null && l.val_loss != null && l.step === last.step) {
+        out[out.length - 1] = { ...last, val_loss: l.val_loss };
+      }
+      continue;
+    }
+    out.push(l);
+  }
+  return out;
+}
+
 interface EpochSummary {
   epoch: number; avg_train_loss: number | null; min_train_loss: number | null;
   max_train_loss: number | null; val_loss: number | null; duration_seconds: number; steps: number;
@@ -621,7 +645,7 @@ function OverfittingGapChart({ summaries }: { summaries: EpochSummary[] }) {
           )}
         </span>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">{t('analysisPanel.charts.overfitting.currentLabel')} <span className={isOverfitting ? 'text-amber-400 font-semibold' : 'text-gray-300'}>+{gaps[gaps.length - 1].toFixed(4)}</span></span>
+          <span className="text-xs text-gray-400">{t('analysisPanel.charts.overfitting.currentLabel')} <span className={isOverfitting ? 'text-amber-400 font-semibold' : 'text-gray-300'}>{gaps[gaps.length - 1] >= 0 ? '+' : ''}{gaps[gaps.length - 1].toFixed(4)}</span></span>
           <button onClick={handleDownload} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title={t('analysisPanel.charts.overfitting.exportTooltip')}>
             <Download className="w-4 h-4" />
           </button>
@@ -969,9 +993,9 @@ export function ReportText({ text }: { text: string }) {
             );
             continue;
           }
-          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          if (/^[-*•]\s/.test(trimmed)) {
             const items: string[] = [];
-            const isBullet = (l: string) => l.trim().startsWith('- ') || l.trim().startsWith('* ');
+            const isBullet = (l: string) => /^[-*•]\s/.test(l.trim());
             while (i < lines.length) {
               if (isBullet(lines[i])) {
                 items.push(lines[i].trim().slice(2).trim());
@@ -986,10 +1010,12 @@ export function ReportText({ text }: { text: string }) {
               break;
             }
             nodes.push(
-              <ul key={`ul-${i}`} className="space-y-1 my-1.5">
+              <ul key={`ul-${i}`} className="space-y-1 my-1.5 list-none pl-0">
                 {items.map((item, j) => (
                   <li key={j} className="flex items-start gap-2">
-                    <span className="text-purple-400 mt-1 shrink-0">•</span>
+                    {/* Punkt als Form statt Zeichen: das • sass je nach Schrift
+                        klein und versetzt unter der Grundlinie. */}
+                    <span aria-hidden className="mt-[0.6em] w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
                     <span dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
                   </li>
                 ))}
@@ -1452,10 +1478,19 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       setLoading(true);
       const list = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree');
       setModelsWithVersions(list);
-      // Das neueste Modell hat oft noch gar keine Version – dann startet die
-      // Analyse direkt im Leerzustand. Deshalb das erste Modell mit Versionen
-      // vorwählen, mit Fallback auf das erste überhaupt.
-      const preferred = list.find(m => m.versions.length > 0) ?? list[0];
+      // Vorwahl: das zuletzt erfolgreich trainierte Modell. Vorher war es das
+      // erste mit irgendeiner Version — die Root-Version eines nie trainierten
+      // Modells (z.B. yolo-obb) zeigte dann nur "No Training Data".
+      let lastTrained: string | undefined;
+      try {
+        const history = await invoke<{ model_id?: string; status: string; completed_at?: string | null; created_at: string }[]>('get_training_history');
+        lastTrained = history
+          .filter(j => j.status === 'completed' && j.model_id && list.some(m => m.id === j.model_id))
+          .sort((a, b) => (b.completed_at ?? b.created_at).localeCompare(a.completed_at ?? a.created_at))[0]?.model_id;
+      } catch { /* ohne Verlauf: Fallback unten */ }
+      const preferred = (lastTrained ? list.find(m => m.id === lastTrained) : undefined)
+        ?? list.find(m => m.versions.some(v => !v.is_root))
+        ?? list.find(m => m.versions.length > 0) ?? list[0];
       if (preferred) setSelectedModelId(preferred.id);
     }
     catch (e: any) { notifyError(t('common.error'), String(e)); }
@@ -1479,7 +1514,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       ]);
       setMetrics(metricsRes.status === 'fulfilled' ? metricsRes.value : null);
       setVersionDetails(detailsRes.status === 'fulfilled' ? detailsRes.value : null);
-      setLogs(logsRes.status === 'fulfilled' ? logsRes.value : []);
+      setLogs(logsRes.status === 'fulfilled' ? stepLogs(logsRes.value) : []);
       setFullData(fullDataRes.status === 'fulfilled' ? fullDataRes.value : null);
       // Ein leerer Bericht ist kein Bericht. Fruehere Laeufe haben leere
       // Antworten (Thinking hatte das ganze Budget verbraucht) als "Erfolg"
@@ -1705,11 +1740,20 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
 
   const handleExport = async () => {
     if (!metrics) return;
-    const blob = new Blob([JSON.stringify({ metrics, logs, fullData, report, exported_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = url; a.download = `training_analyse_${versionDetails?.version_name || selectedVersionId}.json`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    success(t('common.success'), '');
+    const base = String(versionDetails?.version_name || selectedVersionId || 'model')
+      .trim().replace(/[^A-Za-z0-9._-]+/g, '_');
+    try {
+      const path = await saveDialog({
+        defaultPath: `${t('analysisPanel.exportFilePrefix')}_${base}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!path) return;
+      const contents = JSON.stringify({ metrics, logs, fullData, report, exported_at: new Date().toISOString() }, null, 2);
+      await invoke('write_analysis_export', { path, contents });
+      success(t('analysisPanel.exportSavedTitle'), path);
+    } catch (e: unknown) {
+      notifyError(t('common.error'), e instanceof Error ? e.message : String(e));
+    }
   };
 
   // ── Computed ───────────────────────────────────────────────────────────────
@@ -1725,7 +1769,9 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   const hasVal         = logs.some(l => l.val_loss != null) || epochSummaries.some(s => s.val_loss != null);
   const hasGradNorm    = logs.some(l => l.grad_norm != null);
   // Bei Objekterkennung ersetzt die mAP-Karte die Klassifikations-Karte.
-  const hasDetectionMetrics = Object.values(fullData?.detection_metrics ?? {})
+  // Nur mit mAP ist es ein Detektor; aeltere Analysen trugen hier auch die
+  // Precision/Recall eines Textklassifikators ein.
+  const hasDetectionMetrics = [fullData?.detection_metrics?.map50, fullData?.detection_metrics?.map50_95]
     .some(v => typeof v === 'number' && v > 0);
 
   // ── Early Returns ──────────────────────────────────────────────────────────
@@ -1779,8 +1825,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
               {templates.map(template => (
                 <div key={template.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
                   <div>
-                    <div className="text-white font-medium text-sm">{template.name}</div>
-                    {template.description && <div className="text-gray-400 text-xs mt-0.5">{template.description}</div>}
+                    <div className="text-white font-medium text-sm">{tplName(template, t)}</div>
+                    {template.description && <div className="text-gray-400 text-xs mt-0.5">{tplDescription(template, t)}</div>}
                     <div className="text-gray-600 text-xs mt-0.5 flex items-center gap-1.5">
                       {template.source === 'ai' ? <Bot className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
                       <span>{template.source === 'ai' ? t('analysisPanel.templates.sourceAI') : t('analysisPanel.templates.sourceUser')}</span>
@@ -1956,7 +2002,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                    Detektor nichts aus — hier zaehlt mAP. */}
               {(() => {
                 const dm = fullData?.detection_metrics;
-                if (!dm) return null;
+                if (!dm || !hasDetectionMetrics) return null;
                 const entries: Array<[string, number | null | undefined]> = [
                   [t('analysisPanel.detection.map50'), dm.map50],
                   [t('analysisPanel.detection.map5095'), dm.map50_95],

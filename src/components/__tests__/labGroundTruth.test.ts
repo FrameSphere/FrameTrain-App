@@ -110,13 +110,13 @@ describe('parseYoloLabelFile', () => {
 });
 
 describe('summarizeBoxes', () => {
-  it('zaehlt Boxen und nennt die Klassen ohne Wiederholung', () => {
+  it('zaehlt Boxen je Klasse', () => {
     expect(summarizeBoxes([{ label: 'Sky' }, { label: 'Sky' }, { label: 'Tree' }]))
-      .toBe('3x Sky, Tree');
+      .toBe('2x Sky, 1x Tree');
   });
 
   it('kuerzt lange Klassenlisten', () => {
-    expect(summarizeBoxes(['A', 'B', 'C', 'D'].map(label => ({ label })))).toBe('4x A, B, C +1');
+    expect(summarizeBoxes(['A', 'B', 'C', 'D'].map(label => ({ label })))).toBe('1x A, 1x B, 1x C +1');
   });
 
   it('sagt es, wenn nichts da ist', () => {

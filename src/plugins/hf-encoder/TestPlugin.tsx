@@ -8,6 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Loader2, Play, Square, RefreshCw, FlaskConical, AlertTriangle } from 'lucide-react';
 import type { TestPluginProps } from '../types';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { engineErrorText } from '../engineError';
 
 type TopPred = { label?: string; score?: number };
 
@@ -106,7 +107,7 @@ export default function HFEncoderTestPlugin({
 
       const u2 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', (e) => {
         if (e.payload.test_id !== testId) return;
-        setSingleError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
+        setSingleError(engineErrorText(e.payload.data, t, t('testPlugins.common.unknownError')));
         setSingleLoading(false);
       });
 
@@ -178,7 +179,7 @@ export default function HFEncoderTestPlugin({
 
       const u3 = await listen<{ test_id: string; data?: { error?: string } }>('test-error', (e) => {
         if (e.payload.test_id !== jobId) return;
-        setDatasetError(e.payload.data?.error ?? t('testPlugins.common.unknownError'));
+        setDatasetError(engineErrorText(e.payload.data, t, t('testPlugins.common.unknownError')));
         setDatasetLoading(false);
       });
 

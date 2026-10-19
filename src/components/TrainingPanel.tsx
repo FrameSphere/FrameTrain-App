@@ -139,6 +139,8 @@ import { MarkdownText } from './ui/MarkdownText';
 import { dateLocale } from '../utils/dateLocale';
 import ModalPortal from './ui/ModalPortal';
 import PackageCheckBanner from './PackageCheckBanner';
+import { pluginName, pluginDescription } from '../plugins/pluginText';
+import { templateName, templateDescription } from '../utils/templateText';
 
 /**
  * Gemeinsamer Einstieg fuer Training, Labor und die Dev-Panels.
@@ -503,9 +505,9 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
                 <div className="flex-1 min-w-0">
                   <p className="text-white font-medium text-sm flex items-center gap-2">
                     {tab === 'builtin' ? builtinIcon(template.id) : <BookOpen className="w-4 h-4 text-gray-500" />}
-                    <span>{template.name}</span>
+                    <span>{templateName(template, t)}</span>
                   </p>
-                  {template.description && <p className="text-gray-500 text-xs mt-0.5">{template.description}</p>}
+                  {template.description && <p className="text-gray-500 text-xs mt-0.5">{templateDescription(template, t)}</p>}
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {template.config.learning_rate != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">LR: {template.config.learning_rate}</span>}
                     {template.config.batch_size     != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">Batch: {template.config.batch_size}</span>}
@@ -1848,7 +1850,14 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                           </div>
                           <p className="text-white font-medium text-sm truncate">{job.model_name}</p>
                           <p className="text-gray-500 text-xs truncate">{t('trainingPanel.history.datasetLabel')} {job.dataset_name}</p>
-                          {job.error && <p className="text-red-400 text-xs mt-1 truncate">{t('trainingPanel.history.errorLabel')} {job.error}</p>}
+                          {job.error && (
+                            <p className="text-red-400 text-xs mt-1 line-clamp-3 whitespace-pre-wrap break-words select-text" title={job.error}>
+                              {t('trainingPanel.history.errorLabel')} {job.error}
+                            </p>
+                          )}
+                          {!job.error && job.status === 'failed' && (
+                            <p className="text-gray-500 text-xs mt-1">{t('trainingPanel.history.noErrorSaved')}</p>
+                          )}
                         </div>
                         <div className="text-right flex-shrink-0">
                           <p className="text-xs text-gray-500">{new Date(job.created_at).toLocaleDateString(dateLocale(language), { day:'2-digit', month:'2-digit', year:'2-digit' })}</p>
@@ -1880,7 +1889,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
           // Der feste Untertitel behauptete auch bei YOLO oder Bildmodellen
           // "Sequenzklassifikations-Modelle".
           detection?.supported
-            ? t('trainingPanel.subtitleForPlugin').replace('{name}', detection.plugin.name)
+            ? t('trainingPanel.subtitleForPlugin').replace('{name}', pluginName(detection.plugin, t))
             : t('trainingPanel.subtitle')
         }</p></div>
         <div className="flex items-center gap-2">
@@ -1933,7 +1942,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
               
               {/* Support Info */}
               {selectedModel && (isSupported
-                ? <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mt-1"><CheckCircle className="w-4 h-4 text-emerald-400" /><span className="text-emerald-300 text-xs font-medium">{t('trainingPanel.modelBlock.pluginSupported').replace('{name}', detection.plugin.name)}</span></div>
+                ? <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mt-1"><CheckCircle className="w-4 h-4 text-emerald-400" /><span className="text-emerald-300 text-xs font-medium">{t('trainingPanel.modelBlock.pluginSupported').replace('{name}', pluginName(detection.plugin, t))}</span></div>
                 : <div className="space-y-2 mt-1">
                     <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20"><AlertTriangle className="w-4 h-4 text-amber-400" /><span className="text-amber-300 text-xs">{t('trainingPanel.modelBlock.pluginUnsupported')}</span></div>
                     <button onClick={() => setMode('dev')} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-300 text-xs font-medium transition-all"><Code2 className="w-3.5 h-3.5" /> {t('trainingPanel.modelBlock.devModeButton')}</button>
@@ -2131,7 +2140,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 augment. Sie wirkten schon immer, waren aber nirgends einstellbar. */}
             {Object.keys(pluginParams).length > 0 && detection?.supported === true && (
               <SectionCard
-                title={t('trainingPanel.sections.pluginParams').replace('{name}', detection.plugin.name)}
+                title={t('trainingPanel.sections.pluginParams').replace('{name}', pluginName(detection.plugin, t))}
                 icon={<SlidersHorizontal className="w-4 h-4 text-orange-400" />}
                 expanded={sections.plugin}
                 onToggle={() => toggleSection('plugin')}

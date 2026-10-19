@@ -757,12 +757,21 @@ fn uploads_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(d)
 }
 
-/// Aufraeumen: Uploads und Screenshots aelter als einen Tag.
+/// Aufraeumen: Uploads und Screenshots aelter als einen Tag — ausser sie
+/// stehen noch in einem gespeicherten Chatverlauf. Sonst zeigte ein alter
+/// YOLO-Verlauf nur noch die Boxen auf leerem Feld.
 pub fn clean_uploads(app: &tauri::AppHandle) {
     let Ok(d) = uploads_dir(app) else { return };
+    let referenced: String = chats_dir(app).ok()
+        .and_then(|c| std::fs::read_dir(c).ok())
+        .into_iter().flatten().flatten()
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .collect::<Vec<_>>().join("\n");
     let limit = SystemTime::now() - Duration::from_secs(24 * 3600);
     for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
         if e.metadata().and_then(|m| m.modified()).map(|t| t < limit).unwrap_or(false) {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !name.is_empty() && referenced.contains(&name) { continue; }
             let _ = std::fs::remove_file(e.path());
         }
     }

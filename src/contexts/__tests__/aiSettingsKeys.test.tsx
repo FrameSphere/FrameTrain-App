@@ -21,7 +21,8 @@ import { AISettingsProvider, useAISettings } from '../AISettingsContext';
 function keychain(initial: Record<string, string> = {}, calls?: string[]) {
   const store: Record<string, string> = { ...initial };
   mockInvoke.mockImplementation(async (cmd: string, args: any) => {
-    calls?.push(cmd);
+    calls?.push(cmd === 'secret_get' ? `secret_get:${args.key}` : cmd);
+    if (cmd === 'secret_exists') return args.key in store;
     if (cmd === 'secret_get') return store[args.key] ?? null;
     if (cmd === 'secret_set') { store[args.key] = args.value; return null; }
     if (cmd === 'secret_delete') { delete store[args.key]; return null; }
@@ -117,7 +118,8 @@ describe('AISettings – Key pro Anbieter', () => {
   // Schluesselbund lag — sichtbar wurde er erst beim Umschalten. Genau die
   // Beruhigung, die die Anzeige geben soll, fehlte damit.
   it('meldet ALLE Anbieter mit hinterlegtem Key, ohne dass man umschalten muss', async () => {
-    keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude', 'ft_ai_key_u1_groq': 'gsk_groq' });
+    const calls: string[] = [];
+    keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude', 'ft_ai_key_u1_groq': 'gsk_groq' }, calls);
     storedSettings('anthropic');
     const { result } = await mounted();
 
@@ -127,6 +129,9 @@ describe('AISettings – Key pro Anbieter', () => {
 
     act(() => { result.current.ensureProviderKeysLoaded(); });
     await waitFor(() => expect(result.current.providersWithKey).toEqual(['anthropic', 'groq']));
+    // Beim Oeffnen nur nachsehen, OB ein Key da ist — Auslesen fragte unter
+    // macOS nach dem Schluesselbund-Passwort.
+    expect(calls).not.toContain('secret_get:ft_ai_key_u1_groq');
 
     // Umschalten aendert daran nichts und verliert keinen Key.
     act(() => { result.current.updateDraft({ provider: 'groq' }); });

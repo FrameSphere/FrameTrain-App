@@ -24,6 +24,7 @@ import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPyth
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
 import { detectScriptModality, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { localizeScript } from './scriptLocale';
 import { generateYoloTestScript } from './yoloDevScripts';
 import DiffViewer from './DiffViewer';
 import OpenLibraryModal from './OpenLibraryModal';
@@ -1369,7 +1370,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
   const { success, error } = useNotification();
   const { settings: aiSettings } = useAISettings();
   const { setCurrentPageContent } = usePageContext();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   const [fileOpen, setFileOpen]       = useState(false);
   const [tlHovered, setTlHovered]     = useState(false);
@@ -1645,7 +1646,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
 
   const generateTemplate = () => {
     if (!modelInfo || !outputPath) return;
-    setScript(generateDefaultTestScript(modelInfo, datasets, outputPath));
+    setScript(localizeScript(generateDefaultTestScript(modelInfo, datasets, outputPath), language));
     setIsDirty(true);
   };
 

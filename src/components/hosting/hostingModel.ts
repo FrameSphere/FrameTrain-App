@@ -243,52 +243,70 @@ export function knownConflict(accel: string, mac: boolean): string | null {
 
 // ── API-Beispiele ────────────────────────────────────────────────────────
 
-export function apiSnippets(url: string, token: string, host: Pick<HostInfo, 'api_name' | 'modality' | 'input_kind'>): { curl: string; python: string } {
+/** Platzhalter, solange der Token in den Einstellungen verborgen ist. */
+export const TOKEN_PLACEHOLDER = '$FRAMETRAIN_TOKEN';
+
+export function apiSnippets(
+  url: string, token: string,
+  host: Pick<HostInfo, 'api_name' | 'modality' | 'input_kind'>,
+  language: 'de' | 'en' = 'de',
+): { curl: string; python: string } {
   const spec = composerSpec(host);
+  const en = language === 'en';
+  // In Python wird "$FRAMETRAIN_TOKEN" nicht ersetzt (Shell-Syntax) — das
+  // Beispiel lieferte so 401. Dort aus der Umgebung lesen.
+  const placeholder = token === TOKEN_PLACEHOLDER;
+  const pyToken = placeholder ? 'os.environ["FRAMETRAIN_TOKEN"]' : `"${token}"`;
+  const pyImportOs = placeholder ? 'import os\n' : '';
+  const pyBearer = placeholder ? `f"Bearer {os.environ['FRAMETRAIN_TOKEN']}"` : `"Bearer ${token}"`;
+  const hello = en ? 'Hello!' : 'Hallo!';
   if (spec.chat || host.modality === 'seq2seq') {
     return {
       curl: `curl ${url}/chat/completions \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model": "${host.api_name}", "messages": [{"role": "user", "content": "Hallo!"}], "stream": false}'`,
-      python: `from openai import OpenAI
+  -d '{"model": "${host.api_name}", "messages": [{"role": "user", "content": "${hello}"}], "stream": false}'`,
+      python: `${pyImportOs}from openai import OpenAI
 
-client = OpenAI(base_url="${url}", api_key="${token}")
-antwort = client.chat.completions.create(
+client = OpenAI(base_url="${url}", api_key=${pyToken})
+${en ? 'answer' : 'antwort'} = client.chat.completions.create(
     model="${host.api_name}",
-    messages=[{"role": "user", "content": "Hallo!"}],
+    messages=[{"role": "user", "content": "${hello}"}],
 )
-print(antwort.choices[0].message.content)`,
+print(${en ? 'answer' : 'antwort'}.choices[0].message.content)`,
     };
   }
   if (spec.file) {
     const ext = spec.file === 'image' ? 'png' : spec.file === 'audio' ? 'wav' : 'mp4';
+    const file = en ? 'file' : 'datei';
+    const data = en ? 'data' : 'daten';
     return {
       curl: `curl ${url}/infer \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model": "${host.api_name}", "file_path": "/pfad/zur/datei.${ext}"${spec.text === 'optional' ? ', "question": "Was ist zu sehen?"' : ''}}'`,
-      python: `import base64, requests
+  -d '{"model": "${host.api_name}", "file_path": "/${en ? 'path/to/file' : 'pfad/zur/datei'}.${ext}"${spec.text === 'optional' ? `, "question": "${en ? 'What is in the picture?' : 'Was ist zu sehen?'}"` : ''}}'`,
+      python: `import base64, ${placeholder ? 'os, ' : ''}requests
 
-with open("datei.${ext}", "rb") as f:
-    daten = base64.b64encode(f.read()).decode()
+with open("${file}.${ext}", "rb") as f:
+    ${data} = base64.b64encode(f.read()).decode()
 
 r = requests.post("${url}/infer",
-    headers={"Authorization": "Bearer ${token}"},
-    json={"model": "${host.api_name}", "file_base64": daten, "file_ext": "${ext}"})
+    headers={"Authorization": ${pyBearer}},
+    json={"model": "${host.api_name}", "file_base64": ${data}, "file_ext": "${ext}"})
 print(r.json()["result"])`,
     };
   }
+  const sample = en ? 'Sample text' : 'Beispieltext';
   return {
     curl: `curl ${url}/infer \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model": "${host.api_name}", "text": "Beispieltext"}'`,
-    python: `import requests
+  -d '{"model": "${host.api_name}", "text": "${sample}"}'`,
+    python: `import ${placeholder ? 'os, ' : ''}requests
 
 r = requests.post("${url}/infer",
-    headers={"Authorization": "Bearer ${token}"},
-    json={"model": "${host.api_name}", "text": "Beispieltext"})
+    headers={"Authorization": ${pyBearer}},
+    json={"model": "${host.api_name}", "text": "${sample}"})
 print(r.json()["result"]["predicted"])`,
   };
 }

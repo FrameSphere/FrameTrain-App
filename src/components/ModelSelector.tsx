@@ -9,6 +9,7 @@ import { Loader2, CheckCircle, Ban } from 'lucide-react';
 import { detectPlugin, type DetectionResult } from '../plugins/registry';
 import type { ModelConfig } from '../plugins/types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { pluginName, pluginDescription } from '../plugins/pluginText';
 
 interface ModelSelectorProps {
   onDetected: (result: DetectionResult, modelPath: string) => void;
@@ -103,9 +104,9 @@ export default function ModelSelector({ onDetected, accentColor = 'emerald' }: M
               <CheckCircle className={`w-5 h-5 ${accent.text}`} />
               <div>
                 <p className={`text-sm font-medium ${accent.text}`}>
-                  {result.plugin.name}
+                  {pluginName(result.plugin, t)}
                 </p>
-                <p className="text-gray-400 text-xs">{result.plugin.description}</p>
+                <p className="text-gray-400 text-xs">{pluginDescription(result.plugin, t)}</p>
               </div>
             </div>
           );

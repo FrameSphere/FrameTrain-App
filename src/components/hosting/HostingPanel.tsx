@@ -2,7 +2,9 @@
 // befragen — hier im Hauptfenster, per Schnell-Chat (Kuerzel/Tray) oder ueber
 // die lokale API.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import BrokenPackageNotice from '../BrokenPackageNotice';
+import { brokenPackageFromError } from '../usePackageInstall';
 import { invoke } from '@tauri-apps/api/core';
 import { Server, Plus, Play, Square, Trash2, Star, Loader2, AlertTriangle, Moon, MessageSquarePlus, Settings2, Zap, Plug } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -96,13 +98,6 @@ function HostDetail({ host, shortcut }: { host: HostInfo; shortcut: string }) {
         </div>
       </div>
 
-      {host.status === 'error' && host.error && (
-        <div className="mx-5 mt-3 flex items-start gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-300">
-          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-          <span className="whitespace-pre-wrap break-words">{host.error}</span>
-        </div>
-      )}
-
       <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
         {chat.messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 text-gray-500">
@@ -114,6 +109,19 @@ function HostDetail({ host, shortcut }: { host: HostInfo; shortcut: string }) {
           <MessageList messages={chat.messages} host={host} />
         )}
       </div>
+
+      {/* Ladefehler unten bei der neuesten Nachricht, nicht ueber dem Verlauf. */}
+      {host.status === 'error' && host.error && (() => {
+        const broken = brokenPackageFromError(host.error);
+        return broken ? (
+          <div className="mx-5 mb-2"><BrokenPackageNotice broken={broken} compact /></div>
+        ) : (
+          <div className="mx-5 mb-2 flex items-start gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-300">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            <span className="whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{host.error}</span>
+          </div>
+        );
+      })()}
 
       <div className="px-5 pb-4 pt-2 border-t border-white/5">
         <Composer host={host} sending={chat.sending} onSend={chat.send} autoFocus />
@@ -135,8 +143,17 @@ export default function HostingPanel() {
   const [dialog, setDialog] = useState(false);
   const openSettings = () => { requestSettingsTab('quick'); navigateTo('settings'); };
 
+  // Ein gerade gehostetes Modell steht oft noch nicht in der Liste, wenn
+  // onHosted kommt — dann fiel die Auswahl auf das Standardmodell zurueck.
+  const pendingRef = useRef<string | null>(null);
+  const hostNew = (id: string) => { pendingRef.current = id; setSelected(id); };
+
   useEffect(() => {
-    if (!hosts.length) { setSelected(null); return; }
+    if (!hosts.length) { if (!pendingRef.current) setSelected(null); return; }
+    if (pendingRef.current) {
+      if (!hosts.some(h => h.id === pendingRef.current)) return;
+      pendingRef.current = null;
+    }
     if (!selected || !hosts.some(h => h.id === selected)) {
       setSelected((hosts.find(h => h.is_default) ?? hosts[0]).id);
     }
@@ -217,7 +234,7 @@ export default function HostingPanel() {
         </div>
       )}
 
-      {dialog && <HostModelDialog hosts={hosts} onClose={() => setDialog(false)} onHosted={id => setSelected(id)} />}
+      {dialog && <HostModelDialog hosts={hosts} onClose={() => setDialog(false)} onHosted={hostNew} />}
     </div>
   );
 }
