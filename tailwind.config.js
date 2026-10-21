@@ -45,6 +45,7 @@ export default {
         pink: accent,
         // Ergebnis-Farbe aus dem Logo: nur fuer Laufendes und Ergebnisse
         output: tok('--ft-out'),
+        'output-text': tok('--ft-out-text'),
         paper: '#ffffff',
       },
       fontFamily: {

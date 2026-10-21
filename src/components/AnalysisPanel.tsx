@@ -438,7 +438,7 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-5 text-xs text-gray-400">
-            <div className="flex items-center gap-1.5"><div className="w-4 h-0.5 bg-emerald-400 rounded" /><span>{t('analysisPanel.charts.bigLoss.legendTrain')}</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-4 h-0.5 bg-output rounded" /><span>{t('analysisPanel.charts.bigLoss.legendTrain')}</span></div>
             {valArr.length > 0 && <div className="flex items-center gap-1.5"><div className="w-5 border-t border-dashed border-purple-400" /><span>{t('analysisPanel.charts.bigLoss.legendVal')}</span></div>}
           </div>
           <button onClick={handleDownload} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title={t('analysisPanel.charts.bigLoss.exportTooltip')}>
@@ -494,7 +494,7 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
       <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center justify-between">
           <span className="text-gray-400">{t('analysisPanel.charts.bigLoss.legendTrain')}</span>
-          <span className="text-emerald-400 font-mono font-semibold">{trains[0]?.toFixed(4)} → {trains[trains.length - 1]?.toFixed(4)}</span>
+          <span className="text-output-text font-mono font-semibold">{trains[0]?.toFixed(4)} → {trains[trains.length - 1]?.toFixed(4)}</span>
         </div>
         {valArr.length > 0 && (
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2.5 flex items-center justify-between">
@@ -507,7 +507,7 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
         <div className="mt-3 p-2.5 bg-slate-900/40 border border-slate-700/50 rounded-lg flex items-center gap-3 text-xs">
           <div className="flex-1">
             <div className="text-gray-400 font-semibold">{t('analysisPanel.charts.bigLoss.hoverEpoch').replace('{step}', String(hoveredLog.step)).replace('{epoch}', String(hoveredLog.epoch))}</div>
-            <div className="text-gray-500 text-xs mt-0.5">{t('analysisPanel.charts.bigLoss.hoverTrainLoss')} <span className="text-emerald-400 font-mono">{hoveredLog.train_loss.toFixed(4)}</span></div>
+            <div className="text-gray-500 text-xs mt-0.5">{t('analysisPanel.charts.bigLoss.hoverTrainLoss')} <span className="text-output-text font-mono">{hoveredLog.train_loss.toFixed(4)}</span></div>
             {hoveredLog.val_loss != null && <div className="text-gray-500 text-xs">{t('analysisPanel.charts.bigLoss.hoverValLoss')} <span className="text-purple-400 font-mono">{hoveredLog.val_loss.toFixed(4)}</span></div>}
             {hoveredLog.learning_rate > 0 && <div className="text-gray-500 text-xs">{t('analysisPanel.charts.bigLoss.hoverLr')} <span className="text-blue-400 font-mono">{hoveredLog.learning_rate.toExponential(2)}</span></div>}
           </div>
