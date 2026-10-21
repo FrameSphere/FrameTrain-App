@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import Sidebar from './Sidebar';
+import Sidebar, { IS_MAC } from './Sidebar';
 import HomePanel from './HomePanel';
 import ModelManager from './ModelManager';
 import TrainingPanel from './TrainingPanel';
@@ -124,7 +124,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
 
   return (
     // Fensterwand (getoent mit dem Akzent), darauf Glas-Seitenleiste und eine
-    // deckende Arbeitsflaeche. macOS: oberer Streifen der Flaeche ist ziehbar.
+    // deckende Arbeitsflaeche. Ziehbarer Fensterrand: main.tsx.
     <div className="flex h-screen gap-2 p-2" style={{ background: 'var(--ft-wall)' }}>
       <Sidebar 
         // Das Studio ist eine Unterseite der Datensaetze — in der Seitenleiste
@@ -135,11 +135,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         onLogout={onLogout}
       />
       
-      <main className={`ft-sheet relative flex-1 min-w-0 rounded-[18px] ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto'}`}>
-        {currentView !== 'synapse' && (
-          <div data-tauri-drag-region className="sticky top-0 z-[5] h-3 -mb-3" aria-hidden="true" />
-        )}
-        <div className={currentView === 'synapse' ? 'h-full' : 'max-w-7xl mx-auto px-8 pt-7 pb-28'}>
+      <main className={`ft-sheet relative flex-1 min-w-0 rounded-[18px] ${currentView === 'synapse' ? `overflow-hidden flex flex-col ${IS_MAC ? 'pt-5' : ''}` : 'overflow-auto'}`}>
+        <div className={currentView === 'synapse' ? 'flex-1 min-h-0' : 'max-w-7xl mx-auto px-8 pt-7 pb-28'}>
           {renderView()}
         </div>
       </main>
