@@ -5,6 +5,7 @@ import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCirc
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, translate, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import ThemePicker from './ui/ThemePicker';
+import BrandMark from './ui/BrandMark';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
@@ -2252,28 +2253,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const renderAboutTab = () => (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10 text-center">
-      <div
-      className="inline-flex items-center justify-center mb-4 rounded-[18px]"
-      style={{
-      background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #3b82f6 100%)',
-      width: 72,
-      height: 72,
-        boxShadow: '0 0 32px rgba(168,85,247,0.45), 0 8px 32px rgba(0,0,0,0.4)',
-      }}
-      >
-      <span
-        style={{
-            fontFamily: 'Arial, sans-serif',
-              fontSize: 40,
-              fontWeight: 900,
-              color: 'white',
-              lineHeight: 1,
-              userSelect: 'none',
-            }}
-          >
-            F
-          </span>
-        </div>
+      <div className="inline-flex mb-4"><BrandMark size={72} className="ft-mark-shadow" /></div>
         <h3 className="text-2xl font-bold text-white mb-2">{t('settings.about.desktopTitle')}</h3>
         <p className="text-gray-400 mb-4">{t('settings.about.versionLabel').replace('{version}', appVersion)}</p>
         <p className="text-sm text-gray-400 max-w-md mx-auto">

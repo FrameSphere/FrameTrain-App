@@ -458,8 +458,8 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
       >
         <defs>
           <linearGradient id="trainFillBig" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.01" />
+            <stop offset="0%" stopColor="var(--ft-out)" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="var(--ft-out)" stopOpacity="0.01" />
           </linearGradient>
         </defs>
         {yTicks.map((v, i) => {
@@ -478,14 +478,14 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
           </g>
         ))}
         <path d={trainArea} fill="url(#trainFillBig)" />
-        <path d={trainPath} fill="none" stroke="#10b981" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
-        {valArr.length > 1 && <path d={valPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="6,3" strokeLinejoin="round" strokeLinecap="round" />}
-        <circle cx={toX(logs.length - 1)} cy={toY(last.train_loss)} r="4.5" fill="#10b981" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />
-        {last.val_loss != null && <circle cx={toX(logs.length - 1)} cy={toY(last.val_loss)} r="4" fill="#a855f7" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />}
+        <path d={trainPath} fill="none" stroke="var(--ft-out)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        {valArr.length > 1 && <path d={valPath} fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="6,3" strokeLinejoin="round" strokeLinecap="round" />}
+        <circle cx={toX(logs.length - 1)} cy={toY(last.train_loss)} r="4.5" fill="var(--ft-out)" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />
+        {last.val_loss != null && <circle cx={toX(logs.length - 1)} cy={toY(last.val_loss)} r="4" fill="var(--ft-accent-text)" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />}
         {hoveredLog && (
           <>
-            <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.train_loss)} r="5.5" fill="none" stroke="#10b981" strokeWidth="2" opacity="0.6" />
-            {hoveredLog.val_loss != null && <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.val_loss)} r="5.5" fill="none" stroke="#a855f7" strokeWidth="2" opacity="0.6" />}
+            <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.train_loss)} r="5.5" fill="none" stroke="var(--ft-out)" strokeWidth="2" opacity="0.6" />
+            {hoveredLog.val_loss != null && <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.val_loss)} r="5.5" fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" opacity="0.6" />}
           </>
         )}
             <text x={PAD.l} y={H - 6} textAnchor="start" fill="rgba(255,255,255,0.2)" fontSize="9">{t('analysisPanel.charts.bigLoss.stepStart')}</text>

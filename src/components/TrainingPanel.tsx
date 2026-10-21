@@ -427,10 +427,10 @@ export function LossChart({ points }: { points: LossPoint[] }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 128 }}>
       {[0.25, 0.5, 0.75].map(f => <line key={f} x1={PAD.l} x2={W - PAD.r} y1={PAD.t + iH * f} y2={PAD.t + iH * f} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />)}
       {[0, 0.5, 1].map(f => <text key={f} x={PAD.l - 4} y={PAD.t + iH * f + 4} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="9">{(maxV - f * (maxV - minV)).toFixed(3)}</text>)}
-      <path d={trainPath} fill="none" stroke="#10b981" strokeWidth="2" strokeLinejoin="round" />
-      {vals.length > 0 && <path d={valPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="4,2" strokeLinejoin="round" />}
-      <circle cx={PAD.l + 4} cy={H - 10} r="4" fill="#10b981" /><text x={PAD.l + 12} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendTrain')}</text>
-      {vals.length > 0 && <><line x1={PAD.l + 70} y1={H - 10} x2={PAD.l + 84} y2={H - 10} stroke="#a855f7" strokeWidth="2" strokeDasharray="3,2" /><text x={PAD.l + 88} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendVal')}</text></>}
+      <path d={trainPath} fill="none" stroke="var(--ft-out)" strokeWidth="2" strokeLinejoin="round" />
+      {vals.length > 0 && <path d={valPath} fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="4,2" strokeLinejoin="round" />}
+      <circle cx={PAD.l + 4} cy={H - 10} r="4" fill="var(--ft-out)" /><text x={PAD.l + 12} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendTrain')}</text>
+      {vals.length > 0 && <><line x1={PAD.l + 70} y1={H - 10} x2={PAD.l + 84} y2={H - 10} stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="3,2" /><text x={PAD.l + 88} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendVal')}</text></>}
     </svg>
   );
 }
