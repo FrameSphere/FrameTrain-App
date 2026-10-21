@@ -296,39 +296,24 @@ export default function HomePanel({ userEmail, userId }: HomePanelProps) {
       ? `home.insights.${insight.kind}_one`
       : `home.insights.${insight.kind}`;
 
-  const statusVisual = (status: string) => {
+  // Status als Punkt + Wort: Farbe allein reicht nicht (Farbsehschwaeche)
+  const statusDot = (status: string) => {
     switch (status) {
-      case 'completed': return { Icon: CheckCircle, cls: 'text-emerald-400' };
-      case 'failed':    return { Icon: XCircle,     cls: 'text-red-400' };
-      case 'stopped':   return { Icon: MinusCircle, cls: 'text-amber-400' };
+      case 'completed': return 'var(--ft-ok)';
+      case 'failed':    return 'var(--ft-bad)';
+      case 'stopped':   return 'var(--ft-warn)';
       case 'running':
-      case 'pending':   return { Icon: Loader2,     cls: 'text-blue-400 animate-spin' };
-      default:          return { Icon: MinusCircle, cls: 'text-gray-500' };
+      case 'pending':   return 'var(--ft-out)';
+      default:          return 'var(--ft-faint)';
     }
   };
+  const statusLabel = (status: string) => t(`home.status.${status}`, status);
 
-  const StatTile = ({ icon: Icon, value, label, view, note }: {
-    icon: typeof Layers; value: number; label: string; view: AppView; note?: string;
-  }) => (
-    <button
-      onClick={() => navigateTo(view)}
-      className="rounded-2xl border border-white/10 bg-white/5 p-5 text-left hover:bg-white/[0.09] hover:border-white/20 transition-all group"
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className={`p-2 rounded-xl bg-gradient-to-r ${currentTheme.colors.gradient}`}>
-          <Icon className="w-4 h-4 text-white" />
-        </div>
-        <ArrowRight className="w-4 h-4 text-gray-600 group-hover:text-gray-300 group-hover:translate-x-0.5 transition-all" />
-      </div>
-      <div className="text-2xl font-bold text-white tabular-nums">{value}</div>
-      <div className="text-xs text-gray-400 mt-0.5">{label}</div>
-      {note && (
-        <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-1">
-          <HardDrive className="w-3 h-3" />{note}
-        </div>
-      )}
-    </button>
-  );
+  const plural = (key: string, n: number) =>
+    t(n === 1 ? `home.summary.${key}_one` : `home.summary.${key}`, { n: n.toLocaleString(locale) });
+
+  // Laufende Jobs: Modellname aus der Historie, falls dort schon eingetragen
+  const runningName = trainings.find(j => j.status === 'running')?.model_name;
 
   if (loading) {
     return (
@@ -338,385 +323,333 @@ export default function HomePanel({ userEmail, userId }: HomePanelProps) {
     );
   }
 
+  const stats: { value: number; label: string; view: AppView; note?: string }[] = [
+    { value: models.length,    label: t('home.stats.models'),    view: 'models' },
+    { value: versionCount,     label: t('home.stats.versions'),  view: 'versions', note: totalSize > 0 ? formatBytes(totalSize) : undefined },
+    { value: datasets.length,  label: t('home.stats.datasets'),  view: 'dataset' },
+    { value: trainings.length, label: t('home.stats.trainings'), view: 'training' },
+  ];
+
   return (
     <div className="space-y-6">
 
       {/* ── Begrüßung ──────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className={`p-3 rounded-2xl bg-gradient-to-r ${currentTheme.colors.gradient} flex-shrink-0`}>
-            <Home className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-white">
-              {greeting()}, {displayName}
-            </h2>
-            <p className="text-gray-400 text-sm mt-1">
-              {new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-              {lastSeen && <span className="text-gray-600"> · {t('home.lastVisit', { when: formatRelative(lastSeen) })}</span>}
-            </p>
-          </div>
+      <header className="flex items-end gap-3 flex-wrap">
+        <div className="flex-1 min-w-[260px]">
+          <h1 className="ft-h1">{greeting()}, {displayName}</h1>
+          <p className="text-[14px] text-gray-400 mt-1.5">
+            {isFirstRun
+              ? new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })
+              : <>
+                  {plural('models', models.length)}, {plural('datasets', datasets.length)}, {plural('runs', trainings.length)}.{' '}
+                  {active.length > 0 ? plural('running', active.length) : t('home.summary.idle')}
+                </>}
+            {lastSeen && <span className="text-gray-500"> · {t('home.lastVisit', { when: formatRelative(lastSeen) })}</span>}
+          </p>
         </div>
-        <button
-          onClick={() => void load()}
-          title={t('common.refresh')}
-          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/10 transition-all flex-shrink-0"
-        >
+        <button onClick={() => void load()} title={t('common.refresh')} aria-label={t('common.refresh')} className="ft-icon-btn">
           <RefreshCw className="w-4 h-4" />
         </button>
-      </div>
+        <button onClick={() => navigateTo('training')} className="ft-btn ft-btn-primary">
+          <Play className="w-3.5 h-3.5" />
+          {t('home.newTraining')}
+        </button>
+      </header>
 
-      {/* ── Läuft gerade ───────────────────────────────────────────────── */}
+      {/* ── Läuft gerade (Ergebnis-Farbe) ──────────────────────────────── */}
       {active.length > 0 && (
-        <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5">
+        <section className="ft-card p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Activity className="w-4 h-4 text-blue-300" />
-            <h3 className="text-sm font-semibold text-blue-200">{t('home.running.title')}</h3>
+            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--ft-out)' }} aria-hidden="true" />
+            <h3 className="ft-label" style={{ color: 'var(--ft-out-text)' }}>{t('home.running.title')}</h3>
+            {runningName && <span className="ft-h2 ml-1">{runningName}</span>}
           </div>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {active.map(job => (
-              <button
-                key={job.training_id}
-                onClick={() => navigateTo('training')}
-                className="w-full text-left group"
-              >
-                <div className="flex items-center justify-between text-sm mb-1.5">
-                  <span className="text-white font-medium">
-                    {t('home.running.step', { step: String(job.current_step), total: String(job.total_steps) })}
-                    <span className="text-gray-400 font-normal">
-                      {' · '}{t('home.running.epoch', { epoch: String(job.current_epoch), total: String(job.total_epochs) })}
-                      {' · '}{t('home.running.loss', { loss: job.train_loss.toFixed(4) })}
-                    </span>
+              <button key={job.training_id} onClick={() => navigateTo('training')} className="w-full text-left group">
+                <div className="flex items-baseline justify-between gap-4 mb-2">
+                  <span className="text-[14px] text-white font-medium">
+                    {t('home.running.step', { step: job.current_step.toLocaleString(locale), total: job.total_steps.toLocaleString(locale) })}
                   </span>
-                  <span className="text-gray-400 tabular-nums flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {formatDuration(job.elapsed_time_seconds)}
+                  <span className="font-mono text-[12px] text-gray-400 tabular-nums flex items-center gap-3">
+                    <span>{t('home.running.epoch', { epoch: String(job.current_epoch), total: String(job.total_epochs) })}</span>
+                    <span style={{ color: 'var(--ft-out-text)' }}>{t('home.running.loss', { loss: job.train_loss.toFixed(4) })}</span>
+                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDuration(job.elapsed_time_seconds)}</span>
                   </span>
                 </div>
-                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--ft-line-strong)' }}>
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-blue-400 to-cyan-400 transition-all"
-                    style={{ width: `${Math.min(100, Math.max(0, job.progress_percentage))}%` }}
+                    className="h-full rounded-full transition-[width] duration-500"
+                    style={{ width: `${Math.min(100, Math.max(0, job.progress_percentage))}%`, background: 'var(--ft-out)' }}
                   />
                 </div>
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* ── Seit deinem letzten Besuch ─────────────────────────────────── */}
-      {hasNews && sinceLastVisit && (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="w-4 h-4 text-gray-300" />
-            <h3 className="text-sm font-semibold text-white">{t('home.since.title')}</h3>
-          </div>
-          <div className="space-y-2">
-            {sinceLastVisit.completed.map(job => (
-              <button
-                key={job.id}
-                onClick={() => navigateTo('analysis')}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/15 transition-all text-left group"
-              >
-                <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span className="text-sm text-white truncate flex-1">
-                  {t('home.since.trainingDone', { model: job.model_name })}
-                  {typeof job.progress?.train_loss === 'number' && (
-                    <span className="text-gray-400"> · {t('home.since.finalLoss', { loss: job.progress.train_loss.toFixed(4) })}</span>
-                  )}
-                </span>
-                <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{formatDateTime(job.completed_at)}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-300 flex-shrink-0" />
-              </button>
-            ))}
-            {sinceLastVisit.failed.map(job => (
-              <button
-                key={job.id}
-                onClick={() => navigateTo('training')}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 transition-all text-left group"
-              >
-                <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                <span className="text-sm text-white truncate flex-1">
-                  {job.status === 'stopped'
-                    ? t('home.since.trainingStopped', { model: job.model_name })
-                    : t('home.since.trainingFailed', { model: job.model_name })}
-                  {job.error && <span className="text-gray-400"> · {job.error}</span>}
-                </span>
-                <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{formatDateTime(job.completed_at)}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-300 flex-shrink-0" />
-              </button>
-            ))}
-            {sinceLastVisit.tested.map(job => (
-              <button
-                key={job.id}
-                onClick={() => navigateTo('tests')}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/15 transition-all text-left group"
-              >
-                <FlaskConical className="w-4 h-4 text-cyan-400 flex-shrink-0" />
-                <span className="text-sm text-white truncate flex-1">
-                  {t('home.since.testDone', { model: job.model_name, version: job.version_name })}
-                  {typeof job.results?.accuracy === 'number' && (
-                    <span className="text-gray-400"> · {t('home.since.accuracy', { value: (job.results.accuracy * 100).toFixed(1) })}</span>
-                  )}
-                </span>
-                <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{formatDateTime(job.completed_at)}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-300 flex-shrink-0" />
-              </button>
-            ))}
-          </div>
-        </div>
+        </section>
       )}
 
       {/* ── Erststart ──────────────────────────────────────────────────── */}
       {isFirstRun && (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-          <h3 className="text-lg font-semibold text-white mb-2">{t('home.firstRun.title')}</h3>
+        <section className="ft-card p-6">
+          <h3 className="text-[17px] font-semibold text-white mb-2 tracking-[-0.01em]">{t('home.firstRun.title')}</h3>
           <p className="text-sm text-gray-400 max-w-2xl leading-relaxed">{t('home.firstRun.text')}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => navigateTo('models')}
-              className={`inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r ${currentTheme.colors.gradient} rounded-xl text-white text-sm font-medium hover:opacity-90 transition-all`}
-            >
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button onClick={() => navigateTo('models')} className="ft-btn ft-btn-primary">
               <Layers className="w-4 h-4" />
               {t('home.firstRun.cta')}
             </button>
-            {/* Trainings-Video führt neue Nutzer zum Aha-Moment. In der App
-                betten wir keinen Player ein, sondern öffnen den Link im
-                Standardbrowser (Tauri-Shell). */}
-            <button
-              onClick={() => { void openUrl(youtubeWatchUrl(VIDEOS.train)).catch(() => {}); }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/15 bg-white/5 text-gray-200 text-sm font-medium hover:bg-white/10 hover:border-white/25 transition-all"
-            >
+            {/* Trainings-Video im Standardbrowser (Tauri-Shell), kein eingebetteter Player */}
+            <button onClick={() => { void openUrl(youtubeWatchUrl(VIDEOS.train)).catch(() => {}); }} className="ft-btn ft-btn-ghost">
               <PlayCircle className="w-4 h-4" />
               {t('home.firstRun.videoCta')}
             </button>
           </div>
+        </section>
+      )}
+
+      {/* ── Kennzahlen: eine ruhige Zeile statt Kachelraster ───────────── */}
+      {!isFirstRun && (
+        <div className="ft-card grid grid-cols-2 lg:grid-cols-4 overflow-hidden">
+          {stats.map((st, i) => (
+            <button
+              key={st.view}
+              onClick={() => navigateTo(st.view)}
+              className={`text-left px-5 py-4 hover:bg-white/[0.04] transition-colors group ${i > 0 ? 'lg:border-l' : ''} ${i % 2 === 1 ? 'border-l lg:border-l' : ''} ${i > 1 ? 'border-t lg:border-t-0' : ''}`}
+              style={{ borderColor: 'var(--ft-line)' }}
+            >
+              <div className="ft-label flex items-center justify-between">
+                {st.label}
+                <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <div className="flex items-baseline gap-2 mt-1.5">
+                <span className="text-[26px] leading-none font-semibold tracking-[-0.04em] text-white tabular-nums">{st.value.toLocaleString(locale)}</span>
+                {st.note && <span className="font-mono text-[11.5px] text-gray-500 flex items-center gap-1"><HardDrive className="w-3 h-3" />{st.note}</span>}
+              </div>
+            </button>
+          ))}
         </div>
       )}
 
-      {/* ── Braucht Aufmerksamkeit ─────────────────────────────────────── */}
-      {insights.length > 0 && (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-4 h-4 text-amber-300" />
-            <h3 className="text-sm font-semibold text-white">{t('home.insights.title')}</h3>
-          </div>
-          <div className="space-y-2">
-            {insights.map(insight => {
-              const warn = insight.severity === 'warn';
-              const Icon = warn ? AlertTriangle : Info;
-              return (
-                <button
-                  key={insight.id}
-                  onClick={() => navigateTo(insight.target)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left group ${
-                    warn
-                      ? 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10 hover:border-amber-500/40'
-                      : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/15'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 flex-shrink-0 ${warn ? 'text-amber-400' : 'text-gray-400'}`} />
-                  {/* Nicht abschneiden: ein halber Warnsatz ist wertlos. */}
-                  <span className="text-sm text-white flex-1 min-w-0">
-                    {t(insightKey(insight), insight.params)}
-                  </span>
-                  <ArrowRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-gray-300 flex-shrink-0" />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* ── Zwei Spalten: Läufe links, Hinweise rechts ──────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-x-8 gap-y-6">
 
-      {/* ── Kennzahlen ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatTile icon={Layers}    value={models.length}    label={t('home.stats.models')}    view="models" />
-        <StatTile icon={GitBranch} value={versionCount}     label={t('home.stats.versions')}  view="versions"
-                   note={totalSize > 0 ? formatBytes(totalSize) : undefined} />
-        <StatTile icon={Upload}    value={datasets.length}  label={t('home.stats.datasets')}  view="dataset" />
-        <StatTile icon={Play}      value={trainings.length} label={t('home.stats.trainings')} view="training" />
-      </div>
-
-      {/* ── Letzte Trainings / Letzte Tests ────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Play className="w-4 h-4 text-gray-400" />
-              {t('home.recentTrainings.title')}
-            </h3>
-            <button
-              onClick={() => navigateTo('analysis')}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              {t('home.viewAll')}
-            </button>
-          </div>
-          {sortedTrainings.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6 text-center">{t('home.recentTrainings.empty')}</p>
-          ) : (
-            <div className="space-y-1.5">
-              {sortedTrainings.slice(0, 5).map(job => {
-                const { Icon, cls } = statusVisual(job.status);
-                const started = parseDate(job.started_at);
-                const ended = parseDate(job.completed_at);
-                const dur = started && ended ? (ended.getTime() - started.getTime()) / 1000 : null;
-                return (
-                  <button
-                    key={job.id}
-                    onClick={() => navigateTo(job.status === 'completed' ? 'analysis' : 'training')}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left group"
-                  >
-                    <Icon className={`w-4 h-4 flex-shrink-0 ${cls}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm text-white truncate">{job.model_name}</div>
-                      <div className="text-xs text-gray-500 truncate">
-                        {job.dataset_name}
-                        {dur !== null && <> · {formatDuration(dur)}</>}
-                      </div>
-                    </div>
-                    {typeof job.progress?.train_loss === 'number' && job.status === 'completed' && (
-                      <span className="text-xs text-gray-400 tabular-nums flex-shrink-0">
-                        {job.progress.train_loss.toFixed(4)}
+        <div className="space-y-6 min-w-0">
+          {/* Letzte Trainings */}
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="ft-h2">{t('home.recentTrainings.title')}</h3>
+              <button onClick={() => navigateTo('analysis')} className="ft-link">{t('home.viewAll')}</button>
+            </div>
+            {sortedTrainings.length === 0 ? (
+              <p className="text-sm text-gray-500 py-6 border-t" style={{ borderColor: 'var(--ft-line)' }}>{t('home.recentTrainings.empty')}</p>
+            ) : (
+              <div role="table" className="text-[13.5px]">
+                <div role="row" className="ft-home-row ft-home-head">
+                  <span role="columnheader">{t('home.cols.model')}</span>
+                  <span role="columnheader" className="text-right">{t('home.cols.loss')}</span>
+                  <span role="columnheader">Status</span>
+                  <span role="columnheader" className="text-right">{t('home.cols.when')}</span>
+                </div>
+                {sortedTrainings.slice(0, 6).map(job => {
+                  const started = parseDate(job.started_at);
+                  const ended = parseDate(job.completed_at);
+                  const dur = started && ended ? (ended.getTime() - started.getTime()) / 1000 : null;
+                  return (
+                    <button
+                      role="row"
+                      key={job.id}
+                      onClick={() => navigateTo(job.status === 'completed' ? 'analysis' : 'training')}
+                      className="ft-home-row ft-home-link"
+                      title={job.error ?? undefined}
+                    >
+                      <span role="cell" className="min-w-0">
+                        <span className="block truncate text-white">{job.model_name}</span>
+                        <span className="block truncate text-[12px] text-gray-500">
+                          {job.dataset_name}{dur !== null && <> · <span className="font-mono">{formatDuration(dur)}</span></>}
+                        </span>
                       </span>
-                    )}
-                    <span className="text-xs text-gray-500 tabular-nums flex-shrink-0 w-20 text-right">
+                      <span role="cell" className="font-mono text-[12.5px] text-right tabular-nums text-white">
+                        {typeof job.progress?.train_loss === 'number' && job.status === 'completed' ? job.progress.train_loss.toFixed(4) : '–'}
+                      </span>
+                      <span role="cell" className="flex items-center gap-2 text-gray-400 text-[12.5px]">
+                        <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: statusDot(job.status) }} aria-hidden="true" />
+                        {statusLabel(job.status)}
+                      </span>
+                      <span role="cell" className="font-mono text-[12px] text-right tabular-nums text-gray-500">
+                        {formatDateTime(job.completed_at ?? job.created_at)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Letzte Tests */}
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="ft-h2">{t('home.recentTests.title')}</h3>
+              <button onClick={() => navigateTo('tests')} className="ft-link">{t('home.viewAll')}</button>
+            </div>
+            {sortedTests.length === 0 ? (
+              <p className="text-sm text-gray-500 py-6 border-t" style={{ borderColor: 'var(--ft-line)' }}>{t('home.recentTests.empty')}</p>
+            ) : (
+              <div role="table" className="text-[13.5px]">
+                <div role="row" className="ft-home-row ft-home-head">
+                  <span role="columnheader">{t('home.cols.model')}</span>
+                  <span role="columnheader" className="text-right">{t('home.cols.accuracy')}</span>
+                  <span role="columnheader">Status</span>
+                  <span role="columnheader" className="text-right">{t('home.cols.when')}</span>
+                </div>
+                {sortedTests.slice(0, 5).map(job => (
+                  <button role="row" key={job.id} onClick={() => navigateTo('tests')} className="ft-home-row ft-home-link">
+                    <span role="cell" className="min-w-0">
+                      <span className="block truncate text-white">{job.model_name}</span>
+                      <span className="block truncate text-[12px] text-gray-500">{job.version_name} · {job.dataset_name}</span>
+                    </span>
+                    <span role="cell" className="font-mono text-[12.5px] text-right tabular-nums text-white">
+                      {typeof job.results?.accuracy === 'number' ? `${(job.results.accuracy * 100).toFixed(1)}%` : '–'}
+                    </span>
+                    <span role="cell" className="flex items-center gap-2 text-gray-400 text-[12.5px]">
+                      <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: statusDot(job.status) }} aria-hidden="true" />
+                      {statusLabel(job.status)}
+                    </span>
+                    <span role="cell" className="font-mono text-[12px] text-right tabular-nums text-gray-500">
                       {formatDateTime(job.completed_at ?? job.created_at)}
                     </span>
                   </button>
-                );
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <FlaskConical className="w-4 h-4 text-gray-400" />
-              {t('home.recentTests.title')}
-            </h3>
-            <button
-              onClick={() => navigateTo('tests')}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              {t('home.viewAll')}
-            </button>
-          </div>
-          {sortedTests.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6 text-center">{t('home.recentTests.empty')}</p>
-          ) : (
-            <div className="space-y-1.5">
-              {sortedTests.slice(0, 5).map(job => {
-                const { Icon, cls } = statusVisual(job.status);
-                return (
-                  <button
-                    key={job.id}
-                    onClick={() => navigateTo('tests')}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left group"
-                  >
-                    <Icon className={`w-4 h-4 flex-shrink-0 ${cls}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm text-white truncate">{job.model_name}</div>
-                      <div className="text-xs text-gray-500 truncate">{job.version_name} · {job.dataset_name}</div>
-                    </div>
-                    {typeof job.results?.accuracy === 'number' && (
-                      <span className="text-xs text-emerald-300 tabular-nums flex-shrink-0">
-                        {(job.results.accuracy * 100).toFixed(1)}%
-                      </span>
-                    )}
-                    <span className="text-xs text-gray-500 tabular-nums flex-shrink-0 w-20 text-right">
-                      {formatDateTime(job.completed_at ?? job.created_at)}
+        <div className="space-y-6 min-w-0 lg:border-l lg:pl-8" style={{ borderColor: 'var(--ft-line)' }}>
+          {/* Seit dem letzten Besuch */}
+          {hasNews && sinceLastVisit && (
+            <section>
+              <h3 className="ft-h2 mb-1">{t('home.since.title')}</h3>
+              <div>
+                {sinceLastVisit.completed.map(job => (
+                  <button key={job.id} onClick={() => navigateTo('analysis')} className="ft-dot-row">
+                    <span className="ft-dot" style={{ background: 'var(--ft-ok)' }} aria-hidden="true" />
+                    <span className="flex-1 min-w-0">
+                      {t('home.since.trainingDone', { model: job.model_name })}
+                      {typeof job.progress?.train_loss === 'number' && (
+                        <span className="block text-[12.5px] text-gray-400">{t('home.since.finalLoss', { loss: job.progress.train_loss.toFixed(4) })}</span>
+                      )}
                     </span>
+                    <span className="font-mono text-[11.5px] text-gray-500 tabular-nums">{formatDateTime(job.completed_at)}</span>
                   </button>
-                );
-              })}
-            </div>
+                ))}
+                {sinceLastVisit.failed.map(job => (
+                  <button key={job.id} onClick={() => navigateTo('training')} className="ft-dot-row">
+                    <span className="ft-dot" style={{ background: job.status === 'stopped' ? 'var(--ft-warn)' : 'var(--ft-bad)' }} aria-hidden="true" />
+                    <span className="flex-1 min-w-0">
+                      {job.status === 'stopped'
+                        ? t('home.since.trainingStopped', { model: job.model_name })
+                        : t('home.since.trainingFailed', { model: job.model_name })}
+                      {job.error && <span className="block text-[12.5px] text-gray-400 break-words">{job.error}</span>}
+                    </span>
+                    <span className="font-mono text-[11.5px] text-gray-500 tabular-nums">{formatDateTime(job.completed_at)}</span>
+                  </button>
+                ))}
+                {sinceLastVisit.tested.map(job => (
+                  <button key={job.id} onClick={() => navigateTo('tests')} className="ft-dot-row">
+                    <span className="ft-dot" style={{ background: 'var(--ft-accent-text)' }} aria-hidden="true" />
+                    <span className="flex-1 min-w-0">
+                      {t('home.since.testDone', { model: job.model_name, version: job.version_name })}
+                      {typeof job.results?.accuracy === 'number' && (
+                        <span className="block text-[12.5px] text-gray-400">{t('home.since.accuracy', { value: (job.results.accuracy * 100).toFixed(1) })}</span>
+                      )}
+                    </span>
+                    <span className="font-mono text-[11.5px] text-gray-500 tabular-nums">{formatDateTime(job.completed_at)}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
-        </div>
-      </div>
 
-      {/* ── Loss-Trend + Bestenliste ──────────────────────────────────── */}
-      {(trend.length > 1 || ranking.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Braucht Aufmerksamkeit */}
+          {insights.length > 0 && (
+            <section>
+              <h3 className="ft-h2 mb-1">{t('home.worth')}</h3>
+              <div>
+                {insights.map(insight => {
+                  const warn = insight.severity === 'warn';
+                  return (
+                    <button key={insight.id} onClick={() => navigateTo(insight.target)} className="ft-dot-row">
+                      <span className="ft-dot" style={{ background: warn ? 'var(--ft-warn)' : 'var(--ft-faint)' }} aria-hidden="true" />
+                      {/* Nicht abschneiden: ein halber Warnsatz ist wertlos. */}
+                      <span className="flex-1 min-w-0">
+                        {warn && <span className="sr-only">{t('home.insights.title')}: </span>}
+                        {t(insightKey(insight), insight.params)}
+                      </span>
+                      <ArrowRight className="w-3.5 h-3.5 text-gray-500 flex-none mt-1" />
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
+          {/* Loss-Trend: Ergebnis-Kurve in Orange */}
           {trend.length > 1 && (
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+            <section>
+              <div className="flex items-baseline justify-between gap-3">
+                <h3 className="ft-h2 flex items-center gap-2">
                   {trendPct !== null && trendPct >= 0
                     ? <TrendingDown className="w-4 h-4 text-emerald-400" />
                     : <TrendingUp className="w-4 h-4 text-amber-400" />}
                   {t('home.trend.title')}
                 </h3>
                 {trendPct !== null && (
-                  <span className={`text-sm font-medium tabular-nums ${trendPct >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  <span className={`font-mono text-[12.5px] tabular-nums ${trendPct >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {trendPct >= 0 ? '−' : '+'}{Math.abs(trendPct).toFixed(1)}%
                   </span>
                 )}
               </div>
-              <p className="text-xs text-gray-500 mb-4">{t('home.trend.subtitleModel', { count: String(trend.length), model: trend[trend.length - 1]?.label ?? '' })}</p>
-
+              <p className="text-[12.5px] text-gray-500 mt-0.5 mb-3">{t('home.trend.subtitleModel', { count: String(trend.length), model: trend[trend.length - 1]?.label ?? '' })}</p>
               {/* Sparkline: kleiner Loss liegt oben, aelteste Laeufe links. */}
-              <svg viewBox="0 0 300 60" preserveAspectRatio="none" className="w-full h-16" role="img"
-                   aria-label={t('home.trend.title')}>
+              <svg viewBox="0 0 300 60" preserveAspectRatio="none" className="w-full h-14" role="img" aria-label={t('home.trend.title')}>
                 <polyline
                   points={sparklinePoints(trend, 300, 60, 4)}
                   fill="none"
-                  stroke="url(#ft-trend)"
+                  stroke="var(--ft-out)"
                   strokeWidth="2"
                   strokeLinejoin="round"
                   strokeLinecap="round"
                   vectorEffect="non-scaling-stroke"
                 />
-                <defs>
-                  <linearGradient id="ft-trend" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#60a5fa" />
-                    <stop offset="100%" stopColor="#34d399" />
-                  </linearGradient>
-                </defs>
               </svg>
-
-              <div className="flex items-center justify-between text-xs mt-2 tabular-nums">
-                <span className="text-gray-400">{trend[0].loss.toFixed(4)}</span>
-                <span className="text-gray-500 truncate px-2">{trend[trend.length - 1].label}</span>
-                <span className="text-gray-200 font-medium">{trend[trend.length - 1].loss.toFixed(4)}</span>
+              <div className="flex items-center justify-between font-mono text-[11.5px] mt-1.5 tabular-nums">
+                <span className="text-gray-500">{trend[0].loss.toFixed(4)}</span>
+                <span style={{ color: 'var(--ft-out-text)' }}>{trend[trend.length - 1].loss.toFixed(4)}</span>
               </div>
-            </div>
+            </section>
           )}
 
+          {/* Bestenliste */}
           {ranking.length > 0 && (
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
-                <Trophy className="w-4 h-4 text-amber-300" />
-                {t('home.ranking.title')}
-              </h3>
-              <div className="space-y-1.5">
+            <section>
+              <h3 className="ft-h2 mb-1">{t('home.ranking.title')}</h3>
+              <div>
                 {ranking.map((row, i) => (
-                  <button
-                    key={row.id}
-                    onClick={() => navigateTo('tests')}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left"
-                  >
-                    <span className={`w-5 text-center text-xs font-bold tabular-nums flex-shrink-0 ${
-                      i === 0 ? 'text-amber-300' : 'text-gray-600'
-                    }`}>{i + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm text-white truncate">{row.model_name}</div>
-                      <div className="text-xs text-gray-500 truncate">{row.version_name} · {row.dataset_name}</div>
-                    </div>
-                    <span className="text-sm text-emerald-300 tabular-nums flex-shrink-0">
-                      {(row.accuracy * 100).toFixed(1)}%
+                  <button key={row.id} onClick={() => navigateTo('tests')} className="ft-dot-row items-center">
+                    <span className={`w-4 font-mono text-[12px] tabular-nums flex-none ${i === 0 ? 'text-white' : 'text-gray-500'}`}>{i + 1}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">{row.model_name}</span>
+                      <span className="block truncate text-[12px] text-gray-500">{row.version_name} · {row.dataset_name}</span>
                     </span>
+                    <span className="font-mono text-[12.5px] tabular-nums text-white">{(row.accuracy * 100).toFixed(1)}%</span>
                   </button>
                 ))}
               </div>
-            </div>
+            </section>
           )}
         </div>
-      )}
+      </div>
 
       {/* ── KI-Briefing ────────────────────────────────────────────────── */}
       {!isFirstRun && (

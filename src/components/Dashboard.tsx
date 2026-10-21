@@ -20,7 +20,6 @@ import StudioPanel from './studio/StudioPanel';
 import HostingPanel from './hosting/HostingPanel';
 import { listen } from '@tauri-apps/api/event';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useTheme } from '../contexts/ThemeContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 
 interface UserData {
@@ -40,7 +39,6 @@ type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('home');
   const [initialAnalysisVersionId, setInitialAnalysisVersionId] = useState<string | null>(null);
-  const { currentTheme } = useTheme();
 
   const {
     state: trainingState,
@@ -125,7 +123,9 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
   };
 
   return (
-    <div className={`flex h-screen bg-gradient-to-br ${currentTheme.colors.background}`}>
+    // Fensterwand (getoent mit dem Akzent), darauf Glas-Seitenleiste und eine
+    // deckende Arbeitsflaeche. macOS: oberer Streifen der Flaeche ist ziehbar.
+    <div className="flex h-screen gap-2 p-2" style={{ background: 'var(--ft-wall)' }}>
       <Sidebar 
         // Das Studio ist eine Unterseite der Datensaetze — in der Seitenleiste
         // bleibt deshalb "Datensaetze" markiert statt gar nichts.
@@ -135,8 +135,11 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         onLogout={onLogout}
       />
       
-      <main className={`flex-1 ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto p-8 pb-28'}`}>
-        <div className={currentView === 'synapse' ? 'h-full' : 'max-w-7xl mx-auto'}>
+      <main className={`ft-sheet relative flex-1 min-w-0 rounded-[18px] ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto'}`}>
+        {currentView !== 'synapse' && (
+          <div data-tauri-drag-region className="sticky top-0 z-[5] h-3 -mb-3" aria-hidden="true" />
+        )}
+        <div className={currentView === 'synapse' ? 'h-full' : 'max-w-7xl mx-auto px-8 pt-7 pb-28'}>
           {renderView()}
         </div>
       </main>

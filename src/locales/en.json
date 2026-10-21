@@ -12,11 +12,43 @@
       "versions": "Versions",
       "hosting": "Hosting"
     },
+    "groups": {
+      "prepare": "Prepare",
+      "train": "Train",
+      "check": "Check",
+      "use": "Use"
+    },
     "settings": "Settings",
     "logout": "Log Out",
     "home": "Home"
   },
   "home": {
+    "newTraining": "New training",
+    "summary": {
+      "models": "{n} models",
+      "models_one": "1 model",
+      "datasets": "{n} datasets",
+      "datasets_one": "1 dataset",
+      "runs": "{n} runs",
+      "runs_one": "1 run",
+      "running": "{n} trainings are running.",
+      "running_one": "One training is running.",
+      "idle": "Nothing is running right now."
+    },
+    "worth": "Worth a look",
+    "cols": {
+      "model": "Model",
+      "loss": "Final loss",
+      "accuracy": "Accuracy",
+      "when": "When"
+    },
+    "status": {
+      "completed": "Done",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "running": "Running",
+      "pending": "Waiting"
+    },
     "greeting": {
       "morning": "Good morning",
       "day": "Good afternoon",
@@ -4364,23 +4396,23 @@
     "pipelineUnsupported": "Pipeline not supported"
   },
   "themes": {
-    "purple-passion": "Classic purple and pink",
-    "ocean-breeze": "Calm blue and turquoise",
-    "forest-green": "Natural green",
-    "sunset-orange": "Warm orange and red",
-    "midnight-blue": "Deep dark blue",
-    "rose-gold": "Elegant rose gold",
-    "dark-minimal": "Minimal black",
-    "cyber-yellow": "Black with a neon yellow accent",
-    "arctic-white": "Icy white and blue tones",
-    "neon-pink": "Electric neon pink",
-    "blood-red": "Intense dark red",
-    "toxic-green": "Toxic neon green",
-    "golden-hour": "Warm gold and amber",
-    "monochrome": "Classic black and white",
-    "lavender-dream": "Soft lavender and violet",
-    "fire-ice": "Orange-red meets ice blue",
-    "light-gray": "Light neutral gray",
-    "pure-white": "Clean bright white"
+    "purple-passion": "FrameTrain default: indigo on Night",
+    "ocean-breeze": "Calm blue",
+    "forest-green": "Deep green",
+    "sunset-orange": "Warm, muted clay",
+    "midnight-blue": "Dark blue",
+    "rose-gold": "Muted rose",
+    "dark-minimal": "Neutral, no color",
+    "cyber-yellow": "Yellow accent",
+    "arctic-white": "Cool light blue",
+    "neon-pink": "Strong pink",
+    "blood-red": "Dark red",
+    "toxic-green": "Fresh lime",
+    "golden-hour": "Warm gold",
+    "monochrome": "Black and white",
+    "lavender-dream": "Soft violet",
+    "fire-ice": "Ice blue, orange stays for running work",
+    "light-gray": "Light with a neutral accent",
+    "pure-white": "Light with an indigo accent"
   }
 }
