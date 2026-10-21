@@ -20,6 +20,8 @@ export function UpdateChecker() {
   }, []);
 
   async function checkForUpdates() {
+    // Lokaler Vorschau-Build: kein Hinweis auf Produktions-Updates
+    if (import.meta.env.VITE_FT_PREVIEW === '1') return;
     try {
       const currentVersion = await getVersion();
       console.log('[UpdateChecker] Current version:', currentVersion);
