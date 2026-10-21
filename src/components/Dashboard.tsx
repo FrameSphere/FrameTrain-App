@@ -125,7 +125,10 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
   return (
     // Fensterwand (getoent mit dem Akzent), darauf Glas-Seitenleiste und eine
     // deckende Arbeitsflaeche. Ziehbarer Fensterrand: main.tsx.
-    <div className="flex h-screen gap-2 p-2" style={{ background: 'var(--ft-wall)' }}>
+    <div
+      className={`ft-shell flex h-screen gap-2 p-2 ${currentView === 'synapse' ? 'ft-scope ft-synapse' : ''}`}
+      style={{ background: 'var(--ft-wall)' }}
+    >
       <Sidebar 
         // Das Studio ist eine Unterseite der Datensaetze — in der Seitenleiste
         // bleibt deshalb "Datensaetze" markiert statt gar nichts.

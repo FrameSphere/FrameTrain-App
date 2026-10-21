@@ -1495,7 +1495,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   }}
                   className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 transition-all duration-200 ${
                     active
-                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} border-transparent shadow-lg scale-[1.01]`
+                      ? 'bg-purple-500/15 border-purple-500/70'
                       : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
                   }`}
                 >

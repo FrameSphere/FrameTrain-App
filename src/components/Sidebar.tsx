@@ -68,7 +68,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
   return (
     <aside className="ft-glass ft-sidebar flex-none w-[244px] rounded-[18px] flex flex-col min-h-0">
       {/* Kopf: Ampel-Platz (macOS) und Marke. Ziehbar wie eine Titelleiste. */}
-      <div data-tauri-drag-region className={`flex items-center gap-2.5 px-4 ${IS_MAC ? 'pt-[42px]' : 'pt-4'} pb-3`}>
+      <div data-tauri-drag-region className={`flex items-center gap-2.5 px-4 ${IS_MAC ? 'pt-[50px]' : 'pt-4'} pb-3`}>
         <BrandMark size={26} />
         <div data-tauri-drag-region className="min-w-0 leading-tight">
           <div data-tauri-drag-region className="text-[15px] font-semibold tracking-[-0.02em] text-white">FrameTrain</div>

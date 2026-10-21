@@ -352,7 +352,7 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
   
   return (
     <div className={`h-screen flex items-center justify-center bg-gradient-to-br ${currentTheme.colors.background} p-6`}>
-      <div className="w-full max-w-5xl h-[90vh] bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl flex flex-col overflow-hidden">
+      <div className="ft-sheet w-full max-w-5xl h-[90vh] rounded-[20px] flex flex-col overflow-hidden">
 
         {/* Screen 0: Sprachauswahl */}
         {!languageSelected && (
@@ -473,11 +473,11 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <ShieldCheck className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.preflight.title')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.preflight.title')}</h1>
             <p className="text-gray-300">{t('firstLaunch.preflight.subtitle')}</p>
           </div>
         </div>
@@ -626,11 +626,11 @@ const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Globe className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Globe className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{ui.headline}</h1>
+            <h1 className="ft-h1">{ui.headline}</h1>
             <p className="text-gray-300 mt-1">{ui.sub}</p>
           </div>
         </div>
@@ -648,7 +648,7 @@ const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
                   onClick={() => setSelected(lang)}
                   className={`w-full flex items-center gap-5 px-6 py-5 rounded-2xl border-2 transition-all duration-200 ${
                     active
-                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} border-transparent shadow-lg scale-[1.02]`
+                      ? 'bg-purple-500/15 border-purple-500/70'
                       : 'bg-white/5 border-white/15 hover:bg-white/10 hover:border-white/30'
                   }`}
                 >
@@ -710,11 +710,11 @@ const ThemeSelectScreen: React.FC<ThemeSelectScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Palette className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Palette className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.theme.headline')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.theme.headline')}</h1>
             <p className="text-gray-300 mt-1">{t('firstLaunch.theme.sub')}</p>
           </div>
         </div>
@@ -758,11 +758,11 @@ const AISetupScreen: React.FC<AISetupScreenProps> = ({ currentTheme, onContinue,
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Brain className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Brain className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.aiSetup.headline')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.aiSetup.headline')}</h1>
             <p className="text-gray-300 mt-1">{t('firstLaunch.aiSetup.sub')}</p>
           </div>
         </div>
@@ -807,11 +807,11 @@ const QuickAccessScreen: React.FC<{ currentTheme: Theme; onContinue: () => void 
     <>
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Zap className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Zap className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.quick.headline')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.quick.headline')}</h1>
             <p className="text-gray-300 mt-1">{t('firstLaunch.quick.sub')}</p>
           </div>
         </div>
@@ -896,11 +896,11 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Package className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Package className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.python.setupTitle')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.python.setupTitle')}</h1>
             <p className="text-gray-300">{t('firstLaunch.python.setupSubtitle')}</p>
           </div>
         </div>
@@ -1045,11 +1045,11 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4 mb-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Package className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Package className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.plugins.title')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.plugins.title')}</h1>
             <p className="text-gray-300">{t('firstLaunch.plugins.subtitle')}</p>
           </div>
         </div>

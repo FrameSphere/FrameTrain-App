@@ -30,9 +30,18 @@ body {
 /* Ziffern sind ueberall gleich breit, Werte in Mono wirken ruhiger */
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
+/* Fokus-Ring fuer Tastatur-Navigation auf Knoepfen und Links. Textfelder
+   zeigen den Fokus ueber Cursor und eigenen Rahmen; ein harter Rechteck-
+   Ring wirkte dort (Schnell-Chat) wie ein Fremdkoerper. */
 :focus-visible {
   outline: 2px solid var(--ft-accent-text);
   outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[contenteditable]:focus-visible {
+  outline: none;
 }
 
 ::selection { background: var(--ft-accent-line); }
@@ -421,3 +430,15 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 }
 .ft-chip:hover { background: var(--ft-hover); }
 .ft-chip svg { color: var(--ft-muted); }
+
+/* Weicher Wechsel der Huelle (z. B. in den Synapse Builder und zurueck) */
+.ft-shell,
+.ft-shell .ft-glass,
+.ft-shell .ft-sheet {
+  transition: background-color 450ms ease, border-color 450ms ease, box-shadow 450ms ease;
+}
+.ft-shell .ft-sidebar { transition: background-color 450ms ease, border-color 450ms ease, color 450ms ease; }
+.ft-shell .ft-nav { transition: background-color 120ms ease, color 450ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .ft-shell, .ft-shell .ft-glass, .ft-shell .ft-sheet, .ft-shell .ft-sidebar { transition: none; }
+}

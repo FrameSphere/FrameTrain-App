@@ -127,3 +127,39 @@
   --ft-a-900: color-mix(in oklab, var(--ft-accent) 12%, var(--ft-panel));
   --ft-a-950: color-mix(in oklab, var(--ft-accent) 7%, var(--ft-panel));
 }
+
+/* ── Synapse Builder ────────────────────────────────────────────────────────
+   Der Builder hat sein eigenes dunkles Navy-Design. Solange er offen ist,
+   uebernimmt die ganze Huelle (Wand, Seitenleiste, Flaeche) diese Farben,
+   auch im Day-Theme; Dashboard.tsx setzt dafuer .ft-synapse. */
+.ft-synapse {
+  --ft-wall-base: #05070c;
+  --ft-wall-mix: 100%;
+  --ft-panel: #0a0e17;
+  --ft-panel-2: #0d1117;
+  --ft-ink: #e6e9f0;
+  --ft-muted: #94a0b8;
+  --ft-faint: #7a869e;
+  --ft-line: #1e293b;
+  --ft-line-strong: #334155;
+  --ft-hover: rgba(148, 163, 184, 0.08);
+  --ft-sel: rgba(129, 140, 248, 0.14);
+  --ft-glass: rgba(13, 17, 27, 0.86);
+  --ft-glass-edge: #1e293b;
+  --ft-glass-hi: rgba(255, 255, 255, 0.05);
+  --ft-accent-text: #a5b4fc;
+  --ft-shadow: rgba(0, 0, 0, 0.6);
+
+  --ft-n-50: #f7f7f9;
+  --ft-n-100: #eef0f5;
+  --ft-n-200: #dfe3eb;
+  --ft-n-300: #c3cad8;
+  --ft-n-400: #94a0b8;
+  --ft-n-500: #7f8aa2;
+  --ft-n-600: #75809a;
+  --ft-n-700: #334155;
+  --ft-n-800: #1e293b;
+  --ft-n-900: #0d1117;
+  --ft-n-950: #080c12;
+  color-scheme: dark;
+}
