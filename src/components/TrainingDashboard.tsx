@@ -705,7 +705,7 @@ export default function TrainingDashboard({
         </div>
         {progress && (
           <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
+            <div className={`h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all`} style={{ width: `${percent}%` }} />
           </div>
         )}
         <Maximize2 className="w-3.5 h-3.5 text-gray-500 group-hover:text-white transition-all flex-shrink-0" />
@@ -780,7 +780,7 @@ export default function TrainingDashboard({
                 <span className="font-mono">{Math.round(percent)}%</span>
               </div>
               <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
-                <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
+                <div className={`h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all`} style={{ width: `${percent}%` }} />
               </div>
               {/* Nach 100% der Trainingsschritte laeuft noch die Abschluss-
                   Evaluierung/Speicherung. Ohne diesen Hinweis sah ein stummer
@@ -825,7 +825,7 @@ export default function TrainingDashboard({
               {completedVersionId && onNavigateToAnalysis && (
                 <button
                   onClick={() => onNavigateToAnalysis(completedVersionId)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:opacity-90 text-white font-semibold text-sm transition-all shadow-lg"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:opacity-90 text-white font-semibold text-sm transition-all shadow-lg"
                 >
                   <BarChart3 className="w-4 h-4" /> {t('trainingDashboard.completed.analyzeButton')}
                 </button>

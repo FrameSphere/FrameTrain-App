@@ -1910,15 +1910,15 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                 // Welcome-Modus: nur Neue Datei + Datei laden
                 <>
                   <button onClick={handleNewFile}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/25 text-emerald-400 text-xs font-medium transition-all">
+                    className="flex items-center gap-1.5 px-3 py-1.5 ft-chip text-xs font-medium">
                     <FileCode className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.newFileButton')}
                   </button>
                   <button onClick={() => setShowLib(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 text-xs font-medium transition-all">
+                    className="flex items-center gap-1.5 px-3 py-1.5 ft-chip text-xs font-medium">
                     <FolderClosed className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.loadFileButton')}
                   </button>
                   <button onClick={() => setShowOpenLib(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/25 text-violet-400 text-xs font-medium transition-all">
+                    className="flex items-center gap-1.5 px-3 py-1.5 ft-chip text-xs font-medium">
                     <Globe className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.openLibraryButton')}
                   </button>
                 </>
@@ -1932,11 +1932,11 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
                     </button>
                   )}
                   <button onClick={() => setShowLib(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium transition-all">
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 ft-chip text-xs font-medium">
                     <FolderClosed className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.libraryButton')}
                   </button>
                   <button onClick={() => setShowOpenLib(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 text-violet-400 text-xs font-medium transition-all">
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 ft-chip text-xs font-medium">
                     <Globe className="w-3.5 h-3.5" /> {t('devTrainPanel.editor.openLibraryButton')}
                   </button>
                   <button
@@ -2244,7 +2244,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
 
             {progress && (
               <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`}
+                <div className={`h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all`}
                   style={{ width: `${devProgressPercent(progress)}%` }} />
               </div>
             )}

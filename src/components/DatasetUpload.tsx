@@ -416,7 +416,7 @@ function DeleteDialog({ name, onConfirm, onCancel }: { name: string; onConfirm: 
   return (
     <ModalPortal><div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-        <div className="h-1 bg-gradient-to-r from-red-500 to-orange-500" />
+        <div className="h-1 bg-gradient-to-r from-red-500 to-red-500" />
         <div className="p-6 space-y-5">
           <div className="flex items-start gap-4">
             <div className="w-10 h-10 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center flex-shrink-0">
@@ -935,7 +935,7 @@ export default function DatasetUpload() {
 
   if (models.length === 0) return (
     <div className="space-y-6">
-      <div><h1 className="text-2xl font-bold text-white">{t('datasetUpload.title')}</h1><p className="text-gray-400 mt-1">{t('datasetUpload.subtitleAlt')}</p></div>
+      <div><h1 className="ft-h1">{t('datasetUpload.title')}</h1><p className="text-gray-400 mt-1">{t('datasetUpload.subtitleAlt')}</p></div>
       <div className="rounded-2xl border border-white/10 bg-white/5 p-16 text-center space-y-4">
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/5 border border-white/10">
           <Layers className="w-8 h-8 text-gray-500" />
@@ -953,7 +953,7 @@ export default function DatasetUpload() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('datasetUpload.title')}</h1>
+          <h1 className="ft-h1">{t('datasetUpload.title')}</h1>
           <p className="text-gray-400 mt-1">{t('datasetUpload.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -1212,7 +1212,7 @@ export default function DatasetUpload() {
               )}
               <p className="text-gray-500 text-xs">{t('datasetUpload.halveModal.originalNote')}</p>
               <button onClick={handleHalve} disabled={halving}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50">
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50">
                 {halving ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('datasetUpload.halveModal.halvingButton')}</> : <>{t('datasetUpload.halveModal.halveButton')}</>}
               </button>
             </div>

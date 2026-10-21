@@ -123,53 +123,39 @@ function darkenHex(hex: string, amount: number): string {
 }
 
 const COACH_MAGIC_CSS = `
-  @keyframes ftCoachButtonFloat { 0%,100% { transform:translateY(0) scale(1); } 50% { transform:translateY(-3px) scale(1.02); } }
-  @keyframes ftCoachPanelIn { from { opacity:0; transform:translate3d(10px,14px,0) scale(.975); filter:blur(8px); } to { opacity:1; transform:none; filter:blur(0); } }
-  @keyframes ftCoachAuraSweep { 0%,100% { opacity:.28; transform:translateX(-32%); } 50% { opacity:.82; transform:translateX(32%); } }
-  @keyframes ftCoachMessageIn { from { opacity:0; transform:translateY(8px) scale(.985); } to { opacity:1; transform:none; } }
-  @keyframes ftCoachThinkingSweep { from { transform:translateX(-80%); opacity:.18; } 50% { opacity:.72; } to { transform:translateX(180%); opacity:.18; } }
-  @keyframes ftCoachSoftPulse { 0%,100% { box-shadow:0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 26px rgba(255,255,255,.12); } }
-  .ft-coach-button { animation:ftCoachButtonFloat 4.5s ease-in-out infinite; }
-  .ft-coach-shell {
-    animation:ftCoachPanelIn .26s cubic-bezier(.2,.85,.22,1);
-    backdrop-filter:blur(22px) saturate(1.28);
-    -webkit-backdrop-filter:blur(22px) saturate(1.28);
-  }
-  .ft-coach-shell::before {
-    content:"";
-    position:absolute;
-    inset:0;
-    pointer-events:none;
-    border-radius:16px;
-    background:
-      radial-gradient(circle at 18% 4%, rgba(255,255,255,.10), transparent 28%),
-      radial-gradient(circle at 88% 10%, rgba(255,255,255,.08), transparent 30%);
-    opacity:.75;
-  }
-  .ft-coach-shell::after {
-    content:"";
-    position:absolute;
-    top:0;
-    left:14px;
-    right:14px;
-    height:1px;
-    pointer-events:none;
-    background:linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
-    animation:ftCoachAuraSweep 5.2s ease-in-out infinite;
-  }
-  .ft-coach-message { animation:ftCoachMessageIn .22s ease both; }
+  @keyframes ftCoachPanelIn { from { opacity:0; transform:translate3d(0,8px,0) scale(.985); } to { opacity:1; transform:none; } }
+  @keyframes ftCoachMessageIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+  @keyframes ftCoachThinkingSweep { from { transform:translateX(-80%); opacity:.18; } 50% { opacity:.6; } to { transform:translateX(180%); opacity:.18; } }
+  .ft-coach-shell { animation:ftCoachPanelIn .18s cubic-bezier(.23,1,.32,1); }
+  .ft-coach-message { animation:ftCoachMessageIn .16s ease both; }
   .ft-coach-scroll::-webkit-scrollbar { width:6px; }
   .ft-coach-scroll::-webkit-scrollbar-track { background:transparent; }
-  .ft-coach-scroll::-webkit-scrollbar-thumb { background:rgba(148,163,184,.32); border-radius:999px; }
+  .ft-coach-scroll::-webkit-scrollbar-thumb { background:var(--ft-line-strong); border-radius:999px; }
   .ft-coach-thinking-card { position:relative; overflow:hidden; }
   .ft-coach-thinking-card::before {
     content:"";
     position:absolute;
     inset:0;
-    background:linear-gradient(90deg, transparent, rgba(255,255,255,.10), transparent);
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
     animation:ftCoachThinkingSweep 1.7s ease-in-out infinite;
   }
+  @media (prefers-reduced-motion: reduce) {
+    .ft-coach-shell, .ft-coach-message, .ft-coach-thinking-card::before { animation:none; }
+  }
 `;
+
+/** Coach-Symbol: drei Eingaben, ein Ergebnis (wie das Logo, ohne Kachel). */
+function CoachGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style={{ flex: 'none' }}>
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity=".55">
+        <path d="M6 7l10 5M6 12h10M6 17l10-5" />
+      </g>
+      <g fill="currentColor"><circle cx="6" cy="7" r="2" /><circle cx="6" cy="12" r="2" /><circle cx="6" cy="17" r="2" /></g>
+      <circle cx="16.5" cy="12" r="4" fill="var(--ft-out)" />
+    </svg>
+  );
+}
 
 // ============ Thinking Block ============
 
@@ -1186,15 +1172,11 @@ Reply with ONLY the title, nothing else.`;
         <style>{COACH_MAGIC_CSS}</style>
         <button
           onClick={openModal}
-          className="ft-coach-button fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl hover:shadow-white/20 hover:scale-110 transition-all flex items-center justify-center z-40"
-          style={{
-            background: themeGradient,
-            boxShadow: `0 18px 48px ${safePrimary}33, 0 0 0 1px rgba(255,255,255,.14), inset 0 1px 0 rgba(255,255,255,.28)`,
-          }}
+          className="ft-glass ft-press fixed bottom-5 right-5 h-11 pl-3.5 pr-4 rounded-full flex items-center gap-2.5 z-40 text-[13.5px] font-semibold text-white"
           title={t('aiCoach.openTitle')}
         >
-          <Sparkles className="absolute w-3 h-3 text-white/70 -top-0.5 right-1.5" />
-          <Brain className="w-6 h-6 text-white" />
+          <CoachGlyph />
+          Coach
         </button>
       </>
     );
@@ -1504,7 +1486,7 @@ Reply with ONLY the title, nothing else.`;
     return (
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
         <style>{COACH_MAGIC_CSS}</style>
-        <div className="ft-coach-shell relative bg-slate-900/90 rounded-2xl border border-white/10 w-full max-w-2xl h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+        <div className="ft-coach-shell ft-glass relative rounded-[18px] w-full max-w-2xl h-[85vh] overflow-hidden flex flex-col">
           {content}
         </div>
       </div>
@@ -1514,13 +1496,12 @@ Reply with ONLY the title, nothing else.`;
   // ── Floating window ──
   return (
     <div
-      className="ft-coach-shell fixed bg-slate-900/90 rounded-2xl border border-white/[0.10] shadow-2xl overflow-hidden flex flex-col z-50"
+      className="ft-coach-shell ft-glass fixed rounded-[18px] overflow-hidden flex flex-col z-50"
       style={{
         width: `${size.width}px`,
         height: `${size.height}px`,
         left: `${position.x}px`,
         top: `${position.y}px`,
-        boxShadow: `0 25px 70px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,255,255,0.06), 0 0 48px ${safePrimary}14`,
       }}
     >
       <style>{COACH_MAGIC_CSS}</style>
@@ -1529,7 +1510,7 @@ Reply with ONLY the title, nothing else.`;
         className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize"
         onMouseDown={handleResizeMouseDown}
         style={{
-          background: `linear-gradient(135deg, transparent 50%, ${currentTheme.colors.primary}4d 100%)`,
+          background: 'linear-gradient(135deg, transparent 50%, var(--ft-line-strong) 100%)',
           borderRadius: '0 0 16px 0',
         }}
       />

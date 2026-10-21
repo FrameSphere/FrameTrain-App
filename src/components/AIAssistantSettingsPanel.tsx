@@ -100,7 +100,7 @@ export default function AIAssistantSettingsPanel() {
           <button
             onClick={() => updateAISettings({ enabled: !aiSettings.enabled })}
             className={`w-11 h-6 rounded-full transition-all ${
-              aiSettings.enabled ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-white/10'
+              aiSettings.enabled ? 'bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)]' : 'bg-white/10'
             }`}
           >
             <div

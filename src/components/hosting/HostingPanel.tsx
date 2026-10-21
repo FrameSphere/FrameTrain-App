@@ -170,7 +170,7 @@ export default function HostingPanel() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3"><Server className="w-8 h-8" />{t('hosting.page.title')}</h1>
+          <h1 className="ft-h1">{t('hosting.page.title')}</h1>
           <p className="text-gray-400 mt-1">{t('hosting.page.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

@@ -704,7 +704,7 @@ function EpochImprovementChart({ summaries }: { summaries: EpochSummary[] }) {
               <span className="text-xs text-gray-500 w-8 shrink-0">E{x.epoch}</span>
               <div className="flex-1 bg-white/5 rounded-full h-2.5 overflow-hidden">
                 <div
-                  className={`h-2.5 rounded-full transition-all ${isGood ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' : 'bg-gradient-to-r from-red-500 to-red-400'}`}
+                  className={`h-2.5 rounded-full transition-all ${isGood ? 'bg-gradient-to-r from-emerald-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-red-500'}`}
                   style={{ width: `${barPct}%` }}
                 />
               </div>
@@ -882,7 +882,7 @@ function EpochDurationBar({ summaries }: { summaries: EpochSummary[] }) {
           <div key={s.epoch} className="flex items-center gap-3">
             <span className="text-xs text-gray-500 w-8 shrink-0">E{s.epoch}</span>
             <div className="flex-1 bg-white/5 rounded-full h-2">
-              <div className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all" style={{ width: `${(s.duration_seconds / maxDur) * 100}%` }} />
+              <div className="h-2 rounded-full bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] transition-all" style={{ width: `${(s.duration_seconds / maxDur) * 100}%` }} />
             </div>
             <span className="text-xs text-gray-400 w-14 text-right">{formatDuration(s.duration_seconds)}</span>
           </div>
@@ -1779,7 +1779,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   if (loading) return <div className="flex items-center justify-center py-24"><Loader2 className="w-8 h-8 text-gray-400 animate-spin" /></div>;
   if (!modelsWithVersions.length) return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-white">{t('analysisPanel.title')}</h1>
+      <h1 className="ft-h1">{t('analysisPanel.title')}</h1>
       <div className="bg-white/5 rounded-2xl border border-white/10 p-14 text-center">
         <Layers className="w-12 h-12 text-gray-400 mx-auto mb-4 opacity-40" />
         <h3 className="text-xl font-semibold text-white mb-2">{t('analysisPanel.emptyState.noModel.title')}</h3>
@@ -1796,7 +1796,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">{t('analysisPanel.title')}</h1>
+          <h1 className="ft-h1">{t('analysisPanel.title')}</h1>
           <p className="text-gray-400 mt-1 text-sm">{t('analysisPanel.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -2263,7 +2263,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 </div>
 
                 {aiRecommendedParams ? (
-                  <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-xl">
+                  <div className="p-4 bg-gradient-to-r from-white/[0.03] to-white/[0.03] border border-purple-500/30 rounded-xl">
                     <div className="flex items-start gap-3 mb-3">
                       <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
                       <div>

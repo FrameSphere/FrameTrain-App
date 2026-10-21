@@ -251,7 +251,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
       {/* ── Header mit Mode-Toggle ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('testPanel.title')}</h1>
+          <h1 className="ft-h1">{t('testPanel.title')}</h1>
           <p className="text-gray-400 mt-1">
             {mode === 'test'
               ? t('testPanel.subtitleEngine')
