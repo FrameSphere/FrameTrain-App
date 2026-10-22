@@ -244,9 +244,9 @@ jobs:
           echo "Assets: $ASSETS_JSON"
 
           export WIN_URL MAC_ARM_URL LINUX_URL
-          WIN_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.exe$"; "i"))] | first | .browserDownloadUrl // ""')
-          MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.app\\.tar\\.gz$"; "i"))] | first | .browserDownloadUrl // ""')
-          LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.AppImage$"; "i"))] | first | .browserDownloadUrl // ""')
+          WIN_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.exe$"; "i"))] | first | .url // ""')
+          MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.app\\.tar\\.gz$"; "i"))] | first | .url // ""')
+          LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.AppImage$"; "i"))] | first | .url // ""')
 
           [ "$WIN_URL" = "null" ]     && WIN_URL=""
           [ "$MAC_ARM_URL" = "null" ] && MAC_ARM_URL=""
