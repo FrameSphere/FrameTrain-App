@@ -442,3 +442,48 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 @media (prefers-reduced-motion: reduce) {
   .ft-shell, .ft-shell .ft-glass, .ft-shell .ft-sheet, .ft-shell .ft-sidebar { transition: none; }
 }
+
+/* ── Ladebildschirm ─────────────────────────────────────────────────────────
+   Aufbau (0–0,7 s): Kachel federt rein, Eingaben ploppen auf, Verbindungen
+   zeichnen sich, das Ergebnis erscheint. Danach Takt 2,4 s: Signale laufen
+   zum Ergebnis (SMIL in LoadingScreen.tsx), bei Ankunft schlaegt der Knoten
+   einmal und ein Ring laeuft nach aussen; die Loss-Kurve zeichnet sich. */
+.ft-load-mark { overflow: visible; filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.32)); }
+.ft-load-mark * { transform-box: fill-box; transform-origin: center; }
+.ft-load-tile { animation: ft-load-tile 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.ft-load-in { animation: ft-load-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both; animation-delay: 0s; }
+.ft-load-edge { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ft-load-draw 320ms ease-out both; }
+.ft-load-out { animation: ft-load-pop 300ms 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both, ft-load-beat 2.4s 750ms ease-out infinite; }
+.ft-load-ring { opacity: 0; animation: ft-load-ring 2.4s 750ms ease-out infinite; }
+.ft-load-loss { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ft-load-loss 2.4s 750ms ease-in-out infinite; }
+.ft-load-curve { overflow: visible; }
+.ft-load-word { animation: ft-load-rise 420ms 300ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+
+@keyframes ft-load-tile { from { opacity: 0; transform: scale(0.82); } to { opacity: 1; transform: scale(1); } }
+@keyframes ft-load-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+@keyframes ft-load-draw { to { stroke-dashoffset: 0; } }
+@keyframes ft-load-beat {
+  0%, 26% { transform: scale(1); }
+  32% { transform: scale(1.13); }
+  44% { transform: scale(0.97); }
+  52%, 100% { transform: scale(1); }
+}
+@keyframes ft-load-ring {
+  0%, 29% { opacity: 0; transform: scale(1); }
+  32% { opacity: 0.6; transform: scale(1.05); }
+  78% { opacity: 0; transform: scale(2.3); }
+  100% { opacity: 0; transform: scale(2.3); }
+}
+@keyframes ft-load-loss {
+  0% { stroke-dashoffset: 1; opacity: 1; }
+  62% { stroke-dashoffset: 0; opacity: 1; }
+  88% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes ft-load-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ft-load-tile, .ft-load-in, .ft-load-out, .ft-load-word { animation: none; }
+  .ft-load-edge, .ft-load-loss { animation: none; stroke-dashoffset: 0; }
+  .ft-load-ring { animation: none; opacity: 0; }
+}
