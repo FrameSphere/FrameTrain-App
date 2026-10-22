@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { detectPluginForModel, type ModelDetectionInfo } from '../../plugins/registry';
+import { yoloTaskFromName } from '../../plugins/yolo/detect';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { StudioProject } from './studioTypes';
 
@@ -35,7 +36,14 @@ export function passendeAufgaben(project: Pick<StudioProject, 'modality' | 'task
 
 export function passtZumProjekt(model: StudioModel, project: Pick<StudioProject, 'modality' | 'task'>): boolean {
   const r = detectPluginForModel(model);
-  return r.supported && passendeAufgaben(project).includes(r.plugin.taskType);
+  if (!r.supported || !passendeAufgaben(project).includes(r.plugin.taskType)) return false;
+  // Box-Projekte: YOLO-Varianten fuer gedrehte Boxen, Masken oder Posen
+  // zeichnen keine normalen Boxen (yolo-obb stand sonst vorausgewaehlt).
+  if (r.plugin.taskType === 'detect') {
+    const yoloTask = yoloTaskFromName(model.name ?? '') ?? yoloTaskFromName(model.source_path ?? '');
+    if (yoloTask && yoloTask !== 'detect') return false;
+  }
+  return true;
 }
 
 /** Passende zuerst, Reihenfolge innerhalb der Gruppen bleibt erhalten. */

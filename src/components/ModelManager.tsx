@@ -1002,7 +1002,9 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
       {/* ── Import Modal ── */}
       {showImportModal && (
         <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+          {/* Hugging Face: feste Hoehe — die Trefferliste nimmt den Rest, Details
+              und Download-Knopf bleiben sichtbar, das Fenster waechst nicht mehr. */}
+          <div className={`bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl overflow-hidden flex flex-col ${importMode === 'huggingface' ? 'h-[min(56rem,94vh)]' : 'max-h-[90vh]'}`}>
 
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 flex-shrink-0">
@@ -1032,7 +1034,7 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto flex-1">
+            <div className={`p-6 overflow-y-auto flex-1 min-h-0 ${importMode === 'huggingface' ? 'flex flex-col' : ''}`}>
               {importMode === 'local' ? (
                 <LocalImportPanel
                   isDragging={isDragging}
@@ -1139,7 +1141,7 @@ function ModelCard({ model, onDelete, onChangePlugin, gradientClass }: ModelCard
         <div className="flex items-center justify-between text-gray-400">
           <span className="flex items-center gap-1.5">
             <FileBox className="w-3.5 h-3.5" />
-            {t('modelManager.card.filesLabel').replace('{count}', String(model.file_count))}
+            {t('modelManager.card.filesLabel', { count: String(model.file_count) })}
           </span>
           <span>{formatBytes(model.size_bytes)}</span>
         </div>
@@ -1338,9 +1340,9 @@ function HuggingFaceImportPanel({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5 flex-1 min-h-0">
       {/* Search */}
-      <div className="space-y-1.5">
+      <div className="space-y-1.5 flex-none">
         <label className="block text-sm font-medium text-gray-300">{t('common.search')}</label>
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1361,11 +1363,10 @@ function HuggingFaceImportPanel({
 
       {/* Results */}
       {results.length > 0 && !downloading && (
-        <div className="space-y-2">
-          <p className="text-gray-500 text-xs">{t('modelManager.importModal.hf.resultsCount').replace('{count}', results.length.toString())}</p>
-          {/* Ohne Auswahl darf die Liste den Platz nutzen; mit Auswahl bleibt
-              sie kurz, damit Details und Download-Knopf im Fenster bleiben. */}
-          <div className={`space-y-1.5 overflow-y-auto pr-1 ${selected ? 'max-h-44' : 'max-h-[min(24rem,45vh)]'}`}>
+        <div className="flex flex-col gap-2 flex-1 min-h-[10rem]">
+          <p className="text-gray-500 text-xs flex-none">{t('modelManager.importModal.hf.resultsCount', { count: results.length.toString() })}</p>
+          {/* Die Liste fuellt den Platz, den die Details uebrig lassen. */}
+          <div className="space-y-1.5 overflow-y-auto pr-1 flex-1 min-h-0">
             {results.map((m) => (
               <button
                 key={m.id}
@@ -1400,7 +1401,7 @@ function HuggingFaceImportPanel({
 
       {/* Selected model details & Download */}
       {selected && (
-        <div className="space-y-4 p-4 rounded-2xl border border-white/10 bg-white/5">
+        <div className="space-y-4 p-4 rounded-2xl border border-white/10 bg-white/5 flex-none">
           <div className="flex items-center gap-3">
             <Cloud className="w-5 h-5 text-gray-400" />
             <div>

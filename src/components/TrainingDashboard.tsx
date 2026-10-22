@@ -87,7 +87,7 @@ function BigLossChart({ points, finished = false }: { points: LossPoint[]; finis
   if (points.length < 2 && finished) {
     return (
       <div className="h-52 flex flex-col items-center justify-center gap-1 text-center px-6">
-        <p className="text-gray-400 text-sm">{t('trainingDashboard.chart.tooFewPoints').replace('{count}', String(points.length))}</p>
+        <p className="text-gray-400 text-sm">{t('trainingDashboard.chart.tooFewPoints', { count: String(points.length) })}</p>
         {points.length === 1 && (
           <p className="text-gray-500 text-xs font-mono">
             Train {points[0].train_loss.toFixed(4)}{points[0].val_loss != null ? ` · Val ${points[0].val_loss.toFixed(4)}` : ''}
@@ -838,7 +838,7 @@ export default function TrainingDashboard({
             <div className="lg:col-span-2 rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium text-gray-400 flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-emerald-400" /> {t('trainingDashboard.chart.title')}</p>
-                <span className="text-[10px] text-gray-600">{t('trainingDashboard.chart.points').replace('{count}', String(lossPoints.length))}</span>
+                <span className="text-[10px] text-gray-600">{t('trainingDashboard.chart.points', { count: String(lossPoints.length) })}</span>
               </div>
               <BigLossChart points={lossPoints} finished={isDone} />
               {lossPoints.length >= 2 && (
@@ -867,7 +867,7 @@ export default function TrainingDashboard({
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/10">
               <Clock className="w-3.5 h-3.5 text-gray-500" />
               <span className="text-xs font-medium text-gray-400">{t('trainingDashboard.eventLog.title')}</span>
-              <span className="ml-auto text-[10px] text-gray-600">{t('trainingDashboard.eventLog.entriesNote').replace('{count}', String(events.length))}</span>
+              <span className="ml-auto text-[10px] text-gray-600">{t('trainingDashboard.eventLog.entriesNote', { count: String(events.length) })}</span>
             </div>
             <div className="max-h-40 overflow-y-auto p-3 space-y-1.5">
               {events.length === 0 ? (

@@ -152,7 +152,7 @@ function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
           <DatasetTypeIcon icon={typeMeta.icon} className={`w-6 h-6 flex-shrink-0 ${typeMeta.color}`} />
           <div>
             <p className={`text-sm font-semibold ${typeMeta.color}`}>{t(typeMeta.labelKey, typeMeta.label)}</p>
-            <p className="text-gray-500 text-xs">{t('datasetUpload.analysisPreview.confidenceLabel').replace('{confidence}', String(analysis.confidence)).replace('{count}', String(analysis.file_count))}</p>
+            <p className="text-gray-500 text-xs">{t('datasetUpload.analysisPreview.confidenceLabel', { confidence: String(analysis.confidence), count: String(analysis.file_count) })}</p>
           </div>
         </div>
         <div title={t('datasetUpload.analysisPreview.autoDetectedTooltip')}>
@@ -187,9 +187,9 @@ function AnalysisPreview({ analysis, model }: AnalysisPreviewProps) {
             : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
         }`}>
           {analysis.pairing_status.is_paired ? (
-            <><CheckCircle className="w-3.5 h-3.5" /> {t('datasetUpload.analysisPreview.pairedCount').replace('{count}', String(analysis.pairing_status.paired_count))}</>
+            <><CheckCircle className="w-3.5 h-3.5" /> {t('datasetUpload.analysisPreview.pairedCount', { count: String(analysis.pairing_status.paired_count) })}</>
           ) : (
-            <><AlertTriangle className="w-3.5 h-3.5" /> {t('datasetUpload.analysisPreview.orphanCount').replace('{count}', String(analysis.pairing_status.orphan_primaries.length))}</>
+            <><AlertTriangle className="w-3.5 h-3.5" /> {t('datasetUpload.analysisPreview.orphanCount', { count: String(analysis.pairing_status.orphan_primaries.length) })}</>
           )}
         </div>
       )}
@@ -1102,8 +1102,9 @@ export default function DatasetUpload() {
               <p className="text-gray-400 text-sm">{t(
                 !datasetToSplit.dataset_type || datasetToSplit.dataset_type === 'unknown'
                   ? 'datasetUpload.splitModal.fileCountTotal'
-                  : 'datasetUpload.splitModal.fileCount'
-              ).replace('{count}', String(datasetToSplit.file_count))}</p>
+                  : 'datasetUpload.splitModal.fileCount',
+                { count: datasetToSplit.file_count },
+              )}</p>
 
               {([
                 { label: t('datasetUpload.splitModal.labelTrain'), color: '#3b82f6', ratio: trainRatio, set: (v: number) => {
@@ -1223,7 +1224,9 @@ export default function DatasetUpload() {
       {/* Import Modal */}
       {showImportModal && (
         <ModalPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+          {/* Hugging Face: feste Hoehe, die Trefferliste nimmt den Rest — so bleibt
+              "Download Dataset" ohne Scrollen sichtbar. */}
+          <div className={`bg-slate-900 rounded-2xl border border-white/10 w-full max-w-2xl overflow-hidden flex flex-col ${importMode === 'huggingface' ? 'h-[min(56rem,94vh)]' : 'max-h-[90vh]'}`}>
 
             <div className="px-6 py-5 border-b border-white/10 flex items-start justify-between flex-shrink-0">
               <div>
@@ -1250,7 +1253,7 @@ export default function DatasetUpload() {
               ))}
             </div>
 
-            <div className="p-6 overflow-y-auto flex-1">
+            <div className={`p-6 overflow-y-auto flex-1 min-h-0 ${importMode === 'huggingface' ? 'flex flex-col' : ''}`}>
               {importMode === 'local' ? (
                 <div className="space-y-5">
                   {/* Struktur-Guide */}
@@ -1356,8 +1359,8 @@ export default function DatasetUpload() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-5">
-                  <div className="space-y-3">
+                <div className="flex flex-col gap-5 flex-1 min-h-0">
+                  <div className="space-y-3 flex-none">
                     <button onClick={() => setShowFilters(!showFilters)}
                       className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-all">
                       <Filter className="w-4 h-4" />
@@ -1384,7 +1387,7 @@ export default function DatasetUpload() {
                     )}
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 flex-none">
                     <label className="block text-sm font-medium text-gray-300">{t('datasetUpload.importModal.hf.searchLabel')}</label>
                     <div className="relative">
                       <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1399,9 +1402,9 @@ export default function DatasetUpload() {
                   </div>
 
                   {hfResults.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-gray-500 text-xs">{t('datasetUpload.importModal.hf.resultsCount').replace('{count}', String(hfResults.length))}</p>
-                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    <div className="flex flex-col gap-1.5 flex-1 min-h-[10rem]">
+                      <p className="text-gray-500 text-xs flex-none">{t('datasetUpload.importModal.hf.resultsCount', { count: String(hfResults.length) })}</p>
+                      <div className="space-y-1.5 overflow-y-auto pr-1 flex-1 min-h-0">
                         {hfResults.map(ds => (
                           <button key={ds.id} onClick={() => handleHfSelect(ds)}
                             className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
@@ -1427,7 +1430,7 @@ export default function DatasetUpload() {
                   )}
 
                   {selectedHfDataset && (
-                    <div className="space-y-4 p-4 rounded-2xl border border-white/10 bg-white/5">
+                    <div className="space-y-4 p-4 rounded-2xl border border-white/10 bg-white/5 flex-none">
                       <div className="flex items-center gap-3">
                         <Cloud className="w-5 h-5 text-gray-400" />
                         <div>
@@ -1565,7 +1568,7 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
               </span>
               {dataset.training_count > 0 && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400">
-                  {t('datasetUpload.card.usedCount').replace('{count}', String(dataset.training_count))}
+                  {t('datasetUpload.card.usedCount', { count: String(dataset.training_count) })}
                 </span>
               )}
             </div>
@@ -1591,8 +1594,8 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
                 )}
                 <span>
                   {dataset.pairing_status.is_paired
-                    ? t('datasetUpload.card.pairedCount').replace('{count}', String(dataset.pairing_status.paired_count))
-                    : t('datasetUpload.card.orphanCount').replace('{count}', String(dataset.pairing_status.orphan_primaries.length))}
+                    ? t('datasetUpload.card.pairedCount', { count: String(dataset.pairing_status.paired_count) })
+                    : t('datasetUpload.card.orphanCount', { count: String(dataset.pairing_status.orphan_primaries.length) })}
                 </span>
               </span>
             </span>
@@ -1615,7 +1618,7 @@ function DatasetCard({ dataset, gradientClass, onDelete, onSplit, onHalve, onFil
       {/* Meta */}
       <div className="space-y-1.5 text-sm">
         <div className="flex items-center justify-between text-gray-400">
-          <span className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5" />{t('datasetUpload.card.filesLabel').replace('{count}', String(dataset.file_count))}</span>
+          <span className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5" />{t('datasetUpload.card.filesLabel', { count: String(dataset.file_count) })}</span>
           <span>{formatBytes(dataset.size_bytes)}</span>
         </div>
         <div className="flex items-center gap-1.5 text-gray-500 text-xs">

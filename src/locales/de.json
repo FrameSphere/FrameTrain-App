@@ -7,7 +7,7 @@
       "training": "Training",
       "analysis": "Analyse",
       "tests": "Tests",
-      "laboratory": "Laboratory",
+      "laboratory": "Labor",
       "synapse": "Synapse Builder",
       "versions": "Versionen",
       "hosting": "Hosting"
@@ -39,7 +39,7 @@
     "cols": {
       "model": "Modell",
       "loss": "Final-Loss",
-      "accuracy": "Accuracy",
+      "accuracy": "Genauigkeit",
       "when": "Wann"
     },
     "status": {
@@ -74,7 +74,7 @@
       "trainingStopped": "Training gestoppt: {model}",
       "finalLoss": "Final-Loss {loss}",
       "testDone": "Test abgeschlossen: {model} ({version})",
-      "accuracy": "Accuracy {value}%"
+      "accuracy": "Genauigkeit {value}%"
     },
     "firstRun": {
       "title": "Willkommen bei FrameTrain",
@@ -87,11 +87,11 @@
       "sleepRisk": "Ein Training läuft, aber der Ruhezustand ist nicht unterdrückt — der Rechner könnte mitten im Lauf einschlafen",
       "trainingFailed": "Letzter Lauf von {model} ist fehlgeschlagen — seitdem kein neuer Versuch",
       "overfitting": "{model}: val_loss {val} liegt deutlich über train_loss {train} — Verdacht auf Overfitting",
-      "weakAccuracy": "{model} kommt im letzten Test nur auf {value}% Accuracy",
+      "weakAccuracy": "{model} kommt im letzten Test nur auf {value}% Genauigkeit",
       "untestedModels": "{count} Modelle wurden noch nie getestet (z. B. {first})",
-      "untestedModels_one": "{first} wurde noch nie getestet",
+      "untestedModels_one": "{count} Modell wurde noch nie getestet ({first})",
       "unusedDatasets": "{count} Datasets wurden noch nie für ein Training benutzt (z. B. {first})",
-      "unusedDatasets_one": "Dataset {first} wurde noch nie für ein Training benutzt",
+      "unusedDatasets_one": "{count} Dataset wurde noch nie für ein Training benutzt ({first})",
       "trainingStopped": "Letzter Lauf von {model} wurde abgebrochen — seitdem kein neuer Versuch"
     },
     "stats": {
@@ -111,7 +111,9 @@
     "trend": {
       "title": "Loss-Trend",
       "subtitle": "Final-Loss der letzten {count} abgeschlossenen Trainings",
-      "subtitleModel": "{model}: Final-Loss der letzten {count} abgeschlossenen Trainings"
+      "subtitle_one": "Final-Loss des letzten abgeschlossenen Trainings",
+      "subtitleModel": "{model}: Final-Loss der letzten {count} abgeschlossenen Trainings",
+      "subtitleModel_one": "{model}: Final-Loss des letzten abgeschlossenen Trainings"
     },
     "ranking": {
       "title": "Beste Ergebnisse"
@@ -125,6 +127,8 @@
       "loading": "{provider} schreibt das Briefing...",
       "meta": "{model} · {when}",
       "stale": "Stand veraltet",
+      "staleHint": "Für einen älteren Stand geschrieben — Zahlen und Hinweise passen womöglich nicht mehr. Für den aktuellen Stand neu erstellen.",
+      "staleLanguage": "In einer anderen Sprache geschrieben — neu erstellen, um es auf Deutsch zu bekommen.",
       "costHint": "Wird nur auf Klick erstellt und danach gespeichert — kostet also nur einmal Tokens.",
       "disabled": "Der KI-Assistent ist nicht eingerichtet. Mit einem hinterlegten Anbieter fasst er hier zusammen, was seit dem letzten Blick passiert ist, und schlägt den nächsten Schritt vor.",
       "toSettings": "In den Einstellungen einrichten",
@@ -236,7 +240,9 @@
       "preview": "Vorschau",
       "exampleButton": "Beispiel Button",
       "exampleSubtitle": "So sieht dein Theme aus",
-      "themeChanged": "Theme erfolgreich geändert!"
+      "themeChanged": "Theme erfolgreich geändert!",
+      "groupNight": "Nacht",
+      "groupDay": "Tag"
     },
     "language": {
       "title": "Sprache / Language",
@@ -261,7 +267,7 @@
       "subtitle": "Globale Einstellung für den KI-Coach in der App",
       "active": "KI-Assistent ist aktiv und verfügbar",
       "inactive": "KI-Assistent ist deaktiviert",
-      "providerTitle": "KI-ANBIETER WÄHLEN",
+      "providerTitle": "KI-Anbieter wählen",
       "noKeyNeeded": "Kein API-Key nötig",
       "keyNeeded": "API-Key nötig",
       "keyStored": "Key hinterlegt",
@@ -380,8 +386,8 @@
       "step2": "Deinstalliere die alte FrameTrain App komplett:",
       "step3": "Installiere die neue Version",
       "step4": "Starte FrameTrain neu (alle Einstellungen und Daten bleiben erhalten)",
-      "uninstallMac": "macOS: Applications → {app} → Move to Trash",
-      "uninstallWindows": "Windows: Control Panel → Uninstall",
+      "uninstallMac": "macOS: Programme → {app} → In den Papierkorb legen",
+      "uninstallWindows": "Windows: Systemsteuerung → Programm deinstallieren",
       "uninstallLinux": "Linux: sudo apt remove frametrain oder entsprechend für deine Distribution",
       "autoUpdateTitle": "Automatische Update-Benachrichtigung",
       "autoUpdateDesc": "FrameTrain prüft automatisch beim Start auf neue Versionen. Wenn ein Update verfügbar ist, wird dir ein Modal angezeigt. Du kannst auch hier jederzeit manuell prüfen."
@@ -566,6 +572,11 @@
   },
   "aiCoach": {
     "openTitle": "KI-Coach öffnen",
+    "capsule": {
+      "yieldHint": "Der Knopf darunter ist frei",
+      "tuck": "Coach einklappen",
+      "untuck": "Coach zurückholen"
+    },
     "chatHistory": "Chatverläufe",
     "newChat": "Neuer Chat",
     "newChatStart": "Neuen Chat starten",
@@ -645,6 +656,7 @@
       "deleteTooltip": "Löschen",
       "pluginLabel": "Plugin-Erkennung:",
       "filesLabel": "{count} Dateien",
+      "filesLabel_one": "{count} Datei",
       "viewOnHF": "Auf HuggingFace ansehen"
     },
     "deleteDialog": {
@@ -677,6 +689,7 @@
         "searchPlaceholder": "z.B. xlm-roberta, bert, mistral…",
         "searchHint": "Mindestens 2 Zeichen eingeben",
         "resultsCount": "{count} Modelle gefunden",
+        "resultsCount_one": "{count} Modell gefunden",
         "viewOnHF": "Auf HuggingFace ansehen",
         "localNameLabel": "Lokaler Name",
         "localNamePlaceholder": "Name für die lokale Speicherung",
@@ -755,7 +768,9 @@
   "diffViewer": {
     "title": "Code Änderungen",
     "removedLines": "{count} Zeilen",
+    "removedLines_one": "{count} Zeile",
     "addedLines": "{count} Zeilen",
+    "addedLines_one": "{count} Zeile",
     "changesCount": "{count} Änderung",
     "changesCountPlural": "{count} Änderungen",
     "appliedCount": "{count} Übernommen",
@@ -765,7 +780,9 @@
     "applyAllButton": "Alle übernehmen",
     "copyTooltip": "Neue Version kopieren",
     "removeLabel": "Entfernen ({count} Zeilen)",
+    "removeLabel_one": "Entfernen ({count} Zeile)",
     "addLabel": "Hinzufügen ({count} Zeilen)",
+    "addLabel_one": "Hinzufügen ({count} Zeile)",
     "appliedLabel": "Übernommen",
     "failedLabel": "Text nicht gefunden",
     "applyButton": "Übernehmen"
@@ -895,6 +912,7 @@
       "newChatButton": "Neuer Chat",
       "noChats": "Noch keine gespeicherten Chats.",
       "messagesCount": "{count} Nachrichten",
+      "messagesCount_one": "{count} Nachricht",
       "continueButton": "Fortsetzen",
       "sessionSuffix": " (Fortgesetzt)",
       "readonlyBadge": "Lesemodus",
@@ -1199,6 +1217,7 @@
       "newChatButton": "Neuer Chat",
       "emptyHistory": "Noch keine gespeicherten Chats.",
       "messagesCount": "{count} Nachrichten",
+      "messagesCount_one": "{count} Nachricht",
       "continueButton": "Fortsetzen",
       "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.",
       "editNotApplicable": "nicht anwendbar",
@@ -1286,6 +1305,7 @@
       "newChatButton": "Neuer Chat",
       "noChats": "Noch keine gespeicherten Chats.",
       "messagesCount": "{count} Nachrichten",
+      "messagesCount_one": "{count} Nachricht",
       "continueButton": "Fortsetzen",
       "sessionSuffix": " (Fortgesetzt)",
       "readonlyBadge": "Lesemodus",
@@ -1365,6 +1385,7 @@
     "chart": {
       "title": "Loss-Verlauf",
       "points": "{count} Punkte",
+      "points_one": "{count} Punkt",
       "waitingForData": "Warte auf erste Loss-Werte…",
       "tooFewPoints": "Zu wenige Messpunkte für eine Kurve ({count}) — der Lauf war kürzer als ein Logging-Intervall.",
       "legendTrain": "Train Loss",
@@ -1399,6 +1420,7 @@
     "eventLog": {
       "title": "Trainings-Log",
       "entriesNote": "{count} Einträge · wird in ft_training_sessions gespeichert",
+      "entriesNote_one": "{count} Eintrag · wird in ft_training_sessions gespeichert",
       "waiting": "Warte auf Events…",
       "eventStart": "Training gestartet — {model}",
       "eventComplete": "Abgeschlossen! Finaler Loss: {loss}",
@@ -1528,6 +1550,7 @@
       "loading": "Lade Modelle…",
       "trainedBadge": "✓ trainiert",
       "classesLabel": "{count} Klassen",
+      "classesLabel_one": "{count} Klasse",
       "footerTrainable": "Modelle sind an deinen Account gebunden und im Training-Panel trainierbar.",
       "renameTooltip": "Umbenennen",
       "duplicateTooltip": "Duplizieren — Kopie zum Experimentieren",
@@ -1592,6 +1615,7 @@
       "gradAccumLabel": "Grad-Akkum.",
       "precisionCudaHint": "fp16/bf16 nur auf CUDA — auf CPU/MPS wird fp32 verwendet",
       "noMetrics": "Noch keine Metriken — starte das Training, um Daten zu sehen",
+      "resizeHint": "Ziehen, um die Höhe zu ändern",
       "metricLoss": "Loss",
       "metricValLoss": "Val Loss",
       "metricAccuracy": "Genauigkeit",
@@ -1673,6 +1697,7 @@
       "closeButton": "✕",
       "issuesTitle": "{count} Fehler gefunden:",
       "warningsTitle": "{count} Warnungen:",
+      "warningsTitle_one": "{count} Warnung:",
       "quickQuestionsLabel": "SCHNELLE FRAGEN:",
       "question1": "Was sind die Probleme?",
       "question2": "Fixe Shape-Fehler",
@@ -1710,6 +1735,7 @@
       "refreshTooltip": "Aktualisieren",
       "originalBadge": "Original",
       "filesLabel": "{count} Dateien",
+      "filesLabel_one": "{count} Datei",
       "versionLabel": "v{n}",
       "metricsTrainLoss": "Train Loss",
       "metricsValLoss": "Val Loss",
@@ -1957,7 +1983,7 @@
     },
     "ramCalculator": {
       "title": "RAM-Schätzung",
-      "subtitle": "({sizeGb} GB Modell{lora}{quant})",
+      "subtitle": "({sizeGb} GB auf der Platte{lora}{quant})",
       "loraLabel": " · LoRA",
       "quantLabel": " · {bits}bit",
       "weights": "Modell-Gewichte",
@@ -2038,6 +2064,8 @@
     },
     "aiAssistant": {
       "title": "KI-Metrik-Assistent",
+      "suggestionName": "KI-Vorschlag",
+      "suggestionDescription": "Automatisch vom KI-Assistenten erstellt.",
       "configTitle": "Aktuelle Konfiguration",
       "historyTitle": "Vorherige Trainings-Analysen",
       "historySoon": "Bald",
@@ -2049,7 +2077,9 @@
       "analysingText": "Analysiere Hyperparameter…",
       "analysingGoal": "Berücksichtige: {goal}…",
       "suggestionsTitle": "Vorgeschlagene Änderungen ({count} Metriken)",
+      "suggestionsTitle_one": "Vorgeschlagene Änderungen ({count} Metrik)",
       "applyButton": "Alle {count} Metriken übernehmen",
+      "applyButton_one": "{count} Metrik übernehmen",
       "applyDoneLabel": "Übernommen!",
       "discardButton": "Verwerfen",
       "saveAsTemplateButton": "Als Metriken-Template speichern",
@@ -2077,6 +2107,8 @@
     "history": {
       "title": "Trainings-Verlauf",
       "entries": "Einträge",
+      "entriesCount": "{count} Einträge",
+      "entriesCount_one": "{count} Eintrag",
       "filterAll": "Alle",
       "filterRunning": "Läuft",
       "filterCompleted": "Erfolgreich",
@@ -2260,10 +2292,14 @@
     },
     "metricCards": {
       "finalTrainLoss": "Final Train Loss",
-      "valLabel": "Val: {value}",
+      "valLabel": "Val (Schluss-Eval): {value}",
       "epochsSteps": "Epochen / Steps",
+      "epochsValue": "{count} Epochen",
+      "epochsValue_one": "{count} Epoche",
       "stepsLabel": "{count} Steps",
-      "duration": "Dauer",
+      "stepsLabel_one": "{count} Step",
+      "duration": "Trainingszeit",
+      "durationHint": "Reine Trainingsschleife, von der Engine gemessen — ohne Laden von Modell und Daten. Der Trainingsverlauf zeigt den ganzen Lauf.",
       "bestEpoch": "Best: E{epoch}",
       "status": "Status",
       "statusDone": "Fertig"
@@ -2272,6 +2308,7 @@
       "title": "Abgeleitete Statistiken",
       "lossReduction": "Loss-Reduktion",
       "overfittingGap": "Overfitting-Gap",
+      "overfittingGapHint": "Letzter Val-Loss gegen letzten Train-Loss, relativ zum Train-Loss. Hervorgehoben nur, wenn der Abstand über die Epochen wächst.",
       "avgGradNorm": "Ø Grad Norm",
       "logEntries": "Log-Einträge"
     },
@@ -2343,15 +2380,17 @@
     },
     "epochTable": {
       "title": "Epoch-Zusammenfassung ({count} Epochen trainiert)",
+      "title_one": "Epoch-Zusammenfassung ({count} Epoche trainiert)",
       "colEpoch": "Epoche",
       "colAvgTrainLoss": "Ø Train Loss",
       "colMinLoss": "Min Loss",
-      "colValLoss": "Val Loss",
+      "colValLoss": "Ø Val Loss",
       "colDuration": "Dauer",
-      "colSteps": "Steps"
+      "colSteps": "Log-Einträge"
     },
     "logTable": {
       "title": "Training Logs ({count} Einträge)",
+      "title_one": "Training Logs ({count} Eintrag)",
       "colEpoch": "E",
       "colStep": "Step",
       "colTrainLoss": "Train Loss",
@@ -2472,7 +2511,7 @@
     "header": {
       "refreshTooltip": "Aktualisieren",
       "addButton": "Dataset hinzufügen",
-      "buildButton": "Datensatz bauen",
+      "buildButton": "Dataset bauen",
       "buildTooltip": "Bilder labeln und daraus einen Datensatz erzeugen"
     },
     "modelSelector": {
@@ -2485,8 +2524,11 @@
     "card": {
       "usedCount": "{count}× benutzt",
       "pairedCount": "{count} Paare",
+      "pairedCount_one": "{count} Paar",
       "orphanCount": "{count} Orphans",
+      "orphanCount_one": "{count} Orphan",
       "filesLabel": "{count} Dateien",
+      "filesLabel_one": "{count} Datei",
       "lastUsed": "Zuletzt:",
       "extensionsMore": "+{count}",
       "filesButton": "Dateien",
@@ -2515,7 +2557,9 @@
       "unknownTypeDesc": "Aufgeteilt werden nur Datendateien direkt im Hauptordner. Hilfsdateien wie Skripte, data.yaml oder README bleiben liegen; Unterordner bleiben unverändert. Wie viele Dateien am Ende in train/val/test landen, steht daher vorher nicht fest.",
       "dataIntegrityWarning": "Die Original-Dateien werden in train/, val/ und test/-Unterordner verschoben. Dies kann nicht rückgängig gemacht werden. Erstelle ein Backup wenn nötig.",
       "fileCount": "{count} Dateien aufteilen.",
+      "fileCount_one": "{count} Datei aufteilen.",
       "fileCountTotal": "{count} Dateien im Dataset.",
+      "fileCountTotal_one": "{count} Datei im Dataset.",
       "labelTrain": "Training",
       "labelVal": "Validierung",
       "labelTest": "Test",
@@ -2551,7 +2595,7 @@
       "tabLocal": "Lokaler Ordner",
       "tabHuggingFace": "Hugging Face",
       "local": {
-        "supportedFormats": ".csv .jsonl .json .parquet .txt Bilder/ Audio/ YOLO/ COCO/ VOC/",
+        "supportedFormats": ".csv .jsonl .json .parquet .txt images/ audio/ YOLO/ COCO/ VOC/",
         "dropzoneIdle": "Dataset-Ordner hierher ziehen",
         "dropzoneDragging": "Ordner hier ablegen",
         "dropzoneSubtitle": "Flat Files, YOLO, COCO, Pascal VOC, Audio/Transkript, …",
@@ -2577,7 +2621,7 @@
       "hf": {
         "filterToggleShow": "Filter anzeigen",
         "filterToggleHide": "Filter ausblenden",
-        "filterTask": "Task",
+        "filterTask": "Aufgabe",
         "filterLanguage": "Sprache",
         "filterSize": "Größe",
         "filterAll": "Alle",
@@ -2585,6 +2629,7 @@
         "searchPlaceholder": "z. B. squad, imdb, common_voice…",
         "searchHint": "Mindestens 2 Zeichen eingeben",
         "resultsCount": "{count} Datasets gefunden",
+        "resultsCount_one": "{count} Dataset gefunden",
         "viewOnHF": "Auf HuggingFace ansehen",
         "localNameLabel": "Lokaler Name",
         "localNamePlaceholder": "Name für lokale Speicherung",
@@ -2637,9 +2682,12 @@
     },
     "analysisPreview": {
       "confidenceLabel": "{confidence}% Konfidenz · {count} Dateien",
+      "confidenceLabel_one": "{confidence}% Konfidenz · {count} Datei",
       "autoDetectedTooltip": "Auto-erkannt",
       "pairedCount": "{count} Paare vollständig",
+      "pairedCount_one": "{count} Paar vollständig",
       "orphanCount": "{count} Dateien ohne Partner",
+      "orphanCount_one": "{count} Datei ohne Partner",
       "preferredType": "Optimal für {name}",
       "compatible": "Kompatibel mit {name}",
       "notRecommended": "Für {name} nicht empfohlen — unterstützt: {types}"
@@ -2657,7 +2705,7 @@
       "halve": "Halbieren …",
       "revealInFinder": "Im Finder zeigen",
       "delete": "Löschen …",
-      "build": "Datensatz bauen"
+      "build": "Dataset bauen"
     }
   },
   "datasetFileManager": {
@@ -2669,6 +2717,7 @@
     },
     "header": {
       "totalFiles": "{count} Dateien in der Liste",
+      "totalFiles_one": "{count} Datei in der Liste",
       "statTrain": "Train: {count}",
       "statVal": "Val: {count}",
       "statTest": "Test: {count}",
@@ -2702,10 +2751,13 @@
       "loadError": "Fehler beim Laden",
       "readError": "Fehler beim Lesen",
       "moveSuccess": "{count} Datei(en) → {split}",
+      "moveSuccess_one": "{count} Datei → {split}",
       "moveError": "Fehler beim Verschieben",
       "deleteSuccess": "{count} Datei(en) gelöscht",
+      "deleteSuccess_one": "{count} Datei gelöscht",
       "deleteError": "Fehler beim Löschen",
       "addSuccess": "{count} Datei(en) hinzugefügt",
+      "addSuccess_one": "{count} Datei hinzugefügt",
       "addError": "Fehler"
     },
     "parquet": {
@@ -2713,6 +2765,7 @@
       "totalCols": "Spalten",
       "showingRows": "zeigt erste {count}",
       "moreRowsNote": "+ {count} weitere Zeilen nicht angezeigt",
+      "moreRowsNote_one": "+ {count} weitere Zeile nicht angezeigt",
       "previewErrorTitle": "Diese Datei konnte nicht angezeigt werden",
       "previewErrorHint": "Benötigt Python mit installiertem pandas/pyarrow."
     },
@@ -2779,6 +2832,7 @@
     "setup": {
       "title": "Konfiguration",
       "configSummary": "{model} · {engine} · {count} Samples aus „{file}“",
+      "configSummary_one": "{model} · {engine} · {count} Sample aus „{file}“",
       "noModelsTitle": "Kein Modell vorhanden",
       "noModelsDesc": "Füge zuerst ein Modell im Model-Manager hinzu.",
       "modelLabel": "Modell",
@@ -2799,16 +2853,21 @@
       "datasetLabel": "Sample-Dataset",
       "datasetPlaceholder": "– Dataset wählen –",
       "datasetFileCount": "{count} Dateien",
+      "datasetFileCount_one": "{count} Datei",
       "datasetSplitSuffix": " · gesplittet",
       "noDatasetWarning": "Kein Dataset für dieses Modell vorhanden. Bitte zuerst ein Dataset hochladen.",
       "splitAll": "Alle",
+      "splitMissing": "Diesen Split hat das Dataset nicht",
       "loadSamplesButton": "Samples laden",
       "loadingSamplesButton": "Lade Samples…",
       "samplesLoaded": "{count} Samples geladen · {file}",
+      "samplesLoaded_one": "{count} Sample geladen · {file}",
       "samplesPreviewTitle": "Vorschau ({count} Samples)",
+      "samplesPreviewTitle_one": "Vorschau ({count} Sample)",
       "samplesPreviewMore": "+ {count} weitere…",
       "samplesRemove": "Entfernen",
       "startButton": "Lab-Session starten ({count} Samples)",
+      "startButton_one": "Lab-Session starten ({count} Sample)",
       "notifications": {
         "engineNotSupported": "Nicht unterstützt",
         "engineNotSupportedDetail": "Dieses Modell wird von der Test Engine noch nicht unterstützt. Nutze den Dev Script Modus.",
@@ -2818,11 +2877,13 @@
         "noDatasetFilesDetail": "Keine Dateien für Split \"{split}\" gefunden. Verfügbare Splits: {splits}.",
         "noSamples": "Keine Samples",
         "noSamplesDetail": "{count} Datei(en) geladen, aber keine Samples extrahiert. Prüfe das Format (JSONL, CSV, TXT)",
+        "noSamplesDetail_one": "{count} Datei geladen, aber keine Samples extrahiert. Prüfe das Format (JSONL, CSV, TXT)",
         "loadSuccess": "Geladen",
         "loadSuccessDetail": "{count} Samples aus {fileCount} Datei(en) geladen.",
         "loadError": "Fehler beim Laden",
         "fileLoadSuccess": "Geladen",
         "fileLoadSuccessDetail": "{count} Samples aus „{name}“ geladen.",
+        "fileLoadSuccessDetail_one": "{count} Sample aus „{name}“ geladen.",
         "fileEmpty": "Leer",
         "fileEmptyDetail": "Keine Samples gefunden.",
         "modelLoadError": "Modell-Ladefehler"
@@ -2884,6 +2945,7 @@
       "confThreshold": "Ab {value}% Konfidenz",
       "boxesShown": "{shown} von {total} Boxen",
       "boxesHidden": "{count} Boxen unterhalb der Schwelle ausgeblendet",
+      "boxesHidden_one": "{count} Box unterhalb der Schwelle ausgeblendet",
       "correctionHint": "Keine Korrektur erfasst",
       "correctionSaved": "Korrektur: {value}",
       "correctionStart": "Korrektur erfassen",
@@ -2911,7 +2973,8 @@
       "avgConfidenceTitle": "Ø Konfidenz",
       "avgConfCorrect": "Korrekte",
       "avgConfWrong": "Falsche",
-      "accuracyLabel": "Accuracy (bewertet)",
+      "avgConfNone": "– noch keine bewerteten Antworten",
+      "accuracyLabel": "Genauigkeit (bewertet)",
       "topWrongTitle": "Häufigste Fehlklassen",
       "topWrongEmpty": "Keine Fehler vorhanden",
       "topWrongSuffix": "{count}×",
@@ -2947,6 +3010,7 @@
       "exportDatasetEmptyDetail": "In dieser Session ist keine Korrektur erfasst. Trage beim Durchgehen ein, wie das Ergebnis hätte aussehen müssen.",
       "exportDatasetDone": "Dataset angelegt",
       "exportDatasetDoneDetail": "{count} korrigierte Samples stehen jetzt als Dataset zum Training bereit.",
+      "exportDatasetDoneDetail_one": "{count} korrigiertes Sample steht jetzt als Dataset zum Training bereit.",
       "exportDatasetDoneSkipped": "{count} Samples exportiert, {skipped} übersprungen (fehlende Datei oder Bildmaße).",
       "exportDatasetError": "Export fehlgeschlagen"
     },
@@ -2961,6 +3025,7 @@
       "entitiesFound": "Gefunden",
       "entityCompare": "{hits} von {total} Entitäten richtig",
       "entityMissing": "{count} fehlen",
+      "entityMissing_one": "{count} fehlt",
       "entityExtra": "{count} zusätzlich",
       "noEntities": "Keine Entitäten gefunden",
       "question": "Frage",
@@ -2972,7 +3037,10 @@
   },
   "openLibrary": {
     "title": "Open Script Library",
-    "scriptsAvailable": "{n} Skripte verfügbar",
+    "scriptsAvailable": "{count} Skripte verfügbar",
+    "scriptsAvailable_one": "{count} Skript verfügbar",
+    "showRejected": "Deine abgelehnten Uploads zeigen ({count})",
+    "hideRejected": "Abgelehnte Uploads ausblenden",
     "reload": "Neu laden",
     "tabBrowse": "Durchsuchen",
     "tabUpload": "Hochladen",
@@ -3016,6 +3084,7 @@
     "unverifiedInfoBody": "Dieses Skript wurde noch nicht von FrameTrain geprüft. Schau den Code-Inhalt durch bevor du es ausführst.",
     "scriptPreviewTitle": "Skript-Vorschau",
     "scriptPreviewLines": "({count} Zeilen)",
+    "scriptPreviewLines_one": "({count} Zeile)",
     "scriptPreviewUnavailable": "Code noch nicht geladen",
     "scriptPreviewUnavailableHint": "Der Quelltext wird erst beim Hinzufügen zur eigenen Bibliothek geladen.",
     "copyButton": "Kopieren",
@@ -3027,6 +3096,7 @@
       "noOwnScripts": "Keine eigenen Skripte in deiner Bibliothek.",
       "noOwnScriptsHint": "Schreibe zuerst ein Skript im {mode} und speichere es.",
       "scriptLineCount": "{count} Zeilen",
+      "scriptLineCount_one": "{count} Zeile",
       "scriptSavedAt": "gespeichert {date}",
       "previewLabel": "Vorschau:",
       "nameLabel": "Name",
@@ -3068,6 +3138,7 @@
     "noModels": "Keine Canvas-Modelle gefunden. Erst im Builder ein Modell exportieren und trainieren.",
     "noWeightsShort": "kein model.pt",
     "classes": "{count} Klassen",
+    "classes_one": "{count} Klasse",
     "noWeightsTag": "Kein model.pt",
     "inputHint": "Kommagetrennte Zahlen, z. B.:",
     "running": "Inferenz läuft…",
@@ -3117,6 +3188,7 @@
     "validationErrors": "Validierungsfehler",
     "aiSummary": {
       "executed": "{count} Schritte ausgeführt",
+      "executed_one": "{count} Schritt ausgeführt",
       "noChanges": "(keine Änderungen)"
     },
     "exportModal": {
@@ -3174,6 +3246,7 @@
       "textHint": "Verwende .jsonl, .csv oder .parquet mit Textspalten.",
       "preSplit": "Voraufgeteiltes Dataset. {rest}",
       "withOrphans": "{rest} {count} Dateien ohne Partner.",
+      "withOrphans_one": "{rest} {count} Datei ohne Partner.",
       "xlm": {
         "imageDataset": "Bild-Dataset erkannt – XLM-RoBERTa braucht Textdaten.",
         "audioDataset": "Audio-Dataset erkannt – XLM-RoBERTa ist ein Text-Modell.",
@@ -3288,6 +3361,7 @@
       "results": "Ergebnisse",
       "samples": "Samples: {n}",
       "accuracy": "Genauigkeit: {value}%",
+      "suspiciousAccuracy": "Fast jede Antwort stimmt. Hat dieses Dataset keinen Test-Split, lief der Test auf Daten, mit denen das Modell trainiert wurde — das misst Wiedererkennen, nicht echte Qualität. Dataset aufteilen (Datasets → Aufteilen) und auf dem Testteil prüfen.",
       "avgInference": "Ø Inferenz: {ms}ms",
       "speed": "Geschwindigkeit: {value} Samples/s",
       "showPreds": "Vorhersagen anzeigen",
@@ -3426,6 +3500,7 @@
       "emptyTitle": "Noch kein Projekt",
       "emptyDetail": "Ein Projekt hält Bilder, Klassen und Boxen an einer Stelle zusammen. Ein fertiger Datensatz wird erst beim Export daraus.",
       "cardMeta": "{samples} Bilder · {confirmed} bestätigt · {classes} Klassen",
+      "cardMeta_one": "{samples} Bild · {confirmed} bestätigt · {classes} Klassen",
       "updated": "Zuletzt bearbeitet {date}",
       "delete": "Löschen",
       "deleteTitle": "Projekt löschen?",
@@ -3434,10 +3509,15 @@
       "deletedDetail": "\"{name}\" wurde entfernt",
       "backToDatasets": "Zurück zu den Datensätzen",
       "cardMetaText": "{samples} Texte · {confirmed} bestätigt · {classes} Klassen",
+      "cardMetaText_one": "{samples} Text · {confirmed} bestätigt · {classes} Klassen",
       "cardMetaAudio": "{samples} Aufnahmen · {confirmed} bestätigt · {classes} Klassen",
+      "cardMetaAudio_one": "{samples} Aufnahme · {confirmed} bestätigt · {classes} Klassen",
       "cardMetaTranscript": "{samples} Aufnahmen · {confirmed} transkribiert",
+      "cardMetaTranscript_one": "{samples} Aufnahme · {confirmed} transkribiert",
       "cardMetaPairs": "{samples} Paare · {confirmed} bestätigt",
-      "cardMetaVideo": "{samples} Clips · {confirmed} bestätigt · {classes} Klassen"
+      "cardMetaPairs_one": "{samples} Paar · {confirmed} bestätigt",
+      "cardMetaVideo": "{samples} Clips · {confirmed} bestätigt · {classes} Klassen",
+      "cardMetaVideo_one": "{samples} Clip · {confirmed} bestätigt · {classes} Klassen"
     },
     "create": {
       "title": "Neues Projekt",
@@ -3486,6 +3566,7 @@
       "emptyDetail": "Einen Ordner importieren — Unterordner kommen mit, doppelte Bilder nur einmal. Liegen YOLO-Labels daneben, werden sie übernommen.",
       "noBoxes": "ohne Box",
       "moreLoading": "{count} weitere werden beim Blättern geladen",
+      "moreLoading_one": "{count} weitere wird beim Blättern geladen",
       "classesTitle": "Klassen",
       "noClasses": "Ohne Klasse lässt sich keine Box setzen. Unten eine anlegen.",
       "newClassPlaceholder": "Neue Klasse",
@@ -3522,6 +3603,7 @@
       "skipped": "Übersprungen",
       "boxes": "Boxen",
       "emptyConfirmed": "{count} bestätigte Bilder haben keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
+      "emptyConfirmed_one": "{count} bestätigtes Bild hat keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
       "doubts": "Widersprüche"
     },
     "shortcuts": {
@@ -3564,6 +3646,7 @@
       "classDialogSummary": "{images} Bilder, davon {labels} mit Labeldatei. Die Labels verwenden {ids} Klassen-IDs.",
       "classDialogWhy": "In einer Labeldatei steht nur eine Zahl. Ohne die Liste, zu der sie gehört, wird aus einem Baum der Quelle schnell ein Ski im Projekt — und das fällt erst im Training auf.",
       "optionFolder": "Liste aus dem Ordner ({count} Namen)",
+      "optionFolder_one": "Liste aus dem Ordner ({count} Name)",
       "optionFolderMissing": "Der Ordner enthält keine classes.txt, obj.names oder data.yaml",
       "optionModel": "Namen aus einem trainierten Modell",
       "optionModelHint": "Das Modell, mit dem der Datensatz entstanden ist, kennt die Reihenfolge",
@@ -3605,6 +3688,7 @@
       "split_test": "Test",
       "split_testHint": "der Rest",
       "splitFewWarning": "Bei {count} Bildern bleiben Validierung oder Test womöglich leer.",
+      "splitFewWarning_one": "Bei {count} Bild bleiben Validierung oder Test womöglich leer.",
       "noFittingModel": "Noch kein passendes Modell vorhanden. Unter Modelle eines herunterladen, zum Beispiel {model} – sonst hängt der Datensatz an einem Modell, das ihn nicht trainieren kann.",
       "oneClassWarning": "Nur eine Klasse hat bestätigte Beispiele. Ein Klassifikator braucht mindestens zwei – sonst gibt es nichts zu unterscheiden."
     },
@@ -3683,6 +3767,7 @@
       "folderHint": "Unterordner kommen mit, doppelte Bilder nur einmal",
       "dataset": "Vorhandener Datensatz",
       "datasetHint": "{count} Datensätze in FrameTrain",
+      "datasetHint_one": "{count} Datensatz in FrameTrain",
       "datasetMeta": "{files} Dateien · {type}",
       "noDatasets": "Noch kein Datensatz in FrameTrain",
       "video": "Video",
@@ -3706,6 +3791,7 @@
       "targetColumn": "Welche Spalte ist der Zieltext?",
       "noColumn": "keine",
       "foundLabels": "{count} Klassen in der Quelle",
+      "foundLabels_one": "{count} Klasse in der Quelle",
       "ignoreLabels": "Vorhandene Zuordnung weglassen und selbst neu vergeben",
       "duplicateNote": "Gleicher Text zweimal wird nur einmal übernommen.",
       "targetLabel": "So soll es heißen",
@@ -3742,6 +3828,7 @@
       "classLabel": "Klasse (optional — ohne Klasse landet der Text als offen in der Warteschlange)",
       "noClass": "keine",
       "count": "{count} Texte werden angelegt",
+      "count_one": "{count} Text wird angelegt",
       "empty": "Noch nichts eingegeben",
       "confirmButton": "Anlegen",
       "doneTitle": "Angelegt",
@@ -3785,6 +3872,7 @@
       "licenseHint": "Steht später in PROVENANCE.csv neben jeder Datei. Ohne Angabe bleibt das Feld leer — und der Datensatz ist nicht weitergebbar.",
       "manners": "robots.txt wird gelesen und befolgt, samt Crawl-delay; je Server wird mindestens eine Sekunde gewartet. Was untersagt ist, wird nicht geholt und im Bericht genannt.",
       "count": "{count} gültige Adressen erkannt",
+      "count_one": "{count} gültige Adresse erkannt",
       "progress": "{current} von {total}",
       "runButton": "Holen",
       "errorTitle": "Abruf fehlgeschlagen",
@@ -3868,6 +3956,7 @@
       "runButton": "Erzeugen",
       "running": "Erzeuge… ({cur}/{total})",
       "reviewHint": "{count} Vorschläge. Was nicht passt, wird abgewählt — der Rest wird übernommen.",
+      "reviewHint_one": "{count} Vorschlag. Was nicht passt, wird abgewählt — der Rest wird übernommen.",
       "keep": "Doch behalten",
       "drop": "Nicht übernehmen",
       "again": "Noch einmal",
@@ -3884,7 +3973,8 @@
       "promptExamples": "Vorhandene Beispiele, an denen du dich orientieren sollst (nicht wiederholen):",
       "editItem": "Vorschlag {n} bearbeiten",
       "editTarget": "Antwort zu Vorschlag {n} bearbeiten",
-      "subtitleMore": "Das Projekt hat schon {count} Texte. Der KI-Assistent schreibt weitere Beispiele im selben Stil — nichts davon landet ungesehen im Projekt."
+      "subtitleMore": "Das Projekt hat schon {count} Texte. Der KI-Assistent schreibt weitere Beispiele im selben Stil — nichts davon landet ungesehen im Projekt.",
+      "subtitleMore_one": "Das Projekt hat schon {count} Text. Der KI-Assistent schreibt weitere Beispiele im selben Stil — nichts davon landet ungesehen im Projekt."
     },
     "remove": {
       "button": "Entfernen",
@@ -3942,7 +4032,9 @@
     "keys": {
       "copiedTitle": "Boxen kopiert",
       "copiedDetail": "{count} Box(en) in der Zwischenablage – mit Cmd+V auf einem anderen Bild einfügen.",
-      "boxesHidden": "{count} Boxen ausgeblendet – H blendet sie wieder ein"
+      "copiedDetail_one": "{count} Box in der Zwischenablage – mit Cmd+V auf einem anderen Bild einfügen.",
+      "boxesHidden": "{count} Boxen ausgeblendet – H blendet sie wieder ein",
+      "boxesHidden_one": "{count} Box ausgeblendet – H blendet sie wieder ein"
     },
     "balance": {
       "title": "Verteilung",
@@ -4015,6 +4107,7 @@
       },
       "wavConvertedTitle": "Aufnahmen umgewandelt",
       "wavConverted": "{count} Aufnahmen liegen jetzt als WAV vor – so liest sie das Training auf jedem System.",
+      "wavConverted_one": "{count} Aufnahme liegt jetzt als WAV vor – so liest sie das Training auf jedem System.",
       "empty": {
         "audioTitle": "Noch keine Aufnahmen",
         "audioDetail": "Direkt aufnehmen, einen Ordner einlesen oder aus dem Netz holen – Unterordner gelten als Klasse, eine .txt neben der Datei als Transkript.",
@@ -4038,8 +4131,10 @@
       "removeButton": "{count} entfernen",
       "removedTitle": "Dubletten entfernt",
       "removedDetail": "{count} Samples entfernt",
+      "removedDetail_one": "{count} Sample entfernt",
       "errorTitle": "Prüfung fehlgeschlagen",
       "unreadable": "{count} Bilder ließen sich nicht lesen und wurden nicht verglichen.",
+      "unreadable_one": "{count} Bild ließ sich nicht lesen und wurde nicht verglichen.",
       "unreadableAll": "Kein Bild ließ sich lesen ({count}) – es wurde nichts verglichen."
     },
     "report": {
@@ -4060,27 +4155,35 @@
         "class_few": "Klasse „{klasse}“ hat nur {anzahl} Beispiele (empfohlen: mindestens {min}).",
         "unbalanced": "Unausgewogen: „{gross}“ hat {grossN} Beispiele, „{klein}“ nur {kleinN}. Das Modell lernt dann vor allem die große Klasse.",
         "group_leaks": "{count} Gruppe(n) liegen in mehr als einem Teil.",
+        "group_leaks_one": "{count} Gruppe liegt in mehr als einem Teil.",
         "split_empty": "Der Teil „{split}“ ist leer – ohne Validierung misst das Training nicht, wie gut das Modell ist.",
         "class_missing_in_split": "Klasse „{klasse}“ fehlt im Teil „{split}“.",
         "few_groups": "Nur {count} Gruppe(n) (Videos, Seiten, Aufnahmen). Samples einer Gruppe bleiben zusammen, die Aufteilung ist dann grob – mehr Quellen machen die Validierung verlässlicher.",
         "near_across": "{count} Paar(e) fast gleicher Samples liegen in verschiedenen Teilen – die Validierung misst dort Wiedererkennen.",
+        "near_across_one": "{count} Paar fast gleicher Samples liegt in verschiedenen Teilen – die Validierung misst dort Wiedererkennen.",
         "near_within": "{count} Paar(e) fast gleicher Samples im Datensatz.",
+        "near_within_one": "{count} Paar fast gleicher Samples im Datensatz.",
         "without_license": "{count} aus dem Netz geholte Samples ohne Lizenzangabe – so nicht weitergeben.",
-        "clips_failed": "{count} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export."
+        "without_license_one": "{count} aus dem Netz geholtes Sample ohne Lizenzangabe – so nicht weitergeben.",
+        "clips_failed": "{count} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export.",
+        "clips_failed_one": "{count} Videoabschnitt ließ sich nicht schneiden und fehlt im Export."
       }
     }
   },
   "datasetHints": {
     "orphan_images": "{count} Bild(er) ohne Label.",
+    "orphan_images_one": "{count} Bild ohne Label.",
     "no_val_split": "Kein Validierungs-Split gefunden – nur Training.",
     "orphan_audio": "{count} Audio-Datei(en) ohne Transkript.",
+    "orphan_audio_one": "{count} Audio-Datei ohne Transkript.",
     "mixed_file_types": "Dataset enthält gemischte Dateitypen.",
     "images_labels_mismatch": "images/ und labels/ gefunden, aber die Struktur passt nicht: erwartet werden Bilder direkt in images/ oder gleich benannte Split-Ordner in beiden (images/train + labels/train).",
     "type_unknown": "Dataset-Typ konnte nicht erkannt werden.",
     "hf_configs": "Dataset hat {count} Konfigurationen ({configs}). Importiert wurde „{chosen}“.",
     "hf_splits_skipped": "Splits ohne verwertbare Labels übersprungen: {splits}.",
     "hf_no_standard_splits": "Keine Standard-Splits erkannt – alle Dateien werden als „train“ importiert.",
-    "split_overlap": "{count} Bild(er) liegen in mehreren Splits (train/val/test) – Val- und Testwerte sind dadurch zu optimistisch."
+    "split_overlap": "{count} Bild(er) liegen in mehreren Splits (train/val/test) – Val- und Testwerte sind dadurch zu optimistisch.",
+    "split_overlap_one": "{count} Bild liegt in mehreren Splits (train/val/test) – Val- und Testwerte sind dadurch zu optimistisch."
   },
   "packageCheck": {
     "title": "Für diese Aufgabe fehlen Python-Pakete ({group})",
@@ -4141,6 +4244,7 @@
       "settings": "Schnell-Zugriff & API",
       "hosted": "Gehostet",
       "running": "{count} laufen · {gb} GB",
+      "running_one": "{count} läuft · {gb} GB",
       "emptyTitle": "Noch kein Modell gehostet",
       "emptyText": "Wähle ein trainiertes Modell oder eines aus der Bibliothek. Es bleibt geladen und antwortet sofort – hier, im Schnell-Chat ({shortcut}) oder per API.",
       "default": "Schnell-Chat-Standard",
@@ -4154,6 +4258,7 @@
       "removeConfirm": "„{name}“ aus dem Hosting entfernen? Das Modell selbst bleibt in der Bibliothek.",
       "notLoadedYet": "noch nicht geladen",
       "requests": "{count} Anfragen",
+      "requests_one": "{count} Anfrage",
       "emptyChat": "Schick dem Modell eine erste Anfrage.",
       "quickHint": "Schnell-Chat von überall: {shortcut}",
       "composerHint": "Enter senden · Umschalt+Enter neue Zeile · Dateien ins Fenster ziehen oder einfügen",
@@ -4169,6 +4274,7 @@
       "loading": "Modelle werden geladen …",
       "empty": "Keine Modelle gefunden. Importiere eines unter „Modelle“ oder trainiere eines.",
       "versions": "{count} Versionen",
+      "versions_one": "{count} Version",
       "library": "Bibliothek",
       "hostedCount": "{count} gehostet",
       "version": "Version",

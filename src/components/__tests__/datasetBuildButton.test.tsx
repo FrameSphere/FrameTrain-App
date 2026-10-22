@@ -45,13 +45,13 @@ describe('Dataset-Bereich', () => {
     });
   });
 
-  it('fuehrt mit "Datensatz bauen" in die Werkstatt', async () => {
+  it('fuehrt mit "Dataset bauen" in die Werkstatt', async () => {
     const seen: string[] = [];
     const listener = (e: Event) => seen.push((e as CustomEvent<string>).detail);
     window.addEventListener('ft_navigate', listener as EventListener);
     try {
       render(<DatasetUpload />);
-      const button = await screen.findByRole('button', { name: /Datensatz bauen/ });
+      const button = await screen.findByRole('button', { name: /Dataset bauen/ });
       fireEvent.click(button);
       expect(seen).toEqual(['studio']);
     } finally {

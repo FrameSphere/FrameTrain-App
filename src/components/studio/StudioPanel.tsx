@@ -202,6 +202,7 @@ export default function StudioPanel() {
                     <p className="text-gray-500 text-xs mt-0.5">
                       {t(cardMetaKey(p), {
                         samples: p.sample_count ?? 0,
+                        count: p.sample_count ?? 0,
                         confirmed: p.confirmed_count ?? 0,
                         classes: p.classes.length,
                       })}

@@ -16,9 +16,9 @@ import { getVersion } from '@tauri-apps/api/app';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { PROVIDER_META } from '../ai/providerMeta';
 import { testAIConnection } from '../ai/aiClient';
-import { getStoredAuthorName, saveAuthorName } from './OpenLibraryModal';
+import { getStoredAuthorName, saveAuthorName, fetchCommunityName } from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
-import QuickAccessSettings from './hosting/QuickAccessSettings';
+import QuickAccessSettings, { Toggle } from './hosting/QuickAccessSettings';
 import { takeRequestedSettingsTab } from '../ui/navigationEvents';
 
 interface UserData {
@@ -131,9 +131,35 @@ function CommunityNameErrorModal({ name, onClose }: { name: string; onClose: () 
   );
 }
 
+// Zuletzt offener Reiter: nach einem Abstecher (z. B. Theme auf der Startseite
+// ansehen) oeffneten die Einstellungen sonst wieder bei "Konto".
+let lastSettingsTab: SettingsTab = 'account';
+
+type NotifyKey = 'trainingComplete' | 'errors' | 'updates';
+const NOTIFY_PREFS_KEY = 'ft_notify_prefs';
+function loadNotifyPrefs(): Record<NotifyKey, boolean> {
+  const defaults = { trainingComplete: true, errors: true, updates: true };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(NOTIFY_PREFS_KEY) || '{}') }; } catch { return defaults; }
+}
+
 export default function Settings({ userData, onLogout }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() => (takeRequestedSettingsTab() as SettingsTab | null) ?? 'account');
+  const [activeTab, setActiveTabState] = useState<SettingsTab>(() => (takeRequestedSettingsTab() as SettingsTab | null) ?? lastSettingsTab);
+  const setActiveTab = (tab: SettingsTab) => { lastSettingsTab = tab; setActiveTabState(tab); };
   const [showApiKey, setShowApiKey] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Neuer Reiter beginnt oben — sonst oeffnete "Darstellung" nach einem langen
+  // "Konto" ganz unten bei den Day-Themes.
+  useEffect(() => {
+    rootRef.current?.closest('main')?.scrollTo({ top: 0 });
+  }, [activeTab]);
+  const [notifyPrefs, setNotifyPrefs] = useState<Record<NotifyKey, boolean>>(loadNotifyPrefs);
+  const setNotifyPref = (key: NotifyKey, on: boolean) => {
+    setNotifyPrefs(prev => {
+      const next = { ...prev, [key]: on };
+      try { localStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(next)); } catch { /* nur Komfort */ }
+      return next;
+    });
+  };
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const { currentTheme, setTheme, themes: allThemes } = useTheme();
   const { language, setLanguage, t } = useLanguage();
@@ -252,6 +278,17 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   // Community-Name
   const [communityName, setCommunityName]         = useState(() => getStoredAuthorName(userData.userId) || '');
   const [communityNameInput, setCommunityNameInput] = useState(() => getStoredAuthorName(userData.userId) || '');
+  // Der Name kann auf einem anderen Geraet oder beim Library-Upload gesetzt
+  // worden sein; dann stand er hier leer, obwohl der Upload ihn zeigte.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCommunityName(userData.userId).then(name => {
+      if (cancelled || !name) return;
+      setCommunityName(prev => prev || name);
+      setCommunityNameInput(prev => prev || name);
+    });
+    return () => { cancelled = true; };
+  }, [userData.userId]);
   const [editingCommunity, setEditingCommunity]   = useState(false);
   const [communitySaved, setCommunitySaved]       = useState(false);
   const [savingCommunity, setSavingCommunity]     = useState(false);
@@ -1024,18 +1061,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               <h3 className="text-lg font-semibold text-white">{t('settings.ai.title')}</h3>
               <p className="text-sm text-gray-400 mt-1">{t('settings.ai.subtitle')}</p>
             </div>
-            <button
-              onClick={() => updateAISettings({ enabled: !aiSettings.enabled })}
-              className={`w-11 h-6 rounded-full transition-all ${
-                aiSettings.enabled ? 'bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)]' : 'bg-white/10'
-              }`}
-            >
-              <div
-                className={`w-5 h-5 rounded-full bg-white shadow-lg transform transition-transform ${
-                  aiSettings.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                }`}
-              />
-            </button>
+            <Toggle on={aiSettings.enabled} onChange={enabled => updateAISettings({ enabled })} label={t('settings.ai.title')} />
           </div>
           {aiSettings.enabled && (
             <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 flex items-center gap-2">
@@ -1538,29 +1564,29 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         <h3 className="text-lg font-semibold text-white mb-4">{t('settings.notifications.title')}</h3>
         
         <div className="space-y-4">
-          <label className="flex items-center justify-between cursor-pointer">
+          <div className="flex items-center justify-between gap-6">
             <div>
               <div className="text-white font-medium">{t('settings.notifications.trainingComplete')}</div>
               <div className="text-sm text-gray-400">{t('settings.notifications.trainingCompleteDesc')}</div>
             </div>
-            <input type="checkbox" className="w-5 h-5 rounded bg-white/5 border-white/10" defaultChecked />
-          </label>
+            <Toggle on={notifyPrefs.trainingComplete} onChange={v => setNotifyPref('trainingComplete', v)} label={t('settings.notifications.trainingComplete')} />
+          </div>
 
-          <label className="flex items-center justify-between cursor-pointer">
+          <div className="flex items-center justify-between gap-6">
             <div>
               <div className="text-white font-medium">{t('settings.notifications.errors')}</div>
               <div className="text-sm text-gray-400">{t('settings.notifications.errorsDesc')}</div>
             </div>
-            <input type="checkbox" className="w-5 h-5 rounded bg-white/5 border-white/10" defaultChecked />
-          </label>
+            <Toggle on={notifyPrefs.errors} onChange={v => setNotifyPref('errors', v)} label={t('settings.notifications.errors')} />
+          </div>
 
-          <label className="flex items-center justify-between cursor-pointer">
+          <div className="flex items-center justify-between gap-6">
             <div>
               <div className="text-white font-medium">{t('settings.notifications.updates')}</div>
               <div className="text-sm text-gray-400">{t('settings.notifications.updatesDesc')}</div>
             </div>
-            <input type="checkbox" className="w-5 h-5 rounded bg-white/5 border-white/10" defaultChecked />
-          </label>
+            <Toggle on={notifyPrefs.updates} onChange={v => setNotifyPref('updates', v)} label={t('settings.notifications.updates')} />
+          </div>
         </div>
       </div>
     </div>
@@ -1653,6 +1679,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         )}
       </div>
 
+      {/* Download-Link und Handanleitung nur, wenn es etwas zu holen gibt oder
+          die Pruefung scheiterte — bei "aktuell" verunsicherten sie nur. */}
+      {(updateStatus === 'update-available' || updateStatus === 'error') && (<>
       {/* GitHub Releases Link */}
       <div className="bg-gradient-to-br from-white/[0.03] to-white/[0.03] border border-purple-500/20 rounded-xl p-6">
         <div className="flex items-start gap-4">
@@ -1703,6 +1732,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           </p>
         </div>
       </div>
+
+      </>)}
 
       {/* Auto-Update Info */}
       <div className="bg-blue-500/10 rounded-xl p-6 border border-blue-500/20">
@@ -1842,8 +1873,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             {storedTickets.length > 0 && (
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
                 {storedTickets.length === 1
-                  ? t('settings.support.ticketCount').replace('{count}', String(storedTickets.length))
-                  : t('settings.support.ticketCountPlural').replace('{count}', String(storedTickets.length))
+                  ? t('settings.support.ticketCount', { count: String(storedTickets.length) })
+                  : t('settings.support.ticketCountPlural', { count: String(storedTickets.length) })
                 }
               </span>
             )}
@@ -2332,7 +2363,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   );
 
   return (
-    <div>
+    <div ref={rootRef}>
       {/* Header */}
       <div className="mb-8">
         <h1 className="ft-h1 mb-1.5">{t('settings.title')}</h1>

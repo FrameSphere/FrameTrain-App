@@ -429,7 +429,7 @@ export const SynapseAIPanel: React.FC<SynapseAIPanelProps> = ({
                 title={t('synapseAI.panel.shapeContextHint')}
               >
                 <span className="synapse-ai-shape-chip-label">
-                  ⚠ {t('synapseAI.panel.shapeActiveLabel').replace('{count}', String(affectedNodes.length || 1))}
+                  ⚠ {t('synapseAI.panel.shapeActiveLabel', { count: String(affectedNodes.length || 1) })}
                   {affectedNodes.length > 0 && (
                     <span className="synapse-ai-shape-chip-nodes">
                       {' '}({affectedNodes.map((a) => a.label || a.id).join(", ")})

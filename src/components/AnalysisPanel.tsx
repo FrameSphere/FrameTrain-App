@@ -606,6 +606,16 @@ function EpochLossLineChart({ summaries, enableSmoothing = false }: { summaries:
 
 // ── 3. Overfitting-Gap (Val – Train über Epochen) ────────────────────────────
 
+/** Ein Urteil fuer Kachel und Indikator — vorher meldete die Kachel 47 % in
+ *  Warnfarbe, waehrend der Indikator darunter "kein Overfitting" sagte. */
+function isOverfittingTrend(summaries: EpochSummary[]): boolean | null {
+  const paired = summaries.filter(s => s.val_loss != null && s.avg_train_loss != null);
+  if (paired.length < 2) return null;
+  const gaps = paired.map(s => s.val_loss! - s.avg_train_loss!);
+  const maxG = Math.max(...gaps.map(Math.abs), 0.001) * 1.2;
+  return gaps[gaps.length - 1] > maxG * 0.35;
+}
+
 function OverfittingGapChart({ summaries }: { summaries: EpochSummary[] }) {
   const { success, error } = useNotification();
   const { t } = useLanguage();
@@ -622,7 +632,7 @@ function OverfittingGapChart({ summaries }: { summaries: EpochSummary[] }) {
   const toY = (v: number) => midY - (v / maxG) * (iH / 2);
   const linePath = gaps.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${toX(gaps.length - 1).toFixed(1)},${midY} L${PAD.l},${midY} Z`;
-  const isOverfitting = gaps[gaps.length - 1] > maxG * 0.35;
+  const isOverfitting = isOverfittingTrend(summaries);
 
   const handleDownload = async () => {
     if (!svgRef.current) { error(t('common.error'), t('analysisPanel.charts.common.chartMissing')); return; }
@@ -1801,7 +1811,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         </div>
         <div className="flex items-center gap-2">
             <button onClick={() => setShowTemplates(p => !p)} className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 text-sm border border-white/10 transition-all">
-            <BookOpen className="w-4 h-4" /><span>{t('analysisPanel.header.templatesButton').replace('{count}', String(templates.length))}</span>
+            <BookOpen className="w-4 h-4" /><span>{t('analysisPanel.header.templatesButton', { count: String(templates.length) })}</span>
             </button>
           {metrics && (
             <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 text-sm border border-white/10 transition-all">
@@ -1905,11 +1915,11 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: t('analysisPanel.metricCards.finalTrainLoss'), value: metrics.final_train_loss.toFixed(4), sub: t('analysisPanel.metricCards.valLabel').replace('{value}', metrics.final_val_loss?.toFixed(4) || 'N/A'), icon: <TrendingDown className="w-4 h-4 text-blue-400" />, color: 'text-blue-400' },
-              { label: t('analysisPanel.metricCards.epochsSteps'), value: `${metrics.total_epochs}E`, sub: t('analysisPanel.metricCards.stepsLabel').replace('{count}', metrics.total_steps.toLocaleString()), icon: <Activity className="w-4 h-4 text-purple-400" />, color: 'text-purple-400' },
-              { label: t('analysisPanel.metricCards.duration'), value: formatDuration(metrics.training_duration_seconds), sub: metrics.best_epoch ? t('analysisPanel.metricCards.bestEpoch').replace('{epoch}', String(metrics.best_epoch)) : '–', icon: <Clock className="w-4 h-4 text-yellow-400" />, color: 'text-yellow-400' },
+              { label: t('analysisPanel.metricCards.epochsSteps'), value: t('analysisPanel.metricCards.epochsValue', { count: metrics.total_epochs }), sub: t('analysisPanel.metricCards.stepsLabel', { count: metrics.total_steps.toLocaleString() }), icon: <Activity className="w-4 h-4 text-purple-400" />, color: 'text-purple-400' },
+              { label: t('analysisPanel.metricCards.duration'), title: t('analysisPanel.metricCards.durationHint'), value: formatDuration(metrics.training_duration_seconds), sub: metrics.best_epoch ? t('analysisPanel.metricCards.bestEpoch').replace('{epoch}', String(metrics.best_epoch)) : '–', icon: <Clock className="w-4 h-4 text-yellow-400" />, color: 'text-yellow-400' },
               { label: t('analysisPanel.metricCards.status'), value: t('analysisPanel.metricCards.statusDone'), sub: formatDate(metrics.created_at, language), icon: <CheckCircle className="w-4 h-4 text-green-400" />, color: 'text-green-400' },
             ].map((c, i) => (
-              <div key={i} className="bg-white/5 rounded-xl border border-white/10 p-4">
+              <div key={i} className="bg-white/5 rounded-xl border border-white/10 p-4" title={'title' in c ? c.title : undefined}>
                 <div className="flex items-center justify-between mb-2">{c.icon}<span className="text-xs text-gray-400">{c.label}</span></div>
                 <div className={`text-xl font-bold ${c.color}`}>{c.value}</div>
                 <div className="text-xs text-gray-500 mt-0.5">{c.sub}</div>
@@ -1928,12 +1938,16 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                     <div className="text-emerald-400 font-bold text-lg">{lossReductionPct}%</div>
                   </div>
                 )}
-                {overfittingGapPct !== null && (
-                  <div className={`rounded-lg p-3 text-center ${Math.abs(overfittingGapPct) > 20 ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-white/5 border border-white/10'}`}>
-                    <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.overfittingGap')}</div>
-                    <div className={`font-bold text-lg ${Math.abs(overfittingGapPct) > 20 ? 'text-amber-400' : 'text-white'}`}>{overfittingGapPct}%</div>
-                  </div>
-                )}
+                {overfittingGapPct !== null && (() => {
+                  // Mit Epochen-Verlauf entscheidet der Trend (wie im Indikator), sonst die Prozentschwelle.
+                  const warn = isOverfittingTrend(epochSummaries) ?? Math.abs(overfittingGapPct) > 20;
+                  return (
+                    <div className={`rounded-lg p-3 text-center ${warn ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-white/5 border border-white/10'}`} title={t('analysisPanel.derivedStats.overfittingGapHint')}>
+                      <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.overfittingGap')}</div>
+                      <div className={`font-bold text-lg ${warn ? 'text-amber-400' : 'text-white'}`}>{overfittingGapPct > 0 ? '+' : ''}{overfittingGapPct}%</div>
+                    </div>
+                  );
+                })()}
                 {avgGradNorm !== null && (
                   <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
                     <div className="text-gray-400 mb-0.5">{t('analysisPanel.derivedStats.avgGradNorm')}</div>
@@ -2139,7 +2153,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
           {epochSummaries.length > 0 && (
             <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
               <button onClick={() => setShowEpochTable(p => !p)} className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Target className="w-4 h-4" />{t('analysisPanel.epochTable.title').replace('{count}', String(fullData?.training_summary?.total_epochs ?? epochSummaries.length))}</h3>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Target className="w-4 h-4" />{t('analysisPanel.epochTable.title', { count: String(fullData?.training_summary?.total_epochs ?? epochSummaries.length) })}</h3>
                 {showEpochTable ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
               </button>
               {showEpochTable && (
@@ -2268,7 +2282,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                       <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
                       <div>
                         <div className="text-sm font-semibold text-white">{t('analysisPanel.aiAnalysis.recommendedParams.title')}</div>
-                        <div className="text-xs text-gray-400 mt-0.5">{t('analysisPanel.aiAnalysis.recommendedParams.countLabel').replace('{count}', String(Object.keys(aiRecommendedParams).length))}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{t('analysisPanel.aiAnalysis.recommendedParams.countLabel', { count: String(Object.keys(aiRecommendedParams).length) })}</div>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5 mb-3">
@@ -2375,7 +2389,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
           {logs.length > 0 && (
             <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
               <button onClick={() => setShowLogTable(p => !p)} className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2"><FileText className="w-4 h-4" />{t('analysisPanel.logTable.title').replace('{count}', String(logs.length))}</h3>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2"><FileText className="w-4 h-4" />{t('analysisPanel.logTable.title', { count: String(logs.length) })}</h3>
                 {showLogTable ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
               </button>
               {showLogTable && (

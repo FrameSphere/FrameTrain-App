@@ -753,20 +753,20 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
 
   return (
     <div className="space-y-4">
-      {/* Kopf */}
-      <div className="flex items-center gap-3">
+      {/* Kopf: bricht um, wenn die (deutschen) Knoepfe den Namen sonst abschneiden */}
+      <div className="flex flex-wrap items-center gap-3">
         <button onClick={onBack}
           className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 transition-all"
           aria-label={t('studio.workbench.back')}>
           <ArrowLeft className="w-4 h-4" />
         </button>
-        <div className="min-w-0">
-          <h2 className="text-white font-semibold text-lg truncate">{project.name}</h2>
+        <div className="min-w-0 flex-1 basis-60">
+          <h2 className="text-white font-semibold text-lg truncate" title={project.name}>{project.name}</h2>
           <p className="text-gray-500 text-xs">
             {t('studio.workbench.subtitle', { confirmed, total: stats?.total ?? total })}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <button onClick={() => setShowSource(true)} disabled={!!importing}
             className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-sm transition-all inline-flex items-center gap-2 disabled:opacity-50">
             {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
@@ -1011,12 +1011,13 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
                   </button>
                   <button onClick={copyFromPrevious} disabled={index === 0 || !samples[index - 1]?.ann.boxes.length}
                     className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm whitespace-nowrap inline-flex items-center gap-2 disabled:opacity-30"
-                    title={t('studio.workbench.copyPreviousHint')}>
-                    <Copy className="w-4 h-4" /> {t('studio.workbench.copyPrevious')}
+                    title={t('studio.workbench.copyPreviousHint')} aria-label={t('studio.workbench.copyPrevious')}>
+                    <Copy className="w-4 h-4" /> <span className="hidden 2xl:inline">{t('studio.workbench.copyPrevious')}</span>
                   </button>
                   <button onClick={undo} disabled={undoStack.current.length === 0}
+                    title={t('studio.workbench.undo')} aria-label={t('studio.workbench.undo')}
                     className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-sm whitespace-nowrap inline-flex items-center gap-2 disabled:opacity-30">
-                    <Undo2 className="w-4 h-4" /> {t('studio.workbench.undo')}
+                    <Undo2 className="w-4 h-4" /> <span className="hidden 2xl:inline">{t('studio.workbench.undo')}</span>
                   </button>
                   <span className="ml-auto" />
                   <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} armSignal={entfernenScharf} />

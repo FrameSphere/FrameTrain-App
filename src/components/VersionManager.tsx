@@ -287,11 +287,11 @@ function VersionFilesPanel({ versionPath }: { versionPath: string }) {
       ))}
       <div className="px-3 py-2 text-[10px] text-gray-600">
         {files.filter(f => !f.is_dir).length === 1
-          ? t('versionManager.filesPanel.fileCount').replace('{count}', '1')
-          : t('versionManager.filesPanel.fileCountPlural').replace('{count}', String(files.filter(f => !f.is_dir).length))
+          ? t('versionManager.filesPanel.fileCount', { count: '1' })
+          : t('versionManager.filesPanel.fileCountPlural', { count: String(files.filter(f => !f.is_dir).length) })
         }
         {files.filter(f => f.is_dir).length > 0 && (
-          ', ' + t('versionManager.filesPanel.folderCount').replace('{count}', String(files.filter(f => f.is_dir).length))
+          ', ' + t('versionManager.filesPanel.folderCount', { count: String(files.filter(f => f.is_dir).length) })
         )}
       </div>
     </div>
@@ -502,7 +502,7 @@ function VersionsModal({
             <GitBranch className="w-6 h-6 text-purple-400" />
             <div>
               <h2 className="text-xl font-bold text-white">{model.name}</h2>
-              <p className="text-sm text-gray-400">{versions.length === 1 ? t('versionManager.versionsModal.versionsCount').replace('{count}','1') : t('versionManager.versionsModal.versionsCountPlural').replace('{count}', String(versions.length))}</p>
+              <p className="text-sm text-gray-400">{versions.length === 1 ? t('versionManager.versionsModal.versionsCount', { count: '1' }) : t('versionManager.versionsModal.versionsCountPlural', { count: String(versions.length) })}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -594,7 +594,7 @@ function VersionsModal({
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                       <div className="flex items-center gap-2 text-gray-400">
                         <FileBox className="w-4 h-4" />
-                        <span>{t('versionManager.versionsModal.filesLabel').replace('{count}', String(version.file_count))}</span>
+                        <span>{t('versionManager.versionsModal.filesLabel', { count: String(version.file_count) })}</span>
                       </div>
                       <div className="flex items-center gap-2 text-gray-400">
                         <HardDrive className="w-4 h-4" />
@@ -1165,7 +1165,7 @@ export default function VersionManager() {
               <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
                 <div className="flex items-center gap-2 text-gray-400">
                   <GitBranch className="w-4 h-4" />
-                  <span>{model.version_count === 1 ? t('versionManager.modelCard.versionsLabel').replace('{count}','1') : t('versionManager.modelCard.versionsLabelPlural').replace('{count}', String(model.version_count))}</span>
+                  <span>{model.version_count === 1 ? t('versionManager.modelCard.versionsLabel', { count: '1' }) : t('versionManager.modelCard.versionsLabelPlural', { count: String(model.version_count) })}</span>
                 </div>
                 <div className="flex items-center gap-2 text-gray-400">
                   <HardDrive className="w-4 h-4" />

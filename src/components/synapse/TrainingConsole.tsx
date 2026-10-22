@@ -4,6 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { useLanguage } from "../../contexts/LanguageContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+const CONSOLE_HEIGHT_KEY = 'ft_synapse_console_height';
+const CONSOLE_DEFAULT = 240;
+const CONSOLE_MIN = 140;
+const CONSOLE_INFERENCE_MIN = 380;
+
 export type TrainingStatus = "idle" | "running" | "paused" | "done" | "error";
 
 export interface TrainingConfig {
@@ -286,6 +291,31 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
   }, []);
 
   const [activeTab, setActiveTab] = useState<"config" | "metrics" | "log" | "inference">("config");
+  // Hoehe per Griff an der Oberkante verstellbar (gemerkt). Mit 200 px lag die
+  // Inferenz-Eingabe unterhalb und war nur per Scroll im Mini-Panel erreichbar.
+  const [panelHeight, setPanelHeight] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem(CONSOLE_HEIGHT_KEY)); return v >= CONSOLE_MIN ? v : CONSOLE_DEFAULT; } catch { return CONSOLE_DEFAULT; }
+  });
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = panelHeight;
+    const max = Math.round(window.innerHeight * 0.7);
+    let last = startH;
+    const move = (ev: PointerEvent) => {
+      last = Math.min(max, Math.max(CONSOLE_MIN, startH + (startY - ev.clientY)));
+      setPanelHeight(last);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      try { localStorage.setItem(CONSOLE_HEIGHT_KEY, String(last)); } catch { /* nur Komfort */ }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  // Die Inferenz braucht Platz fuer Modellwahl und Eingabe.
+  const effectiveHeight = activeTab === "inference" ? Math.max(panelHeight, CONSOLE_INFERENCE_MIN) : panelHeight;
   const [showExportModal, setShowExportModal] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPath, setExportPath] = useState<string | null>(null);
@@ -405,7 +435,12 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
   }, [config, selectedDataset, onStartTraining]);
 
   return (
-    <div style={{ height: 200, background: "#0a0e17", borderTop: "1px solid #1e293b", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ height: effectiveHeight, background: "#0a0e17", borderTop: "1px solid #1e293b", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", flexShrink: 0 }}>
+      <div
+        onPointerDown={startResize}
+        title={t('synapse.trainingConsole.resizeHint')}
+        style={{ position: "absolute", top: -3, left: 0, right: 0, height: 7, cursor: "ns-resize", zIndex: 5 }}
+      />
       {/* Top bar */}
       <div style={{ display: "flex", alignItems: "center", padding: "0 14px", gap: 12, height: 38, borderBottom: "1px solid #1e293b", flexShrink: 0 }}>
         <StatusBadge status={status} />

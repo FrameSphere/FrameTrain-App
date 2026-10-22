@@ -186,8 +186,8 @@ describe('Bild-Werkbank: Tastatur und Menue', { timeout: 15000 }, () => {
     render(<ImageWorkbench {...props} />);
     await screen.findByText('1 / 2');
     fireEvent.keyDown(window, { key: 'h' });
-    expect(await screen.findByText(/Boxen ausgeblendet/)).toBeInTheDocument();
+    expect(await screen.findByText(/(Box|Boxen) ausgeblendet/)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'h' });
-    await waitFor(() => expect(screen.queryByText(/Boxen ausgeblendet/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/(Box|Boxen) ausgeblendet/)).not.toBeInTheDocument());
   });
 });

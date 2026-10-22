@@ -94,7 +94,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
           <div className="border-b border-white/5">
             <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2">
               <p className="text-xs font-medium text-red-300 flex items-center gap-2">
-                <Minus className="w-3.5 h-3.5" /> {t('diffViewer.removeLabel').replace('{count}', String(findLines.length))}
+                <Minus className="w-3.5 h-3.5" /> {t('diffViewer.removeLabel', { count: String(findLines.length) })}
               </p>
             </div>
             <div>
@@ -108,7 +108,7 @@ function EditDiff({ edit, onApply, isApplying }: { edit: CodeEdit; onApply: (upd
           <div>
             <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2">
               <p className="text-xs font-medium text-emerald-300 flex items-center gap-2">
-                <Plus className="w-3.5 h-3.5" /> {t('diffViewer.addLabel').replace('{count}', String(replaceLines.length))}
+                <Plus className="w-3.5 h-3.5" /> {t('diffViewer.addLabel', { count: String(replaceLines.length) })}
               </p>
             </div>
             <div>
@@ -194,11 +194,11 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <Minus className="w-4 h-4 text-red-400" />
-                <span className="text-sm font-medium text-red-300">{t('diffViewer.removedLines').replace('{count}', String(totalRemoved))}</span>
+                <span className="text-sm font-medium text-red-300">{t('diffViewer.removedLines', { count: String(totalRemoved) })}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Plus className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-medium text-emerald-300">{t('diffViewer.addedLines').replace('{count}', String(totalAdded))}</span>
+                <span className="text-sm font-medium text-emerald-300">{t('diffViewer.addedLines', { count: String(totalAdded) })}</span>
               </div>
             </div>
           </div>
@@ -213,7 +213,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <p className="text-xs text-gray-500">
-            {(edits.length === 1 ? t('diffViewer.changesCount') : t('diffViewer.changesCountPlural')).replace('{count}', String(edits.length))} · {t('diffViewer.appliedCount').replace('{count}', String(edits.filter(e => e.applied).length))}
+            {t(edits.length === 1 ? 'diffViewer.changesCount' : 'diffViewer.changesCountPlural', { count: edits.length })} · {t('diffViewer.appliedCount', { count: String(edits.filter(e => e.applied).length) })}
           </p>
           {edits.map((edit) => (
             <EditDiff
@@ -234,7 +234,7 @@ export default function DiffViewer({ edits: initialEdits, onApply, onApplyAll, o
                 {t('diffViewer.allApplied')}
               </span>
             ) : (
-              t('diffViewer.readyCount').replace('{count}', String(edits.filter(e => !e.applied && !e.failed).length))
+              t('diffViewer.readyCount', { count: String(edits.filter(e => !e.applied && !e.failed).length) })
             )}
           </p>
           <div className="flex items-center gap-3">

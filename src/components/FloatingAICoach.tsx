@@ -12,6 +12,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { callAI as callAIClient } from '../ai/aiClient';
 import GradientChatInput from './ui/GradientChatInput';
+import CoachCapsule from './ui/CoachCapsule';
 import { MarkdownText } from './ui/MarkdownText';
 import { PROVIDER_META } from '../ai/providerMeta';
 import { onOpenAICoach } from '../ai/aiCoachEvents';
@@ -1170,14 +1171,10 @@ Reply with ONLY the title, nothing else.`;
     return (
       <>
         <style>{COACH_MAGIC_CSS}</style>
-        <button
-          onClick={openModal}
-          className="ft-glass ft-press fixed bottom-5 right-5 h-11 pl-3.5 pr-4 rounded-full flex items-center gap-2.5 z-40 text-[13.5px] font-semibold text-white"
-          title={t('aiCoach.openTitle')}
-        >
+        <CoachCapsule onOpen={openModal} title={t('aiCoach.openTitle')}>
           <CoachGlyph />
           Coach
-        </button>
+        </CoachCapsule>
       </>
     );
   }

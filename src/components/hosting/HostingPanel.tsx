@@ -226,7 +226,7 @@ export default function HostingPanel() {
             <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
               {hosts.map(h => <HostCard key={h.id} h={h} active={h.id === selected} onClick={() => setSelected(h.id)} />)}
             </div>
-            {shortcut && <p className="text-[11px] text-gray-500 px-1 pt-1 border-t border-white/5">{t('hosting.page.quickHint', { shortcut })}</p>}
+            {shortcut && <p className="text-[11px] leading-snug text-gray-500 px-2 pt-2 pb-1 border-t border-white/5 break-words">{t('hosting.page.quickHint', { shortcut })}</p>}
           </aside>
           <section className="rounded-2xl border border-white/10 bg-white/[0.03] min-h-0 overflow-hidden">
             {host ? <HostDetail key={host.id} host={host} shortcut={shortcut} /> : null}

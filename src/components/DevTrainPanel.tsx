@@ -835,7 +835,7 @@ ANFORDERUNGEN:
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[9px] text-gray-600">{relativeTime(session.updatedAt)}</span>
-                        <span className="text-[9px] text-gray-700">· {t('devTrainPanel.aiSidebar.messagesCount').replace('{count}', String(session.messages.length))}</span>
+                        <span className="text-[9px] text-gray-700">· {t('devTrainPanel.aiSidebar.messagesCount', { count: String(session.messages.length) })}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">
@@ -1226,7 +1226,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       t('devTrainPanel.pageContext.scriptStateTitle'),
       isDirty ? t('devTrainPanel.pageContext.unsaved') : t('devTrainPanel.pageContext.saved'),
       currentScriptId ? t('devTrainPanel.pageContext.scriptLoaded').replace('{id}', currentScriptId) : t('devTrainPanel.pageContext.newUnsaved'),
-      running ? t('devTrainPanel.pageContext.running') : showDashboard ? t('devTrainPanel.pageContext.dashboardOpen') : t('devTrainPanel.pageContext.idle').replace('{count}', String(lossPoints.length)),
+      running ? t('devTrainPanel.pageContext.running') : showDashboard ? t('devTrainPanel.pageContext.dashboardOpen') : t('devTrainPanel.pageContext.idle', { count: String(lossPoints.length) }),
       '',
       t('devTrainPanel.pageContext.layoutTitle'),
       t('devTrainPanel.pageContext.topSection'),
@@ -1259,10 +1259,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       '',
       t('devTrainPanel.pageContext.contextTitle'),
       t('devTrainPanel.pageContext.contextModel').replace('{name}', modelInfo?.name || t('devTrainPanel.pageContext.none')),
-      t('devTrainPanel.pageContext.contextDatasets').replace('{count}', String(datasets.length)).replace('{names}', datasets.length > 0 ? datasets.map(d => d.name).join(', ') : t('devTrainPanel.pageContext.none')),
+      t('devTrainPanel.pageContext.contextDatasets', { count: String(datasets.length), names: datasets.length > 0 ? datasets.map(d => d.name).join(', ') : t('devTrainPanel.pageContext.none') }),
       t('devTrainPanel.pageContext.contextDatasetPaths').replace('{paths}', dsRefs.map(d => d.key).join(', ')),
       t('devTrainPanel.pageContext.contextOutput').replace('{path}', outputPath || '[AppData]/training_outputs/dev_<job_id>'),
-      lossPoints.length > 0 ? t('devTrainPanel.pageContext.contextLoss').replace('{count}', String(lossPoints.length)) : '',
+      lossPoints.length > 0 ? t('devTrainPanel.pageContext.contextLoss', { count: String(lossPoints.length) }) : '',
     ];
 
     setCurrentPageContent(lines.join('\n'), 'training-dev');
@@ -1583,7 +1583,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       if (currentScriptId) {
         updateScript(currentScriptId, script, userData?.userId);
       } else {
-        const autoName = `Dev Train ${new Date().toLocaleString(language === 'de' ? 'de-DE' : 'en-US')}`;
+        const autoName = `Dev Train ${new Date().toLocaleString(dateLocale(language), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
         saveScript(autoName, script, userData?.userId);
         const newest = loadScripts(userData?.userId)[0];
         if (newest) setCurrentScriptId(newest.id);

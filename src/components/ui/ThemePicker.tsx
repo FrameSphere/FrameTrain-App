@@ -59,8 +59,8 @@ export default function ThemePicker({ onSelect, columns = 3 }: {
 
   return (
     <div className="space-y-5">
-      {section('Night', night)}
-      {section('Day', day)}
+      {section(t('settings.appearance.groupNight'), night)}
+      {section(t('settings.appearance.groupDay'), day)}
     </div>
   );
 }

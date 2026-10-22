@@ -75,8 +75,14 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
           withVersions.map(m => ({ ...(info.get(m.id) ?? {}), ...m })), project);
         const geordnet = [...passend, ...andere].map(m => withVersions.find(x => x.id === m.id)!);
         setTree(geordnet);
-        const first = geordnet[0]?.versions[0];
-        if (first) setVersionId(first.id);
+        // Vorauswahl: die neueste trainierte Version eines passenden Modells —
+        // ein nie trainiertes Original erkennt die Projektklassen nicht.
+        const passendIds = new Set(passend.map(m => m.id));
+        const trained = (m: ModelWithVersionTree) =>
+          [...m.versions].filter(v => v.version_number > 0).sort((a, b) => b.version_number - a.version_number)[0];
+        const pick = geordnet.filter(m => passendIds.has(m.id)).map(trained).find(Boolean)
+          ?? geordnet[0]?.versions[0];
+        if (pick) setVersionId(pick.id);
       })
       .catch(() => { /* Auswahl bleibt leer, der Knopf bleibt gesperrt */ });
   }, []);

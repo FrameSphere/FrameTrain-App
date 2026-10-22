@@ -142,6 +142,19 @@ select:focus-visible,
 .ft-press:active:not(:disabled) {
   transform: scale(0.97);
 }
+/* Coach-Kapsel: hebt sich mit leichtem Nachfedern an, wenn sie auf einem
+   Knopf liegt (CoachCapsule.tsx); die Lasche gleitet vom Rand herein. */
+.ft-coach-capsule {
+  transform-origin: 85% 100%;
+  transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 260ms ease, background-color 140ms ease;
+}
+.ft-coach-tab { transition: transform 280ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ft-coach-hint { animation: ft-coach-hint-in 220ms ease both; }
+@keyframes ft-coach-hint-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .ft-coach-capsule, .ft-coach-tab { transition: opacity 160ms ease; }
+  .ft-coach-hint { animation: none; }
+}
 .ft-answer {
   transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
 }

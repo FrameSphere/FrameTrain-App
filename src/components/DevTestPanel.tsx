@@ -563,7 +563,7 @@ ANFORDERUNGEN:
                       <p className={`text-[11px] truncate font-medium ${isActive ? 'text-violet-200' : 'text-gray-300'}`}>{session.title}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[9px] text-gray-600">{relativeTime(session.updatedAt)}</span>
-                        <span className="text-[9px] text-gray-700">· {t('devTestPanel.chat.messagesCount').replace('{count}', String(session.messages.length))}</span>
+                        <span className="text-[9px] text-gray-700">· {t('devTestPanel.chat.messagesCount', { count: String(session.messages.length) })}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all">

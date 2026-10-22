@@ -141,6 +141,8 @@ interface LabResult {
   filePath?: string;
   imageWidth?: number;
   imageHeight?: number;
+  /** Erkannte Boxen — die Auswertung zeigt sie ueber dem Bild. */
+  boxes?: DetectionBox[];
   predicted: string;
   confidence?: number;
   topPredictions?: TopPred[];
@@ -889,8 +891,8 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
             { label: t('laboratoryPanel.analysis.avgConfWrong'),  val: avgConf(wrong),   color: 'red' },
           ].map(x => (
             <div key={x.label} className="space-y-1">
-              <span className="text-xs text-gray-400">{x.label}</span>
-              {x.val != null ? <ConfidenceBar value={x.val} color={x.color} /> : <span className="text-gray-600 text-xs">–</span>}
+              <span className="block text-xs text-gray-400">{x.label}</span>
+              {x.val != null ? <ConfidenceBar value={x.val} color={x.color} /> : <span className="block text-gray-600 text-xs">{t('laboratoryPanel.analysis.avgConfNone')}</span>}
             </div>
           ))}
           <div className="pt-1 border-t border-white/10">
@@ -962,6 +964,17 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
                 </button>
                 {expandedIdx === i && (
                   <div className="px-5 pb-4 space-y-2 bg-white/[0.02] border-t border-white/5">
+                    {/* Bild-Sessions: das Bild mit den erkannten Boxen, wie beim Testen. */}
+                    {r.filePath && r.imageWidth && r.imageHeight && (
+                      <div className="pt-3">
+                        <div className="relative inline-block">
+                          <img src={convertFileSrc(r.filePath)} alt={r.inputText} className="max-h-72 max-w-full rounded-lg object-contain block" draggable={false} />
+                          {r.boxes && (
+                            <DetectionOverlay boxes={r.boxes} width={r.imageWidth} height={r.imageHeight} />
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3 pt-3 text-xs">
                       <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailInput')}</span><p className="text-gray-300 mt-0.5">{r.inputText}</p></div>
                       <div><span className="text-gray-500">{t('laboratoryPanel.analysis.detailPredicted')}</span><p className="text-white font-semibold mt-0.5">{shownPrediction(r.predicted, t)}</p></div>
@@ -991,6 +1004,8 @@ function AnalysisView({ session, onBack }: { session: LabSession; onBack: () => 
 // ── Main Component ────────────────────────────────────────────────────────
 
 type LabPhase = 'setup' | 'testing' | 'analysis';
+
+const SAMPLE_SPLITS = ['train', 'val', 'test'];
 
 /**
  * Zeichnet die Detektionen ueber das Vorschaubild.
@@ -1131,6 +1146,23 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
   const [sourceFileName, setSourceFileName] = useState('');
   const [selectedSampleDatasetId, setSelectedSampleDatasetId] = useState<string | null>(null);
   const [selectedSampleSplit, setSelectedSampleSplit] = useState<'all' | 'train' | 'val' | 'test'>('all');
+  // Welche Splits das gewaehlte Dataset wirklich hat — die anderen Schalter
+  // sind gesperrt, statt erst beim Laden "No files found" zu melden.
+  const [availableSplits, setAvailableSplits] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    setAvailableSplits(null);
+    if (!selectedSampleDatasetId) return;
+    let cancelled = false;
+    invoke<{ is_dir: boolean; split: string }[]>('get_dataset_files', { datasetId: selectedSampleDatasetId })
+      .then(files => {
+        if (cancelled) return;
+        const found = new Set(files.filter(f => !f.is_dir).map(f => f.split).filter(sp => SAMPLE_SPLITS.includes(sp)));
+        setAvailableSplits(found);
+        setSelectedSampleSplit(cur => (cur === 'all' || found.has(cur) ? cur : 'all'));
+      })
+      .catch(() => { /* ohne Liste bleiben alle Schalter frei */ });
+    return () => { cancelled = true; };
+  }, [selectedSampleDatasetId]);
   const [loadingDatasetSamples, setLoadingDatasetSamples] = useState(false);
   const [currentSampleIdx, setCurrentSampleIdx] = useState(0);
 
@@ -1698,7 +1730,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           t('laboratoryPanel.setup.notifications.noDatasetFiles'),
           t('laboratoryPanel.setup.notifications.noDatasetFilesDetail', {
             split: selectedSampleSplit,
-            splits: [...new Set(files.filter(f => !f.is_dir).map(f => f.split))].join(', ') || 'keine',
+            // Nur echte Splits nennen — Ordner wie labels/ oder images/ sind keine.
+            splits: [...new Set(files.filter(f => !f.is_dir).map(f => f.split).filter(sp => SAMPLE_SPLITS.includes(sp)))].join(', ') || '–',
           }),
         );
         return;
@@ -1932,6 +1965,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       filePath: currentSample.filePath,
       imageWidth: testResult.imageWidth ?? imageSize?.w,
       imageHeight: testResult.imageHeight ?? imageSize?.h,
+      boxes: testResult.boxes?.length ? testResult.boxes : undefined,
       predicted: testResult.predicted,
       confidence: testResult.confidence,
       topPredictions: testResult.topPredictions,
@@ -2214,7 +2248,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                               <button
                                 key={split}
                                 onClick={() => setSelectedSampleSplit(split)}
-                                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                disabled={split !== 'all' && availableSplits != null && !availableSplits.has(split)}
+                                title={split !== 'all' && availableSplits != null && !availableSplits.has(split) ? t('laboratoryPanel.setup.splitMissing') : undefined}
+                                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-35 disabled:cursor-not-allowed ${
                                   selectedSampleSplit === split
                                     ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                                     : 'text-gray-400 hover:text-white'

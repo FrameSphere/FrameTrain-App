@@ -346,7 +346,9 @@ function RamCalculator({ config, modelSizeGb, systemRamGb, imageSize, unavailabl
       </div>
       <div className="space-y-1.5 text-xs">
         {[
-          [t('trainingPanel.ramCalculator.weights'), weightRam],
+          // Auf der Platte liegt das Modell oft halb so gross (bf16) — im Training
+          // rechnet es in der hier genannten Praezision.
+          [`${t('trainingPanel.ramCalculator.weights')} (${is4bit ? '4bit' : is8bit ? '8bit' : isFp16 ? 'fp16' : 'fp32'})`, weightRam],
           [config.use_lora || isQuantized ? t('trainingPanel.ramCalculator.gradientsLora') : t('trainingPanel.ramCalculator.gradients'), gradRam],
           [config.use_lora || isQuantized ? t('trainingPanel.ramCalculator.optimizerLora') : t('trainingPanel.ramCalculator.optimizer'), optimizerRam],
           [t('trainingPanel.ramCalculator.activations').replace('{batch}', String(config.batch_size)).replace('{gradCkpt}', config.gradient_checkpointing ? t('trainingPanel.ramCalculator.gradCkptLabel') : ''), activationRam],
@@ -438,7 +440,7 @@ export function LossChart({ points }: { points: LossPoint[] }) {
 // ── Templates Modal ────────────────────────────────────────────────────────
 
 function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: (cfg: Partial<TrainingConfig>) => void; onClose: () => void; onSave: (name: string, desc: string) => void; currentConfig: TrainingConfig; }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   useEscapeKey(onClose);
   const [userTemplates, setUserTemplates] = useState<MetricsTemplate[]>([]);
   const [tab, setTab] = useState<'builtin' | 'user'>('builtin');
@@ -493,7 +495,7 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
             <button key={tabKey} onClick={() => setTab(tabKey)} className={`px-4 py-3 text-sm font-medium border-b-2 transition-all ${tab === tabKey ? 'text-blue-300 border-blue-400' : 'text-gray-400 hover:text-white border-transparent'}`}>
               <span className="inline-flex items-center gap-2">
                 {tabKey === 'builtin' ? <Zap className="w-4 h-4" /> : <Folder className="w-4 h-4" />}
-                {tabKey === 'builtin' ? t('trainingPanel.templates.tabBuiltin') : t('trainingPanel.templates.tabUser').replace('{count}', String(userTemplates.length))}
+                {tabKey === 'builtin' ? t('trainingPanel.templates.tabBuiltin') : t('trainingPanel.templates.tabUser', { count: String(userTemplates.length) })}
               </span>
             </button>
           ))}
@@ -507,7 +509,7 @@ function TemplatesModal({ onApply, onClose, onSave, currentConfig }: { onApply: 
                     {tab === 'builtin' ? builtinIcon(template.id) : <BookOpen className="w-4 h-4 text-gray-500" />}
                     <span>{templateName(template, t)}</span>
                   </p>
-                  {template.description && <p className="text-gray-500 text-xs mt-0.5">{templateDescription(template, t)}</p>}
+                  {template.description && <p className="text-gray-500 text-xs mt-0.5">{templateDescription(template, t, language)}</p>}
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {template.config.learning_rate != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">LR: {template.config.learning_rate}</span>}
                     {template.config.batch_size     != null && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">Batch: {template.config.batch_size}</span>}
@@ -943,15 +945,6 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl border border-dashed border-white/15 bg-white/[0.02] space-y-2">
-                <div className="flex items-center gap-2">
-                  <History className="w-4 h-4 text-gray-500" />
-                  <p className="text-sm font-medium text-gray-400">{t('trainingPanel.aiAssistant.historyTitle')}</p>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/20">{t('trainingPanel.aiAssistant.historySoon')}</span>
-                </div>
-                <p className="text-xs text-gray-600">{t('trainingPanel.aiAssistant.historyHint')}</p>
-              </div>
-
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-white">{t('trainingPanel.aiAssistant.goalLabel')}</label>
                 <p className="text-xs text-gray-500">{t('trainingPanel.aiAssistant.goalHint')}</p>
@@ -1013,7 +1006,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                     <div className="space-y-3">
                       <p className="text-white text-sm font-medium flex items-center gap-2">
                         <ClipboardList className="w-4 h-4 text-violet-400" />
-                        {t('trainingPanel.aiAssistant.suggestionsTitle').replace('{count}', String(suggestionRows.length))}
+                        {t('trainingPanel.aiAssistant.suggestionsTitle', { count: String(suggestionRows.length) })}
                       </p>
                       <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
                         {suggestionRows.map(([k, v, prev]) => (
@@ -1036,7 +1029,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                             <button onClick={applySuggestions} className="flex-1 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 text-sm font-medium transition-all">
                               <span className="inline-flex items-center gap-2">
                                 <Check className="w-4 h-4" />
-                                {t('trainingPanel.aiAssistant.applyButton').replace('{count}', String(suggestionRows.length))}
+                                {t('trainingPanel.aiAssistant.applyButton', { count: String(suggestionRows.length) })}
                               </span>
                             </button>
                             <button onClick={onClose} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-sm transition-all">{t('trainingPanel.aiAssistant.discardButton')}</button>
@@ -1692,8 +1685,8 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
   const handleSaveAIAsTemplate = async (cfg: Partial<TrainingConfig>): Promise<boolean> => {
     try {
       await invoke('save_metrics_template', {
-        name: `KI-Vorschlag ${new Date().toLocaleDateString('de-DE')}`,
-        description: 'Automatisch vom KI-Assistenten erstellt.',
+        name: `${t('trainingPanel.aiAssistant.suggestionName')} ${new Date().toLocaleDateString(dateLocale(language))}`,
+        description: t('trainingPanel.aiAssistant.suggestionDescription'),
         config: toBackendConfig({ ...DEFAULT_CONFIG, ...cfg }),
         source: 'ai',
       });
@@ -1811,7 +1804,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 );
               })}
               <div className="ml-auto text-xs text-gray-500 flex items-center">
-                {historyJobs.filter(j => historyFilter === 'all' || j.status === historyFilter).length} {t('trainingPanel.history.entries')}
+                {t('trainingPanel.history.entriesCount', { count: historyJobs.filter(j => historyFilter === 'all' || j.status === historyFilter).length })}
               </div>
             </div>
             {/* List */}

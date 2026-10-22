@@ -230,7 +230,7 @@ export default function HFEncoderTestPlugin({
           <button
             onClick={handleSingleTest}
             disabled={singleLoading || !inputText.trim()}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--ft-accent)] hover:bg-[var(--ft-accent-hover)] border border-transparent text-[var(--ft-on-accent)] text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {singleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {t('testPlugins.hfEncoder.testButton')}
@@ -331,7 +331,7 @@ export default function HFEncoderTestPlugin({
           <button
             onClick={handleStartDatasetTest}
             disabled={datasetLoading || !selectedDatasetId}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--ft-accent)] hover:bg-[var(--ft-accent-hover)] border border-transparent text-[var(--ft-on-accent)] text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {datasetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {t('testPlugins.common.start')}
@@ -367,7 +367,11 @@ export default function HFEncoderTestPlugin({
             {typeof datasetResults.accuracy === 'number' && (
               <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.accuracy', { value: (datasetResults.accuracy * 100).toFixed(2) })}</div>
             )}
-            <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.avgInference', { ms: datasetResults.average_inference_time.toFixed(0) })}</div>
+            {/* 100 % ist meist Wiedererkennen: Ohne Test-Split pruefen wir auf den Trainingsdaten. */}
+            {typeof datasetResults.accuracy === 'number' && datasetResults.accuracy >= 0.99 && (
+              <p className="text-xs text-amber-300/90">{t('testPlugins.hfEncoder.suspiciousAccuracy')}</p>
+            )}
+            <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.avgInference', { ms: (datasetResults.average_inference_time * 1000).toFixed(0) })}</div>
             {typeof datasetResults.samples_per_second === 'number' && (
               <div className="text-gray-300 text-sm">{t('testPlugins.hfEncoder.speed', { value: datasetResults.samples_per_second.toFixed(2) })}</div>
             )}

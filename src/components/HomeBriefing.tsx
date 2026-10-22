@@ -33,6 +33,8 @@ interface CachedBriefing {
   text: string;
   at: string;
   model: string;
+  /** Sprache des Textes; aeltere Eintraege haben keine. */
+  lang?: string;
 }
 
 const CACHE_PREFIX = 'ft_home_briefing_';
@@ -123,7 +125,9 @@ export default function HomeBriefing({ facts, factsKey, userId }: HomeBriefingPr
   const meta = PROVIDER_META[settings.provider];
   const aiReady = settings.enabled && (!meta.needsKey || !!settings.apiKey);
   // Der gespeicherte Text passt nur, solange er zu genau diesem Stand gehoert.
-  const isStale = !!cached && cached.hash !== factsKey;
+  // Nach einem Sprachwechsel stand sonst ein englischer Text im deutschen Rahmen.
+  const wrongLanguage = !!cached && (cached.lang ?? 'de') !== language;
+  const isStale = !!cached && (cached.hash !== factsKey || wrongLanguage);
 
   const generate = async () => {
     setLoading(true);
@@ -143,6 +147,7 @@ export default function HomeBriefing({ facts, factsKey, userId }: HomeBriefingPr
         text: trimmed,
         at: new Date().toISOString(),
         model: resolveModel(settings.provider, settings.selectedModel, settings.ollamaModel),
+        lang: language,
       };
       try { localStorage.setItem(cacheKey, JSON.stringify(entry)); } catch { /* Quota — der Text steht trotzdem */ }
       setCached(entry);
@@ -210,7 +215,13 @@ export default function HomeBriefing({ facts, factsKey, userId }: HomeBriefingPr
 
       {!loading && cached && (
         <>
-          <div className="mt-3 text-gray-300">
+          {isStale && (
+            <p className="mt-3 text-xs text-amber-400/90 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+              {t(wrongLanguage ? 'home.briefing.staleLanguage' : 'home.briefing.staleHint')}
+            </p>
+          )}
+          <div className={`mt-3 text-gray-300 ${isStale ? 'opacity-50' : ''}`}>
             <MarkdownText text={split.body} className="space-y-1.5" />
           </div>
           {split.nextStep && (

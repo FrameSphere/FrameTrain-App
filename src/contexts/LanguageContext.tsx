@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import de from '../locales/de.json'
 import en from '../locales/en.json'
 
@@ -54,8 +54,16 @@ export function translate(
   key: string,
   paramsOrFallback?: string | Record<string, string | number>,
 ): string {
+  // Einzahl: bei count === 1 gewinnt ein vorhandener `<key>_one` ("1 file" statt "1 files").
+  const params = paramsOrFallback && typeof paramsOrFallback === 'object' ? paramsOrFallback : undefined
+  const singular = params != null && Number(params.count) === 1
   // Fallback zur deutschen Version wenn EN-Key fehlt
-  const value = [lookup(language, key), lookup('de', key)].find(v => typeof v === 'string')
+  const value = [
+    singular ? lookup(language, `${key}_one`) : undefined,
+    lookup(language, key),
+    singular ? lookup('de', `${key}_one`) : undefined,
+    lookup('de', key),
+  ].find(v => typeof v === 'string')
   if (typeof value === 'string') {
     if (paramsOrFallback && typeof paramsOrFallback === 'object') {
       return replacePlaceholders(value, paramsOrFallback)
@@ -78,6 +86,25 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(LS_KEY) as Language | null
     return stored === 'en' ? 'en' : 'de'
   })
+
+  // Das Schnell-Chat-Fenster teilt sich den localStorage mit dem Hauptfenster,
+  // bekam den Wechsel aber erst nach einem Neustart mit. Das storage-Event
+  // kommt aus dem anderen Fenster; beim Fokus wird zur Sicherheit nachgelesen.
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const stored = localStorage.getItem(LS_KEY)
+        if (stored === 'de' || stored === 'en') setLanguageState(stored)
+      } catch { /* ohne Storage bleibt die Sprache */ }
+    }
+    const onStorage = (e: StorageEvent) => { if (e.key === LS_KEY) sync() }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('focus', sync)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('focus', sync)
+    }
+  }, [])
 
   const setLanguage = (lang: Language) => {
     localStorage.setItem(LS_KEY, lang)

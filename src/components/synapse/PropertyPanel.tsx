@@ -2,6 +2,7 @@ import React, { useCallback } from "react";
 import { Node } from "@xyflow/react";
 import { NodeDefinition, ParamDefinition } from "./nodeTypes";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { nodeText } from "./nodeText";
 
 interface PropertyPanelProps {
   selectedNode: Node | null;
@@ -129,11 +130,13 @@ const FieldCode: React.FC<{
 const ParamRow: React.FC<{
   param: ParamDefinition; value: unknown; accent: string; onChange: (v: unknown) => void;
 }> = ({ param, value, accent, onChange }) => {
+  const { language } = useLanguage();
+  const label = nodeText(param.label, language);
   const renderInput = () => {
     switch (param.type) {
       case "number":  return <FieldNumber param={param} value={value as number} accent={accent} onChange={onChange} />;
       case "select":  return <FieldSelect param={param} value={value as string} accent={accent} onChange={onChange} />;
-      case "boolean": return <FieldBool label={param.label} value={value as boolean} accent={accent} onChange={onChange} />;
+      case "boolean": return <FieldBool label={label} value={value as boolean} accent={accent} onChange={onChange} />;
       case "code":    return <FieldCode value={value as string} accent={accent} onChange={onChange} />;
       default:        return <FieldText value={value as string} accent={accent} onChange={onChange} />;
     }
@@ -151,7 +154,7 @@ const ParamRow: React.FC<{
             marginBottom: 5,
           }}
         >
-          {param.label}
+          {label}
           {param.description && (
             <span title={param.description} style={{ marginLeft: 4, opacity: 0.5, cursor: "help" }}>?</span>
           )}
@@ -168,7 +171,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
   definition,
   onParamChange,
 }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const accent = categoryColors[definition?.category ?? ""] ?? "#64748b";
 
   const handleChange = useCallback(
@@ -263,7 +266,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                   fontFamily: "'JetBrains Mono', monospace",
                 }}
               >
-                {definition.category}
+                {nodeText(definition.category, language)}
               </div>
               {definition.description && (
                 <div
@@ -272,7 +275,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                     fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6,
                   }}
                 >
-                  {definition.description}
+                  {nodeText(definition.description, language)}
                 </div>
               )}
             </div>

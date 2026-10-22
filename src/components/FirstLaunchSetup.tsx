@@ -1211,7 +1211,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                   `}
                 >
                   <Download className="w-5 h-5" />
-                  {t('firstLaunch.plugins.install').replace('{count}', String(selectedPlugins.size))}
+                  {t('firstLaunch.plugins.install', { count: String(selectedPlugins.size) })}
                 </button>
               </div>
             </div>

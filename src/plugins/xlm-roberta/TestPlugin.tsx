@@ -299,7 +299,7 @@ export default function XLMRobertaTestPlugin({
             <button
               onClick={handleSingleTest}
               disabled={singleLoading || !inputText.trim()}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--ft-accent)] hover:bg-[var(--ft-accent-hover)] border border-transparent text-[var(--ft-on-accent)] font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {singleLoading
                 ? <><Loader2 className="w-4 h-4 animate-spin" />{t('testPlugins.xlmRoberta.analyzing')}</>
@@ -447,7 +447,7 @@ export default function XLMRobertaTestPlugin({
               <button
                 onClick={handleStartDatasetTest}
                 disabled={!selectedDatasetId || selectedDataset?.status !== 'split' || datasets.length === 0}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[var(--ft-accent)] hover:bg-[var(--ft-accent-hover)] border border-transparent text-[var(--ft-on-accent)] font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {t('testPlugins.xlmRoberta.startButton')}
               </button>

@@ -195,7 +195,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
         datasetId, filePaths: Array.from(selectedFiles), targetSplit,
       });
       success(
-        t('datasetFileManager.notifications.moveSuccess').replace('{count}', String(selectedFiles.size)).replace('{split}', targetSplit),
+        t('datasetFileManager.notifications.moveSuccess', { count: String(selectedFiles.size), split: targetSplit }),
         '',
       );
       setSelectedFiles(new Set());
@@ -211,7 +211,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
       await invoke('delete_dataset_files', {
         datasetId, filePaths: Array.from(selectedFiles),
       });
-      success(t('datasetFileManager.notifications.deleteSuccess').replace('{count}', String(selectedFiles.size)), '');
+      success(t('datasetFileManager.notifications.deleteSuccess', { count: String(selectedFiles.size) }), '');
       setSelectedFiles(new Set());
       loadFiles();
     } catch (err: unknown) {
@@ -226,7 +226,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected];
         const result = await invoke<{ added: number }>('add_files_to_dataset', { datasetId, filePaths: paths });
-        success(t('datasetFileManager.notifications.addSuccess').replace('{count}', String(result.added ?? paths.length)), '');
+        success(t('datasetFileManager.notifications.addSuccess', { count: String(result.added ?? paths.length) }), '');
         loadFiles();
       }
     } catch (err: unknown) {
@@ -285,11 +285,11 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
               {/* "Dateien gesamt" war falsch: gelistet werden nur die Dateien in den
                   bekannten Split- und Medienordnern, nicht jede Datei im Datensatz
                   (die Karte zaehlt rekursiv alles, z. B. auch mitkopierte Rohdaten). */}
-              <span>{t('datasetFileManager.header.totalFiles').replace('{count}', String(files.length))}</span>
-              <span className="text-blue-400">{t('datasetFileManager.header.statTrain').replace('{count}', String(stats.train))}</span>
-              <span className="text-purple-400">{t('datasetFileManager.header.statVal').replace('{count}', String(stats.val))}</span>
-              <span className="text-green-400">{t('datasetFileManager.header.statTest').replace('{count}', String(stats.test))}</span>
-              {stats.unsplit > 0 && <span className="text-gray-500">{t('datasetFileManager.header.statUnsplit').replace('{count}', String(stats.unsplit))}</span>}
+              <span>{t('datasetFileManager.header.totalFiles', { count: String(files.length) })}</span>
+              <span className="text-blue-400">{t('datasetFileManager.header.statTrain', { count: String(stats.train) })}</span>
+              <span className="text-purple-400">{t('datasetFileManager.header.statVal', { count: String(stats.val) })}</span>
+              <span className="text-green-400">{t('datasetFileManager.header.statTest', { count: String(stats.test) })}</span>
+              {stats.unsplit > 0 && <span className="text-gray-500">{t('datasetFileManager.header.statUnsplit', { count: String(stats.unsplit) })}</span>}
             </div>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition-all">
@@ -436,7 +436,7 @@ export default function DatasetFileManager({ datasetId, datasetName, datasetType
                 <section className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-white">
-                      {t('datasetFileManager.yaml.sectionClasses')} <span className="text-gray-500 font-normal ml-1">{t('datasetFileManager.yaml.ncLabel').replace('{count}', String(editNames.length))}</span>
+                      {t('datasetFileManager.yaml.sectionClasses')} <span className="text-gray-500 font-normal ml-1">{t('datasetFileManager.yaml.ncLabel', { count: String(editNames.length) })}</span>
                     </h3>
                   </div>
 
@@ -533,7 +533,7 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
             className="px-5 py-2.5 border-b flex gap-3 items-center text-sm flex-shrink-0"
             style={{ background: `linear-gradient(to right, ${currentTheme.colors.primary}18, transparent)`, borderColor: currentTheme.colors.primary + '25' }}
           >
-            <span className="text-white font-medium">{t('datasetFileManager.selection.selectedCount').replace('{count}', String(selectedFiles.size))}</span>
+            <span className="text-white font-medium">{t('datasetFileManager.selection.selectedCount', { count: String(selectedFiles.size) })}</span>
             <div className="flex gap-2 ml-auto">
               {(['train', 'val', 'test'] as const).map(s => (
                   <button key={s} onClick={() => moveFiles(s)}
@@ -679,7 +679,7 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
                         {t('datasetFileManager.parquet.totalCols')}
                       </span>
                       <span className="text-gray-600">
-                        {t('datasetFileManager.parquet.showingRows').replace('{count}', String(parquetPreview.shown_rows))}
+                        {t('datasetFileManager.parquet.showingRows', { count: String(parquetPreview.shown_rows) })}
                       </span>
                     </div>
 
@@ -726,7 +726,7 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
 
                     {parquetPreview.total_rows > parquetPreview.shown_rows && (
                       <p className="text-gray-600 text-[11px] text-center pt-1">
-                        {t('datasetFileManager.parquet.moreRowsNote').replace('{count}', String(parquetPreview.total_rows - parquetPreview.shown_rows))}
+                        {t('datasetFileManager.parquet.moreRowsNote', { count: String(parquetPreview.total_rows - parquetPreview.shown_rows) })}
                       </p>
                     )}
                   </div>

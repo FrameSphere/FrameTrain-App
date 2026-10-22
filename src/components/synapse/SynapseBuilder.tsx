@@ -271,7 +271,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       setHasUnsavedChanges(saved.dirty ?? true);
       setLogLines((p) => [
         ...p,
-        t('synapseBuilder.autosaveRestored').replace('{count}', String(saved.nodes.length)),
+        t('synapseBuilder.autosaveRestored', { count: String(saved.nodes.length) }),
       ]);
       setTimeout(() => {
         if (saved.viewport) rfRef.current?.setViewport(saved.viewport, { duration: 0 });
@@ -525,6 +525,13 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       setMetrics(m => (m.length === 0 ? list : m));
     } catch { /* keine gespeicherten Werte */ }
   }, []);
+
+  // Auch nach dem automatischen Wiederherstellen (Autosave) und nicht nur beim
+  // Laden aus der Bibliothek — sonst stand bei einem trainierten Graphen "No metrics yet".
+  useEffect(() => {
+    if (activeCanvasModelId && trainingStatus !== 'running') void loadSavedMetrics(activeCanvasModelId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCanvasModelId, loadSavedMetrics]);
 
   const parseStatusLogLine = useCallback((message: string) => {
     setLogLines((p) => [...p, message]);
@@ -1151,7 +1158,7 @@ Keine Floskeln, nur Fakten.`;
 
       const cleanSummary = stripToolCallTags(result.summary || "");
       const assistantContent = result.steps.length > 0
-        ? `${t('synapseBuilder.aiSummary.executed').replace('{count}', String(result.steps.length))}${cleanSummary ? "\n" + cleanSummary : ""}`
+        ? `${t('synapseBuilder.aiSummary.executed', { count: String(result.steps.length) })}${cleanSummary ? "\n" + cleanSummary : ""}`
         : cleanSummary || t('synapseBuilder.aiSummary.noChanges');
 
       setAiMessages(prev => [...prev, { role: 'assistant', content: assistantContent }]);

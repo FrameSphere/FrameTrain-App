@@ -20,6 +20,17 @@ const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
 // Globales Auto-Error-Reporting an den Manager (speist die Auto-Fix-Pipeline).
 installGlobalErrorReporting();
 
+// Einzeilige Felder sind hier Modellnamen, Repo-IDs, Pfade und Suchen — die
+// macOS-Autokorrektur machte aus "distilbert" beim Wegklicken "distillery".
+// Mehrzeilige Felder (Chats, Notizen) behalten Rechtschreibhilfe.
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (!(el instanceof HTMLInputElement) || el.dataset.ftTyping === 'natural') return;
+  el.setAttribute('autocorrect', 'off');
+  el.setAttribute('autocapitalize', 'off');
+  el.spellcheck = false;
+}, true);
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AppErrorBoundary>

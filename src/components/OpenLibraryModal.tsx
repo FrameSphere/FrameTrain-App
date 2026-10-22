@@ -102,6 +102,24 @@ export function saveAuthorName(userId: string, name: string): void {
   localStorage.setItem(AUTHOR_KEY(userId), validateAuthorName(name));
 }
 
+/** Community-Name vom Server (und lokal gemerkt); sonst der lokal gespeicherte. */
+export async function fetchCommunityName(userId: string): Promise<string> {
+  try {
+    const res = await fetch(`https://frame-train.com/api/user/community-name?userId=${encodeURIComponent(userId)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.communityName) {
+        const name = validateAuthorName(data.communityName);
+        saveAuthorName(userId, name);
+        return name;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load community name from backend:', err);
+  }
+  return getStoredAuthorName(userId);
+}
+
 type TFn = (key: string, fallback?: string) => string;
 function relativeDate(iso: string | undefined | null, t: TFn): string {
   const diff = Date.now() - parseDate(iso).getTime();
@@ -331,7 +349,7 @@ function ScriptDetail({
               <FileCode className="w-4 h-4 text-gray-400" />
               <span className="text-gray-300 text-sm font-medium">{t('openLibrary.scriptPreviewTitle')}</span>
               <span className="text-gray-600 text-xs">{hasCode
-                ? t('openLibrary.scriptPreviewLines').replace('{count}', String(code.split('\n').length))
+                ? t('openLibrary.scriptPreviewLines', { count: String(code.split('\n').length) })
                 : t('openLibrary.scriptPreviewUnavailable')}</span>
             </div>
             <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showPreview ? 'rotate-180' : ''}`} />
@@ -394,35 +412,19 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [duplicateNameError, setDuplicateNameError] = useState<string | null>(null);
 
-  // Load community name from backend on mount
+  // Gespeicherten Namen sofort zeigen, danach mit dem Server abgleichen —
+  // vorher blieb das Feld leer, bis die Anfrage zurueck war.
   useEffect(() => {
-    const loadAuthorName = async () => {
-      if (!userData?.userId) return;
-      
-      try {
-        // First try to load from backend
-        const backendRes = await fetch(`https://frame-train.com/api/user/community-name?userId=${userData.userId}`);
-        if (backendRes.ok) {
-          const data = await backendRes.json();
-          if (data.communityName) {
-            setAuthorInput(validateAuthorName(data.communityName));
-            setAuthorLocked(true);
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load community name from backend:', err);
-      }
-      
-      // Fallback to localStorage
-      const storedName = getStoredAuthorName(userData?.userId);
-      if (storedName) {
-        setAuthorInput(validateAuthorName(storedName));
-        setAuthorLocked(true);
-      }
+    if (!userData?.userId) return;
+    let cancelled = false;
+    const apply = (name: string) => {
+      if (cancelled || !name) return;
+      setAuthorInput(name);
+      setAuthorLocked(true);
     };
-    
-    loadAuthorName();
+    apply(getStoredAuthorName(userData.userId));
+    void fetchCommunityName(userData.userId).then(apply);
+    return () => { cancelled = true; };
   }, [userData?.userId]);
 
   const [selectedId, setSelectedId] = useState<string>('');
@@ -597,7 +599,7 @@ function UploadTab({ mode = 'train', userData }: { mode?: 'train' | 'test'; user
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{s.name}</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">{t('openLibrary.upload.scriptLineCount').replace('{count}', String(s.script.split('\n').length))} · {t('openLibrary.upload.scriptSavedAt').replace('{date}', new Date(s.savedAt).toLocaleDateString())}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">{t('openLibrary.upload.scriptLineCount', { count: String(s.script.split('\n').length) })} · {t('openLibrary.upload.scriptSavedAt').replace('{date}', new Date(s.savedAt).toLocaleDateString())}</p>
                   </div>
                   {selectedId === s.id && <Check className="w-4 h-4 text-violet-400 flex-shrink-0" />}
                 </div>
@@ -816,6 +818,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Skripte laden
+  const [showRejected, setShowRejected] = useState(false);
   const loadScripts = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
@@ -862,8 +865,12 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
     return () => window.removeEventListener('keydown', handler);
   }, [selectedScript, onClose]);
 
-  // Filtern
+  // Abgelehnte Skripte liefert der Server nur dem Autor; sie stehen nicht in
+  // der Liste (sonst wirkt eine leere Bibliothek halbfertig), sondern hinter
+  // einem eigenen Schalter.
+  const rejectedCount = scripts.filter(isRejected).length;
   const filtered = scripts.filter(s => {
+    if (isRejected(s) && !showRejected) return false;
     if (onlyVerified && !s.verified) return false;
     if (filterModelType !== 'Alle' && s.model_type !== filterModelType) return false;
     if (filterTaskType !== 'Alle' && s.task_type !== filterTaskType) return false;
@@ -931,7 +938,7 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
               </div>
               <div>
                 <h1 className="text-white font-bold text-base">{t('openLibrary.title')}</h1>
-                <p className="text-gray-500 text-[10px]">{t('openLibrary.scriptsAvailable').replace('{n}', String(scripts.length))}</p>
+                <p className="text-gray-500 text-[10px]">{t('openLibrary.scriptsAvailable', { count: scripts.length - rejectedCount })}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -1095,6 +1102,11 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                     <Globe className="w-12 h-12 text-gray-700" />
                     <p className="text-gray-500 text-sm">{t('openLibrary.noScripts')}</p>
                     <p className="text-gray-600 text-xs">{t('openLibrary.noScriptsHint')}</p>
+                    {rejectedCount > 0 && !showRejected && (
+                      <button onClick={() => setShowRejected(true)} className="text-xs text-gray-500 hover:text-gray-300 underline underline-offset-2">
+                        {t('openLibrary.showRejected', { count: rejectedCount })}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1108,6 +1120,11 @@ export default function OpenLibraryModal({ onClose, onLoadScript, mode = 'train'
                         )}
                       </div>
                     ))}
+                    {rejectedCount > 0 && (
+                      <button onClick={() => setShowRejected(v => !v)} className="col-span-2 text-xs text-gray-500 hover:text-gray-300 py-2">
+                        {showRejected ? t('openLibrary.hideRejected') : t('openLibrary.showRejected', { count: rejectedCount })}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

@@ -443,7 +443,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="min-w-0">
-          <h2 className="text-white font-semibold text-lg truncate">{project.name}</h2>
+          <h2 className="text-white font-semibold text-lg truncate" title={project.name}>{project.name}</h2>
           <p className="text-gray-500 text-xs">
             {t('studio.workbench.subtitle', { confirmed, total: stats?.total ?? total })}
           </p>

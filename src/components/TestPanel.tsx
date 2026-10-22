@@ -174,7 +174,20 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
         ]);
         setModels(list);
         setModelsWithVersions(listWithVersions);
-        const preferred = pickPreferredModelId(listWithVersions, list);
+        // Wie in der Analyse: das zuletzt erfolgreich trainierte Modell zuerst.
+        // Sonst stand ein nie trainiertes (yolo-obb) vorausgewaehlt.
+        let lastTrained: string | undefined;
+        try {
+          const history = await invoke<{ model_id?: string; status: string; completed_at?: string | null; created_at: string }[]>('get_training_history');
+          lastTrained = history
+            .filter(j => j.status === 'completed' && j.model_id && listWithVersions.some(m => m.id === j.model_id))
+            .sort((a, b) => (b.completed_at ?? b.created_at).localeCompare(a.completed_at ?? a.created_at))[0]?.model_id;
+        } catch { /* ohne Verlauf: Fallback unten */ }
+        const trainedFirst = [
+          ...listWithVersions.filter(m => m.versions.some(v => !v.is_root)),
+          ...listWithVersions.filter(m => !m.versions.some(v => !v.is_root)),
+        ];
+        const preferred = lastTrained ?? pickPreferredModelId(trainedFirst, list);
         if (preferred) setSelectedModelId(preferred);
       } catch (e) {
         console.error('[TestPanel] initLoad:', e);
@@ -260,18 +273,12 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
         </div>
 
         {/* Mode Toggle – identisch zum TrainingPanel */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
+        <div className="ft-seg">
           {(['test', 'dev'] as const).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                mode === m
-                  ? m === 'test'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                  : 'text-gray-400 hover:text-white'
-              }`}
+              className={`ft-seg-item ${mode === m ? 'is-active' : ''}`}
             >
               {m === 'test'
                 ? <><Play className="w-3.5 h-3.5" /> {t('testPanel.modeEngine')}</>
@@ -386,7 +393,7 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
                 <button
                   onClick={handleStartTest}
                   disabled={!selectedModel || !detectedPlugin || !selectedVersionId}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="ft-btn ft-btn-primary w-full h-11"
                 >
                   {t('testPanel.startButton')}
                 </button>
