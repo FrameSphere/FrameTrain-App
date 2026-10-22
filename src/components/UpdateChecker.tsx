@@ -32,7 +32,7 @@ export function UpdateChecker() {
       try {
         console.log('[UpdateChecker] Trying GitHub API...');
         const response = await fetch(
-          'https://api.github.com/repos/FrameSphere/FrameTrain-App/releases/latest',
+          'https://api.github.com/repos/FrameSphere/FrameTrain-Releases/releases/latest',
           {
             headers: { 'Accept': 'application/json' },
             cache: 'no-store'
@@ -53,7 +53,7 @@ export function UpdateChecker() {
         try {
           console.log('[UpdateChecker] Trying latest.json...');
           const response = await fetch(
-            'https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json',
+            'https://github.com/FrameSphere/FrameTrain-Releases/releases/latest/download/latest.json',
             {
               headers: { 'Accept': 'application/json' },
               cache: 'no-store'

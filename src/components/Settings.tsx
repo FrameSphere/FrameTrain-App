@@ -522,7 +522,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       // Methode 1: GitHub API
       try {
         const response = await fetch(
-          'https://api.github.com/repos/FrameSphere/FrameTrain-App/releases/latest',
+          'https://api.github.com/repos/FrameSphere/FrameTrain-Releases/releases/latest',
           { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
         );
 
@@ -538,7 +538,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       if (!version) {
         try {
           const response = await fetch(
-            'https://github.com/FrameSphere/FrameTrain-App/releases/latest/download/latest.json',
+            'https://github.com/FrameSphere/FrameTrain-Releases/releases/latest/download/latest.json',
             { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
           );
 
@@ -587,8 +587,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   };
 
   const handleOpenGitHub = () => {
-    openUrl('https://github.com/FrameSphere/FrameTrain-App/releases/latest').catch(() => {
-      window.open('https://github.com/FrameSphere/FrameTrain-App/releases/latest', '_blank');
+    openUrl('https://github.com/FrameSphere/FrameTrain-Releases/releases/latest').catch(() => {
+      window.open('https://github.com/FrameSphere/FrameTrain-Releases/releases/latest', '_blank');
     });
   };
 
