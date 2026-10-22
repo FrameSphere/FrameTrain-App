@@ -12,11 +12,43 @@
       "versions": "Versionen",
       "hosting": "Hosting"
     },
+    "groups": {
+      "prepare": "Vorbereiten",
+      "train": "Trainieren",
+      "check": "Prüfen",
+      "use": "Nutzen"
+    },
     "settings": "Einstellungen",
     "logout": "Abmelden",
     "home": "Start"
   },
   "home": {
+    "newTraining": "Neues Training",
+    "summary": {
+      "models": "{n} Modelle",
+      "models_one": "1 Modell",
+      "datasets": "{n} Datasets",
+      "datasets_one": "1 Dataset",
+      "runs": "{n} Läufe",
+      "runs_one": "1 Lauf",
+      "running": "{n} Trainings laufen.",
+      "running_one": "Ein Training läuft.",
+      "idle": "Gerade läuft nichts."
+    },
+    "worth": "Lohnt einen Blick",
+    "cols": {
+      "model": "Modell",
+      "loss": "Final-Loss",
+      "accuracy": "Accuracy",
+      "when": "Wann"
+    },
+    "status": {
+      "completed": "Fertig",
+      "failed": "Fehler",
+      "stopped": "Abgebrochen",
+      "running": "Läuft",
+      "pending": "Wartet"
+    },
     "greeting": {
       "morning": "Guten Morgen",
       "day": "Guten Tag",
@@ -4349,23 +4381,23 @@
     "pipelineUnsupported": "Pipeline nicht unterstützt"
   },
   "themes": {
-    "purple-passion": "Klassisches Lila-Pink-Design",
-    "ocean-breeze": "Beruhigendes Blau-Türkis",
-    "forest-green": "Natürliches Grün",
-    "sunset-orange": "Warmes Orange-Rot",
-    "midnight-blue": "Tiefes Dunkelblau",
-    "rose-gold": "Elegantes Rosa-Gold",
-    "dark-minimal": "Minimalistisches Schwarz",
-    "cyber-yellow": "Schwarz mit neongelbem Akzent",
-    "arctic-white": "Eisige Weiß-Blau-Töne",
-    "neon-pink": "Elektrisierendes Neon-Pink",
-    "blood-red": "Intensives dunkles Rot",
-    "toxic-green": "Giftiges Neon-Grün",
-    "golden-hour": "Warmes Gold und Bernstein",
-    "monochrome": "Klassisches Schwarz-Weiß",
-    "lavender-dream": "Sanftes Lavendel und Violett",
-    "fire-ice": "Orange-Rot trifft Eisblau",
-    "light-gray": "Helles neutrales Grau",
-    "pure-white": "Klares helles Weiß"
+    "purple-passion": "FrameTrain-Standard: Indigo auf Night",
+    "ocean-breeze": "Ruhiges Blau",
+    "forest-green": "Tiefes Grün",
+    "sunset-orange": "Warmer, gedämpfter Ton",
+    "midnight-blue": "Dunkles Blau",
+    "rose-gold": "Gedämpftes Rosa",
+    "dark-minimal": "Neutral, ohne Farbe",
+    "cyber-yellow": "Gelber Akzent",
+    "arctic-white": "Kühles Hellblau",
+    "neon-pink": "Kräftiges Pink",
+    "blood-red": "Dunkles Rot",
+    "toxic-green": "Frisches Gelbgrün",
+    "golden-hour": "Warmes Gold",
+    "monochrome": "Schwarz und Weiß",
+    "lavender-dream": "Weiches Violett",
+    "fire-ice": "Eisblau, Orange bleibt für Laufendes",
+    "light-gray": "Hell mit neutralem Akzent",
+    "pure-white": "Hell mit Indigo-Akzent"
   }
 }

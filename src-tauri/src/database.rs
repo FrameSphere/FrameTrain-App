@@ -749,25 +749,37 @@ pub fn get_database_path() -> PathBuf {
     data_dir.join("frametrain.db")
 }
 
+/// App-Identifier dieses Builds. Standard ist die Produktions-App; ein lokaler
+/// Vorschau-Build setzt beim Kompilieren FRAMETRAIN_APP_ID (siehe
+/// tauri.preview.conf.json) und bekommt so eigene Daten, eigenen
+/// Schluesselbund-Eintrag und eigene Einstellungen.
+pub const APP_ID: &str = match option_env!("FRAMETRAIN_APP_ID") {
+    Some(id) => id,
+    None => "com.frametrain.desktop",
+};
+
+/// true im Vorschau-Build (eigener App-Identifier)
+pub fn is_preview_build() -> bool {
+    APP_ID != "com.frametrain.desktop"
+}
+
 fn get_data_directory() -> PathBuf {
-    // CRITICAL: Use the correct Tauri app identifier from tauri.conf.json
-    // identifier: "com.frametrain.desktop"
-    
+    // Muss zum identifier in tauri.conf.json passen (Tauri legt app_data_dir genauso an)
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").unwrap_or_else(|_| String::from("."));
-        PathBuf::from(appdata).join("com.frametrain.desktop")
+        PathBuf::from(appdata).join(APP_ID)
     }
     
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| String::from("."));
-        PathBuf::from(home).join("Library/Application Support/com.frametrain.desktop")
+        PathBuf::from(home).join("Library/Application Support").join(APP_ID)
     }
     
     #[cfg(target_os = "linux")]
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| String::from("."));
-        PathBuf::from(home).join(".local/share/com.frametrain.desktop")
+        PathBuf::from(home).join(".local/share").join(APP_ID)
     }
 }

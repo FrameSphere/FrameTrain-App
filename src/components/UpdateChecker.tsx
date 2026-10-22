@@ -20,6 +20,8 @@ export function UpdateChecker() {
   }, []);
 
   async function checkForUpdates() {
+    // Lokaler Vorschau-Build: kein Hinweis auf Produktions-Updates
+    if (import.meta.env.VITE_FT_PREVIEW === '1') return;
     try {
       const currentVersion = await getVersion();
       console.log('[UpdateChecker] Current version:', currentVersion);
@@ -114,7 +116,7 @@ export function UpdateChecker() {
     >
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         {/* Warnstreifen */}
-        <div className="h-1 bg-gradient-to-r from-orange-500 to-red-500" />
+        <div className="h-1 bg-gradient-to-r from-red-500 to-red-500" />
 
         <div className="p-6">
           {/* Header */}

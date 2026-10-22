@@ -2009,7 +2009,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
       {/* ── Page Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('laboratoryPanel.title')}</h1>
+          <h1 className="ft-h1">{t('laboratoryPanel.title')}</h1>
           <p className="text-gray-400 mt-1">{t('laboratoryPanel.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -2095,10 +2095,10 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     {/* Engine Toggle */}
                     <div className="space-y-3">
                       <label className="block text-sm font-medium text-white">{t('laboratoryPanel.setup.engineLabel')}</label>
-                      <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
-                        {([['engine', t('laboratoryPanel.setup.engineStandard'), Play, 'amber'], ['dev', t('laboratoryPanel.setup.engineDev'), Code2, 'blue']] as const).map(([val, label, Icon, col]) => (
-                          <button key={val} onClick={() => setEngineMode(val as typeof engineMode)}
-                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${engineMode === val ? (col === 'amber' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30') : 'text-gray-400 hover:text-white'}`}>
+                      <div className="ft-seg w-full" role="group">
+                        {([['engine', t('laboratoryPanel.setup.engineStandard'), Play], ['dev', t('laboratoryPanel.setup.engineDev'), Code2]] as const).map(([val, label, Icon]) => (
+                          <button key={val} onClick={() => setEngineMode(val as typeof engineMode)} aria-pressed={engineMode === val}
+                            className={`ft-seg-item flex-1 ${engineMode === val ? 'is-active' : ''}`}>
                             <Icon className="w-3.5 h-3.5" />{label}
                           </button>
                         ))}
@@ -2271,7 +2271,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                     <button
                       onClick={handleStartSession}
                       disabled={!selectedModel || !selectedVersionId || samples.length === 0 || (engineMode === 'engine' && !detectedPlugin) || (engineMode === 'dev' && !devScript.trim())}
-                      className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
+                      className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
                     >
                       <FlaskConical className="w-4 h-4" /> {t('laboratoryPanel.setup.startButton', { count: samples.length })}
                     </button>
@@ -2333,7 +2333,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   </div>
                 </div>
                 <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-pink-500 to-rose-500 transition-all duration-300"
+                  <div className="h-full rounded-full bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] transition-all duration-300"
                     style={{ width: `${((currentSampleIdx) / samples.length) * 100}%` }} />
                 </div>
               </div>
@@ -2514,7 +2514,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                   {/* Test-Button */}
                   {!alreadyRated ? (
                     <button onClick={handleRunTest} disabled={testing}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-60">
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-60">
                       {testing ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('laboratoryPanel.testing.testingButton')}</> : <><Play className="w-4 h-4" /> {t('laboratoryPanel.testing.testButton')}</>}
                     </button>
                   ) : (

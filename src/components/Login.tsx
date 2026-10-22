@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Key, Lock, AlertCircle, Eye, EyeOff, ExternalLink, Info } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import BrandMark from './ui/BrandMark';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface LoginProps {
@@ -58,26 +59,14 @@ export default function Login({ onLogin }: LoginProps) {
 
         {/* Logo & Header */}
         <div className="text-center mb-8">
-          <div
-            className="inline-flex items-center justify-center mb-4 rounded-[18px] shadow-2xl"
-            style={{
-              background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #3b82f6 100%)',
-              width: 72,
-              height: 72,
-              boxShadow: '0 0 32px rgba(168,85,247,0.45), 0 8px 32px rgba(0,0,0,0.4)',
-            }}
-          >
-            <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 40, fontWeight: 900, color: 'white', lineHeight: 1, userSelect: 'none' }}>
-              F
-            </span>
-          </div>
-          <h1 className="text-4xl font-bold text-white mb-2">FrameTrain</h1>
+          <div className="inline-flex mb-4"><BrandMark size={64} className="ft-mark-shadow" /></div>
+          <h1 className="text-[30px] font-semibold tracking-[-0.035em] text-white mb-1">FrameTrain</h1>
           <p className="text-gray-400">{t('login.tagline')}</p>
         </div>
 
         {/* Login Card */}
-        <form onSubmit={handleSubmit} className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 shadow-2xl">
-          <h2 className="text-2xl font-bold text-white mb-6">{t('login.title')}</h2>
+        <form onSubmit={handleSubmit} className="ft-sheet rounded-[20px] p-8">
+          <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-white mb-6">{t('login.title')}</h2>
 
           {/* API-Key */}
           <div className="mb-5">

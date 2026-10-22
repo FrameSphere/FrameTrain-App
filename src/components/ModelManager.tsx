@@ -301,7 +301,7 @@ export function UnknownModelDialog({ model, mode = 'unknown', userId, userEmail,
   return (
     <ModalPortal><div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[85vh]">
-        <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
+        <div className="h-1 bg-gradient-to-r from-amber-500 to-amber-500" />
         <div className="p-6 pb-4 flex items-start gap-4">
           <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center flex-shrink-0">
             <Puzzle className="w-5 h-5 text-amber-400" />
@@ -436,7 +436,7 @@ function DeleteConfirmDialog({ modelName, onConfirm, onCancel }: DeleteDialogPro
   return (
     <ModalPortal><div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-        <div className="h-1 bg-gradient-to-r from-red-500 to-orange-500" />
+        <div className="h-1 bg-gradient-to-r from-red-500 to-red-500" />
         <div className="p-6 space-y-5">
           <div className="flex items-start gap-4">
             <div className="w-10 h-10 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center flex-shrink-0">
@@ -921,7 +921,7 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('modelManager.title')}</h1>
+          <h1 className="ft-h1">{t('modelManager.title')}</h1>
           <p className="text-gray-400 mt-1">{t('modelManager.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">

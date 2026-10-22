@@ -170,7 +170,7 @@ ${graphCtx}
   return (
     <div className="w-96 max-h-[540px] bg-gray-900 border border-purple-500/60 shadow-2xl rounded-xl overflow-hidden flex flex-col">
       {/* Header */}
-      <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-3 flex justify-between items-center flex-shrink-0">
+      <div className="bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] p-3 flex justify-between items-center flex-shrink-0">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-white" />
           <h3 className="font-bold text-white">{t('synapseAI.coach.title')}</h3>

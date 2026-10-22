@@ -15,6 +15,8 @@ function isQuickChatWindow(): boolean {
   try { return getCurrentWindow().label === 'quickchat'; } catch { return false; }
 }
 
+const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
+
 // Globales Auto-Error-Reporting an den Manager (speist die Auto-Fix-Pipeline).
 installGlobalErrorReporting();
 
@@ -28,7 +30,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           </LanguageProvider>
         </ThemeProvider>
       ) : (
-        <App />
+        <>
+          {/* macOS: Overlay-Titelleiste (tauri.conf.json). Der obere Rand bleibt
+              auf jeder Seite ziehbar; die Ampel liegt links darueber. */}
+          {IS_MAC && <div data-tauri-drag-region className="fixed top-0 inset-x-0 h-7 z-[45]" aria-hidden="true" />}
+          <App />
+        </>
       )}
     </AppErrorBoundary>
   </React.StrictMode>,

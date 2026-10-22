@@ -1,0 +1,165 @@
+/* ── FrameTrain Neuron: Tokens ────────────────────────────────────────────────
+   Ein Theme setzt nur den Akzent (--ft-accent, --ft-accent-hover,
+   --ft-accent-text, --ft-on-accent) und die Basis (Night oder Day, ueber
+   data-theme). Alles andere leitet sich hier ab. tailwind.config.js bildet
+   white/gray/purple … auf diese Tokens ab, deshalb wirkt jede Aenderung hier
+   auf die ganze App.
+
+   Regeln: Orange (--ft-out) nur fuer Laufendes und Ergebnisse, nie fuer
+   Knoepfe. Glas nur fuer Seitenleiste und schwebende Panels. Kein Glow. */
+
+:root {
+  /* Standard-Akzent, falls das Theme noch nicht geladen ist (Indigo) */
+  --ft-accent: #4f53f0;
+  --ft-accent-hover: #5d61ff;
+  --ft-accent-text: #a3a6ff;
+  --ft-on-accent: #ffffff;
+  --ft-out: #ff7a3d;
+  --ft-radius-sm: 9px;
+  --ft-radius-md: 14px;
+  --ft-radius-lg: 20px;
+  --ft-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* ── Night (Standard) ───────────────────────────────────────────────────── */
+:root,
+.ft-night {
+  --ft-wall-base: #1c1c21;
+  --ft-panel: #121214;
+  --ft-panel-2: #19191c;
+  --ft-ink: #f4f4f6;
+  --ft-muted: #a3a3ad;
+  --ft-faint: #878791;
+  --ft-line: rgba(255, 255, 255, 0.075);
+  --ft-line-strong: rgba(255, 255, 255, 0.16);
+  --ft-hover: rgba(255, 255, 255, 0.055);
+  --ft-sel: rgba(255, 255, 255, 0.085);
+  --ft-glass: rgba(44, 44, 50, 0.62);
+  --ft-glass-edge: rgba(255, 255, 255, 0.09);
+  --ft-glass-hi: rgba(255, 255, 255, 0.1);
+  --ft-out-text: #ff8a52;
+  --ft-ok: #4fc3a1;
+  --ft-warn: #e9b949;
+  --ft-bad: #ff6259;
+  --ft-shadow: rgba(0, 0, 0, 0.55);
+  --ft-wall-mix: 94%;
+
+  --ft-n-50: #f7f7f9;
+  --ft-n-100: #f2f2f4;
+  --ft-n-200: #e4e4e9;
+  --ft-n-300: #cfcfd6;
+  --ft-n-400: #a3a3ad;
+  --ft-n-500: #8b8b95;
+  --ft-n-600: #80808a;
+  --ft-n-700: #3a3a42;
+  --ft-n-800: #26262c;
+  --ft-n-900: #18181c;
+  --ft-n-950: #0f0f12;
+  color-scheme: dark;
+}
+
+/* ── Day ────────────────────────────────────────────────────────────────── */
+:root[data-theme="light"],
+.ft-day {
+  --ft-wall-base: #e6e6ec;
+  --ft-panel: #ffffff;
+  --ft-panel-2: #f6f6f8;
+  --ft-ink: #111114;
+  --ft-muted: #55555f;
+  --ft-faint: #696973;
+  --ft-line: rgba(14, 14, 20, 0.08);
+  --ft-line-strong: rgba(14, 14, 20, 0.18);
+  --ft-hover: rgba(14, 14, 20, 0.045);
+  --ft-sel: rgba(14, 14, 20, 0.07);
+  --ft-glass: rgba(255, 255, 255, 0.58);
+  --ft-glass-edge: rgba(255, 255, 255, 0.85);
+  --ft-glass-hi: rgba(255, 255, 255, 0.95);
+  --ft-out-text: #b8461a;
+  --ft-ok: #17704f;
+  --ft-warn: #8a6400;
+  --ft-bad: #c0322a;
+  --ft-shadow: rgba(20, 20, 40, 0.16);
+  --ft-wall-mix: 95%;
+
+  --ft-n-50: #0b0b0e;
+  --ft-n-100: #111114;
+  --ft-n-200: #1d1d22;
+  --ft-n-300: #33333b;
+  --ft-n-400: #55555f;
+  --ft-n-500: #63636d;
+  --ft-n-600: #6c6c76;
+  --ft-n-700: #c9c9d1;
+  --ft-n-800: #ececf1;
+  --ft-n-900: #ffffff;
+  --ft-n-950: #f6f6f8;
+  color-scheme: light;
+}
+
+/* ── Abgeleitete Werte ──────────────────────────────────────────────────────
+   Steht bewusst auf :root UND .ft-scope: Theme-Vorschauen setzen ihren
+   eigenen Akzent und brauchen die Ableitungen dort neu berechnet. */
+:root,
+.ft-scope {
+  --ft-wall: color-mix(in oklab, var(--ft-wall-base) var(--ft-wall-mix), var(--ft-accent));
+  --ft-accent-soft: color-mix(in srgb, var(--ft-accent) 16%, transparent);
+  --ft-accent-line: color-mix(in srgb, var(--ft-accent) 38%, transparent);
+
+  --ft-a-50: color-mix(in oklab, var(--ft-accent-text) 55%, var(--ft-ink));
+  --ft-a-100: color-mix(in oklab, var(--ft-accent-text) 65%, var(--ft-ink));
+  --ft-a-200: color-mix(in oklab, var(--ft-accent-text) 80%, var(--ft-ink));
+  --ft-a-300: var(--ft-accent-text);
+  --ft-a-400: var(--ft-accent-text);
+  --ft-a-500: var(--ft-accent);
+  --ft-a-600: var(--ft-accent);
+  --ft-a-700: var(--ft-accent-hover);
+  --ft-a-800: color-mix(in oklab, var(--ft-accent) 45%, var(--ft-panel));
+  --ft-a-900: color-mix(in oklab, var(--ft-accent) 28%, var(--ft-panel));
+  --ft-a-950: color-mix(in oklab, var(--ft-accent) 16%, var(--ft-panel));
+}
+
+/* Day: helle Textstufen des Akzents gibt es auf Weiss nicht */
+:root[data-theme="light"],
+.ft-day {
+  --ft-a-50: var(--ft-accent-text);
+  --ft-a-100: var(--ft-accent-text);
+  --ft-a-200: var(--ft-accent-text);
+  --ft-a-800: color-mix(in oklab, var(--ft-accent) 22%, var(--ft-panel));
+  --ft-a-900: color-mix(in oklab, var(--ft-accent) 12%, var(--ft-panel));
+  --ft-a-950: color-mix(in oklab, var(--ft-accent) 7%, var(--ft-panel));
+}
+
+/* ── Synapse Builder ────────────────────────────────────────────────────────
+   Der Builder hat sein eigenes dunkles Navy-Design. Solange er offen ist,
+   uebernimmt die ganze Huelle (Wand, Seitenleiste, Flaeche) diese Farben,
+   auch im Day-Theme; Dashboard.tsx setzt dafuer .ft-synapse. */
+.ft-synapse {
+  --ft-wall-base: #05070c;
+  --ft-wall-mix: 100%;
+  --ft-panel: #0a0e17;
+  --ft-panel-2: #0d1117;
+  --ft-ink: #e6e9f0;
+  --ft-muted: #94a0b8;
+  --ft-faint: #7a869e;
+  --ft-line: #1e293b;
+  --ft-line-strong: #334155;
+  --ft-hover: rgba(148, 163, 184, 0.08);
+  --ft-sel: rgba(129, 140, 248, 0.14);
+  --ft-glass: rgba(13, 17, 27, 0.86);
+  --ft-glass-edge: #1e293b;
+  --ft-glass-hi: rgba(255, 255, 255, 0.05);
+  --ft-accent-text: #a5b4fc;
+  --ft-shadow: rgba(0, 0, 0, 0.6);
+
+  --ft-n-50: #f7f7f9;
+  --ft-n-100: #eef0f5;
+  --ft-n-200: #dfe3eb;
+  --ft-n-300: #c3cad8;
+  --ft-n-400: #94a0b8;
+  --ft-n-500: #7f8aa2;
+  --ft-n-600: #75809a;
+  --ft-n-700: #334155;
+  --ft-n-800: #1e293b;
+  --ft-n-900: #0d1117;
+  --ft-n-950: #080c12;
+  color-scheme: dark;
+}

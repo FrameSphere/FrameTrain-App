@@ -91,11 +91,11 @@ export default function GlobalTrainingProgress({ onNavigateToTraining }: GlobalT
 
   return (
     <div
-      className="fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-900 border border-white/10 shadow-2xl cursor-pointer hover:bg-slate-800 transition-all group"
+      className="ft-glass fixed bottom-5 right-5 z-50 flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-full cursor-pointer transition-transform active:scale-[0.98] group"
       onClick={onNavigateToTraining}
       title={t('globalTrainingProgress.tooltip')}
     >
-      {isRunning   && <Loader2     className="w-4 h-4 text-emerald-400 animate-spin flex-shrink-0" />}
+      {isRunning   && <Loader2     className="w-4 h-4 animate-spin flex-shrink-0" style={{ color: 'var(--ft-out)' }} />}
       {isCompleted && <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
       {isFailed    && <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />}
       {isStopped   && <Square      className="w-4 h-4 text-gray-400 flex-shrink-0" />}
@@ -107,10 +107,10 @@ export default function GlobalTrainingProgress({ onNavigateToTraining }: GlobalT
            : isFailed    ? t('globalTrainingProgress.statusFailed')
            : t('globalTrainingProgress.statusStopped')}
         </p>
-        <p className="text-gray-500 text-[10px]">
+        <p className="text-gray-400 font-mono text-[10.5px] tabular-nums">
           E{effectiveTraining.current_epoch}/{effectiveTraining.total_epochs}
           {' · '}
-          <TrendingDown className="w-2.5 h-2.5 inline text-emerald-400" />{' '}
+          <TrendingDown className="w-2.5 h-2.5 inline" style={{ color: 'var(--ft-out-text)' }} />{' '}
           {effectiveTraining.train_loss?.toFixed(4)}
           {' · '}
           {formatTime(effectiveTraining.elapsed_time_seconds)}
@@ -118,9 +118,9 @@ export default function GlobalTrainingProgress({ onNavigateToTraining }: GlobalT
       </div>
 
       {/* Mini-Progressbar */}
-      <div className="w-20 h-1.5 rounded-full bg-white/10 overflow-hidden">
+      <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: 'var(--ft-line-strong)' }}>
         <div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-500 transition-all duration-500"
+          className="h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all duration-500"
           style={{ width: `${Math.min(effectiveTraining.progress_percentage, 100)}%` }}
         />
       </div>

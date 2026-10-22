@@ -139,12 +139,12 @@ function BigLossChart({ points, finished = false }: { points: LossPoint[]; finis
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }}>
       <defs>
         <linearGradient id="trainFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-          <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+          <stop offset="0%" stopColor="var(--ft-out)" stopOpacity="0.25" />
+          <stop offset="100%" stopColor="var(--ft-out)" stopOpacity="0.02" />
         </linearGradient>
         <linearGradient id="valFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#a855f7" stopOpacity="0.15" />
-          <stop offset="100%" stopColor="#a855f7" stopOpacity="0.01" />
+          <stop offset="0%" stopColor="var(--ft-accent-text)" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="var(--ft-accent-text)" stopOpacity="0.01" />
         </linearGradient>
       </defs>
       {gridYValues.map(f => (
@@ -160,20 +160,20 @@ function BigLossChart({ points, finished = false }: { points: LossPoint[]; finis
         </g>
       ))}
       <path d={trainArea} fill="url(#trainFill)" />
-      <path d={trainPath} fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={trainPath} fill="none" stroke="var(--ft-out)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {vals.length > 1 && (
         <>
           <path d={`${valPath} L${toX(points.lastIndexOf(valPts[valPts.length - 1]))},${PAD.t + iH} L${toX(points.indexOf(valPts[0]))},${PAD.t + iH} Z`} fill="url(#valFill)" />
-          <path d={valPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="5,3" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={valPath} fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="5,3" strokeLinejoin="round" strokeLinecap="round" />
         </>
       )}
-      <circle cx={toX(points.length - 1)} cy={toY(last.train_loss)} r="5" fill="#10b981" stroke="rgba(0,0,0,0.4)" strokeWidth="1.5" />
+      <circle cx={toX(points.length - 1)} cy={toY(last.train_loss)} r="5" fill="var(--ft-out)" stroke="rgba(0,0,0,0.4)" strokeWidth="1.5" />
       <g transform={`translate(${PAD.l}, ${H - 10})`}>
-        <circle cx="4" cy="-2" r="4" fill="#10b981" />
+        <circle cx="4" cy="-2" r="4" fill="var(--ft-out)" />
         <text x="14" y="2" fill="rgba(255,255,255,0.45)" fontSize="10">{t('trainingDashboard.chart.legendTrain')}</text>
         {vals.length > 0 && (
           <>
-            <line x1="90" y1="-2" x2="106" y2="-2" stroke="#a855f7" strokeWidth="2" strokeDasharray="4,2" />
+            <line x1="90" y1="-2" x2="106" y2="-2" stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="4,2" />
             <text x="112" y="2" fill="rgba(255,255,255,0.45)" fontSize="10">{t('trainingDashboard.chart.legendVal')}</text>
           </>
         )}
@@ -705,7 +705,7 @@ export default function TrainingDashboard({
         </div>
         {progress && (
           <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
+            <div className={`h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all`} style={{ width: `${percent}%` }} />
           </div>
         )}
         <Maximize2 className="w-3.5 h-3.5 text-gray-500 group-hover:text-white transition-all flex-shrink-0" />
@@ -780,7 +780,7 @@ export default function TrainingDashboard({
                 <span className="font-mono">{Math.round(percent)}%</span>
               </div>
               <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
-                <div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${percent}%` }} />
+                <div className={`h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all`} style={{ width: `${percent}%` }} />
               </div>
               {/* Nach 100% der Trainingsschritte laeuft noch die Abschluss-
                   Evaluierung/Speicherung. Ohne diesen Hinweis sah ein stummer
@@ -825,7 +825,7 @@ export default function TrainingDashboard({
               {completedVersionId && onNavigateToAnalysis && (
                 <button
                   onClick={() => onNavigateToAnalysis(completedVersionId)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:opacity-90 text-white font-semibold text-sm transition-all shadow-lg"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:opacity-90 text-white font-semibold text-sm transition-all shadow-lg"
                 >
                   <BarChart3 className="w-4 h-4" /> {t('trainingDashboard.completed.analyzeButton')}
                 </button>

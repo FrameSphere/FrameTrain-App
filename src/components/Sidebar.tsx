@@ -1,22 +1,21 @@
-import { 
-  LayoutDashboard, 
+import {
   Home,
-  Play, 
-  Upload, 
-  BarChart3, 
-  GitBranch, 
+  Play,
+  Database,
+  BarChart3,
+  GitBranch,
   LogOut,
   Layers,
   Settings as SettingsIcon,
-  User,
   FlaskConical,
   Microscope,
-  Zap,
   Network,
   Server,
+  type LucideIcon,
 } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useTrainingContext } from '../contexts/TrainingContext';
+import BrandMark from './ui/BrandMark';
 
 interface SidebarProps {
   currentView: string;
@@ -25,137 +24,116 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
+/** macOS: Fenster mit Overlay-Titelleiste, die Ampel liegt oben in der Seitenleiste. */
+export const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
+
+interface NavItem { id: string; label: string; icon: LucideIcon; beta?: boolean }
+
 export default function Sidebar({ currentView, onViewChange, userEmail, onLogout }: SidebarProps) {
-  const { currentTheme } = useTheme();
   const { t } = useLanguage();
+  const { state: training } = useTrainingContext();
 
-  // Wenn der Synapse Builder aktiv ist, übernimmt die Sidebar dessen dunkles
-  // Design (Navy + Violet/Indigo-Akzente) mit sanftem Übergang. Verlässt man
-  // den Synapse Builder wieder, geht es zurück zur normalen Theme-Farbe.
-  const isSynapse = currentView === 'synapse';
-  const synapseActiveGradient = 'linear-gradient(to right, #6366f1, #a78bfa)';
+  // Laufendes Training steht direkt am Eintrag, in der Ergebnis-Farbe
+  const job = training.currentJob;
+  const livePct = job && (job.status === 'running' || job.status === 'pending')
+    ? Math.round(job.progress?.progress_percent ?? 0)
+    : null;
 
-  const menuItems = [
-    { id: 'models',     label: t('sidebar.nav.models'),    icon: Layers },
-    { id: 'dataset',    label: t('sidebar.nav.datasets'),  icon: Upload },
-    { id: 'training',   label: t('sidebar.nav.training'),  icon: Play },
-    { id: 'analysis',   label: t('sidebar.nav.analysis'),  icon: BarChart3 },
-    { id: 'tests',      label: t('sidebar.nav.tests'),     icon: FlaskConical },
-    { id: 'laboratory', label: t('sidebar.nav.laboratory'),icon: Microscope },
-    { id: 'hosting',    label: t('sidebar.nav.hosting'),   icon: Server },
-    { id: 'synapse',    label: t('sidebar.nav.synapse'),   icon: Network },
-    { id: 'versions',   label: t('sidebar.nav.versions'),  icon: GitBranch },
+  // Gruppiert nach dem Weg eines Modells: vorbereiten, trainieren, pruefen, nutzen
+  const groups: { title?: string; items: NavItem[] }[] = [
+    { items: [
+      { id: 'home',     label: t('sidebar.home'),            icon: Home },
+      { id: 'models',   label: t('sidebar.nav.models'),      icon: Layers },
+      { id: 'versions', label: t('sidebar.nav.versions'),    icon: GitBranch },
+    ] },
+    { title: t('sidebar.groups.prepare'), items: [
+      { id: 'dataset',  label: t('sidebar.nav.datasets'),    icon: Database },
+    ] },
+    { title: t('sidebar.groups.train'), items: [
+      { id: 'training', label: t('sidebar.nav.training'),    icon: Play },
+      { id: 'analysis', label: t('sidebar.nav.analysis'),    icon: BarChart3 },
+    ] },
+    { title: t('sidebar.groups.check'), items: [
+      { id: 'tests',      label: t('sidebar.nav.tests'),      icon: FlaskConical },
+      { id: 'laboratory', label: t('sidebar.nav.laboratory'), icon: Microscope, beta: true },
+    ] },
+    { title: t('sidebar.groups.use'), items: [
+      { id: 'hosting',  label: t('sidebar.nav.hosting'),     icon: Server },
+      { id: 'synapse',  label: t('sidebar.nav.synapse'),     icon: Network, beta: true },
+    ] },
   ];
 
+  const initial = (userEmail.trim()[0] ?? '?').toUpperCase();
+
   return (
-    <div
-      className="w-64 backdrop-blur-lg flex flex-col transition-colors duration-500 ease-in-out"
-      style={{
-        backgroundColor: isSynapse ? '#0a0e17' : 'rgba(0, 0, 0, 0.2)',
-        borderRight: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}`,
-      }}
-    >
-      {/* Header */}
-      <div
-        className="p-6 transition-colors duration-500 ease-in-out"
-        style={{ borderBottom: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}` }}
-      >
-        <div className="flex items-center gap-3">
-          {/* Home-Button — Rücksprung zur Startseite von jeder Ansicht aus.
-              Zeigt den Aktiv-Zustand, damit "ich bin auf Start" sichtbar bleibt. */}
-          <button
-            onClick={() => onViewChange('home')}
-            title={t('sidebar.home')}
-            aria-label={t('sidebar.home')}
-            aria-current={currentView === 'home' ? 'page' : undefined}
-            className={`p-2 rounded-xl flex-shrink-0 transition-all duration-500 ease-in-out ${
-              currentView === 'home'
-                ? isSynapse
-                  ? 'text-white shadow-lg'
-                  : `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
-                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10'
-            }`}
-            style={currentView === 'home' && isSynapse ? { backgroundImage: synapseActiveGradient } : undefined}
-          >
-            <Home className="w-5 h-5" />
-          </button>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-white leading-tight">FrameTrain</h1>
-            <p className="text-gray-400 text-sm">{t('sidebar.tagline')}</p>
-          </div>
+    <aside className="ft-glass ft-sidebar flex-none w-[244px] rounded-[18px] flex flex-col min-h-0">
+      {/* Kopf: Ampel-Platz (macOS) und Marke. Ziehbar wie eine Titelleiste. */}
+      <div data-tauri-drag-region className={`flex items-center gap-2.5 px-4 ${IS_MAC ? 'pt-[50px]' : 'pt-4'} pb-3`}>
+        <BrandMark size={26} />
+        <div data-tauri-drag-region className="min-w-0 leading-tight">
+          <div data-tauri-drag-region className="text-[15px] font-semibold tracking-[-0.02em] text-white">FrameTrain</div>
+          <div data-tauri-drag-region className="text-[11.5px] text-gray-500">{t('sidebar.tagline')}</div>
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-2">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentView === item.id;
-          
-          return (
-            <button
-              key={item.id}
-              onClick={() => onViewChange(item.id)}
-              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-500 ease-in-out ${
-                isActive
-                  ? isSynapse
-                    ? 'text-white shadow-lg'
-                    : `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
-                  : 'text-gray-300 hover:bg-white/5 hover:text-white'
-              }`}
-              style={isActive && isSynapse ? { backgroundImage: synapseActiveGradient } : undefined}
-            >
-              <Icon className="w-5 h-5" />
-              <span className="font-medium flex items-center gap-1.5">
-                {item.label}
-                {(item.id === 'synapse' || item.id === 'laboratory') && (
-                  <span className={`text-[8px] font-bold px-1 py-0.5 rounded tracking-wide leading-none ${
-                    isActive
-                      ? 'bg-white/20 text-white'
-                      : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                  }`}>BETA</span>
-                )}
-              </span>
-            </button>
-          );
-        })}
+      <nav aria-label="FrameTrain" className="flex-1 min-h-0 overflow-y-auto px-2.5 pb-2">
+        {groups.map((group, gi) => (
+          <div key={gi} className="flex flex-col gap-px">
+            {group.title && <div className="ft-nav-group">{group.title}</div>}
+            {group.items.map(item => {
+              const Icon = item.icon;
+              const active = currentView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onViewChange(item.id)}
+                  aria-current={active ? 'page' : undefined}
+                  className={`ft-nav ${active ? 'is-active' : ''}`}
+                >
+                  <Icon className="ft-nav-icon" strokeWidth={1.8} />
+                  <span className="truncate">{item.label}</span>
+                  {item.id === 'training' && livePct !== null ? (
+                    <span className="ml-auto font-mono text-[11px] tabular-nums" style={{ color: 'var(--ft-out-text)' }}>
+                      {livePct}%
+                    </span>
+                  ) : item.beta ? (
+                    <span className="ml-auto font-mono text-[9.5px] tracking-[0.08em] text-gray-500">BETA</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
-      {/* Bottom Section */}
-      <div
-        className="p-4 space-y-2 transition-colors duration-500 ease-in-out"
-        style={{ borderTop: `1px solid ${isSynapse ? '#1e293b' : 'rgba(255, 255, 255, 0.1)'}` }}
-      >
-        {/* User Info */}
-        <div className="px-4 py-2 mb-2">
-          <div className="flex items-center space-x-2 text-gray-400">
-            <User className="w-4 h-4" />
-            <span className="text-sm truncate">{userEmail}</span>
-          </div>
-        </div>
-
-        {/* Settings Button */}
+      {/* Fuss: Konto, Einstellungen, Abmelden */}
+      <div className="flex items-center gap-2 px-3 py-3 border-t" style={{ borderColor: 'var(--ft-line)' }}>
+        <span
+          className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-semibold text-white flex-none"
+          style={{ background: 'var(--ft-sel)' }}
+          aria-hidden="true"
+        >
+          {initial}
+        </span>
+        <span className="flex-1 min-w-0 truncate text-[12.5px] text-gray-400" title={userEmail}>{userEmail}</span>
         <button
           onClick={() => onViewChange('settings')}
-          className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-500 ease-in-out ${
-            currentView === 'settings'
-              ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
-              : 'text-gray-300 hover:bg-white/5 hover:text-white'
-          }`}
+          aria-label={t('sidebar.settings')}
+          title={t('sidebar.settings')}
+          aria-current={currentView === 'settings' ? 'page' : undefined}
+          className={`ft-icon-btn ${currentView === 'settings' ? 'is-active' : ''}`}
         >
-          <SettingsIcon className="w-5 h-5" />
-          <span className="font-medium">{t('sidebar.settings')}</span>
+          <SettingsIcon className="w-[17px] h-[17px]" strokeWidth={1.8} />
         </button>
-
-        {/* Logout Button */}
         <button
           onClick={onLogout}
-          className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-red-500/20 hover:text-red-300 transition-all"
+          aria-label={t('sidebar.logout')}
+          title={t('sidebar.logout')}
+          className="ft-icon-btn ft-icon-btn-danger"
         >
-          <LogOut className="w-5 h-5" />
-          <span className="font-medium">{t('sidebar.logout')}</span>
+          <LogOut className="w-[17px] h-[17px]" strokeWidth={1.8} />
         </button>
       </div>
-    </div>
+    </aside>
   );
 }

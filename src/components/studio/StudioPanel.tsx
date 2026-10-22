@@ -163,7 +163,7 @@ export default function StudioPanel() {
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('studio.title')}</h1>
+          <h1 className="ft-h1">{t('studio.title')}</h1>
           <p className="text-gray-500 text-sm">{t('studio.subtitle')}</p>
         </div>
         <button onClick={() => setShowCreate(true)}

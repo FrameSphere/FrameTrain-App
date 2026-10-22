@@ -513,7 +513,7 @@ ${editNames.length > 0 ? editNames.map(n => `  - '${n}'`).join('\n') : `  # ${t(
                 <button
                   onClick={saveYaml}
                   disabled={yamlSaving}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-500 text-white text-sm font-medium hover:opacity-90 transition-all disabled:opacity-50"
                 >
                   {yamlSaving
                     ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('datasetFileManager.yaml.savingButton')}</>

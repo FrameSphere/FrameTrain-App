@@ -4,6 +4,8 @@ import { listen } from '@tauri-apps/api/event';
 import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Upload, Trash2, Infinity as InfinityIcon } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, translate, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
+import ThemePicker from './ui/ThemePicker';
+import BrandMark from './ui/BrandMark';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useAISettings, type AIProvider, type TokenBudget, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';
 import { usePageContext } from '../contexts/PageContext';
@@ -1025,7 +1027,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             <button
               onClick={() => updateAISettings({ enabled: !aiSettings.enabled })}
               className={`w-11 h-6 rounded-full transition-all ${
-                aiSettings.enabled ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-white/10'
+                aiSettings.enabled ? 'bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)]' : 'bg-white/10'
               }`}
             >
               <div
@@ -1457,79 +1459,15 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const renderAppearanceTab = () => {
-    // Helper function to determine if a theme is light
-    const isLightTheme = (themeId: string) => {
-      return themeId === 'light-gray' || themeId === 'pure-white';
-    };
-
-    return (
+  const renderAppearanceTab = () => (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.appearance.title')}</h3>
-        <p className="text-gray-400 mb-6">{t('settings.appearance.subtitle')}</p>
-        
-        <div className="grid grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-2">
-          {Object.values(allThemes).map((theme) => {
-            const isLight = isLightTheme(theme.id);
-            const textColor = isLight ? 'text-slate-900' : 'text-white';
-            const descColor = isLight ? 'text-slate-600' : 'text-gray-400';
-            
-            return (
-            <button
-              key={theme.id}
-              onClick={() => handleThemeChange(theme.id)}
-              className={`ft-keep-colors relative p-5 bg-black bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
-                currentTheme.id === theme.id
-                  ? 'border-white/40 shadow-lg ring-2 ring-white/20'
-                  : 'border-white/10 hover:border-white/20'
-              }`}
-            >
-              {/* Checkmark for active theme */}
-              {currentTheme.id === theme.id && (
-                <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-lg">
-                  <Check className="w-4 h-4 text-slate-900" />
-                </div>
-              )}
-              
-              {/* Color preview */}
-              <div className="flex justify-center mb-3 space-x-2">
-                <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${theme.colors.gradient} shadow-md`} />
-                <div className="w-7 h-7 rounded-full shadow-md" style={{ backgroundColor: theme.colors.accent }} />
-              </div>
-              
-              {/* Theme info */}
-              <div className="text-center">
-                <div className={`${textColor} font-semibold text-sm mb-1`}>{theme.name}</div>
-                <div className={`text-xs ${descColor}`}>{t(`themes.${theme.id}`, theme.description)}</div>
-              </div>
-            </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Preview Section */}
-      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.appearance.preview')}</h3>
-        <div className={`p-6 bg-gradient-to-br ${currentTheme.colors.background} rounded-xl border border-white/10`}>
-          <div className="flex items-center space-x-4 mb-4">
-            <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${currentTheme.colors.gradient} flex items-center justify-center`}>
-              <Palette className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <div className="text-white font-semibold">{t('settings.appearance.exampleButton')}</div>
-              <div className="text-gray-400 text-sm">{t('settings.appearance.exampleSubtitle')}</div>
-            </div>
-          </div>
-          <button className={`w-full py-3 px-4 bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold rounded-lg hover:opacity-90 transition-opacity`}>
-            {t('settings.appearance.exampleButton')}
-          </button>
-        </div>
+        <h3 className="text-lg font-semibold text-white mb-1">{t('settings.appearance.title')}</h3>
+        <p className="text-gray-400 text-sm mb-6">{t('settings.appearance.subtitle')}</p>
+        <ThemePicker onSelect={(id) => void handleThemeChange(id)} />
       </div>
     </div>
-    );
-  };
+  );
 
   const renderLanguageTab = () => (
     <div className="space-y-6">
@@ -1557,7 +1495,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                   }}
                   className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 transition-all duration-200 ${
                     active
-                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} border-transparent shadow-lg scale-[1.01]`
+                      ? 'bg-purple-500/15 border-purple-500/70'
                       : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
                   }`}
                 >
@@ -1716,9 +1654,9 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       </div>
 
       {/* GitHub Releases Link */}
-      <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl p-6">
+      <div className="bg-gradient-to-br from-white/[0.03] to-white/[0.03] border border-purple-500/20 rounded-xl p-6">
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center flex-shrink-0">
+          <div className="w-12 h-12 bg-gradient-to-br from-[var(--ft-accent)] to-[var(--ft-accent)] rounded-xl flex items-center justify-center flex-shrink-0">
             <Download className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1">
@@ -1729,7 +1667,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             
             <button
               onClick={handleOpenGitHub}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all"
             >
               <Download className="w-5 h-5" />
               <span>{t('settings.updates.githubReleases')}</span>
@@ -1784,7 +1722,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const renderDocsTab = () => (
     <div className="space-y-6">
       {/* Docs Header Card */}
-      <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/20 rounded-xl p-6">
+      <div className="bg-gradient-to-br from-white/[0.03] to-white/[0.03] border border-blue-500/20 rounded-xl p-6">
         <div className="flex items-center gap-3 mb-3">
           <BookOpen className="w-6 h-6 text-blue-400" />
           <h3 className="text-lg font-semibold text-white">{t('settings.docs.title')}</h3>
@@ -1971,7 +1909,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                       <button
                         onClick={submitTicket}
                         disabled={submitting || !newSubject.trim() || !newMessage.trim()}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:from-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                         {submitting ? t('settings.support.submitting') : t('settings.support.submit')}
@@ -2070,7 +2008,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
                             <div
                               className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                                 m.sender === 'user'
-                                  ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-br-sm'
+                                  ? 'bg-gradient-to-br from-[var(--ft-accent)] to-[var(--ft-accent)] text-white rounded-br-sm'
                                   : 'glass border border-white/10 text-gray-200 rounded-bl-sm'
                               }`}
                             >
@@ -2205,7 +2143,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             </div>
             <div className="h-2 rounded-full bg-white/10 overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-500 transition-all"
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-400 transition-all"
                 style={{ width: `${Math.min(systemInstallProgress.get('system')?.progress ?? 0, 100)}%` }}
               />
             </div>
@@ -2315,28 +2253,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   const renderAboutTab = () => (
     <div className="space-y-6">
       <div className="bg-white/5 rounded-xl p-6 border border-white/10 text-center">
-      <div
-      className="inline-flex items-center justify-center mb-4 rounded-[18px]"
-      style={{
-      background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #3b82f6 100%)',
-      width: 72,
-      height: 72,
-        boxShadow: '0 0 32px rgba(168,85,247,0.45), 0 8px 32px rgba(0,0,0,0.4)',
-      }}
-      >
-      <span
-        style={{
-            fontFamily: 'Arial, sans-serif',
-              fontSize: 40,
-              fontWeight: 900,
-              color: 'white',
-              lineHeight: 1,
-              userSelect: 'none',
-            }}
-          >
-            F
-          </span>
-        </div>
+      <div className="inline-flex mb-4"><BrandMark size={72} className="ft-mark-shadow" /></div>
         <h3 className="text-2xl font-bold text-white mb-2">{t('settings.about.desktopTitle')}</h3>
         <p className="text-gray-400 mb-4">{t('settings.about.versionLabel').replace('{version}', appVersion)}</p>
         <p className="text-sm text-gray-400 max-w-md mx-auto">
@@ -2418,7 +2335,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     <div>
       {/* Header */}
       <div className="mb-8">
-        <h2 className="text-3xl font-bold text-white mb-2">{t('settings.title')}</h2>
+        <h1 className="ft-h1 mb-1.5">{t('settings.title')}</h1>
         <p className="text-gray-400">{t('settings.subtitle')}</p>
       </div>
 
@@ -2444,7 +2361,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
       <div className="grid grid-cols-4 gap-6">
         {/* Sidebar Tabs — bleiben beim Scrollen langer Reiter stehen */}
-        <div className="space-y-2 self-start sticky top-0">
+        <div className="flex flex-col gap-px self-start sticky top-4">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -2453,14 +2370,11 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
-                  isActive
-                    ? `bg-gradient-to-r ${currentTheme.colors.gradient} text-white shadow-lg`
-                    : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white border border-white/10'
-                }`}
+                aria-current={isActive ? 'page' : undefined}
+                className={`ft-nav ${isActive ? 'is-active' : ''}`}
               >
-                <Icon className="w-5 h-5" />
-                <span className="font-medium">{tab.label}</span>
+                <Icon className="ft-nav-icon" strokeWidth={1.8} />
+                <span className="truncate">{tab.label}</span>
               </button>
             );
           })}

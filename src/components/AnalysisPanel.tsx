@@ -438,7 +438,7 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-5 text-xs text-gray-400">
-            <div className="flex items-center gap-1.5"><div className="w-4 h-0.5 bg-emerald-400 rounded" /><span>{t('analysisPanel.charts.bigLoss.legendTrain')}</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-4 h-0.5 bg-output rounded" /><span>{t('analysisPanel.charts.bigLoss.legendTrain')}</span></div>
             {valArr.length > 0 && <div className="flex items-center gap-1.5"><div className="w-5 border-t border-dashed border-purple-400" /><span>{t('analysisPanel.charts.bigLoss.legendVal')}</span></div>}
           </div>
           <button onClick={handleDownload} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title={t('analysisPanel.charts.bigLoss.exportTooltip')}>
@@ -458,8 +458,8 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
       >
         <defs>
           <linearGradient id="trainFillBig" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.01" />
+            <stop offset="0%" stopColor="var(--ft-out)" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="var(--ft-out)" stopOpacity="0.01" />
           </linearGradient>
         </defs>
         {yTicks.map((v, i) => {
@@ -478,14 +478,14 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
           </g>
         ))}
         <path d={trainArea} fill="url(#trainFillBig)" />
-        <path d={trainPath} fill="none" stroke="#10b981" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
-        {valArr.length > 1 && <path d={valPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="6,3" strokeLinejoin="round" strokeLinecap="round" />}
-        <circle cx={toX(logs.length - 1)} cy={toY(last.train_loss)} r="4.5" fill="#10b981" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />
-        {last.val_loss != null && <circle cx={toX(logs.length - 1)} cy={toY(last.val_loss)} r="4" fill="#a855f7" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />}
+        <path d={trainPath} fill="none" stroke="var(--ft-out)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        {valArr.length > 1 && <path d={valPath} fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="6,3" strokeLinejoin="round" strokeLinecap="round" />}
+        <circle cx={toX(logs.length - 1)} cy={toY(last.train_loss)} r="4.5" fill="var(--ft-out)" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />
+        {last.val_loss != null && <circle cx={toX(logs.length - 1)} cy={toY(last.val_loss)} r="4" fill="var(--ft-accent-text)" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" />}
         {hoveredLog && (
           <>
-            <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.train_loss)} r="5.5" fill="none" stroke="#10b981" strokeWidth="2" opacity="0.6" />
-            {hoveredLog.val_loss != null && <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.val_loss)} r="5.5" fill="none" stroke="#a855f7" strokeWidth="2" opacity="0.6" />}
+            <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.train_loss)} r="5.5" fill="none" stroke="var(--ft-out)" strokeWidth="2" opacity="0.6" />
+            {hoveredLog.val_loss != null && <circle cx={toX(logs.indexOf(hoveredLog))} cy={toY(hoveredLog.val_loss)} r="5.5" fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" opacity="0.6" />}
           </>
         )}
             <text x={PAD.l} y={H - 6} textAnchor="start" fill="rgba(255,255,255,0.2)" fontSize="9">{t('analysisPanel.charts.bigLoss.stepStart')}</text>
@@ -494,7 +494,7 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
       <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center justify-between">
           <span className="text-gray-400">{t('analysisPanel.charts.bigLoss.legendTrain')}</span>
-          <span className="text-emerald-400 font-mono font-semibold">{trains[0]?.toFixed(4)} → {trains[trains.length - 1]?.toFixed(4)}</span>
+          <span className="text-output-text font-mono font-semibold">{trains[0]?.toFixed(4)} → {trains[trains.length - 1]?.toFixed(4)}</span>
         </div>
         {valArr.length > 0 && (
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2.5 flex items-center justify-between">
@@ -507,7 +507,7 @@ function BigLossChart({ logs, label, enableSmoothing = false }: { logs: LogEntry
         <div className="mt-3 p-2.5 bg-slate-900/40 border border-slate-700/50 rounded-lg flex items-center gap-3 text-xs">
           <div className="flex-1">
             <div className="text-gray-400 font-semibold">{t('analysisPanel.charts.bigLoss.hoverEpoch').replace('{step}', String(hoveredLog.step)).replace('{epoch}', String(hoveredLog.epoch))}</div>
-            <div className="text-gray-500 text-xs mt-0.5">{t('analysisPanel.charts.bigLoss.hoverTrainLoss')} <span className="text-emerald-400 font-mono">{hoveredLog.train_loss.toFixed(4)}</span></div>
+            <div className="text-gray-500 text-xs mt-0.5">{t('analysisPanel.charts.bigLoss.hoverTrainLoss')} <span className="text-output-text font-mono">{hoveredLog.train_loss.toFixed(4)}</span></div>
             {hoveredLog.val_loss != null && <div className="text-gray-500 text-xs">{t('analysisPanel.charts.bigLoss.hoverValLoss')} <span className="text-purple-400 font-mono">{hoveredLog.val_loss.toFixed(4)}</span></div>}
             {hoveredLog.learning_rate > 0 && <div className="text-gray-500 text-xs">{t('analysisPanel.charts.bigLoss.hoverLr')} <span className="text-blue-400 font-mono">{hoveredLog.learning_rate.toExponential(2)}</span></div>}
           </div>
@@ -704,7 +704,7 @@ function EpochImprovementChart({ summaries }: { summaries: EpochSummary[] }) {
               <span className="text-xs text-gray-500 w-8 shrink-0">E{x.epoch}</span>
               <div className="flex-1 bg-white/5 rounded-full h-2.5 overflow-hidden">
                 <div
-                  className={`h-2.5 rounded-full transition-all ${isGood ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' : 'bg-gradient-to-r from-red-500 to-red-400'}`}
+                  className={`h-2.5 rounded-full transition-all ${isGood ? 'bg-gradient-to-r from-emerald-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-red-500'}`}
                   style={{ width: `${barPct}%` }}
                 />
               </div>
@@ -882,7 +882,7 @@ function EpochDurationBar({ summaries }: { summaries: EpochSummary[] }) {
           <div key={s.epoch} className="flex items-center gap-3">
             <span className="text-xs text-gray-500 w-8 shrink-0">E{s.epoch}</span>
             <div className="flex-1 bg-white/5 rounded-full h-2">
-              <div className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all" style={{ width: `${(s.duration_seconds / maxDur) * 100}%` }} />
+              <div className="h-2 rounded-full bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] transition-all" style={{ width: `${(s.duration_seconds / maxDur) * 100}%` }} />
             </div>
             <span className="text-xs text-gray-400 w-14 text-right">{formatDuration(s.duration_seconds)}</span>
           </div>
@@ -1779,7 +1779,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
   if (loading) return <div className="flex items-center justify-center py-24"><Loader2 className="w-8 h-8 text-gray-400 animate-spin" /></div>;
   if (!modelsWithVersions.length) return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-white">{t('analysisPanel.title')}</h1>
+      <h1 className="ft-h1">{t('analysisPanel.title')}</h1>
       <div className="bg-white/5 rounded-2xl border border-white/10 p-14 text-center">
         <Layers className="w-12 h-12 text-gray-400 mx-auto mb-4 opacity-40" />
         <h3 className="text-xl font-semibold text-white mb-2">{t('analysisPanel.emptyState.noModel.title')}</h3>
@@ -1796,7 +1796,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">{t('analysisPanel.title')}</h1>
+          <h1 className="ft-h1">{t('analysisPanel.title')}</h1>
           <p className="text-gray-400 mt-1 text-sm">{t('analysisPanel.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -2263,7 +2263,7 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
                 </div>
 
                 {aiRecommendedParams ? (
-                  <div className="p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-xl">
+                  <div className="p-4 bg-gradient-to-r from-white/[0.03] to-white/[0.03] border border-purple-500/30 rounded-xl">
                     <div className="flex items-start gap-3 mb-3">
                       <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
                       <div>

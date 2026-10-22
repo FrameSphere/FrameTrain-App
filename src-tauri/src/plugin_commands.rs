@@ -389,7 +389,11 @@ fn check_package_installed(python: &str, package: &str) -> DependencyStatus {
 fn settings_path() -> Result<PathBuf, String> {
     dirs::home_dir()
         .ok_or("Konnte Home-Verzeichnis nicht finden".to_string())
-        .map(|h| h.join(".frametrain").join("settings.json"))
+        .map(|h| {
+            // Vorschau-Build: eigene Einstellungen, damit er die App nicht beeinflusst
+            let dir = if crate::database::is_preview_build() { ".frametrain-preview" } else { ".frametrain" };
+            h.join(dir).join("settings.json")
+        })
 }
 
 fn mark_first_launch_complete() -> Result<(), String> {

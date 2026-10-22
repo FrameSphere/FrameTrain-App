@@ -1914,7 +1914,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
             <div className="flex items-center gap-2">
               {!fileOpen ? (
                 <>
-                  <button onClick={handleNewFile} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 text-xs font-medium transition-all">
+                  <button onClick={handleNewFile} className="flex items-center gap-1.5 px-3 py-1.5 ft-chip text-xs font-medium">
                     <FileCode className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.newFileButton')}
                   </button>
                   <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 text-xs font-medium transition-all">
@@ -1931,7 +1931,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
                       <Save className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.saveButton')}
                     </button>
                   )}
-                  <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-xs font-medium transition-all">
+                  <button onClick={() => setShowLib(true)} className="flex items-center gap-1.5 px-2.5 py-1.5 ft-chip text-xs font-medium">
                     <FolderClosed className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.libraryButton')}
                   </button>
                   <button
@@ -1973,7 +1973,7 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
                     </button>
                   ) : (
                     <button onClick={handleStart} disabled={!script.trim() || !modelInfo}
-                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed`}>
+                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-500 text-white text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed`}>
                       <Play className="w-3.5 h-3.5" /> {t('devTestPanel.toolbar.startButton')}
                     </button>
                   )}

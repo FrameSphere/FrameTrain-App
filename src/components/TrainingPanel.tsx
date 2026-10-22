@@ -427,10 +427,10 @@ export function LossChart({ points }: { points: LossPoint[] }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 128 }}>
       {[0.25, 0.5, 0.75].map(f => <line key={f} x1={PAD.l} x2={W - PAD.r} y1={PAD.t + iH * f} y2={PAD.t + iH * f} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />)}
       {[0, 0.5, 1].map(f => <text key={f} x={PAD.l - 4} y={PAD.t + iH * f + 4} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="9">{(maxV - f * (maxV - minV)).toFixed(3)}</text>)}
-      <path d={trainPath} fill="none" stroke="#10b981" strokeWidth="2" strokeLinejoin="round" />
-      {vals.length > 0 && <path d={valPath} fill="none" stroke="#a855f7" strokeWidth="2" strokeDasharray="4,2" strokeLinejoin="round" />}
-      <circle cx={PAD.l + 4} cy={H - 10} r="4" fill="#10b981" /><text x={PAD.l + 12} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendTrain')}</text>
-      {vals.length > 0 && <><line x1={PAD.l + 70} y1={H - 10} x2={PAD.l + 84} y2={H - 10} stroke="#a855f7" strokeWidth="2" strokeDasharray="3,2" /><text x={PAD.l + 88} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendVal')}</text></>}
+      <path d={trainPath} fill="none" stroke="var(--ft-out)" strokeWidth="2" strokeLinejoin="round" />
+      {vals.length > 0 && <path d={valPath} fill="none" stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="4,2" strokeLinejoin="round" />}
+      <circle cx={PAD.l + 4} cy={H - 10} r="4" fill="var(--ft-out)" /><text x={PAD.l + 12} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendTrain')}</text>
+      {vals.length > 0 && <><line x1={PAD.l + 70} y1={H - 10} x2={PAD.l + 84} y2={H - 10} stroke="var(--ft-accent-text)" strokeWidth="2" strokeDasharray="3,2" /><text x={PAD.l + 88} y={H - 6} fill="rgba(255,255,255,0.5)" fontSize="9">{t('trainingPanel.lossChart.legendVal')}</text></>}
     </svg>
   );
 }
@@ -964,7 +964,7 @@ Beispiel: {"epochs":4,"learning_rate":0.00002,"fp16":true,"use_lora":true,"lora_
                 />
               </div>
 
-              <button onClick={ask} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:opacity-90 text-white font-semibold text-sm transition-all">
+              <button onClick={ask} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] hover:opacity-90 text-white font-semibold text-sm transition-all">
                 <Sparkles className="w-4 h-4" /> {t('trainingPanel.aiAssistant.startButton')}
               </button>
             </div>
@@ -1885,7 +1885,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-white">{t('trainingPanel.title')}</h1><p className="text-gray-400 mt-1">{
+        <div><h1 className="ft-h1">{t('trainingPanel.title')}</h1><p className="text-gray-400 mt-1">{
           // Der feste Untertitel behauptete auch bei YOLO oder Bildmodellen
           // "Sequenzklassifikations-Modelle".
           detection?.supported
@@ -1893,13 +1893,13 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
             : t('trainingPanel.subtitle')
         }</p></div>
         <div className="flex items-center gap-2">
-          <button onClick={handleOpenHistory} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 text-sm transition-all">
+          <button onClick={handleOpenHistory} className="ft-btn ft-btn-ghost">
             <History className="w-4 h-4" />
             {t('trainingPanel.history.title')}
           </button>
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
+          <div className="ft-seg" role="group">
             {(['train', 'dev'] as const).map(m => (
-              <button key={m} onClick={() => setMode(m)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${mode === m ? (m === 'train' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30') : 'text-gray-400 hover:text-white'}`}>
+              <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m} className={`ft-seg-item ${mode === m ? 'is-active' : ''}`}>
                 {m === 'train' ? <><Play className="w-3.5 h-3.5" /> {t('trainingPanel.header.modeTraining')}</> : <><Code2 className="w-3.5 h-3.5" /> {t('trainingPanel.header.modeDev')}</>}
               </button>
             ))}
@@ -2180,7 +2180,7 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
                 </div>
                 <button onClick={() => { setShowDashboardContext(true); setIsDashMinimizedContext(false); }} className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded-lg bg-white/5 transition-all">{t('trainingPanel.progress.openDashboardButton')}</button>
               </div>
-              {progress && <div className="h-2 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full bg-gradient-to-r ${currentTheme.colors.gradient} transition-all`} style={{ width: `${progress.progress_percent}%` }} /></div>}
+              {progress && <div className="h-2 rounded-full bg-white/10 overflow-hidden"><div className={`h-full rounded-full bg-gradient-to-r from-[var(--ft-out)] to-[var(--ft-out)] transition-all`} style={{ width: `${progress.progress_percent}%` }} /></div>}
               {lossPoints.length > 1 && <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3"><p className="text-xs text-gray-500 mb-2">{t('trainingPanel.progress.lossHistory')}</p><LossChart points={lossPoints} /></div>}
             </div>
           )}

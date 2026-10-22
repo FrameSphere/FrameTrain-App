@@ -23,6 +23,8 @@ export function TauriAutoUpdater() {
 
     (async () => {
       try {
+        // Lokaler Vorschau-Build darf sich nie auf die Produktions-Version aktualisieren
+        if (import.meta.env.VITE_FT_PREVIEW === '1') return;
         const os = platform(); // 'windows' | 'linux' | 'macos' | ...
         if (os !== 'windows' && os !== 'linux') return;
 

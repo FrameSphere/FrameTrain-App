@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Check, Download, Package, Clock, HardDrive, Loader2, AlertCircle, XCircle, Globe, ShieldCheck, Cpu, Database, Palette, Brain, ScanEye, MessageSquare, Sparkles, Zap } from 'lucide-react';
 import { useTheme, type Theme, type ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
+import ThemePicker from './ui/ThemePicker';
 import AIAssistantSettingsPanel from './AIAssistantSettingsPanel';
 import { QuickAccessCard } from './hosting/QuickAccessSettings';
 import { useHostingSettings } from './hosting/useHosting';
@@ -338,20 +339,20 @@ const FirstLaunchSetup: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
 
   const getCategoryColor = (category: string): string => {
     const colors: Record<string, string> = {
-      text: 'from-purple-500 to-pink-500',
+      text: 'from-[var(--ft-accent)] to-[var(--ft-accent)]',
       vision: 'from-blue-500 to-cyan-500',
-      audio: 'from-green-500 to-teal-500',
-      tabular: 'from-orange-500 to-red-500',
-      graph: 'from-indigo-500 to-purple-500',
-      multimodal: 'from-pink-500 to-rose-500',
-      rl: 'from-yellow-500 to-orange-500'
+      audio: 'from-emerald-500 to-emerald-500',
+      tabular: 'from-red-500 to-red-500',
+      graph: 'from-[var(--ft-accent)] to-[var(--ft-accent)]',
+      multimodal: 'from-[var(--ft-accent)] to-[var(--ft-accent)]',
+      rl: 'from-amber-500 to-amber-500'
     };
     return colors[category] || 'from-gray-500 to-gray-600';
   };
   
   return (
     <div className={`h-screen flex items-center justify-center bg-gradient-to-br ${currentTheme.colors.background} p-6`}>
-      <div className="w-full max-w-5xl h-[90vh] bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl flex flex-col overflow-hidden">
+      <div className="ft-sheet w-full max-w-5xl h-[90vh] rounded-[20px] flex flex-col overflow-hidden">
 
         {/* Screen 0: Sprachauswahl */}
         {!languageSelected && (
@@ -472,11 +473,11 @@ const PreFlightScreen: React.FC<PreFlightScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <ShieldCheck className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.preflight.title')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.preflight.title')}</h1>
             <p className="text-gray-300">{t('firstLaunch.preflight.subtitle')}</p>
           </div>
         </div>
@@ -625,11 +626,11 @@ const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Globe className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Globe className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{ui.headline}</h1>
+            <h1 className="ft-h1">{ui.headline}</h1>
             <p className="text-gray-300 mt-1">{ui.sub}</p>
           </div>
         </div>
@@ -647,7 +648,7 @@ const LanguageSelectScreen: React.FC<LanguageSelectScreenProps> = ({
                   onClick={() => setSelected(lang)}
                   className={`w-full flex items-center gap-5 px-6 py-5 rounded-2xl border-2 transition-all duration-200 ${
                     active
-                      ? `bg-gradient-to-r ${currentTheme.colors.gradient} border-transparent shadow-lg scale-[1.02]`
+                      ? 'bg-purple-500/15 border-purple-500/70'
                       : 'bg-white/5 border-white/15 hover:bg-white/10 hover:border-white/30'
                   }`}
                 >
@@ -704,18 +705,16 @@ const ThemeSelectScreen: React.FC<ThemeSelectScreenProps> = ({
 }) => {
   const { t } = useLanguage();
 
-  const isLightTheme = (themeId: string) => themeId === 'light-gray' || themeId === 'pure-white';
-
   return (
     <>
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Palette className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Palette className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.theme.headline')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.theme.headline')}</h1>
             <p className="text-gray-300 mt-1">{t('firstLaunch.theme.sub')}</p>
           </div>
         </div>
@@ -723,41 +722,8 @@ const ThemeSelectScreen: React.FC<ThemeSelectScreenProps> = ({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="grid grid-cols-3 gap-4 max-w-4xl mx-auto">
-          {Object.values(allThemes).map((theme) => {
-            const isLight = isLightTheme(theme.id);
-            const textColor = isLight ? 'text-slate-900' : 'text-white';
-            const descColor = isLight ? 'text-slate-600' : 'text-gray-400';
-            const active = currentTheme.id === theme.id;
-
-            return (
-              <button
-                key={theme.id}
-                onClick={() => onSelectTheme(theme.id)}
-                className={`ft-keep-colors relative p-5 bg-black bg-gradient-to-br ${theme.colors.background} border-2 rounded-xl transition-all hover:scale-105 ${
-                  active
-                    ? 'border-white/40 shadow-lg ring-2 ring-white/20'
-                    : 'border-white/10 hover:border-white/20'
-                }`}
-              >
-                {active && (
-                  <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-lg">
-                    <Check className="w-4 h-4 text-slate-900" />
-                  </div>
-                )}
-
-                <div className="flex justify-center mb-3 space-x-2">
-                  <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${theme.colors.gradient} shadow-md`} />
-                  <div className="w-7 h-7 rounded-full shadow-md" style={{ backgroundColor: theme.colors.accent }} />
-                </div>
-
-                <div className="text-center">
-                  <div className={`${textColor} font-semibold text-sm mb-1`}>{theme.name}</div>
-                  <div className={`text-xs ${descColor}`}>{t(`themes.${theme.id}`, theme.description)}</div>
-                </div>
-              </button>
-            );
-          })}
+        <div className="max-w-4xl mx-auto">
+          <ThemePicker onSelect={onSelectTheme} />
         </div>
       </div>
 
@@ -792,11 +758,11 @@ const AISetupScreen: React.FC<AISetupScreenProps> = ({ currentTheme, onContinue,
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Brain className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Brain className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.aiSetup.headline')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.aiSetup.headline')}</h1>
             <p className="text-gray-300 mt-1">{t('firstLaunch.aiSetup.sub')}</p>
           </div>
         </div>
@@ -841,11 +807,11 @@ const QuickAccessScreen: React.FC<{ currentTheme: Theme; onContinue: () => void 
     <>
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Zap className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Zap className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.quick.headline')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.quick.headline')}</h1>
             <p className="text-gray-300 mt-1">{t('firstLaunch.quick.sub')}</p>
           </div>
         </div>
@@ -930,11 +896,11 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Package className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Package className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.python.setupTitle')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.python.setupTitle')}</h1>
             <p className="text-gray-300">{t('firstLaunch.python.setupSubtitle')}</p>
           </div>
         </div>
@@ -974,7 +940,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
                 <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden shadow-inner">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden bg-gradient-to-r ${
-                      isFailed ? 'from-red-500 to-red-400' : 'from-blue-600 to-purple-500'
+                      isFailed ? 'from-red-500 to-red-500' : 'from-[var(--ft-accent)] to-[var(--ft-accent)]'
                     }`}
                     style={{ width: `${Math.max(pct, 4)}%` }}
                   >
@@ -1025,7 +991,7 @@ const PythonSetupScreen: React.FC<PythonSetupScreenProps> = ({
               
               <button
                 onClick={() => window.location.reload()}
-                className="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl transition-all font-semibold"
+                className="w-full px-6 py-3 bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] text-white rounded-xl transition-all font-semibold"
               >
                 {t('firstLaunch.python.restart')}
               </button>
@@ -1079,11 +1045,11 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
       {/* Header */}
       <div className="flex-shrink-0 p-8 border-b border-white/10">
         <div className="flex items-center gap-4 mb-4">
-          <div className={`p-3 bg-gradient-to-br ${currentTheme.colors.gradient} rounded-xl`}>
-            <Package className="w-8 h-8 text-white" />
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-purple-300">
+            <Package className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">{t('firstLaunch.plugins.title')}</h1>
+            <h1 className="ft-h1">{t('firstLaunch.plugins.title')}</h1>
             <p className="text-gray-300">{t('firstLaunch.plugins.subtitle')}</p>
           </div>
         </div>
@@ -1148,7 +1114,7 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                         <div className={`
                           w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all
                           ${isSelected 
-                            ? 'bg-gradient-to-br from-blue-500 to-purple-500 border-transparent' 
+                            ? 'bg-gradient-to-br from-[var(--ft-accent)] to-[var(--ft-accent)] border-transparent' 
                             : 'border-white/30 group-hover:border-white/50'
                           }
                         `}>
@@ -1292,9 +1258,9 @@ const PluginSelectionScreen: React.FC<PluginSelectionScreenProps> = ({
                   <div className="w-full bg-white/10 rounded-full h-4 overflow-hidden shadow-inner">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ease-out bg-gradient-to-r ${
-                        isGlobalComplete ? 'from-green-500 to-green-400' :
-                        isGlobalFailed   ? 'from-red-500 to-red-400'   :
-                        'from-blue-600 to-purple-500'
+                        isGlobalComplete ? 'from-emerald-500 to-emerald-500' :
+                        isGlobalFailed   ? 'from-red-500 to-red-500'   :
+                        'from-[var(--ft-accent)] to-[var(--ft-accent)]'
                       }`}
                       style={{ width: `${pct}%` }}
                     />

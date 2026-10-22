@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import Sidebar from './Sidebar';
+import Sidebar, { IS_MAC } from './Sidebar';
 import HomePanel from './HomePanel';
 import ModelManager from './ModelManager';
 import TrainingPanel from './TrainingPanel';
@@ -20,7 +20,6 @@ import StudioPanel from './studio/StudioPanel';
 import HostingPanel from './hosting/HostingPanel';
 import { listen } from '@tauri-apps/api/event';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useTheme } from '../contexts/ThemeContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 
 interface UserData {
@@ -40,7 +39,6 @@ type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('home');
   const [initialAnalysisVersionId, setInitialAnalysisVersionId] = useState<string | null>(null);
-  const { currentTheme } = useTheme();
 
   const {
     state: trainingState,
@@ -125,7 +123,12 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
   };
 
   return (
-    <div className={`flex h-screen bg-gradient-to-br ${currentTheme.colors.background}`}>
+    // Fensterwand (getoent mit dem Akzent), darauf Glas-Seitenleiste und eine
+    // deckende Arbeitsflaeche. Ziehbarer Fensterrand: main.tsx.
+    <div
+      className={`ft-shell flex h-screen gap-2 p-2 ${currentView === 'synapse' ? 'ft-scope ft-synapse' : ''}`}
+      style={{ background: 'var(--ft-wall)' }}
+    >
       <Sidebar 
         // Das Studio ist eine Unterseite der Datensaetze — in der Seitenleiste
         // bleibt deshalb "Datensaetze" markiert statt gar nichts.
@@ -135,8 +138,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         onLogout={onLogout}
       />
       
-      <main className={`flex-1 ${currentView === 'synapse' ? 'overflow-hidden' : 'overflow-auto p-8 pb-28'}`}>
-        <div className={currentView === 'synapse' ? 'h-full' : 'max-w-7xl mx-auto'}>
+      <main className={`ft-sheet relative flex-1 min-w-0 rounded-[18px] ${currentView === 'synapse' ? `overflow-hidden flex flex-col ${IS_MAC ? 'pt-5' : ''}` : 'overflow-auto'}`}>
+        <div className={currentView === 'synapse' ? 'flex-1 min-h-0' : 'max-w-7xl mx-auto px-8 pt-7 pb-28'}>
           {renderView()}
         </div>
       </main>

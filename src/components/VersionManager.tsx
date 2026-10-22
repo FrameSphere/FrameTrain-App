@@ -759,7 +759,7 @@ function VersionsModal({
                 disabled={loading}
                 className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all disabled:opacity-50 group"
               >
-                <div className="p-3 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg group-hover:scale-110 transition-transform">
+                <div className="p-3 bg-gradient-to-r from-emerald-500 to-emerald-500 rounded-lg group-hover:scale-110 transition-transform">
                   <Download className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1 text-left">
@@ -776,7 +776,7 @@ function VersionsModal({
                   disabled={loading || hfUploading}
                   className="w-full flex items-center gap-4 p-4 bg-blue-500/5 hover:bg-blue-500/10 transition-all disabled:opacity-50 group"
                 >
-                  <div className="p-3 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg group-hover:scale-110 transition-transform">
+                  <div className="p-3 bg-gradient-to-r from-amber-500 to-amber-500 rounded-lg group-hover:scale-110 transition-transform">
                     <Upload className="w-6 h-6 text-white" />
                   </div>
                   <div className="flex-1 text-left">
@@ -827,7 +827,7 @@ function VersionsModal({
                     <button
                       onClick={handleUploadHf}
                       disabled={hfUploading || !hfRepo.trim() || !hfToken.trim()}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-lg text-white font-medium hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-amber-500 to-amber-500 rounded-lg text-white font-medium hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {hfUploading ? (
                         <><Loader2 className="w-4 h-4 animate-spin" />{t('versionManager.exportModal.hfUploading')}</>
@@ -841,11 +841,11 @@ function VersionsModal({
                         <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
                           {hfProgress && hfProgress.percent >= 0 ? (
                             <div
-                              className="h-full bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full transition-all duration-200"
+                              className="h-full bg-gradient-to-r from-amber-500 to-amber-500 rounded-full transition-all duration-200"
                               style={{ width: `${Math.min(100, Math.max(0, hfProgress.percent))}%` }}
                             />
                           ) : (
-                            <div className="h-full w-full bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full animate-pulse" />
+                            <div className="h-full w-full bg-gradient-to-r from-amber-500 to-amber-500 rounded-full animate-pulse" />
                           )}
                         </div>
                         <div className="flex items-center justify-between text-[11px] text-gray-400">
@@ -875,7 +875,7 @@ function VersionsModal({
                 disabled
                 className="w-full flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl opacity-50 cursor-not-allowed"
               >
-                <div className="p-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg">
+                <div className="p-3 bg-gradient-to-r from-[var(--ft-accent)] to-[var(--ft-accent)] rounded-lg">
                   <Upload className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1 text-left">
@@ -1112,7 +1112,7 @@ export default function VersionManager() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">{t('versionManager.title')}</h1>
+          <h1 className="ft-h1">{t('versionManager.title')}</h1>
           <p className="text-gray-400 mt-1">{t('versionManager.subtitle')}</p>
         </div>
         <button

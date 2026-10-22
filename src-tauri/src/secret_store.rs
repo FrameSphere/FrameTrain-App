@@ -14,7 +14,7 @@
 use keyring::{Entry, Error as KeyringError};
 
 /// Fester Service-Name im Schluesselbund (entspricht dem App-Identifier).
-const SERVICE: &str = "com.frametrain.desktop";
+const SERVICE: &str = crate::database::APP_ID;
 
 fn entry(key: &str) -> Result<Entry, String> {
     Entry::new(SERVICE, key).map_err(|e| format!("Schluesselbund nicht verfuegbar: {}", e))
