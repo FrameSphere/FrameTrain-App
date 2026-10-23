@@ -14,12 +14,14 @@ import { useLanguage } from '../../contexts/LanguageContext';
  */
 
 const INTERACTIVE = 'button, a[href], input, textarea, select, [role="button"], [role="switch"], [contenteditable="true"]';
-/** Wie lange die Kapsel nach dem Verlassen noch angehoben bleibt. */
-const SETTLE_MS = 650;
+/** Wie lange die Kapsel nach dem Verlassen noch angehoben bleibt — kurz,
+ *  damit sie nach einem versehentlichen Darueberfahren gleich wieder sitzt. */
+const SETTLE_MS = 220;
 /** Wie lange sie nach einem Klick auf den Knopf darunter weg bleibt. */
 const AWAY_MS = 4000;
-/** Hubhoehe beim Anheben — Kapselhoehe plus etwas Luft. */
-const LIFT_PX = 54;
+/** Hubhoehe beim Anheben — nur ein Stueck, gerade genug, um den Knopf darunter
+ *  sichtbar und an seiner Unterkante klickbar zu machen. */
+const LIFT_PX = 30;
 
 /** Das Bedienelement unter der Kapsel (ohne die Kapsel selbst), sonst null. */
 export function findCoveredControl(capsule: HTMLElement): Element | null {
@@ -76,7 +78,7 @@ export default function CoachCapsule({ onOpen, title, children }: {
     const inside = (el: Element | null, x: number, y: number) => {
       if (!el) return false;
       const r = el.getBoundingClientRect();
-      return x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6;
+      return x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4;
     };
     const onMove = (e: MouseEvent) => {
       if (inside(capRef.current, e.clientX, e.clientY) || inside(coveredRef.current, e.clientX, e.clientY)) {
@@ -97,11 +99,15 @@ export default function CoachCapsule({ onOpen, title, children }: {
         awayTimer.current = window.setTimeout(() => setAway(false), AWAY_MS);
       }
     };
+    // Maus verlaesst das Fenster: kein mousemove mehr, also sofort absetzen.
+    const onLeaveWindow = () => { clearSettle(); setLifted(false); };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('click', onClick, true);
+    document.documentElement.addEventListener('mouseleave', onLeaveWindow);
     return () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('click', onClick, true);
+      document.documentElement.removeEventListener('mouseleave', onLeaveWindow);
     };
   }, [lifted]);
 
@@ -115,7 +121,7 @@ export default function CoachCapsule({ onOpen, title, children }: {
   return (
     <>
       {lifted && !hidden && (
-        <span className="ft-coach-hint fixed right-6 z-40 text-[11.5px] text-gray-400 pointer-events-none" style={{ bottom: 20 + LIFT_PX + 46 }}>
+        <span className="ft-coach-hint fixed right-6 z-40 text-[11.5px] text-gray-400 pointer-events-none" style={{ bottom: 20 + LIFT_PX + 48 }}>
           {t('aiCoach.capsule.yieldHint')}
         </span>
       )}
@@ -129,7 +135,7 @@ export default function CoachCapsule({ onOpen, title, children }: {
         data-state={hidden ? 'hidden' : lifted ? 'lifted' : 'rest'}
         className="ft-coach-capsule group ft-glass ft-press fixed bottom-5 right-5 h-11 pl-3.5 pr-4 rounded-full flex items-center gap-2.5 z-40 text-[13.5px] font-semibold text-white"
         style={{
-          transform: hidden ? 'translateX(160px)' : lifted ? `translateY(-${LIFT_PX}px) rotate(-4deg)` : undefined,
+          transform: hidden ? 'translateX(160px)' : lifted ? `translateY(-${LIFT_PX}px) rotate(-2deg)` : undefined,
           opacity: hidden ? 0 : 1,
           pointerEvents: hidden ? 'none' : undefined,
         }}
