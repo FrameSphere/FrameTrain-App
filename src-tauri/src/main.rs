@@ -332,6 +332,8 @@ fn main() {
             hosting_manager::hosting_chat_append,
             hosting_desktop::hosting_capture_screenshot,
             hosting_desktop::hosting_open_screen_permission,
+            hosting_desktop::hosting_reset_screen_permission,
+            hosting_desktop::hosting_restart_app,
             hosting_desktop::hosting_show_quickchat,
             hosting_desktop::hosting_hide_quickchat,
             hosting_desktop::hosting_quickchat_resize,

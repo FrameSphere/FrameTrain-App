@@ -4323,8 +4323,10 @@
         "video": "Video anhängen oder hineinziehen",
         "tensor": "Zahlen, z. B. 0.5, 1.2, 3.0"
       },
-      "screenPermission": "macOS erlaubt FrameTrain die Bildschirmaufnahme noch nicht. Erlaube sie unter Datenschutz & Sicherheit → Bildschirmaufnahme und starte FrameTrain neu.",
-      "openSettings": "Einstellungen öffnen"
+      "screenPermission": "macOS erlaubt FrameTrain die Bildschirmaufnahme noch nicht. Erlaube sie unter Datenschutz & Sicherheit → Bildschirmaufnahme und starte FrameTrain neu. Ist der Schalter schon an, gilt er nach einem Update nicht mehr: Freigabe zurücksetzen, Schalter neu einschalten, neu starten.",
+      "openSettings": "Einstellungen öffnen",
+      "resetPermission": "Freigabe zurücksetzen",
+      "restartApp": "Neu starten"
     },
     "result": {
       "copy": "Kopieren",

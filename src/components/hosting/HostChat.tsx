@@ -485,10 +485,20 @@ export function Composer({ host, sending, onSend, compact = false, autoFocus = f
         <p className={`text-xs text-amber-300 select-text ${compact ? 'px-3 pb-1.5' : 'mt-1.5'}`}>
           {hint}
           {needsScreenPermission && (
-            <button type="button" onClick={() => { void invoke('hosting_open_screen_permission').catch(() => {}); }}
-              className="ml-2 underline underline-offset-2 text-white hover:text-amber-100">
-              {t('hosting.composer.openSettings')}
-            </button>
+            <>
+              <button type="button" onClick={() => { void invoke('hosting_open_screen_permission').catch(() => {}); }}
+                className="ml-2 underline underline-offset-2 text-white hover:text-amber-100">
+                {t('hosting.composer.openSettings')}
+              </button>
+              <button type="button" onClick={() => { void invoke('hosting_reset_screen_permission').catch(err => setHint(String(err))); }}
+                className="ml-2 underline underline-offset-2 text-white hover:text-amber-100">
+                {t('hosting.composer.resetPermission')}
+              </button>
+              <button type="button" onClick={() => { void invoke('hosting_restart_app').catch(() => {}); }}
+                className="ml-2 underline underline-offset-2 text-white hover:text-amber-100">
+                {t('hosting.composer.restartApp')}
+              </button>
+            </>
           )}
         </p>
       )}

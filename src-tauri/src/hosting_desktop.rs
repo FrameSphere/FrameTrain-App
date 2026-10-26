@@ -369,7 +369,22 @@ pub fn is_permission_error(stderr: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[cfg(target_os = "macos")]
 fn capture_to(path: &std::path::Path) -> Result<bool, String> {
+    // Vorab pruefen, statt erst den Bereich waehlen zu lassen und dann leer
+    // auszugehen. Request traegt genau diesen Build in die Liste ein (und fragt
+    // beim ersten Mal nach) — der Ad-hoc-Build wechselt mit jedem Release seine
+    // Signatur, ein alter Schalter "an" gilt dann nicht mehr (Live-Test 1.6.2).
+    if !unsafe { CGPreflightScreenCaptureAccess() } {
+        unsafe { CGRequestScreenCaptureAccess() };
+        return Err(SCREEN_PERMISSION.to_string());
+    }
     // -i: Bereich waehlen (Leertaste: Fenster), -x: ohne Ton. Abbruch mit Esc
     // liefert Status 0 ohne Datei.
     let out = Command::new("screencapture").args(["-i", "-x"]).arg(path)
@@ -464,6 +479,33 @@ pub fn hosting_open_screen_permission() {
     let _ = Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         .spawn();
+}
+
+/// Loescht den (veralteten) Eintrag von FrameTrain unter "Bildschirmaufnahme"
+/// und fordert die Freigabe fuer diesen Build neu an. Hilft, wenn der Schalter
+/// an ist, macOS ihn nach einem Update aber nicht mehr anerkennt.
+#[tauri::command]
+pub fn hosting_reset_screen_permission(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let id = app.config().identifier.clone();
+        let st = Command::new("tccutil").args(["reset", "ScreenCapture", &id])
+            .status().map_err(|e| format!("tccutil: {}", e))?;
+        if !st.success() {
+            return Err(format!("tccutil reset ScreenCapture {} fehlgeschlagen", id));
+        }
+        unsafe { CGRequestScreenCaptureAccess() };
+        hosting_open_screen_permission();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    Ok(())
+}
+
+/// Neustart nach erteilter Freigabe — macOS wendet sie erst danach an.
+#[tauri::command]
+pub fn hosting_restart_app(app: tauri::AppHandle) {
+    app.restart();
 }
 
 /// Bildschirmfoto fuer den Schnell-Chat: Fenster verstecken, Bereich waehlen

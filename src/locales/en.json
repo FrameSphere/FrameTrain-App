@@ -4326,8 +4326,10 @@
         "video": "Attach or drop a video",
         "tensor": "Numbers, e.g. 0.5, 1.2, 3.0"
       },
-      "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain.",
-      "openSettings": "Open settings"
+      "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain. If the switch is already on, it no longer applies after an update: reset the permission, turn the switch on again, restart.",
+      "openSettings": "Open settings",
+      "resetPermission": "Reset permission",
+      "restartApp": "Restart"
     },
     "result": {
       "copy": "Copy",
