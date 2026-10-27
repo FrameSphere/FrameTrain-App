@@ -1488,6 +1488,13 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
       setLoading(true);
       const list = await invoke<ModelWithVersionTree[]>('list_models_with_version_tree');
       setModelsWithVersions(list);
+      // Von "Zur Analyse" uebergebene Version hat Vorrang. Vorher ueberschrieb
+      // die Vorwahl unten (nach dem await) die Auswahl wieder — Dev-Train-Laeufe
+      // stehen nicht im Trainingsverlauf, die Seite sprang auf ein anderes Modell.
+      const wanted = initialVersionId
+        ? list.find(m => m.versions.some(v => v.id === initialVersionId))
+        : undefined;
+      if (wanted) { setSelectedModelId(wanted.id); return; }
       // Vorwahl: das zuletzt erfolgreich trainierte Modell. Vorher war es das
       // erste mit irgendeiner Version — die Root-Version eines nie trainierten
       // Modells (z.B. yolo-obb) zeigte dann nur "No Training Data".

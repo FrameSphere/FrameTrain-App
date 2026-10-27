@@ -332,7 +332,7 @@ pub async fn start_dev_training(
             // User hat gestoppt – kein Fehler-/Complete-Event, das Frontend hat die UI bereits aktualisiert.
         } else if success && !json_error {
             let mut data = complete_data.unwrap_or_else(|| serde_json::json!({}));
-            fill_final_metrics(&mut data, &step_logs, step);
+            fill_final_metrics(&mut data, &step_logs, step, Utc::now().timestamp() - started_at_secs);
             let model_path = data.get("model_path").and_then(|v| v.as_str())
                 .filter(|p| std::path::Path::new(p).exists())
                 .unwrap_or(&out_p).to_string();
@@ -605,7 +605,7 @@ fn step_log_entry(data: &serde_json::Value, started_at_secs: i64) -> Option<serd
 /// (final_train_loss, total_epochs, total_steps) — aus den Step-Logs.
 /// Ohne total_epochs > 0 legt save_metrics keinen Eintrag an, und die
 /// Version stuende ohne Kennzahlen in der Liste.
-fn fill_final_metrics(data: &mut serde_json::Value, step_logs: &[serde_json::Value], parsed_steps: u32) {
+fn fill_final_metrics(data: &mut serde_json::Value, step_logs: &[serde_json::Value], parsed_steps: u32, duration_secs: i64) {
     if !data.is_object() { *data = serde_json::json!({}); }
     if !data.get("final_metrics").map(|m| m.is_object()).unwrap_or(false) {
         data["final_metrics"] = serde_json::json!({});
@@ -631,6 +631,10 @@ fn fill_final_metrics(data: &mut serde_json::Value, step_logs: &[serde_json::Val
     if m.get("total_steps").and_then(|v| v.as_i64()).unwrap_or(0) <= 0 {
         let steps = last.and_then(|e| e["step"].as_i64()).unwrap_or(parsed_steps as i64);
         m["total_steps"] = serde_json::json!(steps);
+    }
+    // Ohne Dauer zeigte die Analyse "Training time: -".
+    if m.get("training_duration_seconds").and_then(|v| v.as_i64()).unwrap_or(0) <= 0 {
+        m["training_duration_seconds"] = serde_json::json!(duration_secs.max(1));
     }
 }
 
@@ -673,20 +677,22 @@ mod tests {
             step_log_entry(&serde_json::json!({"step": 10, "epoch": 1, "train_loss": 0.6, "val_loss": 0.5}), 0).unwrap(),
         ];
         let mut data = serde_json::json!({"model_path": "/x", "final_metrics": {"accuracy": 0.8, "val_loss": 0.55, "total_epochs": 1}});
-        fill_final_metrics(&mut data, &logs, 0);
+        fill_final_metrics(&mut data, &logs, 0, 40);
         let m = &data["final_metrics"];
         assert_eq!(m["final_train_loss"], 0.6);
         assert_eq!(m["final_val_loss"], 0.55);
         assert_eq!(m["total_epochs"], 1);
         assert_eq!(m["total_steps"], 10);
         assert_eq!(m["accuracy"], 0.8);
+        assert_eq!(m["training_duration_seconds"], 40);
     }
 
     #[test]
     fn skript_ohne_complete_event_bekommt_trotzdem_metriken() {
         let mut data = serde_json::json!({});
-        fill_final_metrics(&mut data, &[], 3);
+        fill_final_metrics(&mut data, &[], 3, 0);
         assert_eq!(data["final_metrics"]["total_epochs"], 1);
         assert_eq!(data["final_metrics"]["total_steps"], 3);
+        assert_eq!(data["final_metrics"]["training_duration_seconds"], 1);
     }
 }
