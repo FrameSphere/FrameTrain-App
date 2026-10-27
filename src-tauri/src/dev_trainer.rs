@@ -254,6 +254,11 @@ pub async fn start_dev_training(
 
         let mut json_error = false;
         let mut step = 0u32;
+        // Meldet das Skript selbst Fortschritt (JSON), ist der Log-Parser aus.
+        // chronos/HF schreiben trotz eigenem Callback zusaetzlich
+        // {'loss': '1.37', …}-Zeilen; daraus wurden zweite Meldungen ohne
+        // total_steps, die die echten ueberschrieben — "Step 7 / 0", 0 %, keine ETA.
+        let mut script_reports_progress = false;
         // Fuer die Version: Step-Logs (Analyse-Seite) und das complete-Event des
         // Skripts. Die Version entsteht erst nach Exit-Code 0 — ein Skript, das
         // nach "complete" noch abstuerzt, soll keine halbe Version hinterlassen.
@@ -277,6 +282,7 @@ pub async fn start_dev_training(
                         let typ = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
                         match typ {
                             "progress"  => {
+                                script_reports_progress = true;
                                 if let Some(entry) = msg.get("data").and_then(|d| step_log_entry(d, started_at_secs)) {
                                     step_logs.push(entry);
                                 }
@@ -298,7 +304,7 @@ pub async fn start_dev_training(
 
                 // Kein JSON → Loss aus Ausgabe versuchen zu parsen (z.B. "loss: 0.345")
                 // Unterstützt HuggingFace Trainer Output-Format
-                if let Some(loss) = parse_loss_from_line(&line) {
+                if let Some(loss) = parse_loss_from_line(&line).filter(|_| !script_reports_progress) {
                     step += 1;
                     if let Some(entry) = step_log_entry(&serde_json::json!({"step": step, "train_loss": loss}), started_at_secs) {
                         step_logs.push(entry);
