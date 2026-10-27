@@ -680,7 +680,9 @@ fn parse_loss_from_line(line: &str) -> Option<f64> {
         let after = re_sq.or(re_dq)?;
         let after = after.trim_start_matches([' ', ':', '\t']);
         let end = after.find([',', '}', '\n', ' ']).unwrap_or(after.len());
-        after[..end].trim().parse::<f64>().ok()
+        // transformers 5 schreibt die Werte in Anfuehrungszeichen
+        // ({'loss': '0.3582', …}) — ohne trim_matches blieb die Loss-Kurve leer.
+        after[..end].trim().trim_matches(['\'', '"']).parse::<f64>().ok()
     } else {
         None
     }
@@ -689,6 +691,14 @@ fn parse_loss_from_line(line: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loss_wird_auch_in_anfuehrungszeichen_gelesen() {
+        assert_eq!(parse_loss_from_line("{'loss': 0.3452, 'learning_rate': 1e-05}"), Some(0.3452));
+        assert_eq!(parse_loss_from_line("{'loss': '0.3582', 'grad_norm': '15.26', 'epoch': '1'}"), Some(0.3582));
+        assert_eq!(parse_loss_from_line("{\"loss\": \"0.5\"}"), Some(0.5));
+        assert_eq!(parse_loss_from_line("{'train_runtime': '29.09'}"), None);
+    }
 
     #[test]
     fn eval_logs_ohne_train_loss_zaehlen_nicht() {

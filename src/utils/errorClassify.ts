@@ -12,7 +12,9 @@ export type ErrorCategory =
 
 export function classifyError(errorMsg: string): ErrorCategory {
   const e = (errorMsg ?? '').toLowerCase();
-  if (e.includes('cuda out of memory') || e.includes('out of memory') || e.includes('oom'))
+  // "oom" nur als eigenes Wort — sonst landeten "boom", "zoom" oder das
+  // Modell "bloom" bei "Speicher voll".
+  if (e.includes('cuda out of memory') || e.includes('out of memory') || /\boom\b/.test(e))
     return 'memory';
 
   // Label-/Klassenprobleme VOR der Geraete-Pruefung: PyTorch meldet den
@@ -62,6 +64,12 @@ export function classifyError(errorMsg: string): ErrorCategory {
       || e.includes('zerodivisionerror') || e.includes('recursionerror'))
     return 'code';
 
+  // Form-/Dimensionsfehler (RuntimeError aus torch) sind Code-Fehler. Ein
+  // Chronos-Skript mit "einsum(): the number of subscripts … dimensions"
+  // landete vorher wegen "quantile_loss(" im Traceback bei "NaN/Inf".
+  if (/number of (subscripts|dimensions)|size mismatch|shape mismatch|mat1 and mat2|must match the size|cannot be multiplied|expected input.*to have/.test(e))
+    return 'code';
+
   // Nur echte Datei-/Dataset-Meldungen. Ein blosses "path" irgendwo im
   // Traceback reicht nicht.
   if (e.includes('filenotfounderror') || e.includes('file not found')
@@ -71,7 +79,9 @@ export function classifyError(errorMsg: string): ErrorCategory {
     return 'dataset';
 
   // \b-Grenzen: sonst matchen deutsche Woerter wie "Einfach" oder "Finanzen".
-  if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || e.includes('loss'))
+  // "loss" nur zusammen mit NaN/Inf — ein Funktionsname wie quantile_loss im
+  // Traceback ist kein numerisches Problem.
+  if (/\bnan\b|\binf\b/.test(e) || e.includes('gradient') || /\bloss\b[^\n]*\b(nan|inf)\b/.test(e))
     return 'config';
 
   return 'unknown';

@@ -9,20 +9,28 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
-const cache = new Map<string, string>();
+// Kurz zwischenspeichern: Die Beschreibung enthaelt die installierten Pakete.
+// Ohne Ablauf blieb "chronos-forecasting NICHT installiert" bis zum
+// App-Neustart stehen, obwohl es laengst installiert war.
+const CACHE_TTL_MS = 60_000;
+const cache = new Map<string, { text: string; at: number }>();
+const fresh = (key: string) => {
+  const hit = cache.get(key);
+  return hit && Date.now() - hit.at < CACHE_TTL_MS ? hit.text : null;
+};
 
 /** Fakten zu Modell und Dataset; null solange sie laden oder nicht lesbar sind. */
 export function useDevContext(modelPath: string, datasetPath?: string): string | null {
   const key = `${modelPath}\u0000${datasetPath ?? ''}`;
-  const [text, setText] = useState<string | null>(() => cache.get(key) ?? null);
+  const [text, setText] = useState<string | null>(() => fresh(key));
   useEffect(() => {
     if (!modelPath) { setText(null); return; }
-    const hit = cache.get(key);
+    const hit = fresh(key);
     if (hit) { setText(hit); return; }
     let alive = true;
     setText(null);
     invoke<string>('describe_dev_context', { modelPath, datasetPath: datasetPath || null })
-      .then(t => { cache.set(key, t); if (alive) setText(t); })
+      .then(t => { cache.set(key, { text: t, at: Date.now() }); if (alive) setText(t); })
       .catch(() => { if (alive) setText(null); });
     return () => { alive = false; };
   }, [key, modelPath, datasetPath]);

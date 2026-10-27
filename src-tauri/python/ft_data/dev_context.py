@@ -31,7 +31,7 @@ PACKAGES = (
     ("chronos", "chronos-forecasting"), ("sentence_transformers", "sentence-transformers"),
     ("diffusers", "diffusers"), ("bitsandbytes", "bitsandbytes"),
 )
-MAX_CHARS = 4000
+MAX_CHARS = 6000
 
 
 def _short(v, n: int = 60) -> str:
@@ -165,6 +165,84 @@ def describe_dataset(path: Path) -> List[str]:
     return out
 
 
+# Modelle, deren Training ueber eine eigene Bibliothek laeuft. Ohne deren API
+# baute die KI fuer Chronos-2 dreimal einen eigenen Loop um das Modell-Innere
+# (encoder(inputs_embeds=…), group_ids …) und scheiterte jedes Mal — dabei
+# bringt chronos-forecasting mit Chronos2Pipeline.fit das Fine-Tuning mit.
+# Signaturen werden zur Laufzeit gelesen, damit sie zur installierten Version passen.
+LIBRARY_APIS = {
+    "Chronos2Pipeline": {
+        "pip": "chronos-forecasting",
+        "objects": [
+            ("chronos", "Chronos2Pipeline", ("from_pretrained", "fit", "predict_df", "save_pretrained")),
+            ("chronos.chronos2.preprocess", None, ("from_data_frame",)),
+        ],
+        "notes": [
+            "Fine-Tuning NICHT selbst bauen, sondern: pipe = Chronos2Pipeline.from_pretrained(MODEL_PATH); "
+            "inputs = from_data_frame(df, target_columns=[...], prediction_length=H, id_column=..., timestamp_column=...); "
+            "ft = pipe.fit(inputs, prediction_length=H, validation_inputs=..., num_steps=..., batch_size=..., context_length=..., "
+            "output_dir=<temp-Ordner, NICHT OUTPUT_PATH>, callbacks=[TrainerCallback fuer progress-Events]); ft.save_pretrained(OUTPUT_PATH).",
+            "from_data_frame braucht nur id-, timestamp-, Ziel- und Kovariaten-Spalten (Hilfsspalten wie split vorher entfernen).",
+            "context_length klein halten (z. B. 512): mit dem Standard 8192 dauert ein Schritt auf dem Mac ~18 s.",
+        ],
+    },
+}
+
+
+def _signature(obj) -> str:
+    import inspect
+    try:
+        sig = inspect.signature(obj)
+    except (TypeError, ValueError):
+        return "(…)"
+    parts = []
+    for name, p in sig.parameters.items():
+        if name in ("self", "cls"):
+            continue
+        if p.kind is p.VAR_POSITIONAL:
+            parts.append(f"*{name}")
+        elif p.kind is p.VAR_KEYWORD:
+            parts.append(f"**{name}")
+        elif p.default is p.empty:
+            parts.append(name)
+        else:
+            parts.append(f"{name}={_short(repr(p.default), 30)}")
+    return "(" + ", ".join(parts) + ")"
+
+
+def describe_library_api(model_path: Path) -> List[str]:
+    """API der Bibliothek, mit der dieses Modell trainiert wird (falls bekannt)."""
+    cfg_file = model_path / "config.json" if model_path.is_dir() else None
+    if not cfg_file or not cfg_file.is_file():
+        return []
+    try:
+        cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    keys = {v for k, v in cfg.items() if k.endswith("pipeline_class") and isinstance(v, str)}
+    out: List[str] = []
+    for key in sorted(keys & LIBRARY_APIS.keys()):
+        spec = LIBRARY_APIS[key]
+        out.append(f"BIBLIOTHEK FUER DIESES MODELL ({spec['pip']}):")
+        lines: List[str] = []
+        try:
+            import importlib
+            for module_name, cls_name, names in spec["objects"]:
+                mod = importlib.import_module(module_name)
+                owner = getattr(mod, cls_name) if cls_name else mod
+                prefix = f"{cls_name}." if cls_name else f"{module_name}."
+                for n in names:
+                    fn = getattr(owner, n, None)
+                    if fn is not None:
+                        lines.append(f"- {prefix}{n}{_signature(fn)}")
+        except Exception as e:  # nicht installiert oder Import-Fehler
+            out.append(f"- nicht importierbar ({_short(e, 120)}) — erst {spec['pip']} installieren")
+            continue
+        out.extend(lines)
+        out.extend(f"- {n}" for n in spec["notes"])
+    return out
+
+
 def describe_packages() -> List[str]:
     have, missing = [], []
     for module, pip in PACKAGES:
@@ -192,6 +270,8 @@ def describe(model_path: str, dataset_path: Optional[str] = None) -> str:
     if dataset_path:
         lines += describe_dataset(Path(dataset_path))
     lines += describe_packages()
+    if model_path:
+        lines += describe_library_api(Path(model_path))
     text = "\n".join(lines)
     return text if len(text) <= MAX_CHARS else text[: MAX_CHARS - 1] + "…"
 

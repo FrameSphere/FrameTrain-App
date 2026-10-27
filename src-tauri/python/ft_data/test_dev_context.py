@@ -55,6 +55,33 @@ class DevContextTest(unittest.TestCase):
         text = "\n".join(describe_dataset(d))
         self.assertIn("image-Klassenordner: kreis, quadrat", text)
 
+    def test_bibliotheks_api_kommt_aus_dem_installierten_paket(self):
+        # Regression 27.10.2026: ohne die API von chronos-forecasting baute die
+        # KI dreimal einen eigenen Loop um das Modell-Innere und scheiterte.
+        from ft_data import dev_context
+        m = self.root / "lib"
+        m.mkdir()
+        (m / "config.json").write_text(json.dumps({"model_type": "t5", "demo_pipeline_class": "DemoPipeline"}))
+        dev_context.LIBRARY_APIS["DemoPipeline"] = {
+            "pip": "demo-lib",
+            "objects": [("json", None, ("dumps",)), ("fehlt_wirklich", None, ("x",))],
+            "notes": ["Hinweis"],
+        }
+        try:
+            text = "\n".join(dev_context.describe_library_api(m))
+        finally:
+            del dev_context.LIBRARY_APIS["DemoPipeline"]
+        self.assertIn("BIBLIOTHEK FUER DIESES MODELL (demo-lib)", text)
+        self.assertIn("nicht importierbar", text)  # zweites Modul fehlt → klarer Hinweis
+        self.assertIn("erst demo-lib installieren", text)
+
+    def test_ohne_pipeline_klasse_keine_bibliothek(self):
+        from ft_data.dev_context import describe_library_api
+        m = self.root / "bert"
+        m.mkdir()
+        (m / "config.json").write_text(json.dumps({"model_type": "bert"}))
+        self.assertEqual(describe_library_api(m), [])
+
     def test_fehlende_pfade_und_laenge(self):
         text = describe(str(self.root / "fehlt"), str(self.root / "auch_nicht"))
         self.assertIn("Pfad existiert nicht", text)
