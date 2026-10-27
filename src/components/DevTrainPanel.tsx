@@ -1869,9 +1869,15 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, selected
               </div>
               <RefRow
                 color="text-purple-400"
-                label={t('devTrainPanel.paths.outputPathLabel')}
+                label="OUTPUT_PATH"
                 value={outputPath}
               />
+              {/* <job_id> kennt vorher niemand — der Ordner entsteht erst beim Start. */}
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                {t('devTrainPanel.paths.outputHintBefore')}{' '}
+                <code className="px-1 py-0.5 rounded bg-white/5 text-purple-300 font-mono">os.environ["OUTPUT_PATH"]</code>
+                {' '}{t('devTrainPanel.paths.outputHintAfter')}
+              </p>
             </div>
           </div>
         )}
@@ -2265,7 +2271,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, selected
                       modelInfo={modelInfo}
                       modelPathOverride={modelPath}
                       dsRefs={dsRefs}
-                      outputPath={outputPath.replace('<job_id>', 'dev_XXX')}
+                      // Ersatzwert wie in der Vorlage (…/dev_train) — vorher stand dort …/dev_dev_XXX.
+                      outputPath={templateOutputPath(outputPath, 'dev_train')}
                       onApplyEdit={(newScript) => {
                         setScript(newScript);
                         setIsDirty(true);

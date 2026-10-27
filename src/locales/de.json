@@ -804,7 +804,9 @@
       "outputPathLabel": "Ausgabepfad",
       "notSet": "nicht gesetzt",
       "copyTooltip": "Kopieren",
-      "copied": "Kopiert!"
+      "copied": "Kopiert!",
+      "outputHintBefore": "Den Ordner legt FrameTrain erst beim Start an und ersetzt <job_id> durch die ID des Laufs. Pfad deshalb nicht abtippen, sondern im Skript lesen:",
+      "outputHintAfter": "Was dort nach einem erfolgreichen Lauf liegt, wird die neue Modellversion."
     },
     "toolbar": {
       "unsavedChangesTooltip": "Ungespeicherte Änderungen",
@@ -1128,7 +1130,9 @@
       "versionFallback": "Keine Version",
       "notSet": "nicht gesetzt",
       "copyTooltip": "Kopieren",
-      "copied": "Kopiert!"
+      "copied": "Kopiert!",
+      "outputHintBefore": "Den Ordner legt FrameTrain erst beim Start an und ersetzt <job_id> durch die ID des Laufs. Pfad deshalb nicht abtippen, sondern im Skript lesen:",
+      "outputHintAfter": "Dort gehören die Ergebnisse hin, z. B. results.json."
     },
     "toolbar": {
       "unsavedChangesTooltip": "Ungespeicherte Änderungen",

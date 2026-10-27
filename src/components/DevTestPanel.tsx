@@ -1908,6 +1908,12 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
                 <span className="text-sm font-medium text-white">{t('devTestPanel.paths.outputTitle')}</span>
               </div>
               <RefRow color="text-purple-400" label="OUTPUT_PATH" value={outputPath} />
+              {/* <job_id> kennt vorher niemand — der Ordner entsteht erst beim Start. */}
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                {t('devTestPanel.paths.outputHintBefore')}{' '}
+                <code className="px-1 py-0.5 rounded bg-white/5 text-purple-300 font-mono">os.environ["OUTPUT_PATH"]</code>
+                {' '}{t('devTestPanel.paths.outputHintAfter')}
+              </p>
             </div>
           </div>
         )}
@@ -2228,7 +2234,8 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
                   <div className="w-80 border-l border-white/10 flex-shrink-0 flex flex-col overflow-hidden">
                     <CodeAISidebar
                       script={script} modelInfo={modelInfo} dsRefs={dsRefs}
-                      outputPath={outputPath.replace('<job_id>', 'dev_test')}
+                      // Ersatzwert wie in der Vorlage (…/dev_test) — vorher stand dort …/dev_dev_test.
+                      outputPath={templateOutputPath(outputPath, 'dev_test')}
                       modelPathOverride={modelPath}
                       onApplyEdit={(newScript) => {
                         setScript(newScript);

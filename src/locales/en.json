@@ -804,7 +804,9 @@
       "outputPathLabel": "Output path",
       "notSet": "not set",
       "copyTooltip": "Copy",
-      "copied": "Copied!"
+      "copied": "Copied!",
+      "outputHintBefore": "FrameTrain creates this folder when the run starts and replaces <job_id> with the run's ID. Don't type the path — read it in your script:",
+      "outputHintAfter": "Whatever is in there after a successful run becomes the new model version."
     },
     "editor": {
       "noDocument": "No Document",
@@ -1128,7 +1130,9 @@
       "datasetPathLabel": "Dataset path",
       "modelPathLabel": "Model path",
       "outputPathLabel": "Output path",
-      "versionFallback": "No version"
+      "versionFallback": "No version",
+      "outputHintBefore": "FrameTrain creates this folder when the run starts and replaces <job_id> with the run's ID. Don't type the path — read it in your script:",
+      "outputHintAfter": "Put your results there, e.g. results.json."
     },
     "toolbar": {
       "unsavedChangesTooltip": "Unsaved Changes",
