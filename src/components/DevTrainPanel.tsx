@@ -1123,14 +1123,18 @@ ANFORDERUNGEN:
 interface DevTrainPanelProps {
   modelInfo: ModelInfo | null;
   selectedVersionPath: string;
+  /** Gewaehlte Version — wird Elternversion der neuen Dev-Train-Version. */
+  selectedVersionId?: string | null;
   datasets: DatasetInfo[];
   /** Im Dropdown gewähltes Dataset — bestimmt, was als DATASET_PATH ankommt. */
   selectedDatasetId?: string | null;
   onNavigateToAnalysis: (vid: string) => void;
+  /** Nach einer neu angelegten Version — die Versionsliste neu laden. */
+  onVersionCreated?: (versionId: string) => void;
   userData?: { userId: string; email: string; apiKey: string; password: string };
 }
 
-export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets: allDatasets, selectedDatasetId, onNavigateToAnalysis, userData }: DevTrainPanelProps) {
+export default function DevTrainPanel({ modelInfo, selectedVersionPath, selectedVersionId, datasets: allDatasets, selectedDatasetId, onNavigateToAnalysis, onVersionCreated, userData }: DevTrainPanelProps) {
   // Das ausgewählte Dataset muss an Position 0 stehen: DATASET_PATH (ohne
   // Suffix) ist der Pfad, den Skripte und Template verwenden. Vorher wurde
   // stumm immer das erste Dataset der Liste übergeben — wer im Dropdown ein
@@ -1166,6 +1170,10 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
   const [isDashMinimized, setIsDashMinimized] = useState(false);
   const devSessionIdRef   = useRef<string>('');
   const devStartedAtRef   = useRef<number>(0);
+  const [completedVersionId, setCompletedVersionId] = useState<string | null>(null);
+  // Listener werden einmal registriert — Callback ueber Ref aktuell halten.
+  const onVersionCreatedRef = useRef(onVersionCreated);
+  onVersionCreatedRef.current = onVersionCreated;
   const [editorH, setEditorH]     = useState(500);
   const [expanded, setExpanded]   = useState(false);
   const [dismissed, setDismissed] = useState(() => {
@@ -1528,8 +1536,16 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       setTimeout(() => outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight }), 50);
     }).then(fn => { u2 = fn; });
 
-    listen<{ job_id?: string }>('training-complete', e => {
+    listen<{ job_id?: string; new_version_id?: string; version_error?: string }>('training-complete', e => {
       if (!isDevJob(e.payload?.job_id)) return;
+      const newVid = e.payload.new_version_id;
+      if (newVid) {
+        setCompletedVersionId(newVid);
+        onVersionCreatedRef.current?.(newVid);
+        success(t('devTrainPanel.notifications.versionSaved'), t('devTrainPanel.notifications.versionSavedDetail'));
+      } else if (e.payload.version_error) {
+        error(t('devTrainPanel.notifications.versionFailed'), e.payload.version_error);
+      }
       // Timeout bereinigen
       if ((window as any).__devTrainingTimeout) {
         clearTimeout((window as any).__devTrainingTimeout);
@@ -1593,7 +1609,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
       success(t('devTrainPanel.notifications.autoSavedTitle'), t('devTrainPanel.notifications.autoSavedDetail'));
     }
 
-    setRunning(true); setOutput(''); setLoss([]);
+    setRunning(true); setOutput(''); setLoss([]); setCompletedVersionId(null);
 
     const refs = refsToEnv(modelPath, dsRefs);
 
@@ -1605,6 +1621,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         datasetId:   datasets[0]?.id ?? '',
         datasetName: datasets[0]?.name ?? '',
         refs,
+        versionId:   selectedVersionId ?? null,
       });
       setJob(job);
       setOutput(`${t('devTrainPanel.progress.trainingStarted').replace('{id}', job.id)}\n`);
@@ -2356,6 +2373,8 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, datasets
         lossPoints={lossPoints}
         sessionId={devSessionIdRef.current}
         startedAt={devStartedAtRef.current}
+        completedVersionId={completedVersionId}
+        onNavigateToAnalysis={onNavigateToAnalysis}
         onStop={handleStop}
         onClose={() => { setShowDashboard(false); setJob(null); setLoss([]); }}
         devScript={script}
@@ -2836,7 +2855,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from datasets import load_from_disk, load_dataset
+from datasets import ClassLabel, load_from_disk, load_dataset
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -2952,19 +2971,65 @@ if MAX_EVAL and len(eval_ds) > MAX_EVAL:
     print(f"Eval-Split auf {MAX_EVAL} Beispiele begrenzt", flush=True)
 
 text_col, label_col = pick_columns(train_ds)
-num_labels = len(set(train_ds[label_col]))
+
+
+# -- Labels in Klassen-IDs umwandeln --------------------------------------
+# Eigene CSV/JSON-Datensaetze haben oft Text-Labels ("Request", "spam").
+# Das Modell braucht Zahlen 0..n-1 - sonst bricht der Trainer mit
+# "Unable to create tensor ... labels" ab.
+def is_int_label(v):
+    return isinstance(v, (int, np.integer)) and not isinstance(v, bool)
+
+
+def usable(v):
+    # Leere Labels und -1 (HF-Testsplits ohne Loesung) fliegen raus
+    return v is not None and str(v).strip() != "" and not (is_int_label(v) and v < 0)
+
+
+train_ds = train_ds.filter(lambda r: usable(r[label_col]))
+eval_ds = eval_ds.filter(lambda r: usable(r[label_col]))
+feature = train_ds.features[label_col]
+raw_labels = list(train_ds[label_col]) + list(eval_ds[label_col])
+
+if hasattr(feature, "names"):
+    # ClassLabel: IDs und Namen bringt das Dataset schon mit
+    classes = list(feature.names)
+elif all(is_int_label(v) for v in raw_labels):
+    classes = [str(i) for i in range(int(max(raw_labels)) + 1)]
+else:
+    classes = sorted({str(v) for v in raw_labels})
+    class_to_id = {c: i for i, c in enumerate(classes)}
+
+    def to_ids(batch):
+        return {label_col: [class_to_id[str(v)] for v in batch[label_col]]}
+
+    # Zieltyp ausdruecklich setzen: ohne features= behaelt datasets beim
+    # Ueberschreiben den Text-Typ der Spalte ("1" statt 1).
+    def encoded(ds):
+        features = ds.features.copy()
+        features[label_col] = ClassLabel(names=classes)
+        return ds.map(to_ids, batched=True, features=features)
+
+    train_ds = encoded(train_ds)
+    eval_ds = encoded(eval_ds)
+
+num_labels = len(classes)
 if num_labels < 2:
     raise RuntimeError(
         f"Label-Spalte '{label_col}' hat nur einen Wert - damit laesst sich "
         "keine Klassifikation trainieren."
     )
-print(f"Spalten: text='{text_col}', label='{label_col}', Klassen={num_labels}", flush=True)
+id2label = {i: c for i, c in enumerate(classes)}
+label2id = {c: i for i, c in id2label.items()}
+print(f"Spalten: text='{text_col}', label='{label_col}', Klassen={classes}", flush=True)
 
 # -- Modell & Tokenizer ---------------------------------------------------
 emit("status", stage="loading", message="Modell wird geladen ...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = AutoModelForSequenceClassification.from_pretrained(
-    MODEL_PATH, num_labels=num_labels
+    MODEL_PATH, num_labels=num_labels, id2label=id2label, label2id=label2id,
+    # Eine trainierte Version mit anderer Klassenzahl laesst sich so weitertrainieren
+    ignore_mismatched_sizes=True,
 )
 print(f"Modell geladen von {MODEL_PATH}", flush=True)
 
@@ -3040,6 +3105,13 @@ print("Eval:", metrics, flush=True)
 # -- Speichern ------------------------------------------------------------
 model.save_pretrained(OUTPUT_PATH)
 tokenizer.save_pretrained(OUTPUT_PATH)
+# Klassennamen und Spalten fuer Tests und Labor (gleiches Format wie die Engine)
+with open(os.path.join(OUTPUT_PATH, "label_mapping.json"), "w", encoding="utf-8") as f:
+    json.dump({
+        "label2id": label2id,
+        "id2label": {str(i): c for i, c in id2label.items()},
+        "columns": {"text": text_col, "label": label_col},
+    }, f, ensure_ascii=False, indent=2)
 print(f"Modell gespeichert unter {OUTPUT_PATH}", flush=True)
 
 emit(

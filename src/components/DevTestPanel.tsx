@@ -23,7 +23,8 @@ import { MarkdownText } from './ui/MarkdownText';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, calculateAffectedLines, type CodeEdit, type HighlightedLine } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
-import { detectScriptModality, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { detectScriptModality, isCausalLmModel, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
+import { generateCausalLmTestScript } from './llmDevScript';
 import { localizeScript } from './scriptLocale';
 import { generateYoloTestScript } from './yoloDevScripts';
 import DiffViewer from './DiffViewer';
@@ -903,6 +904,14 @@ function RefRow({ color, label, value, hint }: { color: string; label: string; v
 // ── Default Script Generator ──────────────────────────────────────────────
 
 function generateDefaultTestScript(model: ModelInfo | null, datasets: DatasetInfo[], outputPath: string): string {
+  // LLMs bekamen die Klassifikations-Vorlage und brachen auf Chat-Daten ab.
+  if (isCausalLmModel(model)) {
+    return generateCausalLmTestScript({
+      modelPath:   pyPath(model?.local_path || model?.source_path || model?.name),
+      datasetPath: pyPath(datasets[0]?.storage_path),
+      outputPath:  pyPath(templateOutputPath(outputPath, 'dev_test')),
+    });
+  }
   const modality = detectScriptModality(model);
   if (modality === 'detection') {
     const ds = datasets[0];
@@ -1325,20 +1334,32 @@ for start in range(0, len(texts), BATCH_SIZE):
     all_preds.extend(logits.argmax(dim=-1).cpu().tolist())
     print(f"  {min(start + BATCH_SIZE, len(texts))}/{len(texts)} ausgewertet", flush=True)
 
-results = {"predictions": all_preds, "n": len(all_preds), "device": device}
+id2label = {int(k): v for k, v in (getattr(model.config, "id2label", None) or {}).items()}
+results = {
+    "predictions": all_preds,
+    "predicted_labels": [id2label.get(p, str(p)) for p in all_preds],
+    "n": len(all_preds),
+    "device": device,
+}
 
 # -- Bericht, falls Labels vorhanden --------------------------------------
 if label_col is not None:
     all_labels = list(eval_ds[label_col])
-    acc = float(np.mean(np.array(all_preds) == np.array(all_labels)))
+    preds_cmp = all_preds
+    # Text-Labels ("Request", "spam"): Vorhersage-IDs ueber id2label in Namen
+    # umrechnen - sonst wuerden Zahlen mit Namen verglichen (immer 0 %).
+    if any(isinstance(v, str) for v in all_labels):
+        all_labels = [str(v) for v in all_labels]
+        preds_cmp = [str(id2label.get(p, p)) for p in all_preds]
+    acc = float(np.mean(np.array(preds_cmp) == np.array(all_labels)))
     print(f"\\nAccuracy: {acc:.4f}\\n", flush=True)
-    print(classification_report(all_labels, all_preds, zero_division=0), flush=True)
+    print(classification_report(all_labels, preds_cmp, zero_division=0), flush=True)
     print("Confusion Matrix:", flush=True)
-    print(confusion_matrix(all_labels, all_preds), flush=True)
+    print(confusion_matrix(all_labels, preds_cmp), flush=True)
     results["labels"] = all_labels
     results["accuracy"] = acc
     results["report"] = classification_report(
-        all_labels, all_preds, zero_division=0, output_dict=True)
+        all_labels, preds_cmp, zero_division=0, output_dict=True)
 else:
     print("Keine Label-Spalte gefunden - nur Vorhersagen, keine Metriken.", flush=True)
 

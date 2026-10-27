@@ -134,11 +134,16 @@ pub async fn start_dev_training(
     dataset_id:   String,
     dataset_name: String,
     refs:         HashMap<String, String>,
+    version_id:   Option<String>,
 ) -> Result<TrainingJob, String> {
     let python = get_python_path();
 
     // Nur ein Dev-Training gleichzeitig
     registry_start(&DEV_TRAIN_PROC)?;
+
+    let user_id = app_handle.state::<crate::AppState>().db.lock().ok()
+        .and_then(|db| db.get_current_user_id())
+        .unwrap_or_default();
 
     // Anti-Sleep direkt im Backend aktivieren (robust, unabhängig vom Frontend).
     if let Err(e) = crate::power_manager::enable_prevent_sleep(
@@ -249,6 +254,12 @@ pub async fn start_dev_training(
 
         let mut json_error = false;
         let mut step = 0u32;
+        // Fuer die Version: Step-Logs (Analyse-Seite) und das complete-Event des
+        // Skripts. Die Version entsteht erst nach Exit-Code 0 — ein Skript, das
+        // nach "complete" noch abstuerzt, soll keine halbe Version hinterlassen.
+        let started_at_secs = Utc::now().timestamp();
+        let mut step_logs: Vec<serde_json::Value> = Vec::new();
+        let mut complete_data: Option<serde_json::Value> = None;
 
         // Stdout verarbeiten
         if let Some(stdout) = child.stdout.take() {
@@ -265,9 +276,16 @@ pub async fn start_dev_training(
                     if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
                         let typ = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
                         match typ {
-                            "progress"  => { let _ = ah.emit("training-progress", serde_json::json!({"job_id": jid, "data": msg.get("data")})); }
+                            "progress"  => {
+                                if let Some(entry) = msg.get("data").and_then(|d| step_log_entry(d, started_at_secs)) {
+                                    step_logs.push(entry);
+                                }
+                                let _ = ah.emit("training-progress", serde_json::json!({"job_id": jid, "data": msg.get("data")}));
+                            }
                             "status"    => { let _ = ah.emit("training-status",   serde_json::json!({"job_id": jid, "data": msg.get("data")})); }
-                            "complete"  => { let _ = ah.emit("training-complete", serde_json::json!({"job_id": jid, "data": msg.get("data")})); }
+                            // Erst nach dem Prozessende melden (siehe unten) — vorher kam
+                            // training-complete doppelt: einmal hier, einmal beim Exit.
+                            "complete"  => { complete_data = msg.get("data").cloned(); }
                             "error"     => {
                                 json_error = true;
                                 let _ = ah.emit("training-error", serde_json::json!({"job_id": jid, "data": msg.get("data")}));
@@ -282,6 +300,9 @@ pub async fn start_dev_training(
                 // Unterstützt HuggingFace Trainer Output-Format
                 if let Some(loss) = parse_loss_from_line(&line) {
                     step += 1;
+                    if let Some(entry) = step_log_entry(&serde_json::json!({"step": step, "train_loss": loss}), started_at_secs) {
+                        step_logs.push(entry);
+                    }
                     let _ = ah.emit("training-progress", serde_json::json!({
                         "job_id": jid,
                         "data": {
@@ -310,10 +331,45 @@ pub async fn start_dev_training(
         if was_stopped {
             // User hat gestoppt – kein Fehler-/Complete-Event, das Frontend hat die UI bereits aktualisiert.
         } else if success && !json_error {
-            let _ = ah.emit("training-complete", serde_json::json!({
-                "job_id": jid,
-                "data": { "model_path": out_p, "final_metrics": { "total_epochs": 0, "total_steps": step } }
-            }));
+            let mut data = complete_data.unwrap_or_else(|| serde_json::json!({}));
+            fill_final_metrics(&mut data, &step_logs, step);
+            let model_path = data.get("model_path").and_then(|v| v.as_str())
+                .filter(|p| std::path::Path::new(p).exists())
+                .unwrap_or(&out_p).to_string();
+            if let Some(obj) = data.as_object_mut() {
+                obj.insert("model_path".into(), serde_json::json!(model_path));
+            }
+
+            // Wie das normale Training: Ergebnis als Modellversion ablegen, damit
+            // es in Modelle, Analyse, Tests und im Labor auftaucht. Vorher blieb
+            // es unbemerkt in training_outputs/dev_<id> liegen.
+            let mut payload = serde_json::json!({ "job_id": jid, "data": data });
+            if !crate::training_manager::has_model_weights(std::path::Path::new(&model_path)) {
+                payload["version_error"] = serde_json::json!(format!(
+                    "Im Ausgabeordner liegen keine Modellgewichte (.safetensors, .bin, .pt) — keine Version angelegt. \
+                     Speichere das Modell nach OUTPUT_PATH (z. B. model.save_pretrained(OUTPUT_PATH)). Ordner: {}",
+                    model_path
+                ));
+            } else {
+                match crate::training_manager::create_version(&ah, &model_id, &model_name, version_id.clone(), &model_path, &user_id) {
+                    Ok(new_vid) => {
+                        if let Err(e) = crate::training_manager::save_metrics(&ah, &new_vid, &data, &user_id) {
+                            eprintln!("[DevTrain] Metriken: {}", e);
+                        }
+                        let config = serde_json::json!({ "mode": "dev", "dataset_id": dataset_id, "dataset_name": dataset_name });
+                        crate::analysis_manager::save_full_analysis_data(&ah, &new_vid, &data, &step_logs, &config, started_at_secs);
+                        if let Ok(db) = ah.state::<crate::AppState>().db.lock() {
+                            let _ = db.mark_dataset_used(&dataset_id);
+                        }
+                        payload["new_version_id"] = serde_json::json!(new_vid);
+                    }
+                    Err(e) => {
+                        eprintln!("[DevTrain] Version: {}", e);
+                        payload["version_error"] = serde_json::json!(e);
+                    }
+                }
+            }
+            let _ = ah.emit("training-complete", payload);
         } else if !json_error {
             let code = status.and_then(|s| s.code());
             let code_text = match code {
@@ -528,6 +584,56 @@ pub fn stop_dev_test(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Step-Log-Eintrag fuer die Analyse-Seite (gleiches Format wie das normale
+/// Training). Events ohne train_loss (reine Eval-Logs) zaehlen nicht — sonst
+/// stuende die Loss-Kurve an diesen Stellen auf 0.
+fn step_log_entry(data: &serde_json::Value, started_at_secs: i64) -> Option<serde_json::Value> {
+    let train_loss = data.get("train_loss").and_then(|v| v.as_f64())?;
+    Some(serde_json::json!({
+        "epoch":         data.get("epoch").and_then(|v| v.as_i64()).unwrap_or(1),
+        "step":          data.get("step").and_then(|v| v.as_i64()).unwrap_or(0),
+        "train_loss":    train_loss,
+        "val_loss":      data.get("val_loss").and_then(|v| v.as_f64()),
+        "learning_rate": data.get("learning_rate").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        "grad_norm":     data.get("grad_norm").and_then(|v| v.as_f64()),
+        "elapsed_seconds": Utc::now().timestamp() - started_at_secs,
+        "timestamp":     Utc::now().to_rfc3339(),
+    }))
+}
+
+/// Ergaenzt final_metrics um das, was eigene Skripte meist weglassen
+/// (final_train_loss, total_epochs, total_steps) — aus den Step-Logs.
+/// Ohne total_epochs > 0 legt save_metrics keinen Eintrag an, und die
+/// Version stuende ohne Kennzahlen in der Liste.
+fn fill_final_metrics(data: &mut serde_json::Value, step_logs: &[serde_json::Value], parsed_steps: u32) {
+    if !data.is_object() { *data = serde_json::json!({}); }
+    if !data.get("final_metrics").map(|m| m.is_object()).unwrap_or(false) {
+        data["final_metrics"] = serde_json::json!({});
+    }
+    let last = step_logs.last();
+    let m = &mut data["final_metrics"];
+    if m.get("final_train_loss").and_then(|v| v.as_f64()).is_none() {
+        if let Some(l) = m.get("train_loss").and_then(|v| v.as_f64())
+            .or_else(|| last.and_then(|e| e["train_loss"].as_f64())) {
+            m["final_train_loss"] = serde_json::json!(l);
+        }
+    }
+    if m.get("final_val_loss").and_then(|v| v.as_f64()).is_none() {
+        if let Some(v) = m.get("val_loss").and_then(|v| v.as_f64())
+            .or_else(|| step_logs.iter().rev().find_map(|e| e["val_loss"].as_f64())) {
+            m["final_val_loss"] = serde_json::json!(v);
+        }
+    }
+    if m.get("total_epochs").and_then(|v| v.as_i64()).unwrap_or(0) <= 0 {
+        let max_ep = step_logs.iter().filter_map(|e| e["epoch"].as_i64()).max().unwrap_or(0);
+        m["total_epochs"] = serde_json::json!(max_ep.max(1));
+    }
+    if m.get("total_steps").and_then(|v| v.as_i64()).unwrap_or(0) <= 0 {
+        let steps = last.and_then(|e| e["step"].as_i64()).unwrap_or(parsed_steps as i64);
+        m["total_steps"] = serde_json::json!(steps);
+    }
+}
+
 /// Parst den Loss-Wert aus einer HuggingFace Trainer-Ausgabezeile.
 /// Beispiele:
 ///   "{'loss': 0.3452, 'learning_rate': 1e-05, 'epoch': 1.0}"
@@ -545,5 +651,42 @@ fn parse_loss_from_line(line: &str) -> Option<f64> {
         after[..end].trim().parse::<f64>().ok()
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_logs_ohne_train_loss_zaehlen_nicht() {
+        assert!(step_log_entry(&serde_json::json!({"step": 5, "val_loss": 0.4}), 0).is_none());
+        let e = step_log_entry(&serde_json::json!({"step": 5, "epoch": 2, "train_loss": 0.7}), 0).unwrap();
+        assert_eq!(e["epoch"], 2);
+        assert_eq!(e["train_loss"], 0.7);
+    }
+
+    #[test]
+    fn final_metrics_werden_aus_step_logs_ergaenzt() {
+        let logs = vec![
+            step_log_entry(&serde_json::json!({"step": 5, "epoch": 1, "train_loss": 0.9}), 0).unwrap(),
+            step_log_entry(&serde_json::json!({"step": 10, "epoch": 1, "train_loss": 0.6, "val_loss": 0.5}), 0).unwrap(),
+        ];
+        let mut data = serde_json::json!({"model_path": "/x", "final_metrics": {"accuracy": 0.8, "val_loss": 0.55, "total_epochs": 1}});
+        fill_final_metrics(&mut data, &logs, 0);
+        let m = &data["final_metrics"];
+        assert_eq!(m["final_train_loss"], 0.6);
+        assert_eq!(m["final_val_loss"], 0.55);
+        assert_eq!(m["total_epochs"], 1);
+        assert_eq!(m["total_steps"], 10);
+        assert_eq!(m["accuracy"], 0.8);
+    }
+
+    #[test]
+    fn skript_ohne_complete_event_bekommt_trotzdem_metriken() {
+        let mut data = serde_json::json!({});
+        fill_final_metrics(&mut data, &[], 3);
+        assert_eq!(data["final_metrics"]["total_epochs"], 1);
+        assert_eq!(data["final_metrics"]["total_steps"], 3);
     }
 }

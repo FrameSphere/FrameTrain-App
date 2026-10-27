@@ -166,3 +166,157 @@ emit(
 )
 `;
 }
+
+// Dev-Test-Vorlage fuer Decoder-LLMs. Vorher bekam auch der Test die
+// Klassifikations-Vorlage und brach auf Chat-Daten mit "Text-Spalte nicht
+// gefunden. Vorhanden: ['messages']" ab. Diese Vorlage liest dieselben
+// Formate wie die Trainingsvorlage, laesst das Modell antworten und
+// vergleicht mit der Referenz — ohne Referenz (reiner Text) misst sie die
+// Perplexity.
+export function generateCausalLmTestScript(p: { modelPath: string; datasetPath: string; outputPath: string }): string {
+  return `#!/usr/bin/env python3
+# FrameTrain - Dev Test Script (LLM)
+#
+# Laedt Modell + Test-Split, laesst das Modell antworten und vergleicht mit
+# der erwarteten Antwort. Schreibt einen Bericht nach OUTPUT_PATH/results.json.
+
+import json
+import math
+import os
+import random
+from pathlib import Path
+
+import torch
+from datasets import load_from_disk, load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# -- Pfade (von FrameTrain als ENV-Vars gesetzt) --------------------------
+MODEL_PATH   = os.environ.get("MODEL_PATH",   "${p.modelPath}")
+DATASET_PATH = os.environ.get("DATASET_PATH", "${p.datasetPath}")
+OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${p.outputPath}")
+
+MAX_SAMPLES    = 50     # zufaellig gezogen; 0 = alles
+MAX_NEW_TOKENS = 64
+MAX_LENGTH     = 512
+
+PAIRS = (("prompt", "completion"), ("instruction", "response"), ("question", "answer"), ("input", "output"))
+
+
+# -- Dataset laden --------------------------------------------------------
+def load_rows(path: str):
+    # Bevorzugt test/, sonst val/, sonst alles (wie die Trainingsvorlage).
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"DATASET_PATH existiert nicht: {path}")
+    if p.is_dir() and any((p / m).exists() for m in ("dataset_info.json", "state.json", "dataset_dict.json")):
+        ds = load_from_disk(str(p))
+        if hasattr(ds, "keys"):
+            split = next((s for s in ("test", "validation", "val", "train") if s in ds), list(ds.keys())[0])
+            print(f"Split: {split}", flush=True)
+            ds = ds[split]
+        return [dict(r) for r in ds]
+    exts = (".json", ".jsonl", ".csv", ".parquet")
+    files = []
+    for sub in ("test", "val", "validation", ""):
+        d = p / sub if sub else p
+        if d.is_dir():
+            files = sorted(f for f in d.rglob("*") if f.suffix.lower() in exts)
+        if files:
+            break
+    if not files:
+        raise RuntimeError(f"Keine Daten-Dateien in {path} gefunden.")
+    print(f"Dateien: {[str(f.relative_to(p)) for f in files]}", flush=True)
+    ext = files[0].suffix.lower()
+    kind = "json" if ext in (".json", ".jsonl") else ext.lstrip(".")
+    return [dict(r) for r in load_dataset(kind, data_files={"test": [str(f) for f in files]})["test"]]
+
+
+rows = load_rows(DATASET_PATH)
+if not rows:
+    raise RuntimeError(f"Keine Beispiele in {DATASET_PATH} gefunden.")
+if MAX_SAMPLES and len(rows) > MAX_SAMPLES:
+    rows = random.Random(42).sample(rows, MAX_SAMPLES)  # zufaellig statt der ersten N
+cols = list(rows[0].keys())
+print(f"{len(rows)} Beispiele | Spalten: {cols}", flush=True)
+
+# -- Modell & Tokenizer ---------------------------------------------------
+print(f"Lade Modell aus: {MODEL_PATH}", flush=True)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, torch_dtype=torch.float32)
+model.eval()
+device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+model.to(device)
+print(f"Geraet: {device}", flush=True)
+
+
+def split_row(row):
+    """(Prompt-Text, erwartete Antwort) - oder (Text, None) fuer reinen Text."""
+    msgs = row.get("messages")
+    if msgs:
+        # Letzte Assistenten-Antwort ist die Referenz, alles davor der Prompt.
+        last = max((i for i, m in enumerate(msgs) if m.get("role") == "assistant"), default=None)
+        context = msgs[:last] if last is not None else msgs
+        target = msgs[last]["content"] if last is not None else None
+        if getattr(tokenizer, "chat_template", None):
+            prompt = tokenizer.apply_chat_template(context, tokenize=False, add_generation_prompt=True)
+        else:
+            prompt = "\\n".join(f"{m['role']}: {m['content']}" for m in context) + "\\nassistant: "
+        return prompt, target
+    for q, a in PAIRS:
+        if q in row and a in row:
+            return f"{row[q]}\\n", str(row[a])
+    for c in ("text", "content"):
+        if c in row:
+            return str(row[c]), None
+    raise RuntimeError(f"Keine passende Spalte gefunden. Vorhanden: {cols}")
+
+
+def norm(s: str) -> str:
+    return " ".join(str(s).split()).strip(" .!").casefold()
+
+
+# -- Auswertung -----------------------------------------------------------
+predictions, exact, contains, losses = [], 0, 0, []
+for i, row in enumerate(rows, 1):
+    prompt, target = split_row(row)
+    if target is None:
+        # Reiner Text: Perplexity statt Antwortvergleich
+        enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_LENGTH).to(device)
+        with torch.no_grad():
+            losses.append(float(model(**enc, labels=enc["input_ids"]).loss))
+        continue
+    enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_LENGTH,
+                    add_special_tokens=not getattr(tokenizer, "chat_template", None)).to(device)
+    with torch.no_grad():
+        out = model.generate(**enc, max_new_tokens=MAX_NEW_TOKENS, do_sample=False,
+                             pad_token_id=tokenizer.pad_token_id)
+    pred = tokenizer.decode(out[0][enc["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+    hit = norm(pred) == norm(target)
+    exact += hit
+    contains += bool(norm(target)) and norm(target) in norm(pred)
+    predictions.append({"prompt": prompt[-300:], "predicted": pred, "target": target, "exact": hit})
+    if i <= 5:
+        print(f"  [{i}] {pred!r}   (erwartet: {target!r})", flush=True)
+    if i % 10 == 0:
+        print(f"  {i}/{len(rows)} ausgewertet", flush=True)
+
+results = {"n": len(rows), "device": device, "predictions": predictions}
+if predictions:
+    results["exact_match"] = exact / len(predictions)
+    results["contains_match"] = contains / len(predictions)
+    print(f"\\nExakte Treffer: {results['exact_match']:.4f}", flush=True)
+    print(f"Referenz in Antwort enthalten: {results['contains_match']:.4f}", flush=True)
+if losses:
+    results["loss"] = sum(losses) / len(losses)
+    results["perplexity"] = math.exp(results["loss"])
+    print(f"\\nPerplexity: {results['perplexity']:.2f} (Loss {results['loss']:.4f})", flush=True)
+
+# -- Speichern ------------------------------------------------------------
+Path(OUTPUT_PATH).mkdir(parents=True, exist_ok=True)
+with open(os.path.join(OUTPUT_PATH, "results.json"), "w", encoding="utf-8") as f:
+    json.dump(results, f, indent=2, ensure_ascii=False)
+print(f"Ergebnisse gespeichert: {OUTPUT_PATH}/results.json", flush=True)
+`;
+}

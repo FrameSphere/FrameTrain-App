@@ -2007,7 +2007,21 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
 
       {/* Dev Train */}
       {mode === 'dev' && (
-        <DevTrainPanel modelInfo={selectedModel ?? null} selectedVersionPath={selectedVersionPath} datasets={datasets} selectedDatasetId={selectedDatasetId} onNavigateToAnalysis={onNavigateToAnalysis} userData={userData} />
+        <DevTrainPanel
+          modelInfo={selectedModel ?? null}
+          selectedVersionPath={selectedVersionPath}
+          selectedVersionId={selectedVersionId}
+          datasets={datasets}
+          selectedDatasetId={selectedDatasetId}
+          onNavigateToAnalysis={onNavigateToAnalysis}
+          // Neue Version sofort in der Auswahl zeigen (die neueste wird vorgewaehlt).
+          onVersionCreated={() => {
+            invoke<ModelWithVersionTree[]>('list_models_with_version_tree')
+              .then(setModelsWithVersions)
+              .catch(() => {});
+          }}
+          userData={userData}
+        />
       )}
 
       {/* Standard Training */}

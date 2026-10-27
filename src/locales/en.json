@@ -993,7 +993,10 @@
       "savedTitle": "Saved",
       "savedDetail": "Training script “{name}” saved.",
       "autoSavedTitle": "Script saved",
-      "autoSavedDetail": "Unsaved changes were saved automatically before the run."
+      "autoSavedDetail": "Unsaved changes were saved automatically before the run.",
+      "versionSaved": "Saved as a version",
+      "versionSavedDetail": "The model is now available in Models, Analysis and Tests.",
+      "versionFailed": "No version created"
     },
     "relativeTime": {
       "justNow": "just now",

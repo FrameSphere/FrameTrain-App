@@ -1017,7 +1017,10 @@
       "savedTitle": "Gespeichert",
       "savedDetail": "Trainings-Skript „{name}“ gespeichert.",
       "autoSavedTitle": "Skript gespeichert",
-      "autoSavedDetail": "Ungespeicherte Änderungen wurden vor dem Start automatisch gesichert."
+      "autoSavedDetail": "Ungespeicherte Änderungen wurden vor dem Start automatisch gesichert.",
+      "versionSaved": "Als Version gespeichert",
+      "versionSavedDetail": "Das Modell steht jetzt in Modelle, Analyse und Tests zur Auswahl.",
+      "versionFailed": "Keine Version angelegt"
     },
     "relativeTime": {
       "justNow": "gerade eben",

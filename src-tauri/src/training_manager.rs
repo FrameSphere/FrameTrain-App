@@ -806,7 +806,7 @@ pub fn has_model_weights(dir: &Path) -> bool {
     walk(dir, 0)
 }
 
-fn create_version(
+pub(crate) fn create_version(
     app_handle: &tauri::AppHandle,
     model_id: &str,
     model_name: &str,
@@ -935,7 +935,7 @@ fn dir_size(path: &PathBuf) -> Result<(i64, i32), String> {
     Ok((size, count))
 }
 
-fn save_metrics(app_handle: &tauri::AppHandle, version_id: &str, data: &serde_json::Value, user_id: &str) -> Result<(), String> {
+pub(crate) fn save_metrics(app_handle: &tauri::AppHandle, version_id: &str, data: &serde_json::Value, user_id: &str) -> Result<(), String> {
     let metrics = data.get("final_metrics").unwrap_or(data);
 
     let train_loss = metrics.get("final_train_loss").and_then(|v| v.as_f64())
