@@ -584,6 +584,34 @@ pub fn stop_dev_test(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Beschreibt Modell, Dataset und installierte Pakete fuer die Code-KI in
+/// Dev Train / Dev Test (python/ft_data/dev_context.py). Vorher kannte die KI
+/// nur die Pfade und riet bei Chronos-2 + Zeitreihen-Tabelle ein Skript mit
+/// YOLO-, Klassifikations- und LLM-Zweig zusammen.
+#[tauri::command]
+pub async fn describe_dev_context(
+    app_handle:   tauri::AppHandle,
+    model_path:   String,
+    dataset_path: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = Command::new(get_python_path());
+        cmd.no_window();
+        cmd.python_utf8();
+        add_ft_data_path(&mut cmd, &app_handle);
+        cmd.args(["-m", "ft_data.dev_context", &model_path, dataset_path.as_deref().unwrap_or("")]);
+        let out = cmd.output().map_err(|e| format!("Python konnte nicht gestartet werden: {}", e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ohne Fehlerausgabe");
+            return Err(format!("Modell/Dataset nicht lesbar: {}", last));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    })
+    .await
+    .map_err(|e| format!("describe_dev_context: {}", e))?
+}
+
 /// Step-Log-Eintrag fuer die Analyse-Seite (gleiches Format wie das normale
 /// Training). Events ohne train_loss (reine Eval-Logs) zaehlen nicht — sonst
 /// stuende die Loss-Kurve an diesen Stellen auf 0.

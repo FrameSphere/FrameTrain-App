@@ -32,7 +32,9 @@ import OpenLibraryModal from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
 import { highlightPythonToHtml } from '../utils/pythonHighlight';
 import { buildDatasetRefs, refsForPrompt, refsToEnv, selectedFirst, type DevRef } from '../utils/devDatasetRefs';
+import { devContextPrompt, stripPythonBlocks, useDevContext } from '../utils/devContext';
 import ModalPortal from './ui/ModalPortal';
+import { IS_MAC } from './Sidebar';
 
 // ── Script Library ────────────────────────────────────────────────────────
 
@@ -159,7 +161,12 @@ function ScriptLibraryModal({ currentScript, onLoad, onClose, userId }: { curren
 
 // ── Code AI Sidebar ───────────────────────────────────────────────────────
 
-interface AiMessage { role: 'user' | 'assistant'; content: string; edits?: CodeEdit[]; action?: AutoAction | null; }
+interface AiMessage {
+  role: 'user' | 'assistant'; content: string; edits?: CodeEdit[]; action?: AutoAction | null;
+  /** Skript vor einem automatisch uebernommenen Rewrite (fuer Rueckgaengig). */
+  replacedFrom?: string;
+  undone?: boolean;
+}
 interface AppliedEditInfo { messageId: number; editId: string; originalScript: string; }
 interface ChatSession {
   id: string;
@@ -301,6 +308,10 @@ function CodeAISidebar({ script, modelInfo, dsRefs, outputPath, onApplyEdit, onR
   }, [messages, onHighlightLines]);
 
   const modelPath = modelPathOverride || modelInfo?.local_path || modelInfo?.source_path || modelInfo?.name || 'MODELL_PFAD';
+  const devFacts = useDevContext(
+    modelPathOverride || modelInfo?.local_path || modelInfo?.source_path || '',
+    dsRefs.find(r => r.key === 'DATASET_PATH')?.value,
+  );
 
   const baseSystemPrompt = `Du bist ein professioneller Code-Side-Assistant in FrameTrain (Dev Test).
 
@@ -325,7 +336,7 @@ Schreibe die absoluten Pfade NIE fest ins Skript — sonst laeuft es nur auf
 diesem Rechner mit genau diesem Modell und Dataset und ist ueber die
 Bibliothek nicht mehr teilbar.
 
-INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, ultralytics (YOLO)
+${devContextPrompt(devFacts, 'test')}
 
 AKTUELLER SCRIPT-INHALT:
 \`\`\`python
@@ -386,7 +397,10 @@ ANFORDERUNGEN:
       // Bei knappem Budget schreiben manche Modelle ihre ganze Erklaerung in
       // das rationale-Feld des Steuerblocks und lassen den Fliesstext leer.
       // Ohne diesen Rueckgriff blieb die Antwortblase komplett leer.
-      const explanation = cleaned.trim() || (action?.rationale ?? '').trim();
+      const rawExplanation = cleaned.trim() || (action?.rationale ?? '').trim();
+      // Bei einem Rewrite steht der Code separat darunter. Vorher stand er
+      // doppelt im Chat: einmal aus dem Fliesstext, einmal angehaengt.
+      const explanation = code ? stripPythonBlocks(rawExplanation) : rawExplanation;
       // Ein Vorschlag, aus dem kein sauberer Edit zu lesen war (Protokoll-Reste,
       // fehlendes ##EDIT_END##), wird verworfen — sonst landet Markdown als
       // Code im Skript. Ohne Hinweis saehe es aus, als haette die KI nichts
@@ -405,7 +419,14 @@ ANFORDERUNGEN:
             ? 'Answer was cut off at the token limit — the change may be incomplete. Choose a larger token budget in settings.'
             : 'Antwort wurde am Token-Limit abgeschnitten — die Aenderung kann unvollstaendig sein. In den Einstellungen ein groesseres Token-Budget waehlen.'}_`
         : baseContent + droppedNote;
-      setMessages(m => [...m, { role: 'assistant', content: finalContent, edits: cutOff ? [] : edits, action }]);
+      // Rewrite direkt ins Skript schreiben (mit Rueckgaengig). Vorher musste
+      // man "Ersetzen" am Codeblock finden — sonst blieb die Datei leer.
+      const autoApplied = !!code && !cutOff;
+      if (autoApplied) onReplaceScript(code!);
+      setMessages(m => [...m, {
+        role: 'assistant', content: finalContent, edits: cutOff ? [] : edits, action,
+        ...(autoApplied ? { replacedFrom: script } : {}),
+      }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', content: `Fehler: ${String(err)}` }]);
       setRetryText(text);
@@ -655,6 +676,22 @@ ANFORDERUNGEN:
                 })}
                 
                 {/* Simplified Edit Indicator with Undo Support */}
+                {m.replacedFrom !== undefined && (
+                  <div className="w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-[10px]">
+                    <span className="text-emerald-300">
+                      {m.undone ? t('devTestPanel.aiSidebar.replaceUndone') : t('devTestPanel.aiSidebar.appliedToScript')}
+                    </span>
+                    <button
+                      onClick={() => {
+                        onReplaceScript(m.undone ? (extractFullPythonCode(m.content) ?? m.content) : m.replacedFrom!);
+                        setMessages(ms => ms.map(x => x === m ? { ...x, undone: !x.undone } : x));
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 transition-all"
+                    >
+                      {m.undone ? t('devTestPanel.aiSidebar.reapplyReplace') : t('devTestPanel.aiSidebar.undoReplace')}
+                    </button>
+                  </div>
+                )}
                 {m.edits && m.edits.length > 0 && (
                   <div className="w-full space-y-1.5">
                     {m.edits.map((edit, editIdx) => {
@@ -1769,8 +1806,9 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
 
   const isRunning = running;
 
-  return (
-    <div className={`flex gap-0 ${expanded ? 'fixed inset-0 z-40 bg-slate-950 p-4' : ''}`}>
+  const panel = (
+    // macOS: oben liegt die Zugleiste des Fensters (h-7, ueber dem Overlay) — Inhalt darunter beginnen.
+    <div className={`flex gap-0 ${expanded ? `fixed inset-0 z-40 bg-slate-950 p-4 ${IS_MAC ? 'pt-10' : ''}` : ''}`}>
       <div className={`flex-1 space-y-4 ${expanded ? 'overflow-y-auto pr-2' : ''}`}>
 
         {/* Info Banner */}
@@ -2273,4 +2311,10 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
       )}
     </div>
   );
+  // Ausgeklappt haengt der Editor als Vollbild-Overlay am body. Im scrollenden
+  // <main> des Dashboards deckte `fixed inset-0` in WKWebView oben einen
+  // Streifen nicht ab — man sah das Fenster dahinter (wie bei den Modals,
+  // siehe ModalPortal). Der Chat der KI stellt seine Sitzung beim Umschalten
+  // aus dem Verlauf wieder her.
+  return expanded ? <ModalPortal>{panel}</ModalPortal> : panel;
 }

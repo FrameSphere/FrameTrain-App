@@ -240,6 +240,7 @@ fn main() {
             dev_trainer::stop_dev_training,
             dev_trainer::start_dev_test,
             dev_trainer::stop_dev_test,
+            dev_trainer::describe_dev_context,
             training_manager::register_synapse_training_version,
             training_manager::create_canvas_network_model,
             training_manager::update_canvas_network_model,

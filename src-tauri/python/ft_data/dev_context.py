@@ -1,0 +1,200 @@
+"""ft_data.dev_context – was die Code-KI in Dev Train / Dev Test ueber Modell und Daten wissen muss.
+
+Vorher bekam die KI nur die Pfade. Fuer Chronos-2 (config: model_type "t5",
+Architektur Chronos2Model) und eine Zeitreihen-Tabelle baute sie deshalb ein
+Raten-Skript mit YOLO-, Klassifikations- und LLM-Zweig. Dieses Modul liest die
+Fakten aus den Dateien und gibt einen kurzen Text fuer den System-Prompt aus.
+
+Aufruf:  python3 -m ft_data.dev_context <MODEL_PATH> [DATASET_PATH]
+"""
+import importlib.metadata
+import importlib.util
+import json
+import sys
+from pathlib import Path
+from typing import List, Optional
+
+TABULAR = (".parquet", ".csv", ".tsv", ".json", ".jsonl")
+MEDIA = {
+    "image": (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"),
+    "audio": (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"),
+    "video": (".mp4", ".avi", ".mov", ".mkv", ".webm"),
+}
+WEIGHTS = (".safetensors", ".bin", ".pt", ".pth", ".ckpt", ".onnx", ".gguf")
+CONFIG_KEYS = ("model_type", "architectures", "chronos_pipeline_class", "problem_type", "num_labels")
+
+# Import-Name, pip-Name
+PACKAGES = (
+    ("torch", "torch"), ("transformers", "transformers"), ("datasets", "datasets"),
+    ("accelerate", "accelerate"), ("peft", "peft"), ("sklearn", "scikit-learn"),
+    ("pandas", "pandas"), ("ultralytics", "ultralytics"), ("librosa", "librosa"),
+    ("chronos", "chronos-forecasting"), ("sentence_transformers", "sentence-transformers"),
+    ("diffusers", "diffusers"), ("bitsandbytes", "bitsandbytes"),
+)
+MAX_CHARS = 4000
+
+
+def _short(v, n: int = 60) -> str:
+    s = str(v)
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def describe_model(path: Path) -> List[str]:
+    out = [f"MODELL ({path.name}):"]
+    if path.is_file():
+        return out + [f"- Einzeldatei: {path.name}"]
+    if not path.is_dir():
+        return out + ["- Pfad existiert nicht"]
+    cfg_file = path / "config.json"
+    if cfg_file.is_file():
+        try:
+            cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
+            facts = ", ".join(f"{k}={cfg[k]}" for k in CONFIG_KEYS if k in cfg)
+            out.append(f"- config.json: {facts or 'ohne model_type/architectures'}")
+            if isinstance(cfg.get("id2label"), dict) and len(cfg["id2label"]) <= 30:
+                out.append(f"- id2label: {_short(cfg['id2label'], 300)}")
+            chronos = cfg.get("chronos_config")
+            if isinstance(chronos, dict):
+                keep = {k: v for k, v in chronos.items() if not isinstance(v, (list, dict))}
+                out.append(f"- chronos_config: {_short(keep, 300)}")
+        except (OSError, ValueError) as e:
+            out.append(f"- config.json nicht lesbar: {e}")
+    files = sorted(p.name for p in path.iterdir() if p.is_file())
+    weights = [f for f in files if f.lower().endswith(WEIGHTS)]
+    out.append(f"- Dateien: {', '.join(files[:15])}{' …' if len(files) > 15 else ''}")
+    if not weights:
+        out.append("- Keine Gewichtsdatei direkt im Ordner")
+    readme = path / "README.md"
+    if readme.is_file():
+        text = readme.read_text(encoding="utf-8", errors="replace")
+        # Front-Matter (--- … ---) ueberspringen, dann die ersten Zeilen
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            text = text[end + 4:] if end > 0 else text
+        lines = [l.strip() for l in text.splitlines() if l.strip()][:6]
+        if lines:
+            out.append(f"- README (Anfang): {_short(' '.join(lines), 400)}")
+    return out
+
+
+def _table_summary(f: Path) -> List[str]:
+    """Spalten, Typen, Zeilenzahl und drei Beispielzeilen einer Tabellendatei."""
+    try:
+        import pandas as pd
+    except ImportError:
+        return ["  (pandas fehlt – Spalten nicht lesbar)"]
+    try:
+        ext = f.suffix.lower()
+        total: Optional[int] = None
+        if ext == ".parquet":
+            try:
+                import pyarrow.parquet as pq
+                total = pq.ParquetFile(f).metadata.num_rows
+            except Exception:
+                total = None
+            df = pd.read_parquet(f)
+            total = total if total is not None else len(df)
+            df = df.head(5000)
+        elif ext in (".csv", ".tsv"):
+            df = pd.read_csv(f, sep="\t" if ext == ".tsv" else ",", nrows=5000)
+        else:
+            raw = f.read_text(encoding="utf-8", errors="replace").lstrip()
+            if raw.startswith("["):
+                rows = json.loads(raw)
+                total = len(rows)
+                df = pd.DataFrame(rows[:5000])
+            else:
+                df = pd.read_json(f, lines=True, nrows=5000)
+    except Exception as e:
+        return [f"  (nicht lesbar: {_short(e, 120)})"]
+
+    out = [f"  Zeilen: {total if total is not None else f'≥{len(df)}'} | Spalten: "
+           + ", ".join(f"{c} ({df[c].dtype})" for c in df.columns[:30])]
+    # Kategorische Spalten (z. B. id einer Zeitreihe, label) mit Anzahl Werten
+    cats = []
+    for c in df.columns[:30]:
+        if df[c].dtype == object or str(df[c].dtype) in ("string", "str", "category"):
+            try:
+                n = df[c].nunique()
+            except TypeError:
+                continue
+            if 1 < n <= 200:
+                cats.append(f"{c}: {n} Werte (z. B. {', '.join(_short(v, 20) for v in df[c].dropna().unique()[:5])})")
+    if cats:
+        out.append("  Kategorien (aus den ersten 5000 Zeilen): " + "; ".join(cats))
+    for _, row in df.head(3).iterrows():
+        out.append("  Beispiel: " + _short({k: _short(v, 40) for k, v in row.items()}, 400))
+    return out
+
+
+def describe_dataset(path: Path) -> List[str]:
+    out = [f"DATASET ({path.name}):"]
+    if not path.is_dir():
+        return out + ["- Pfad existiert nicht"]
+    yamls = [p.name for p in path.iterdir() if p.suffix.lower() in (".yaml", ".yml")]
+    if yamls:
+        out.append(f"- YAML: {', '.join(yamls)}")
+    parts = [d for d in sorted(path.iterdir()) if d.is_dir() and not d.name.startswith((".", "_"))]
+    sections = [(d.name + "/", d) for d in parts] or [("(Wurzel)", path)]
+    shown_table = False
+    for label, d in sections:
+        files = [f for f in d.rglob("*") if f.is_file() and not f.name.startswith(".")]
+        if not files:
+            out.append(f"- {label}: leer")
+            continue
+        exts = {}
+        for f in files:
+            exts[f.suffix.lower()] = exts.get(f.suffix.lower(), 0) + 1
+        by_ext = sorted(exts.items(), key=lambda x: -x[1])[:5]
+        ext_text = ", ".join("%d× %s" % (n, e or "ohne Endung") for e, n in by_ext)
+        out.append(f"- {label}: {len(files)} Dateien ({ext_text})")
+        kind = next((k for k, e in MEDIA.items() if any(f.suffix.lower() in e for f in files)), None)
+        if kind:
+            classes = sorted({f.parent.name for f in files if f.suffix.lower() in MEDIA[kind] and f.parent != d})
+            if classes:
+                out.append(f"  {kind}-Klassenordner: {', '.join(classes[:20])}{' …' if len(classes) > 20 else ''}")
+        tables = sorted(f for f in files if f.suffix.lower() in TABULAR)
+        if tables and not shown_table:
+            out.append(f"  Tabelle {tables[0].relative_to(path)}:")
+            out.extend(_table_summary(tables[0]))
+            shown_table = True
+    # Root-Dateien neben Split-Ordnern
+    root_files = [p.name for p in path.iterdir() if p.is_file() and not p.name.startswith(".")]
+    if parts and root_files:
+        out.append(f"- Dateien im Wurzelordner: {', '.join(sorted(root_files)[:10])}")
+    return out
+
+
+def describe_packages() -> List[str]:
+    have, missing = [], []
+    for module, pip in PACKAGES:
+        if importlib.util.find_spec(module) is None:
+            missing.append(pip)
+            continue
+        try:
+            version = importlib.metadata.version(pip)
+        except importlib.metadata.PackageNotFoundError:
+            version = "?"
+        note = " (ohne CUDA nicht nutzbar)" if module == "bitsandbytes" and sys.platform == "darwin" else ""
+        have.append(f"{pip} {version}{note}")
+    out = [f"PYTHON: {sys.executable} ({sys.version.split()[0]})",
+           f"- installiert: {', '.join(have) or '–'}"]
+    if missing:
+        out.append(f"- NICHT installiert: {', '.join(missing)}")
+        out.append(f'  Installieren mit: "{sys.executable}" -m pip install <paket>')
+    return out
+
+
+def describe(model_path: str, dataset_path: Optional[str] = None) -> str:
+    lines: List[str] = []
+    if model_path:
+        lines += describe_model(Path(model_path))
+    if dataset_path:
+        lines += describe_dataset(Path(dataset_path))
+    lines += describe_packages()
+    text = "\n".join(lines)
+    return text if len(text) <= MAX_CHARS else text[: MAX_CHARS - 1] + "…"
+
+
+if __name__ == "__main__":
+    print(describe(sys.argv[1] if len(sys.argv) > 1 else "", sys.argv[2] if len(sys.argv) > 2 else None))

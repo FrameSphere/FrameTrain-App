@@ -912,7 +912,11 @@
       },
       "emptySidebarHint": "Describe your goal/issue — I'll provide direct edits or a rewrite.",
       "continuedSuffix": " (continued)",
-      "emptyHistory": "No chats yet."
+      "emptyHistory": "No chats yet.",
+      "appliedToScript": "Written to the script",
+      "undoReplace": "Undo",
+      "replaceUndone": "Undone",
+      "reapplyReplace": "Apply again"
     },
     "errorModal": {
       "title": "Training Failed",
@@ -1330,7 +1334,11 @@
         "addMetric": "Add eval/metric (F1/accuracy)",
         "batchInference": "Make batch inference robust"
       },
-      "emptySidebarHint": "Describe your goal/issue — I'll provide direct edits or a rewrite."
+      "emptySidebarHint": "Describe your goal/issue — I'll provide direct edits or a rewrite.",
+      "appliedToScript": "Written to the script",
+      "undoReplace": "Undo",
+      "replaceUndone": "Undone",
+      "reapplyReplace": "Apply again"
     },
     "errorModal": {
       "title": "Test Failed",

@@ -936,7 +936,11 @@
       },
       "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.",
       "continuedSuffix": " (fortgesetzt)",
-      "emptyHistory": "Noch keine Chats vorhanden."
+      "emptyHistory": "Noch keine Chats vorhanden.",
+      "appliedToScript": "Ins Skript übernommen",
+      "undoReplace": "Rückgängig",
+      "replaceUndone": "Rückgängig gemacht",
+      "reapplyReplace": "Wieder übernehmen"
     },
     "errorModal": {
       "title": "Training fehlgeschlagen",
@@ -1330,7 +1334,11 @@
         "addMetric": "Eval/Metric hinzufügen (F1/Accuracy)",
         "batchInference": "Batch-Inference robust machen"
       },
-      "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite."
+      "emptySidebarHint": "Beschreibe Ziel/Problem — ich liefere direkt Edits oder einen Rewrite.",
+      "appliedToScript": "Ins Skript übernommen",
+      "undoReplace": "Rückgängig",
+      "replaceUndone": "Rückgängig gemacht",
+      "reapplyReplace": "Wieder übernehmen"
     },
     "errorModal": {
       "title": "Test fehlgeschlagen",
