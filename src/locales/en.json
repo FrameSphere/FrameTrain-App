@@ -916,7 +916,8 @@
       "appliedToScript": "Written to the script",
       "undoReplace": "Undo",
       "replaceUndone": "Undone",
-      "reapplyReplace": "Apply again"
+      "reapplyReplace": "Apply again",
+      "continuing": "Answer was too long — continuing ({round}/3) …"
     },
     "errorModal": {
       "title": "Training Failed",
@@ -1338,7 +1339,8 @@
       "appliedToScript": "Written to the script",
       "undoReplace": "Undo",
       "replaceUndone": "Undone",
-      "reapplyReplace": "Apply again"
+      "reapplyReplace": "Apply again",
+      "continuing": "Answer was too long — continuing ({round}/3) …"
     },
     "errorModal": {
       "title": "Test Failed",

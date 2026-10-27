@@ -940,7 +940,8 @@
       "appliedToScript": "Ins Skript übernommen",
       "undoReplace": "Rückgängig",
       "replaceUndone": "Rückgängig gemacht",
-      "reapplyReplace": "Wieder übernehmen"
+      "reapplyReplace": "Wieder übernehmen",
+      "continuing": "Antwort war zu lang — wird fortgesetzt ({round}/3) …"
     },
     "errorModal": {
       "title": "Training fehlgeschlagen",
@@ -1338,7 +1339,8 @@
       "appliedToScript": "Ins Skript übernommen",
       "undoReplace": "Rückgängig",
       "replaceUndone": "Rückgängig gemacht",
-      "reapplyReplace": "Wieder übernehmen"
+      "reapplyReplace": "Wieder übernehmen",
+      "continuing": "Antwort war zu lang — wird fortgesetzt ({round}/3) …"
     },
     "errorModal": {
       "title": "Test fehlgeschlagen",

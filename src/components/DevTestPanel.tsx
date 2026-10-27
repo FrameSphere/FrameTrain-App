@@ -22,6 +22,7 @@ import { callAI, trimHistory } from './TrainingPanel';
 import { MarkdownText } from './ui/MarkdownText';
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, calculateAffectedLines, type CodeEdit, type HighlightedLine } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
+import { CONTINUE_PROMPT, continueTruncated } from '../ai/continueTruncated';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
 import { detectScriptModality, isCausalLmModel, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
 import { generateCausalLmTestScript } from './llmDevScript';
@@ -209,6 +210,8 @@ function CodeAISidebar({ script, modelInfo, dsRefs, outputPath, onApplyEdit, onR
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  /** Laufende Fortsetzung einer abgeschnittenen Antwort (Runde 1..n), 0 = keine. */
+  const [continuing, setContinuing] = useState(0);
   const [showDiffModal, setShowDiffModal] = useState(false);
   const [currentMessageWithEdits, setCurrentMessageWithEdits] = useState<AiMessage | null>(null);
   const [isApplyingEdits, setIsApplyingEdits] = useState(false);
@@ -389,7 +392,27 @@ ANFORDERUNGEN:
       );
       const last = history.pop()!;
       let cutOff = false;
-      const response = await callAI(aiSettings, systemPrompt, last.content, history, language, () => { cutOff = true; });
+      let response = await callAI(aiSettings, systemPrompt, last.content, history, language, () => { cutOff = true; });
+      // Abgeschnittenes Skript fortsetzen, statt es zu verwerfen. Ein ganzes
+      // Trainingsskript (z. B. Chronos-2) passte oft nicht in ein Budget — die
+      // Antwort endete mitten im Code und landete nie in der Datei.
+      if (cutOff) {
+        try {
+          const done = await continueTruncated(response, parseAutoAction(response).action?.mode, async soFar => {
+            let cut = false;
+            const text = await callAI(
+              aiSettings, systemPrompt, CONTINUE_PROMPT,
+              [...history, { role: 'user' as const, content: last.content }, { role: 'assistant' as const, content: soFar }],
+              language, () => { cut = true; },
+            );
+            return { text, cut };
+          }, setContinuing);
+          response = done.text;
+          cutOff = done.cut;
+        } finally {
+          setContinuing(0);
+        }
+      }
       const { action, cleaned } = parseAutoAction(response);
       const inferredEdit = (action?.mode === 'edit') || cleaned.includes('##EDIT_START##');
       const edits = inferredEdit ? parseEdits(response) : [];
@@ -753,7 +776,12 @@ ANFORDERUNGEN:
               <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-300">
                 <Sparkles className="w-3 h-3" />
               </div>
-              <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10"><Loader2 className="w-4 h-4 text-violet-400 animate-spin" /></div>
+              <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 text-violet-400 animate-spin" />
+                {continuing > 0 && (
+                  <span className="text-[10px] text-gray-400">{t('devTestPanel.aiSidebar.continuing', { round: String(continuing) })}</span>
+                )}
+              </div>
             </div>
           )}
           {retryText && !loading && (
