@@ -10,11 +10,11 @@ describe('Zeitreihen-Modelle', () => {
   it('Chronos-2 ist kein Seq2Seq-Modell, sondern ein Zeitreihen-Modell mit klarem Hinweis', () => {
     const r = detectPluginForModel({ name: 'chronos-2-short', source_path: 'amazon/chronos-2', model_type: 't5' } as never);
     expect(r.supported).toBe(false);
-    if (!r.supported) {
-      expect(r.reason).toContain('Chronos');
-      expect(r.reason).toContain('Zeitreihen-Modell');
-      expect(r.reason).toContain('Dev Test');
-    }
+    // Ohne strict verengt TS die Union nicht — Grund explizit lesen.
+    const reason = (r as { reason?: string }).reason ?? '';
+    expect(reason).toContain('Chronos');
+    expect(reason).toContain('Zeitreihen-Modell');
+    expect(reason).toContain('Dev Test');
   });
 
   it('erkennt Chronos auch an der Architektur, ohne Namen', () => {
@@ -31,7 +31,7 @@ describe('Zeitreihen-Modelle', () => {
   it('ein normales T5 bleibt Seq2Seq', () => {
     const r = detectPlugin('google-t5/t5-small', { model_type: 't5' });
     expect(r.supported).toBe(true);
-    if (r.supported) expect(r.plugin.taskType).toBe('seq2seq');
+    expect((r as { plugin?: { taskType: string } }).plugin?.taskType).toBe('seq2seq');
   });
 
   it('kein Fehltreffer mitten im Wort', () => {
