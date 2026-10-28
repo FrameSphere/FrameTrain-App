@@ -69,6 +69,20 @@ export function detectPlugin(
     return { supported: false, reason: 'Kein Modellpfad angegeben.' };
   }
 
+  // Zeitreihen-Modelle VOR den Plugins: Chronos-2 nennt in config.json
+  // model_type "t5" — das Seq2Seq-Plugin griff zu, Test-Engine und Labor
+  // stuerzten ab ("Eingabe- und Zielspalte nicht erkannt", "'T5Config' object
+  // has no attribute 'decoder_start_token_id'").
+  const timeSeries = timeSeriesFamily(trimmed, configJson);
+  if (timeSeries) {
+    return {
+      supported: false,
+      reason: `${timeSeries} ist ein Zeitreihen-Modell. Dafür hat FrameTrain noch kein eigenes Engine-Plugin. `
+        + 'Trainieren und testen lässt es sich mit eigenem Skript: Dev Train, Dev Test und im Labor „Dev Script“ '
+        + '(der Code-Assistent kennt die passende Bibliothek).',
+    };
+  }
+
   for (const plugin of PLUGINS) {
     if (plugin.detect(trimmed, configJson)) {
       return { supported: true, plugin };
@@ -124,6 +138,26 @@ export function hiddenTrainingFieldsForTaskType(taskType?: string): string[] {
  * Sucht eine bekannte Architektur im Modellnamen, wenn keine config.json
  * vorliegt. Nur an Wortgrenzen, damit "bert" nicht in "albert" trifft.
  */
+/** Bekannte Zeitreihen-Foundation-Modelle — am Namen oder an der Architektur. */
+const TIME_SERIES_FAMILIES: Array<[RegExp, string]> = [
+  [/chronos/i, 'Chronos'],
+  [/timesfm/i, 'TimesFM'],
+  [/moirai/i, 'Moirai'],
+  [/lag[-_]?llama/i, 'Lag-Llama'],
+];
+
+export function timeSeriesFamily(modelPathOrId: string, configJson?: ModelConfig): string | undefined {
+  const archs = (configJson?.architectures ?? []).join(' ');
+  const pipeline = typeof configJson?.chronos_pipeline_class === 'string' ? configJson.chronos_pipeline_class : '';
+  const haystack = `${modelPathOrId.toLowerCase().replace(/\\/g, '/')} ${archs} ${pipeline}`;
+  for (const [re, name] of TIME_SERIES_FAMILIES) {
+    // Nur als eigenes Wort/Segment — "synchronos" o. Ae. soll nicht greifen.
+    const word = new RegExp(`(^|[^a-z0-9])${re.source}`, 'i');
+    if (word.test(haystack)) return name;
+  }
+  return undefined;
+}
+
 function knownKeyFromId(modelPathOrId: string): string | undefined {
   const normalized = modelPathOrId.toLowerCase().replace(/\\/g, '/');
   for (const key of Object.keys(KNOWN_UNSUPPORTED)) {

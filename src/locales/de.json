@@ -1270,7 +1270,9 @@
       "savedDetail": "Test-Skript „{name}“ gespeichert.",
       "noModelOrScriptTitle": "Modell oder Skript fehlt",
       "startedTitle": "Test gestartet",
-      "startedDetail": "Das Skript läuft jetzt."
+      "startedDetail": "Das Skript läuft jetzt.",
+      "autoSavedTitle": "Skript gespeichert",
+      "autoSavedDetail": "Ungespeicherte Änderungen wurden vor dem Start automatisch gesichert."
     },
     "pageContext": {
       "title": "=== FrameTrain – Dev Test Mode ===",

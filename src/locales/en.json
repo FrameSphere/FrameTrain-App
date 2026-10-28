@@ -1270,7 +1270,9 @@
       "savedDetail": "Test script “{name}” saved.",
       "noModelOrScriptTitle": "Model or Script Missing",
       "startedTitle": "Test Started",
-      "startedDetail": "The script is running now."
+      "startedDetail": "The script is running now.",
+      "autoSavedTitle": "Script saved",
+      "autoSavedDetail": "Unsaved changes were saved automatically before the run."
     },
     "pageContext": {
       "title": "=== FrameTrain – Dev Test Mode ===",

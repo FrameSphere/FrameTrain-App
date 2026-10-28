@@ -250,29 +250,32 @@ pub async fn run_lab_script_sample(
                 Err(format!("Python konnte nicht gestartet werden: {}", e))
             }
             Ok(mut child) => {
-                // Stderr loggen
+                // Stderr sammeln: ohne die letzten Zeilen sah der User bei einem
+                // Absturz nur "JSON parse …" statt des Tracebacks.
+                let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+                let mut stderr_handle = None;
                 if let Some(stderr) = child.stderr.take() {
-                    std::thread::spawn(move || {
+                    let tail = std::sync::Arc::clone(&stderr_tail);
+                    stderr_handle = Some(std::thread::spawn(move || {
                         for l in BufReader::new(stderr).lines().flatten() {
                             eprintln!("[LabScript STDERR] {}", l);
+                            if let Ok(mut t) = tail.lock() {
+                                t.push(l);
+                                if t.len() > 30 { let n = t.len() - 30; t.drain(0..n); }
+                            }
                         }
-                    });
+                    }));
                 }
 
-                // Erste JSON-Zeile aus stdout lesen
-                let first_line = child.stdout.take().and_then(|s| {
-                    BufReader::new(s).lines().flatten()
-                        .find(|l| !l.trim().is_empty())
-                });
+                let stdout_lines: Vec<String> = child.stdout.take()
+                    .map(|s| BufReader::new(s).lines().flatten().collect())
+                    .unwrap_or_default();
 
-                let _ = child.wait();
+                let status = child.wait().ok();
+                if let Some(h) = stderr_handle { let _ = h.join(); }
                 let _ = std::fs::remove_file(&tp);
-
-                match first_line {
-                    None => Err("Skript hat keine Ausgabe produziert".to_string()),
-                    Some(line) => serde_json::from_str::<serde_json::Value>(&line)
-                        .map_err(|e| format!("JSON parse: {} (Output: {})", e, line)),
-                }
+                let tail = stderr_tail.lock().map(|t| t.clone()).unwrap_or_default();
+                pick_lab_result(&stdout_lines, &tail, status.and_then(|s| s.code()))
             }
         };
 
@@ -283,6 +286,73 @@ pub async fn run_lab_script_sample(
     });
 
     Ok(())
+}
+
+/// Ergebnis eines Labor-Dev-Scripts aus seiner Ausgabe.
+///
+/// Gilt die LETZTE Zeile, die ein JSON-Objekt ist. Vorher zaehlte nur die
+/// erste nicht-leere Zeile — jedes print() davor ("loaded 148508 rows, 32
+/// series") liess das Sample mit "JSON parse: expected value" scheitern.
+/// Ohne JSON-Ergebnis nennt der Fehler Exit-Code, die letzten Ausgabezeilen
+/// und den Traceback.
+fn pick_lab_result(stdout: &[String], stderr_tail: &[String], exit_code: Option<i32>) -> Result<serde_json::Value, String> {
+    let found = stdout.iter().rev()
+        .map(|l| l.trim())
+        .filter(|l| l.starts_with('{'))
+        .find_map(|l| serde_json::from_str::<serde_json::Value>(l).ok().filter(|v| v.is_object()));
+    if let Some(v) = found {
+        return Ok(v);
+    }
+    let mut msg = match exit_code {
+        Some(0) => "Das Skript hat kein JSON-Ergebnis ausgegeben. Erwartet wird als letzte Zeile z. B. \
+                    print(json.dumps({\"predicted\": \"...\"}))".to_string(),
+        Some(c) => format!("Skript beendet mit Exit-Code {}.", c),
+        None => "Skript wurde durch ein Signal beendet.".to_string(),
+    };
+    let out: Vec<&String> = stdout.iter().filter(|l| !l.trim().is_empty()).collect();
+    if !out.is_empty() {
+        let last: Vec<&str> = out[out.len().saturating_sub(5)..].iter().map(|s| s.as_str()).collect();
+        msg.push_str(&format!("\n\nLetzte Ausgabe:\n{}", last.join("\n")));
+    }
+    if !stderr_tail.is_empty() {
+        msg.push_str(&format!("\n\nFehlerausgabe:\n{}", stderr_tail.join("\n")));
+    }
+    Err(msg)
+}
+
+#[cfg(test)]
+mod lab_script_tests {
+    use super::pick_lab_result;
+
+    fn lines(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn letzte_json_zeile_gilt_auch_nach_prints() {
+        let out = lines(&["loaded 148508 rows, 32 series", "{\"predicted\": \"240.1\"}"]);
+        let v = pick_lab_result(&out, &[], Some(0)).unwrap();
+        assert_eq!(v["predicted"], "240.1");
+    }
+
+    #[test]
+    fn letzte_von_mehreren_json_zeilen() {
+        let out = lines(&["{\"type\": \"status\"}", "{\"predicted\": \"b\", \"confidence\": 0.9}"]);
+        assert_eq!(pick_lab_result(&out, &[], Some(0)).unwrap()["predicted"], "b");
+    }
+
+    #[test]
+    fn absturz_zeigt_traceback_und_ausgabe() {
+        let out = lines(&["loaded 148508 rows"]);
+        let err = pick_lab_result(&out, &lines(&["Traceback (most recent call last):", "KeyError: 'x'"]), Some(1)).unwrap_err();
+        assert!(err.contains("Exit-Code 1"));
+        assert!(err.contains("loaded 148508 rows"));
+        assert!(err.contains("KeyError: 'x'"));
+    }
+
+    #[test]
+    fn ohne_json_aber_exit_0_erklaert_das_format() {
+        let err = pick_lab_result(&lines(&["fertig"]), &[], Some(0)).unwrap_err();
+        assert!(err.contains("predicted"));
+    }
 }
 
 // ============ Alte Stubs (unveraendert) ============

@@ -33,6 +33,7 @@ import { callAI, trimHistory } from './TrainingPanel';
 import { MarkdownText } from './ui/MarkdownText';
 import OpenLibraryModal from './OpenLibraryModal';
 import { readUserDevScripts } from '../utils/devScriptStorage';
+import { devContextPrompt, useDevContext } from '../utils/devContext';
 import { useContextMenuActions } from '../ui/contextMenuRegistry';
 import { dateLocale } from '../utils/dateLocale';
 import { parseDelimitedRows } from './csvRows';
@@ -253,15 +254,28 @@ const LABEL_KEYS = new Set(['label','category','class','target','expected','outp
 // LLM-Felder sind Eingabe bzw. erwartete Antwort, keine Zusatzinfos.
 const LLM_KEYS   = new Set(['messages','conversations','prompt','completion','instruction','response','chosen','rejected']);
 
+/** Original-Zeile eines Samples als Objekt (oder null). */
+function sampleRow(sample: LabSample): Record<string, unknown> | null {
+  if (typeof sample.rawData === 'object' && sample.rawData !== null)
+    return sample.rawData as Record<string, unknown>;
+  if (typeof sample.rawData === 'string') {
+    try { return JSON.parse(sample.rawData) as Record<string, unknown>; } catch { return null; }
+  }
+  return null;
+}
+
+/**
+ * Ganze Zeile fuer Dev-Scripts (LAB_SAMPLE_JSON). LAB_SAMPLE_INPUT ist nur der
+ * Anzeigetext — bei einer Zeitreihe die Reihen-ID ("BNBUSDT"); Zeitpunkt,
+ * Zielwert und Kovariaten fehlten dem Skript.
+ */
+export function sampleJson(sample: { rawData: unknown; text: string; label?: string }): string {
+  const row = sampleRow(sample as LabSample);
+  return JSON.stringify(row ?? { text: sample.text, label: sample.label ?? null });
+}
+
 function getSideInfo(sample: LabSample): Array<{ key: string; value: string }> {
-  const rawObj = (() => {
-    if (typeof sample.rawData === 'object' && sample.rawData !== null)
-      return sample.rawData as Record<string, unknown>;
-    if (typeof sample.rawData === 'string') {
-      try { return JSON.parse(sample.rawData) as Record<string, unknown>; } catch { return null; }
-    }
-    return null;
-  })();
+  const rawObj = sampleRow(sample);
   if (!rawObj) return [];
   return Object.entries(rawObj)
     .filter(([k]) => !TEXT_KEYS.has(k) && !LABEL_KEYS.has(k) && !LLM_KEYS.has(k))
@@ -566,13 +580,22 @@ function DevScriptEditor({ script, onChange, modelPath, datasets, outputPath }: 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMessages, setAiMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const aiEndRef = useRef<HTMLDivElement>(null);
+  // Dieselben Modell-/Daten-Fakten wie in Dev Train und Dev Test. Ohne sie
+  // fragte die KI zurueck, welcher Modelltyp vorliegt, und lieferte einen
+  // Platzhalter mit festem Pfad und falscher Sample-Variable.
+  const devFacts = useDevContext(modelPath, datasets.find(d => d.key === 'DATASET_PATH')?.value);
 
   useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [aiMessages]);
 
   const generateTemplate = () => onChange(`#!/usr/bin/env python3
 # FrameTrain – Lab Dev Script
 # Das Skript bekommt ein einzelnes Sample via ENV-Variable
-# und soll das Ergebnis als JSON-Zeile auf stdout ausgeben.
+# und soll das Ergebnis als JSON-Zeile auf stdout ausgeben (die LETZTE
+# JSON-Zeile zaehlt, andere print()-Ausgaben davor sind erlaubt).
+#
+# LAB_SAMPLE_INPUT  Anzeigetext des Samples
+# LAB_SAMPLE_JSON   ganze Original-Zeile als JSON (Tabellen, Zeitreihen)
+# LAB_SAMPLE_LABEL  erwarteter Wert, falls bekannt
 #
 # Pflichtfeld:  {"predicted": "label"}
 # Optional:     {"predicted": "label", "confidence": 0.95, "top_predictions": [{"label": "...", "score": 0.95}]}
@@ -587,6 +610,7 @@ OUTPUT_PATH  = os.environ.get("OUTPUT_PATH",  "${outputPath}")
 
 # ── Sample (wird für jedes Sample neu gesetzt) ────────────────────────────
 SAMPLE_INPUT = os.environ.get("LAB_SAMPLE_INPUT", "")
+SAMPLE_ROW   = json.loads(os.environ.get("LAB_SAMPLE_JSON", "{}") or "{}")
 
 # ── Modell laden (einmalig pro Skript-Start) ──────────────────────────────
 # TODO: Lade dein Modell hier
@@ -622,9 +646,21 @@ print(json.dumps(result))
     setAiMessages(m => [...m, userMsg]); setAiInput(''); setAiLoading(true);
     try {
       const sys = `Du bist ein Code-Assistent für FrameTrain Lab Dev Scripts.
-Das Skript bekommt SAMPLE_INPUT via ENV und soll {"predicted": "...", "confidence": 0.9} auf stdout ausgeben.
-MODEL_PATH="${modelPath}", OUTPUT_PATH="${outputPath}".
-Code in \`\`\`python Blöcken.`;
+
+KONTEXT (lokal):
+- MODEL_PATH = "${modelPath}"
+${datasets.map(d => `- ${d.key} = "${d.value}" (${d.name})`).join('\n')}
+- OUTPUT_PATH = "${outputPath}"
+Pfade im Skript IMMER per os.environ.get("NAME", "<Pfad oben>") lesen, nie fest eintragen.
+
+${devContextPrompt(devFacts, 'lab')}
+
+AKTUELLES SKRIPT:
+\`\`\`python
+${script}
+\`\`\`
+
+Antworte kurz. Ein neues oder geaendertes Skript immer komplett in EINEM \`\`\`python Block — es wird direkt in den Editor uebernommen.`;
       const history = trimHistory(
         [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content })),
         aiSettings,
@@ -1920,6 +1956,8 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
           MODEL_PATH: modelPath,
           ...Object.fromEntries(dsRefs.map(r => [r.key, r.value])),
           LAB_SAMPLE_INPUT: currentSample.text,
+          LAB_SAMPLE_JSON: sampleJson(currentSample),
+          LAB_SAMPLE_LABEL: currentSample.label ?? '',
           LAB_IMAGE_PATH: currentSample.fileKind === 'image' ? currentSample.filePath ?? '' : '',
           LAB_FILE_PATH:  currentSample.fileKind ? currentSample.filePath ?? '' : '',
         };

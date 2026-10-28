@@ -38,7 +38,7 @@ export function useDevContext(modelPath: string, datasetPath?: string): string |
 }
 
 /** Abschnitt fuer den System-Prompt. Ohne Fakten bleibt der bisherige Hinweis stehen. */
-export function devContextPrompt(facts: string | null, mode: 'train' | 'test'): string {
+export function devContextPrompt(facts: string | null, mode: 'train' | 'test' | 'lab'): string {
   const factsBlock = facts
     ? `MODELL, DATASET UND PYTHON (aus den Dateien gelesen — verbindlich):
 ${facts}
@@ -50,6 +50,23 @@ Skript braucht, sage es zu Beginn deiner Antwort und nenne den
 Installationsbefehl von oben.`
     : 'INSTALLIERTE PAKETE: torch, transformers, datasets, scikit-learn, numpy, accelerate, peft, ultralytics (YOLO)';
 
+  if (mode === 'lab') {
+    return `${factsBlock}
+
+LABOR-SKRIPT (laeuft fuer JEDES Sample neu, als eigener Prozess):
+- Eingaben als Umgebungsvariablen:
+    LAB_SAMPLE_INPUT  Anzeigetext des Samples (bei Tabellen oft nur eine ID)
+    LAB_SAMPLE_JSON   die ganze Original-Zeile als JSON-Objekt — fuer Tabellen
+                      und Zeitreihen DIESE nutzen (z. B. id + timestamp)
+    LAB_SAMPLE_LABEL  erwarteter Wert, falls bekannt
+    LAB_FILE_PATH     Datei-Sample (Bild/Audio/Video), sonst leer
+    MODEL_PATH, DATASET_PATH (wie oben) — immer per os.environ lesen
+- Ausgabe: als LETZTE Zeile auf stdout genau ein JSON-Objekt, z. B.
+    print(json.dumps({"predicted": "240.13", "confidence": 0.8,
+                      "top_predictions": [{"label": "p10: 231.0", "score": 0.1}]}))
+  "predicted" ist ein String (Zahlen formatiert). Andere print()-Zeilen davor sind erlaubt.
+- Kurz halten: Modell laden, das eine Sample vorhersagen, Ergebnis ausgeben.`;
+  }
   if (mode === 'test') {
     return `${factsBlock}
 

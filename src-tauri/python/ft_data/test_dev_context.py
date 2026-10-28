@@ -47,6 +47,29 @@ class DevContextTest(unittest.TestCase):
         self.assertIn("id: 2 Werte", text)
         self.assertIn("target", text)
 
+    def test_gemischte_frequenzen_werden_gemeldet(self):
+        # Regression 28.10.2026: Krypto taeglich + Aktien an Boersentagen —
+        # Chronos predict_df brach mit "same frequency" ab.
+        import pandas as pd
+        from ft_data.dev_context import _frequency_summary, _series_frequency
+        daily = pd.date_range("2024-01-01", periods=30, freq="D")
+        bdays = pd.bdate_range("2024-01-01", periods=30).delete(5)  # Feiertag-Luecke
+        df = pd.concat([
+            pd.DataFrame({"id": "BTC", "timestamp": daily, "target": 1.0}),
+            pd.DataFrame({"id": "AAPL", "timestamp": bdays, "target": 1.0}),
+        ])
+        self.assertEqual(_series_frequency(daily), "taeglich inkl. Wochenende")
+        self.assertEqual(_series_frequency(bdays), "Boersen-/Werktage (ohne Wochenende)")
+        text = "\n".join(_frequency_summary(df))
+        self.assertIn("ACHTUNG: unterschiedliche Frequenzen", text)
+        self.assertIn("AAPL", text)
+        self.assertIn("BTC", text)
+
+    def test_ohne_id_und_zeit_keine_frequenz(self):
+        import pandas as pd
+        from ft_data.dev_context import _frequency_summary
+        self.assertEqual(_frequency_summary(pd.DataFrame({"text": ["a"], "label": [1]})), [])
+
     def test_bildklassen_werden_genannt(self):
         d = self.root / "img"
         for cls in ("kreis", "quadrat"):

@@ -77,6 +77,53 @@ def describe_model(path: Path) -> List[str]:
     return out
 
 
+ID_COLUMNS = ("id", "item_id", "series_id", "unique_id", "symbol", "ticker")
+TIME_COLUMNS = ("timestamp", "date", "datetime", "time", "ds")
+
+
+def _series_frequency(ts) -> str:
+    """Grobe Frequenz einer Zeitreihe — robust gegen Feiertage (infer_freq ist es nicht)."""
+    import pandas as pd
+    ts = pd.Series(pd.to_datetime(ts, errors="coerce")).dropna().drop_duplicates().sort_values()
+    if len(ts) < 3:
+        return "zu kurz"
+    step = ts.diff().dropna().median()
+    day = pd.Timedelta(days=1)
+    if step < day:
+        return f"untertaeglich ({step})"
+    if step == day:
+        return "taeglich inkl. Wochenende" if (ts.dt.dayofweek >= 5).any() else "Boersen-/Werktage (ohne Wochenende)"
+    if step == 7 * day:
+        return "woechentlich"
+    if pd.Timedelta(days=28) <= step <= pd.Timedelta(days=31):
+        return "monatlich"
+    return f"alle {step}"
+
+
+def _frequency_summary(df) -> List[str]:
+    """Bei Zeitreihen im Long-Format: Frequenz je Reihe, gruppiert.
+
+    Regression 28.10.2026: Krypto (taeglich inkl. Wochenende) und Aktien
+    (Boersentage) gemischt — Chronos predict_df brach mit "All time series
+    must have the same frequency" ab, weil die KI das nicht wissen konnte.
+    """
+    id_col = next((c for c in ID_COLUMNS if c in df.columns), None)
+    ts_col = next((c for c in TIME_COLUMNS if c in df.columns), None)
+    if not id_col or not ts_col:
+        return []
+    groups = {}
+    for sid, g in df.groupby(id_col, sort=True):
+        groups.setdefault(_series_frequency(g[ts_col]), []).append(str(sid))
+    out = ["  Frequenz je Reihe (" + id_col + " / " + ts_col + "): " + "; ".join(
+        f"{freq}: {len(ids)} Reihen (z. B. {', '.join(ids[:4])})" for freq, ids in sorted(groups.items(), key=lambda x: -len(x[1]))
+    )]
+    if len(groups) > 1:
+        out.append("  ACHTUNG: unterschiedliche Frequenzen — Bibliotheken, die eine gemeinsame Frequenz "
+                   "verlangen (z. B. Chronos predict_df), brauchen getrennte Laeufe je Frequenz, "
+                   "ein Auffuellen auf eine Frequenz oder Vorhersage ueber Positionen statt Zeitstempel.")
+    return out
+
+
 def _table_summary(f: Path) -> List[str]:
     """Spalten, Typen, Zeilenzahl und drei Beispielzeilen einer Tabellendatei."""
     try:
@@ -92,19 +139,21 @@ def _table_summary(f: Path) -> List[str]:
                 total = pq.ParquetFile(f).metadata.num_rows
             except Exception:
                 total = None
-            df = pd.read_parquet(f)
-            total = total if total is not None else len(df)
-            df = df.head(5000)
+            full = pd.read_parquet(f)
+            total = total if total is not None else len(full)
+            df = full.head(5000)
         elif ext in (".csv", ".tsv"):
-            df = pd.read_csv(f, sep="\t" if ext == ".tsv" else ",", nrows=5000)
+            df = pd.read_csv(f, sep="\t" if ext == ".tsv" else ",", nrows=200_000)
+            full, df = df, df.head(5000)
         else:
             raw = f.read_text(encoding="utf-8", errors="replace").lstrip()
             if raw.startswith("["):
                 rows = json.loads(raw)
                 total = len(rows)
-                df = pd.DataFrame(rows[:5000])
+                full = pd.DataFrame(rows)
             else:
-                df = pd.read_json(f, lines=True, nrows=5000)
+                full = pd.read_json(f, lines=True, nrows=200_000)
+            df = full.head(5000)
     except Exception as e:
         return [f"  (nicht lesbar: {_short(e, 120)})"]
 
@@ -122,6 +171,10 @@ def _table_summary(f: Path) -> List[str]:
                 cats.append(f"{c}: {n} Werte (z. B. {', '.join(_short(v, 20) for v in df[c].dropna().unique()[:5])})")
     if cats:
         out.append("  Kategorien (aus den ersten 5000 Zeilen): " + "; ".join(cats))
+    try:
+        out.extend(_frequency_summary(full))
+    except Exception as e:  # Frequenz ist ein Zusatz — nie die ganze Beschreibung verlieren
+        out.append(f"  (Frequenz nicht bestimmbar: {_short(e, 80)})")
     for _, row in df.head(3).iterrows():
         out.append("  Beispiel: " + _short({k: _short(v, 40) for k, v in row.items()}, 400))
     return out

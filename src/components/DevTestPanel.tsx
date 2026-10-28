@@ -1791,8 +1791,24 @@ export default function DevTestPanel({ modelInfo, selectedVersionPath, datasets:
   // ── Test starten / stoppen ─────────────────────────────────────────────
 
   const handleStart = async () => {
-    if (isDirty) { error(t('devTestPanel.notifications.unsavedTitle'), t('devTestPanel.notifications.unsavedDetail')); return; }
     if (!script.trim() || !modelInfo) { error(t('devTestPanel.notifications.noModelOrScriptTitle'), t('devTestPanel.notifications.noModelOrScriptDetail')); return; }
+
+    // Ungespeicherte Aenderungen selbst sichern, wie Dev Train. Vorher brach der
+    // Start nach jedem KI-Rewrite mit "Unsaved Changes" ab — man musste erst
+    // speichern und einen Namen vergeben.
+    if (isDirty) {
+      if (currentScriptId) {
+        updateScript(currentScriptId, script, userData?.userId);
+      } else {
+        const autoName = `Dev Test ${new Date().toLocaleString(dateLocale(language), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+        saveScript(autoName, script, userData?.userId);
+        const newest = loadScripts(userData?.userId)[0];
+        if (newest) setCurrentScriptId(newest.id);
+      }
+      setSavedScript(script);
+      setIsDirty(false);
+      success(t('devTestPanel.notifications.autoSavedTitle'), t('devTestPanel.notifications.autoSavedDetail'));
+    }
 
     setRunning(true); setOutput(''); setExitCode(null);
 
