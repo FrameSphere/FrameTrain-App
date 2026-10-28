@@ -203,12 +203,20 @@ jobs:
     # Faellt eine Plattform der Matrix aus (z.B. Linux), sollen die fertigen
     # Builds trotzdem ihr latest.json bekommen — sonst haengt der Auto-Update
     # aller Plattformen an einer einzigen kaputten Matrix-Zeile.
+    # Scheitern ALLE Builds, bricht der Job im ersten Schritt ab, ohne
+    # latest.json hochzuladen.
     if: ${{ !cancelled() && needs.create-release.result == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
+      # latest.json bekommt nur Plattformen, deren Installer UND .sig im Release
+      # liegen (siehe scripts/generate_latest_json.py). Ist keine einzige
+      # Plattform vollstaendig, scheitert dieser Schritt - dann laufen der
+      # Upload und die Bruecke unten nicht. Beim ersten 1.6.11-Build
+      # scheiterten alle drei Builds und es entstand ein Release nur mit
+      # latest.json, dessen Links auf nicht vorhandene Installer zeigten.
       - name: Download .sig files and generate latest.json
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
@@ -218,47 +226,18 @@ jobs:
           TAG="v${VERSION}"
           export PUB_DATE
           PUB_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          export VERSION TAG
+          export VERSION
+          export ASSETS_FILE=./assets.json SIGS_DIR=./sigs
+
+          echo "Fetching assets of release $TAG..."
+          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets' > "$ASSETS_FILE"
+          jq -r '.[] | "  \(.name) (\(.size) bytes, \(.state))"' "$ASSETS_FILE"
 
           echo "Downloading .sig files for tag $TAG..."
-          mkdir -p ./sigs
-          gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir ./sigs 2>/dev/null \
-            || echo "No .sig files found (signing key not configured)"
-
-          echo "Downloaded sig files:"
-          ls -la ./sigs/ 2>/dev/null || echo "(none)"
-
-          export WIN_SIG="" MAC_ARM_SIG="" LINUX_SIG=""
-          for f in ./sigs/*.exe.sig ./sigs/*.msi.sig; do
-            [ -f "$f" ] && WIN_SIG=$(cat "$f") && echo "Windows sig: $f" && break
-          done
-          for f in ./sigs/*.app.tar.gz.sig; do
-            [ -f "$f" ] && MAC_ARM_SIG=$(cat "$f") && echo "macOS ARM sig: $f" && break
-          done
-          for f in ./sigs/*.AppImage.sig; do
-            [ -f "$f" ] && LINUX_SIG=$(cat "$f") && echo "Linux sig: $f" && break
-          done
-
-          echo "Fetching asset URLs from GitHub release..."
-          ASSETS_JSON=$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets')
-          echo "Assets: $ASSETS_JSON"
-
-          export WIN_URL MAC_ARM_URL LINUX_URL
-          WIN_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.exe$"; "i"))] | first | .url // ""')
-          MAC_ARM_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.app\\.tar\\.gz$"; "i"))] | first | .url // ""')
-          LINUX_URL=$(echo "$ASSETS_JSON" | jq -r '[.[] | select(.name | test("\\.AppImage$"; "i"))] | first | .url // ""')
-
-          [ "$WIN_URL" = "null" ]     && WIN_URL=""
-          [ "$MAC_ARM_URL" = "null" ] && MAC_ARM_URL=""
-          [ "$LINUX_URL" = "null" ]   && LINUX_URL=""
-
-          [ -z "$WIN_URL" ]     && WIN_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain_${VERSION}_x64-setup.exe"
-          [ -z "$MAC_ARM_URL" ] && MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain_${VERSION}_aarch64.app.tar.gz"
-          [ -z "$LINUX_URL" ]   && LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/FrameTrain_${VERSION}_amd64.AppImage"
-
-          echo "WIN_URL:     $WIN_URL"
-          echo "MAC_ARM_URL: $MAC_ARM_URL"
-          echo "LINUX_URL:   $LINUX_URL"
+          mkdir -p "$SIGS_DIR"
+          gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir "$SIGS_DIR" \
+            || echo "No .sig files downloaded"
+          ls -la "$SIGS_DIR"
 
           python3 scripts/generate_latest_json.py
 
