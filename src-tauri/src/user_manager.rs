@@ -9,6 +9,9 @@ pub struct UserSession {
     pub user_id: String,
     pub email: String,
     pub logged_in_at: String,
+    pub terms_accepted: Option<bool>,
+    pub terms_updated: Option<bool>,
+    pub diagnostics_consent: Option<bool>,
 }
 
 /// Login Command - Sets the current user in the database
@@ -38,6 +41,9 @@ pub async fn login_user(
         user_id: validation.user_id,
         email: validation.email,
         logged_in_at: chrono::Utc::now().to_rfc3339(),
+        terms_accepted: validation.terms_accepted,
+        terms_updated: validation.terms_updated,
+        diagnostics_consent: validation.diagnostics_consent,
     };
     
     println!("✅ User logged in: {}", session.email);

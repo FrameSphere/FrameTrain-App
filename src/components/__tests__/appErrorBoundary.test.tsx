@@ -7,10 +7,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 
-vi.mock('../../utils/errorReport', () => ({
-  sendAppErrorReport: vi.fn().mockResolvedValue(true),
-}));
-import { sendAppErrorReport } from '../../utils/errorReport';
+import { setAutoErrorReportingEnabled } from '../../utils/errorReport';
+
+let fetchSpy: ReturnType<typeof vi.spyOn>;
+const sentBody = () => JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
 
 function Boom(): React.ReactElement {
   // Genau der Fehler aus der Library: Zugriff auf ein fehlendes Feld.
@@ -22,7 +22,8 @@ describe('AppErrorBoundary', () => {
   beforeEach(() => {
     // React protokolliert abgefangene Fehler auf der Konsole — hier erwartet.
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.mocked(sendAppErrorReport).mockClear();
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'));
+    localStorage.clear();
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -32,18 +33,26 @@ describe('AppErrorBoundary', () => {
     expect(screen.getByText(/nicht betroffen/i)).toBeTruthy();
   });
 
-  it('meldet den Fehler an die Auto-Fix-Pipeline', () => {
+  it('meldet ohne Einwilligung nichts und behauptet es auch nicht', () => {
     render(<AppErrorBoundary><Boom /></AppErrorBoundary>);
-    expect(sendAppErrorReport).toHaveBeenCalled();
-    const arg = vi.mocked(sendAppErrorReport).mock.calls[0][0];
-    expect(arg.error_type).toBe('runtime:render');
-    expect(arg.details).toContain('Component stack');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(/automatisch gemeldet/i)).toBeNull();
+  });
+
+  it('meldet den Fehler mit Einwilligung an die Auto-Fix-Pipeline', () => {
+    setAutoErrorReportingEnabled(true);
+    render(<AppErrorBoundary><Boom /></AppErrorBoundary>);
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(sentBody().error_type).toBe('runtime:render');
+    expect(sentBody().details).toContain('Component stack');
+    expect(screen.getByText(/automatisch gemeldet/i)).toBeTruthy();
   });
 
   it('laesst fehlerfreie Inhalte unangetastet durch', () => {
+    setAutoErrorReportingEnabled(true);
     render(<AppErrorBoundary><span>alles gut</span></AppErrorBoundary>);
     expect(screen.getByText('alles gut')).toBeTruthy();
-    expect(sendAppErrorReport).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('kehrt ueber "Zurueck zur App" wieder zum Inhalt zurueck', () => {

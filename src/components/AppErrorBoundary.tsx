@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
-import { sendAppErrorReport } from '../utils/errorReport';
+import { isAutoErrorReportingEnabled, sendAutoErrorReport } from '../utils/errorReport';
 
 interface Props { children: React.ReactNode }
 interface State { error: Error | null }
@@ -21,8 +21,8 @@ export class AppErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    // Speist dieselbe Auto-Fix-Pipeline wie der globale Handler.
-    void sendAppErrorReport({
+    // Speist dieselbe Auto-Fix-Pipeline wie der globale Handler — nur mit Einwilligung.
+    sendAutoErrorReport({
       error_type: 'runtime:render',
       title: error.message.slice(0, 200),
       message: error.message,
@@ -44,8 +44,10 @@ export class AppErrorBoundary extends React.Component<Props, State> {
             <h1 className="text-white font-semibold">Diese Ansicht ist abgestuerzt</h1>
           </div>
           <p className="text-gray-400 text-sm">
-            Der Fehler wurde automatisch gemeldet. Deine Modelle, Datensaetze und
-            Trainingslaeufe sind davon nicht betroffen.
+            {isAutoErrorReportingEnabled()
+              ? 'Der Fehler wurde automatisch gemeldet. '
+              : ''}
+            Deine Modelle, Datensaetze und Trainingslaeufe sind davon nicht betroffen.
           </p>
           <pre className="text-[11px] font-mono text-red-300/80 bg-black/30 rounded-lg p-3 overflow-x-auto max-h-32">
             {error.message}

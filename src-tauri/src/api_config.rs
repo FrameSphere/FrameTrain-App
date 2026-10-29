@@ -50,6 +50,16 @@ pub mod endpoints {
     pub fn validate_credentials() -> String {
         format!("{}/desktop/validate-credentials", get_api_base_url())
     }
+
+    /// Schalter "Fehler automatisch melden" in die DB schreiben
+    pub fn diagnostics_consent() -> String {
+        format!("{}/desktop/diagnostics-consent", get_api_base_url())
+    }
+
+    /// Zustimmung zu AGB & Datenschutz nachholen
+    pub fn accept_terms() -> String {
+        format!("{}/desktop/accept-terms", get_api_base_url())
+    }
 }
 
 #[cfg(test)]

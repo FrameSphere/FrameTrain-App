@@ -189,6 +189,8 @@ fn main() {
             force_quit_app,
             open_path_in_finder,
             auth::validate_credentials,
+            auth::set_diagnostics_consent,
+            auth::accept_terms,
             user_manager::login_user,
             user_manager::logout_user,
             user_manager::is_user_logged_in,

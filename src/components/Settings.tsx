@@ -19,6 +19,8 @@ import { testAIConnection } from '../ai/aiClient';
 import { getStoredAuthorName, saveAuthorName, fetchCommunityName } from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
 import QuickAccessSettings, { Toggle } from './hosting/QuickAccessSettings';
+import { isAutoErrorReportingEnabled } from '../utils/errorReport';
+import { changeDiagnosticsConsent } from '../utils/diagnosticsConsent';
 import { takeRequestedSettingsTab } from '../ui/navigationEvents';
 
 interface UserData {
@@ -158,6 +160,13 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       const next = { ...prev, [key]: on };
       try { localStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(next)); } catch { /* nur Komfort */ }
       return next;
+    });
+  };
+  const [autoReporting, setAutoReporting] = useState(isAutoErrorReportingEnabled);
+  const toggleAutoReporting = (on: boolean) => {
+    setAutoReporting(on);
+    void changeDiagnosticsConsent(userData.apiKey, on).then(synced => {
+      if (!synced) setNotification({ type: 'error', message: t('settings.privacy.syncFailed') });
     });
   };
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
@@ -1835,6 +1844,27 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
 
   const renderSupportTab = () => (
     <div className="space-y-6">
+      {/* Fehlerberichte — Opt-in, standardmaessig aus */}
+      <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+        <h3 className="text-lg font-semibold text-white mb-4">{t('settings.privacy.title')}</h3>
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <div className="text-white font-medium">{t('settings.privacy.autoTitle')}</div>
+            <div className="text-sm text-gray-400 mt-1">{t('settings.privacy.autoDesc')}</div>
+          </div>
+          <Toggle on={autoReporting} onChange={toggleAutoReporting} label={t('settings.privacy.autoTitle')} />
+        </div>
+        <p className="text-xs text-gray-500 mt-4">
+          {t('settings.privacy.manualNote')}{' '}
+          <button
+            onClick={() => openUrl(`https://frame-train.com/${language === 'de' ? 'de' : 'en'}/privacy`).catch(() => {})}
+            className="text-gray-300 underline underline-offset-2 hover:text-white"
+          >
+            {t('settings.privacy.policyLink')}
+          </button>
+        </p>
+      </div>
+
       {/* Support Header */}
       <div className="glass-strong rounded-2xl shadow-lg border border-white/10 overflow-hidden">
         {/* Header */}

@@ -453,6 +453,14 @@
       "docs": "Dokumentation",
       "github": "GitHub",
       "copyright": "© 2026 FrameTrain. Alle Rechte vorbehalten."
+    },
+    "privacy": {
+      "title": "Fehlerberichte & Datenschutz",
+      "autoTitle": "Fehler automatisch melden",
+      "autoDesc": "Stürzt eine Ansicht ab oder tritt ein unerwarteter Fehler auf, schickt FrameTrain Fehlermeldung, Stacktrace, App-Version, Plattform und den aktuellen Bereich an das FrameTrain-Team. Stacktraces können Dateipfade enthalten. Datensätze, Modelle und Skripte werden dabei nie gesendet. Übernimmt deine Wahl aus der Registrierung und gilt für dein ganzes Konto; jederzeit widerrufbar.",
+      "manualNote": "Berichte, die du selbst über „An FrameTrain senden“ abschickst, zeigen vorher genau an, was übertragen wird – unabhängig von diesem Schalter.",
+      "policyLink": "Datenschutzerklärung",
+      "syncFailed": "Gerade keine Verbindung zum Konto – der Schalter gilt hier schon und wird beim nächsten Login übertragen."
     }
   },
   "globalTrainingProgress": {
@@ -4526,5 +4534,36 @@
     "fire-ice": "Eisblau, Orange bleibt für Laufendes",
     "light-gray": "Hell mit neutralem Akzent",
     "pure-white": "Hell mit Indigo-Akzent"
+  },
+  "reportPreview": {
+    "title": "Das wird an das FrameTrain-Team gesendet",
+    "intro": "Empfänger ist der Fehler-Server von FrameTrain (Cloudflare). Prüfe vor allem Skript und Logs – sie können Dateipfade, Datensatznamen oder Inhalte enthalten.",
+    "parts": {
+      "message": "Fehlermeldung",
+      "details": "Details / Stacktrace",
+      "logs": "Logs",
+      "script_full": "Komplettes Skript",
+      "config": "Trainings-Konfiguration",
+      "meta": "App-Version, Plattform, Bereich, Zeitpunkt"
+    },
+    "lines": "{n} Zeilen",
+    "showRaw": "Vollständigen Inhalt anzeigen",
+    "hideRaw": "Inhalt ausblenden",
+    "confirm": "Jetzt senden",
+    "cancel": "Abbrechen"
+  },
+  "termsGate": {
+    "title": "Zustimmung erforderlich",
+    "intro": "Für dein Konto ist noch keine Zustimmung zu den AGB und zur Datenschutzerklärung hinterlegt. Bitte lies sie und stimme zu, um FrameTrain weiter zu nutzen.",
+    "checkboxBefore": "Ich habe die",
+    "terms": "AGB",
+    "and": "und die",
+    "privacy": "Datenschutzerklärung",
+    "checkboxAfter": " gelesen und stimme zu.",
+    "accept": "Zustimmen",
+    "decline": "Ablehnen und abmelden",
+    "failed": "Speichern fehlgeschlagen. Prüfe deine Internetverbindung und versuche es erneut.",
+    "updatedTitle": "Unsere AGB wurden aktualisiert",
+    "updatedIntro": "Wir haben die AGB und die Datenschutzerklärung überarbeitet (Stand Oktober 2026). Änderungen gelten erst mit deiner Zustimmung. Bitte lies die neue Fassung und stimme zu, um FrameTrain weiter zu nutzen."
   }
 }

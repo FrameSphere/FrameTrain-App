@@ -14,12 +14,32 @@ import { AISettingsProvider } from './contexts/AISettingsContext';
 import { PageContextProvider } from './contexts/PageContext';
 import { TrainingContextProvider } from './contexts/TrainingContext';
 import { LanguageProvider } from './contexts/LanguageContext';
+import TermsGate from './components/TermsGate';
+import { applyAccountDiagnosticsConsent } from './utils/diagnosticsConsent';
 import './App.css';
 
 interface ApiKeyValidation {
   user_id: string;
   email: string;
   is_valid: boolean;
+}
+
+interface LoginSession {
+  user_id: string;
+  email: string;
+  logged_in_at: string;
+  /** null = Server ohne das Feld (aeltere Version) */
+  terms_accepted: boolean | null;
+  /** Frueher zugestimmt, aber einer aelteren Fassung */
+  terms_updated: boolean | null;
+  diagnostics_consent: boolean | null;
+}
+
+/** Einwilligungen aus dem Konto uebernehmen; Rueckgabe: ob und warum der AGB-Dialog kommt. */
+async function applyAccountConsents(apiKey: string, session: LoginSession): Promise<null | 'missing' | 'updated'> {
+  await applyAccountDiagnosticsConsent(apiKey, session.diagnostics_consent);
+  if (session.terms_accepted !== false) return null;
+  return session.terms_updated ? 'updated' : 'missing';
 }
 
 interface UserData {
@@ -112,6 +132,8 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<UserData | null>(null);
+  // Konto ohne Zustimmung zur aktuellen Fassung von AGB & Datenschutz
+  const [needsTerms, setNeedsTerms] = useState<null | 'missing' | 'updated'>(null);
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
   const [showFirstLaunch, setShowFirstLaunch] = useState(false);
 
@@ -213,11 +235,7 @@ function App() {
       
       if (config.api_key && config.password) {
         // Login user and establish session
-        const session = await invoke<{
-          user_id: string;
-          email: string;
-          logged_in_at: string;
-        }>('login_user', {
+        const session = await invoke<LoginSession>('login_user', {
           apiKey: config.api_key,
           password: config.password
         });
@@ -228,6 +246,7 @@ function App() {
           userId: session.user_id,
           email: session.email
         });
+        setNeedsTerms(await applyAccountConsents(config.api_key, session));
         setIsAuthenticated(true);
         
         console.log('✅ Auto-login successful:', session.email);
@@ -248,11 +267,7 @@ function App() {
   const handleLogin = async (apiKey: string, password: string) => {
     try {
       // Login user and set current user in database
-      const session = await invoke<{
-        user_id: string;
-        email: string;
-        logged_in_at: string;
-      }>('login_user', {
+      const session = await invoke<LoginSession>('login_user', {
         apiKey,
         password
       });
@@ -274,6 +289,7 @@ function App() {
         userId: session.user_id,
         email: session.email
       });
+      setNeedsTerms(await applyAccountConsents(apiKey, session));
       setIsAuthenticated(true);
       
       console.log('✅ User logged in and session established:', session.email);
@@ -360,6 +376,14 @@ function App() {
                   />
                   <UpdateChecker />
                   <TauriAutoUpdater />
+                  {needsTerms && (
+                    <TermsGate
+                      apiKey={userData.apiKey}
+                      reason={needsTerms}
+                      onAccepted={() => setNeedsTerms(null)}
+                      onDecline={() => { setNeedsTerms(null); void handleLogout(); }}
+                    />
+                  )}
                 </>
               ) : (
                 <Login onLogin={handleLogin} />

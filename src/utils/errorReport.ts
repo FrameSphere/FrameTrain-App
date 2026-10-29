@@ -1,7 +1,11 @@
 // Zentraler Helper für Fehler-Reports an das FrameTrain-Team (WebControl HQ).
 // Genutzt von TrainingDashboard/DevTrainPanel (explizite Reports) UND vom
-// globalen Handler (installGlobalErrorReporting), der jeden uncaught Fehler
-// in der App automatisch an den Manager meldet → speist die Auto-Fix-Pipeline.
+// globalen Handler (installGlobalErrorReporting), der uncaught Fehler an den
+// Manager meldet → speist die Auto-Fix-Pipeline.
+//
+// Automatische Meldungen nur mit Einwilligung (Opt-in in den Einstellungen,
+// standardmäßig aus) — so verspricht es die Datenschutzerklärung. Explizite
+// Reports zeigen vorher, was rausgeht (ReportPreview), und brauchen den Klick.
 //
 // API-Kontrakt (POST /api/app-errors): `error_type` und `message` sind Pflicht.
 
@@ -32,21 +36,47 @@ export function setCurrentScreen(screen: string | null | undefined): void {
   if (screen) currentScreen = String(screen);
 }
 
+// ── Einwilligung für automatische Meldungen ────────────────────────
+export const AUTO_REPORTING_KEY = 'ft_auto_error_reporting';
+
+export function isAutoErrorReportingEnabled(): boolean {
+  try { return localStorage.getItem(AUTO_REPORTING_KEY) === 'on'; } catch { return false; }
+}
+
+export function setAutoErrorReportingEnabled(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(AUTO_REPORTING_KEY, 'on');
+    else localStorage.removeItem(AUTO_REPORTING_KEY);
+  } catch { /* ohne Speicher bleibt es aus */ }
+}
+
+/** Genau der Body, der verschickt wird — auch für die Vorschau vor dem Senden. */
+export function buildAppErrorPayload(report: AppErrorReport): Record<string, unknown> {
+  return {
+    site_id: 'frametrain',
+    platform: navigator.platform || 'unknown',
+    app_version: appVersion,
+    screen: report.screen || currentScreen,
+    timestamp: new Date().toISOString(),
+    ...report,
+  };
+}
+
 /** Sendet einen Fehler-Report. Liefert true bei HTTP 2xx, wirft bei Netzwerkfehler. */
 export async function sendAppErrorReport(report: AppErrorReport): Promise<boolean> {
   const response = await fetch(APP_ERROR_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      site_id: 'frametrain',
-      platform: navigator.platform || 'unknown',
-      app_version: appVersion,
-      screen: report.screen || currentScreen,
-      timestamp: new Date().toISOString(),
-      ...report,
-    }),
+    body: JSON.stringify(buildAppErrorPayload(report)),
   });
   return response.ok;
+}
+
+/** Für automatische Meldungen: sendet nur mit Einwilligung, sonst still nichts. */
+export function sendAutoErrorReport(report: AppErrorReport): void {
+  if (!isAutoErrorReportingEnabled()) return;
+  // Fire-and-forget; Netzwerkfehler dürfen die App nie beeinflussen
+  sendAppErrorReport(report).catch(() => { /* offline o.ä. – bewusst geschluckt */ });
 }
 
 // ── Globales, automatisches Error-Reporting ─────────────────────────
@@ -68,22 +98,23 @@ function shouldSend(signature: string): boolean {
 function reportRuntime(error_type: string, message: string, stack?: string): void {
   const msg = String(message || 'Unknown error').slice(0, 1000);
   if (!msg || msg === 'Script error.') return; // CSP/cross-origin Rauschen ignorieren
+  if (!isAutoErrorReportingEnabled()) return;
   if (!shouldSend(error_type + '|' + msg.slice(0, 120))) return;
-  // Fire-and-forget; Netzwerkfehler dürfen die App nie beeinflussen
-  sendAppErrorReport({
+  sendAutoErrorReport({
     error_type,
     title: msg.slice(0, 120),
     message: msg,
     details: stack ? String(stack).slice(0, 4000) : undefined,
     screen: currentScreen,
-  }).catch(() => { /* offline o.ä. – bewusst geschluckt */ });
+  });
 }
 
 let installed = false;
 
 /**
  * Einmalig beim App-Start aufrufen (in main.tsx). Registriert globale
- * Fehler-Handler und lädt die echte App-Version (Tauri) nach.
+ * Fehler-Handler und lädt die echte App-Version (Tauri) nach. Gesendet wird
+ * erst, wenn der Nutzer automatische Fehlerberichte eingeschaltet hat.
  */
 export function installGlobalErrorReporting(): void {
   if (installed) return;

@@ -10,6 +10,11 @@ pub struct ApiKeyValidation {
     pub user_id: String,
     pub email: String,
     pub is_valid: bool,
+    /// None = aeltere Server-Version ohne das Feld (dann nichts erzwingen).
+    pub terms_accepted: Option<bool>,
+    /// Frueher zugestimmt, aber einer aelteren AGB-Fassung.
+    pub terms_updated: Option<bool>,
+    pub diagnostics_consent: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,6 +33,12 @@ struct CredentialResponse {
     email: Option<String>,
     message: Option<String>,
     error: Option<String>,
+    #[serde(rename = "termsAccepted")]
+    terms_accepted: Option<bool>,
+    #[serde(rename = "termsUpdated")]
+    terms_updated: Option<bool>,
+    #[serde(rename = "diagnosticsConsent")]
+    diagnostics_consent: Option<bool>,
 }
 
 /// Validiert API-Key und Password über das Backend-API
@@ -117,7 +128,39 @@ pub async fn validate_credentials(api_key: String, password: String) -> Result<A
         user_id,
         email,
         is_valid: true,
+        terms_accepted: credential_response.terms_accepted,
+        terms_updated: credential_response.terms_updated,
+        diagnostics_consent: credential_response.diagnostics_consent,
     })
+}
+
+/// POST mit API-Key an einen Desktop-Endpoint; Fehler als lesbarer Text.
+async fn post_with_api_key(url: String, body: serde_json::Value) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Fehler beim Erstellen des HTTP-Clients: {}", e))?;
+    let response = client.post(&url).json(&body).send().await
+        .map_err(|e| format!("Netzwerkfehler: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Server antwortet mit {}", response.status()));
+    }
+    Ok(())
+}
+
+/// Schreibt den Schalter "Fehler automatisch melden" ins Konto.
+#[tauri::command]
+pub async fn set_diagnostics_consent(api_key: String, consent: bool) -> Result<(), String> {
+    post_with_api_key(
+        endpoints::diagnostics_consent(),
+        serde_json::json!({ "apiKey": api_key, "consent": consent }),
+    ).await
+}
+
+/// Holt die Zustimmung zur aktuellen Fassung von AGB & Datenschutz nach.
+#[tauri::command]
+pub async fn accept_terms(api_key: String) -> Result<(), String> {
+    post_with_api_key(endpoints::accept_terms(), serde_json::json!({ "apiKey": api_key })).await
 }
 
 #[cfg(test)]

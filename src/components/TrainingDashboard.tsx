@@ -14,7 +14,8 @@ import { classifyError, type ErrorCategory } from '../utils/errorClassify';
 import type { TrainingJob, LossPoint } from '../contexts/TrainingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { sendAppErrorReport } from '../utils/errorReport';
+import { sendAppErrorReport, type AppErrorReport } from '../utils/errorReport';
+import ReportPreview from './ReportPreview';
 import { firstUsableLoss, lossImprovementPct } from './lossStats';
 import { dateLocale } from '../utils/dateLocale';
 
@@ -267,22 +268,26 @@ function ErrorRecoveryPanel({
   // Mehr als drei Zeilen? Dann lohnt der Aufklapp-Button.
   const errorIsLong = errorMsg.split('\n').length > 3 || errorMsg.length > 240;
 
-  // Fehler-Logs an das FrameTrain-Team senden
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const buildReport = (): AppErrorReport => ({
+    error_type: `${mode === 'dev' ? 'devtrain' : 'training'}:${category}`,
+    title: t('trainingDashboard.errorRecovery.reportHeader'),
+    message: errorMsg,
+    details: buildDiagReport(),
+    logs: (events ?? []).slice(0, 50).map(ev => `${ev.time} [${ev.type}] ${ev.message}`).join('\n'),
+    ...(mode === 'dev' && devScript ? { script_full: devScript } : {}),
+    error_analysis: category,
+    error_category: title,
+    ...(config ? { config: config as Record<string, unknown> } : {}),
+  });
+
+  // Fehler-Logs an das FrameTrain-Team senden — erst nach der Vorschau
   const handleSendReport = async () => {
     if (sendState === 'sending' || sendState === 'sent') return;
+    setPreviewOpen(false);
     setSendState('sending');
     try {
-      const ok = await sendAppErrorReport({
-        error_type: `${mode === 'dev' ? 'devtrain' : 'training'}:${category}`,
-        title: t('trainingDashboard.errorRecovery.reportHeader'),
-        message: errorMsg,
-        details: buildDiagReport(),
-        logs: (events ?? []).slice(0, 50).map(ev => `${ev.time} [${ev.type}] ${ev.message}`).join('\n'),
-        ...(mode === 'dev' && devScript ? { script_full: devScript } : {}),
-        error_analysis: category,
-        error_category: title,
-        ...(config ? { config: config as Record<string, unknown> } : {}),
-      });
+      const ok = await sendAppErrorReport(buildReport());
       setSendState(ok ? 'sent' : 'failed');
     } catch {
       setSendState('failed');
@@ -323,9 +328,11 @@ function ErrorRecoveryPanel({
   };
 
   // Echter "An FrameTrain senden"-Button (Standard- und Dev-Modus)
-  const sendReportButton = (
+  const sendReportButton = previewOpen ? (
+    <ReportPreview report={buildReport()} onConfirm={handleSendReport} onCancel={() => setPreviewOpen(false)} />
+  ) : (
     <button
-      onClick={handleSendReport}
+      onClick={() => setPreviewOpen(true)}
       disabled={sendState === 'sending' || sendState === 'sent'}
       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/25 transition-all text-left disabled:cursor-default"
     >

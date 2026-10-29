@@ -453,6 +453,14 @@
       "docs": "Documentation",
       "github": "GitHub",
       "copyright": "© 2026 FrameTrain. All rights reserved."
+    },
+    "privacy": {
+      "title": "Error reports & privacy",
+      "autoTitle": "Report errors automatically",
+      "autoDesc": "When a view crashes or an unexpected error occurs, FrameTrain sends the error message, stack trace, app version, platform and current section to the FrameTrain team. Stack traces may contain file paths. Datasets, models and scripts are never sent this way. Follows your choice from sign-up and applies to your whole account; can be turned off at any time.",
+      "manualNote": "Reports you send yourself via \"Send to FrameTrain\" always show exactly what will be transmitted first, regardless of this switch.",
+      "policyLink": "Privacy policy",
+      "syncFailed": "No connection to your account right now – the switch applies here already and will be synced at the next login."
     }
   },
   "globalTrainingProgress": {
@@ -4544,5 +4552,36 @@
     "fire-ice": "Ice blue, orange stays for running work",
     "light-gray": "Light with a neutral accent",
     "pure-white": "Light with an indigo accent"
+  },
+  "reportPreview": {
+    "title": "This will be sent to the FrameTrain team",
+    "intro": "The recipient is FrameTrain's error server (Cloudflare). Check the script and logs in particular – they may contain file paths, dataset names or content.",
+    "parts": {
+      "message": "Error message",
+      "details": "Details / stack trace",
+      "logs": "Logs",
+      "script_full": "Full script",
+      "config": "Training configuration",
+      "meta": "App version, platform, section, time"
+    },
+    "lines": "{n} lines",
+    "showRaw": "Show full content",
+    "hideRaw": "Hide content",
+    "confirm": "Send now",
+    "cancel": "Cancel"
+  },
+  "termsGate": {
+    "title": "Consent required",
+    "intro": "Your account has no record of agreeing to the Terms and the Privacy Policy yet. Please read them and agree to keep using FrameTrain.",
+    "checkboxBefore": "I have read and agree to the",
+    "terms": "Terms",
+    "and": "and the",
+    "privacy": "Privacy Policy",
+    "checkboxAfter": ".",
+    "accept": "Agree",
+    "decline": "Decline and log out",
+    "failed": "Saving failed. Check your internet connection and try again.",
+    "updatedTitle": "Our Terms have been updated",
+    "updatedIntro": "We have revised the Terms and the Privacy Policy (October 2026). Changes only apply once you agree. Please read the new version and agree to keep using FrameTrain."
   }
 }

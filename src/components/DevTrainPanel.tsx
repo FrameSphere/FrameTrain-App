@@ -29,7 +29,8 @@ import { devContextPrompt, stripPythonBlocks, useDevContext } from '../utils/dev
 import { parseEdits, applyEdit, applyAllEdits, removeEditBlocks, extractFullPythonCode, calculateAffectedLines, type CodeEdit, type HighlightedLine } from '../ai/codeEdits';
 import { buildAutoSystemPrompt, parseAutoAction, type AutoAction } from '../ai/autoModeProtocol';
 import { CONTINUE_PROMPT, continueTruncated } from '../ai/continueTruncated';
-import { sendAppErrorReport } from '../utils/errorReport';
+import { sendAppErrorReport, type AppErrorReport } from '../utils/errorReport';
+import ReportPreview from './ReportPreview';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
 import { detectScriptModality, isCausalLmModel, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
 import { generateCausalLmTrainScript } from './llmDevScript';
@@ -95,6 +96,8 @@ interface DevTrainErrorModalProps {
   onSendToFrameTrain: () => void;
   onSendToAI: (errorContext: string) => void;
   isSending?: boolean;
+  /** Was "An FrameTrain senden" verschickt — wird vor dem Senden gezeigt. */
+  report: AppErrorReport;
 }
 
 function DevTrainErrorModal({
@@ -108,12 +111,14 @@ function DevTrainErrorModal({
   onSendToFrameTrain,
   onSendToAI,
   isSending,
+  report,
 }: DevTrainErrorModalProps) {
   const { t, language } = useLanguage();
   useEscapeKey(onClose, isOpen);
   const analysis = analyzeError(errorMessage);
   const [copied, setCopied] = useState(false);
   const [sent, setSent] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -166,6 +171,14 @@ function DevTrainErrorModal({
               </div>
             </div>
           )}
+
+          {previewOpen && (
+            <ReportPreview
+              report={report}
+              onConfirm={() => { setPreviewOpen(false); onSendToFrameTrain(); }}
+              onCancel={() => setPreviewOpen(false)}
+            />
+          )}
         </div>
 
         {/* Actions */}
@@ -183,8 +196,8 @@ function DevTrainErrorModal({
           </button>
 
           <button
-            onClick={onSendToFrameTrain}
-            disabled={isSending || sent}
+            onClick={() => setPreviewOpen(true)}
+            disabled={isSending || sent || previewOpen}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm border transition-all ${
               sent 
                 ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
@@ -1739,21 +1752,25 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, selected
   };
 
   // Error Report Funktionen
+  const buildDevTrainReport = (): AppErrorReport => {
+    const analysis = analyzeError(errorMessage);
+    const categoryKey = `devTrainPanel.errorModal.errorCategories.${analysis.category}`;
+    return {
+      error_type: `devtrain:${analysis.category}`,
+      title: errorTitle || 'Dev Train Fehler',
+      message: errorMessage,
+      details: errorDetails,
+      logs: output,           // Alle Output-Logs
+      script_full: script,    // Komplettes Skript
+      error_analysis: analysis.category,
+      error_category: t(`${categoryKey}.title`),
+    };
+  };
+
   const handleSendToFrameTrain = async () => {
     setIsSendingError(true);
     try {
-      const analysis = analyzeError(errorMessage);
-      const categoryKey = `devTrainPanel.errorModal.errorCategories.${analysis.category}`;
-      const ok = await sendAppErrorReport({
-        error_type: `devtrain:${analysis.category}`,
-        title: errorTitle || 'Dev Train Fehler',
-        message: errorMessage,
-        details: errorDetails,
-        logs: output,           // Alle Output-Logs
-        script_full: script,    // Komplettes Skript
-        error_analysis: analysis.category,
-        error_category: t(`${categoryKey}.title`),
-      });
+      const ok = await sendAppErrorReport(buildDevTrainReport());
 
       if (ok) {
         success('Gesendet!', 'Fehler wurde an FrameTrain Team gesendet. Danke!');
@@ -2433,6 +2450,7 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, selected
         onSendToFrameTrain={handleSendToFrameTrain}
         onSendToAI={handleSendToAI}
         isSending={isSendingError}
+        report={buildDevTrainReport()}
       />
 
       <TrainingDashboard
