@@ -452,7 +452,11 @@
       "website": "Website",
       "docs": "Documentation",
       "github": "GitHub",
-      "copyright": "© 2026 FrameTrain. All rights reserved."
+      "copyright": "© 2026 FrameTrain. All rights reserved.",
+      "licenses": "Open-source licenses",
+      "licensesTitle": "Open-source licenses",
+      "licensesClose": "Close",
+      "licensesFailed": "The license notices could not be loaded."
     },
     "privacy": {
       "title": "Error reports & privacy",

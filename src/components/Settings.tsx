@@ -21,6 +21,7 @@ import { dateLocale } from '../utils/dateLocale';
 import QuickAccessSettings, { Toggle } from './hosting/QuickAccessSettings';
 import { isAutoErrorReportingEnabled } from '../utils/errorReport';
 import { changeDiagnosticsConsent } from '../utils/diagnosticsConsent';
+import ThirdPartyNotices from './ThirdPartyNotices';
 import { takeRequestedSettingsTab } from '../ui/navigationEvents';
 
 interface UserData {
@@ -162,6 +163,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       return next;
     });
   };
+  const [showLicenses, setShowLicenses] = useState(false);
   const [autoReporting, setAutoReporting] = useState(isAutoErrorReportingEnabled);
   const toggleAutoReporting = (on: boolean) => {
     setAutoReporting(on);
@@ -2381,6 +2383,15 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
             <span>{t('settings.about.github')}</span>
             <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
           </a>
+
+          <button
+            type="button"
+            onClick={() => setShowLicenses(true)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors group"
+          >
+            <span>{t('settings.about.licenses')}</span>
+            <FileText className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
+          </button>
         </div>
       </div>
 
@@ -2454,6 +2465,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'docs'           && renderDocsTab()}
           {activeTab === 'support'        && renderSupportTab()}
           {activeTab === 'about'          && renderAboutTab()}
+          {showLicenses && <ThirdPartyNotices onClose={() => setShowLicenses(false)} />}
         </div>
       </div>
 

@@ -452,7 +452,11 @@
       "website": "Website",
       "docs": "Dokumentation",
       "github": "GitHub",
-      "copyright": "© 2026 FrameTrain. Alle Rechte vorbehalten."
+      "copyright": "© 2026 FrameTrain. Alle Rechte vorbehalten.",
+      "licenses": "Open-Source-Lizenzen",
+      "licensesTitle": "Open-Source-Lizenzen",
+      "licensesClose": "Schließen",
+      "licensesFailed": "Die Lizenzhinweise konnten nicht geladen werden."
     },
     "privacy": {
       "title": "Fehlerberichte & Datenschutz",
