@@ -16,8 +16,7 @@ import { useTrainingContext } from '../contexts/TrainingContext';
 import { navigateTo } from '../ui/navigationEvents';
 import { dateLocale } from '../utils/dateLocale';
 import { VIDEOS, youtubeWatchUrl } from '../utils/videos';
-import { detectPluginForModel, getPluginById } from '../plugins/registry';
-import { pluginName } from '../plugins/pluginText';
+import { detectPluginForModel, timeSeriesFamily } from '../plugins/registry';
 import HomeBriefing from './HomeBriefing';
 import { CompareView, FirstRunSteps, PipelineHead, PipelineList } from './HomeStellwerk';
 import { buildInsights, buildBriefingFacts, factsHash, topResults, type InsightInput } from './homeInsights';
@@ -211,16 +210,16 @@ export default function HomePanel({ userId }: HomePanelProps) {
           : t('home.pipeline.title.empty');
 
   // Aufgabe je Modell: dieselbe Erkennung wie im Training, nicht der Modellname.
+  // Gruppiert wird nach Aufgabe, nicht nach Plugin: BERT und XLM-RoBERTa sind beide
+  // Textklassifikation und gehoeren in denselben Vergleich.
   const taskKey = useCallback((modelId: string) => {
     const model = models.find(m => m.id === modelId);
     if (!model) return 'other';
     const detected = detectPluginForModel(model);
-    return detected.supported ? detected.plugin.id : 'other';
+    if (detected.supported) return detected.plugin.taskType;
+    return timeSeriesFamily(model.source_path || model.name) ? 'time_series' : 'other';
   }, [models]);
-  const groupLabel = (key: string) => {
-    const plugin = getPluginById(key);
-    return plugin ? pluginName(plugin, t) : t('home.pipeline.compare.otherTask');
-  };
+  const groupLabel = (key: string) => t(`home.pipeline.task.${key}`, t('home.pipeline.task.other'));
   // Der Hinweis gilt nur ohne eigenen Testteil: mit Split testet die Engine auf ungesehenen Daten.
   const compare = useMemo(() => {
     const result = buildCompare(allRows, taskKey);

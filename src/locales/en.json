@@ -111,8 +111,7 @@
         "empty": "No test result yet. Run a test and the model appears here.",
         "noResult": "Without a test result",
         "more": "{n} more models without a test result",
-        "more_one": "1 more model without a test result",
-        "otherTask": "Other models"
+        "more_one": "1 more model without a test result"
       },
       "first": {
         "intro": "Each model gets one line here. It shows how far the model has come and what to do next.",
@@ -125,7 +124,27 @@
         "testHint": "See how good it is",
         "host": "Host",
         "hostHint": "Use it in your apps"
-      }
+      },
+      "task": {
+        "seq_classification": "Text classification",
+        "token_classification": "Entities (NER/POS)",
+        "seq2seq": "Seq2Seq",
+        "causal_lm": "Language models",
+        "canvas": "Custom networks (Canvas)",
+        "audio_classification": "Audio classification",
+        "speech_recognition": "Speech recognition",
+        "sentence_embedding": "Embeddings",
+        "hf_image_classification": "Image classification",
+        "image_classification": "Image classification",
+        "video_classification": "Video classification",
+        "detect": "Object detection",
+        "text_to_image_lora": "Text to image",
+        "vision_language": "Vision and language",
+        "time_series": "Time series",
+        "other": "Other models"
+      },
+      "moreUnused": "{n} models without a run",
+      "moreUnused_one": "1 model without a run"
     },
     "newTraining": "New training",
     "running": {

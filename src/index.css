@@ -496,7 +496,8 @@ button.ft-name:hover { color: var(--ft-accent-text); }
 .ft-note { min-height: 22px; margin: -2px 0 10px; font-size: 12.5px; color: var(--ft-muted); }
 .ft-note p { margin: 0; padding-left: 8px; grid-column: 2 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ft-link { font-weight: 500; }
-.ft-gh { display: block; font-size: 13px; font-weight: 600; padding: 12px 0 7px; color: var(--ft-ink); }
+/* Gruppen-Ueberschrift: leiser als die Modellnamen, damit Zeilen und Gruppen nicht verschmelzen. */
+.ft-gh { display: block; font-size: 12.5px; font-weight: 500; padding: 16px 0 6px; margin-bottom: 4px; color: var(--ft-faint); border-bottom: 1px solid var(--ft-line); }
 .ft-gh small { font-size: 12.5px; font-weight: 400; color: var(--ft-faint); margin-left: 6px; }
 .ft-more { display: flex; align-items: center; gap: 10px; height: 32px; margin-top: 4px; font-size: 13px; color: var(--ft-muted); }
 .ft-intro { max-width: 620px; font-size: 14px; line-height: 22px; color: var(--ft-muted); margin: 0 0 18px; }

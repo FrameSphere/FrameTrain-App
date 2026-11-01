@@ -111,8 +111,7 @@
         "empty": "Noch kein Testergebnis. Starte einen Test, dann erscheint das Modell hier.",
         "noResult": "Ohne Testergebnis",
         "more": "{n} weitere Modelle ohne Testergebnis",
-        "more_one": "1 weiteres Modell ohne Testergebnis",
-        "otherTask": "Weitere Modelle"
+        "more_one": "1 weiteres Modell ohne Testergebnis"
       },
       "first": {
         "intro": "Jedes Modell bekommt hier eine Zeile. Sie zeigt, wie weit es ist und was als Nächstes ansteht.",
@@ -125,7 +124,27 @@
         "testHint": "Sehen, wie gut es ist",
         "host": "Hosten",
         "hostHint": "In deinen Apps nutzen"
-      }
+      },
+      "task": {
+        "seq_classification": "Textklassifikation",
+        "token_classification": "Entitäten (NER/POS)",
+        "seq2seq": "Seq2Seq",
+        "causal_lm": "Sprachmodelle",
+        "canvas": "Eigene Netze (Canvas)",
+        "audio_classification": "Audioklassifikation",
+        "speech_recognition": "Spracherkennung",
+        "sentence_embedding": "Embeddings",
+        "hf_image_classification": "Bildklassifikation",
+        "image_classification": "Bildklassifikation",
+        "video_classification": "Videoklassifikation",
+        "detect": "Objekterkennung",
+        "text_to_image_lora": "Text zu Bild",
+        "vision_language": "Bild und Sprache",
+        "time_series": "Zeitreihen",
+        "other": "Weitere Modelle"
+      },
+      "moreUnused": "{n} Modelle ohne Lauf",
+      "moreUnused_one": "1 Modell ohne Lauf"
     },
     "newTraining": "Neues Training",
     "running": {

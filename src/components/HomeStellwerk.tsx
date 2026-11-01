@@ -262,13 +262,14 @@ export function PipelineList({ rows, f, lastSeen, limit, attentionHead }: {
   const { t } = useLanguage();
   const [showAll, setShowAll] = useState(false);
   const attention = rows.filter(r => r.group === 'attention');
-  // Nie benutzte Modelle wiederholen nur "Dataset hinzufuegen": eine Zeile reicht.
-  const allUnused = rows.filter(r => r.group === 'next' && r.next === 'addDataset' && !r.last);
+  // Modelle ohne jeden Lauf wiederholen nur ihre erste Aktion: eine Zeile reicht.
+  const allUnused = rows.filter(r => r.group === 'next' && !r.last);
   const onlyUnused = allUnused.length === rows.length;
   const unused = onlyUnused ? [] : allUnused;
   const rest = rows.filter(r => r.group !== 'attention' && !unused.includes(r));
   const shownRest = showAll ? rest : rest.slice(0, Math.max(4, limit - attention.length));
-  const hiddenCount = showAll ? 0 : rest.length - shownRest.length + unused.length;
+  const hiddenStarted = showAll ? 0 : rest.length - shownRest.length;
+  const hiddenUnused = showAll ? 0 : unused.length;
   const next = [...shownRest.filter(r => r.group === 'next'), ...(showAll ? unused : [])];
   const hosted = shownRest.filter(r => r.group === 'hosted');
   const isNew = (r: ModelRow) => lastSeen !== null && (r.last?.at ?? 0) > lastSeen;
@@ -281,9 +282,13 @@ export function PipelineList({ rows, f, lastSeen, limit, attentionHead }: {
       {next.map(r => <PipelineRow key={r.id} row={r} f={f} isNew={isNew(r)} />)}
       {hosted.length > 0 && <span className="ft-gh">{t('home.pipeline.group.hosted')}</span>}
       {hosted.map(r => <PipelineRow key={r.id} row={r} f={f} isNew={isNew(r)} />)}
-      {hiddenCount > 0 && (
+      {hiddenStarted + hiddenUnused > 0 && (
         <div className="ft-more">
-          <span>{t(hiddenCount === 1 ? 'home.pipeline.more_one' : 'home.pipeline.more', { n: String(hiddenCount) })}</span>
+          <span>
+            {hiddenStarted > 0
+              ? t(hiddenStarted + hiddenUnused === 1 ? 'home.pipeline.more_one' : 'home.pipeline.more', { n: String(hiddenStarted + hiddenUnused) })
+              : t(hiddenUnused === 1 ? 'home.pipeline.moreUnused_one' : 'home.pipeline.moreUnused', { n: String(hiddenUnused) })}
+          </span>
           <button className="ft-go ft-go-quiet" onClick={() => setShowAll(true)}>{t('home.pipeline.showAll')}</button>
         </div>
       )}
