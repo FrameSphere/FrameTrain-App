@@ -26,7 +26,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import type { DatasetType, PairingStatus, DatasetAnalysis } from '../plugins/datasetCompatHelpers';
 import { detectPluginForModel } from '../plugins/registry';
 import { dateLocale } from '../utils/dateLocale';
-import { navigateTo } from '../ui/navigationEvents';
+import { navigateTo, takeModelFocus } from '../ui/navigationEvents';
 import ModalPortal from './ui/ModalPortal';
 import { pluginName, pluginDescription } from '../plugins/pluginText';
 
@@ -640,7 +640,9 @@ export default function DatasetUpload() {
     try {
       const list = await invoke<ModelInfo[]>('list_models');
       setModels(list);
-      if (list.length > 0) setSelectedModelId(list[0].id);
+      const focus = takeModelFocus('dataset');
+      const focused = focus && list.some(m => m.id === focus.modelId) ? focus.modelId : null;
+      if (list.length > 0) setSelectedModelId(focused ?? list[0].id);
       try {
         const opts = await invoke<FilterOptions>('get_dataset_filter_options');
         setFilterOptions(opts);

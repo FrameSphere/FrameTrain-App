@@ -53,7 +53,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const renderView = () => {
     switch (currentView) {
       case 'home':
-        return <HomePanel userEmail={userData.email} userId={userData.userId} />;
+        return <HomePanel userId={userData.userId} />;
       case 'models':
         return <ModelManager userId={userData.userId} userEmail={userData.email} />;
       case 'training':
@@ -85,7 +85,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
       case 'synapse':
         return <SynapseBuilder userId={userData.userId} />;
       default:
-        return <HomePanel userEmail={userData.email} userId={userData.userId} />;
+        return <HomePanel userId={userData.userId} />;
     }
   };
 
@@ -138,7 +138,7 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         onLogout={onLogout}
       />
       
-      <main className={`ft-sheet relative flex-1 min-w-0 rounded-[18px] ${currentView === 'synapse' ? `overflow-hidden flex flex-col ${IS_MAC ? 'pt-5' : ''}` : 'overflow-auto'}`}>
+      <main className={`ft-sheet relative flex-1 min-w-0 rounded-[12px] ${currentView === 'synapse' ? `overflow-hidden flex flex-col ${IS_MAC ? 'pt-5' : ''}` : 'overflow-auto'}`}>
         <div className={currentView === 'synapse' ? 'flex-1 min-h-0' : 'max-w-7xl mx-auto px-8 pt-7 pb-28'}>
           {renderView()}
         </div>

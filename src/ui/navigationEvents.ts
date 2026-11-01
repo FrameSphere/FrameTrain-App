@@ -33,3 +33,22 @@ export function takeRequestedSettingsTab(): string | null {
   requestedSettingsTab = null;
   return t;
 }
+
+// Welches Modell die Zielseite vorauswaehlen soll (Aktionen der Startseite).
+// Gilt nur fuer genau diese Seite und wird beim Lesen geleert.
+export interface ModelFocus { modelId: string; versionId?: string | null; datasetId?: string | null }
+
+let requestedFocus: { view: AppView; focus: ModelFocus } | null = null;
+
+export function navigateToModel(view: AppView, focus: ModelFocus) {
+  requestedFocus = { view, focus };
+  navigateTo(view);
+}
+
+export function takeModelFocus(view: AppView): ModelFocus | null {
+  if (requestedFocus?.view !== view) return null;
+  const { focus } = requestedFocus;
+  // Erst nach dem Render leeren: StrictMode ruft Effekte im Dev-Modus doppelt auf.
+  setTimeout(() => { requestedFocus = null; }, 0);
+  return focus;
+}

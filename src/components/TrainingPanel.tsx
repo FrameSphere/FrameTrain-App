@@ -141,6 +141,7 @@ import ModalPortal from './ui/ModalPortal';
 import PackageCheckBanner from './PackageCheckBanner';
 import { pluginName, pluginDescription } from '../plugins/pluginText';
 import { templateName, templateDescription } from '../utils/templateText';
+import { takeModelFocus } from '../ui/navigationEvents';
 
 /**
  * Gemeinsamer Einstieg fuer Training, Labor und die Dev-Panels.
@@ -1192,9 +1193,11 @@ export default function TrainingPanel({ userData, onNavigateToAnalysis }: Traini
       // Zuletzt benutztes Modell wiederherstellen, sofern es noch existiert.
       // Ohne das fiel die Seite bei jedem Wechsel auf den ersten Eintrag
       // zurück — man stellte Modell und Dataset immer wieder neu ein.
+      const focus = takeModelFocus('training');
+      const focused = focus && listModels.some(m => m.id === focus.modelId) ? focus.modelId : null;
       const remembered = loadLastSelection().modelId;
       const stillExists = remembered && listModels.some(m => m.id === remembered);
-      const preferred = stillExists ? remembered : pickPreferredModelId(listWithVersions, listModels);
+      const preferred = focused ?? (stillExists ? remembered : pickPreferredModelId(listWithVersions, listModels));
       if (preferred) setSelectedModelId(preferred);
     } catch (e) { console.error('[Training] initLoad:', e); }
     finally { setLoadingData(false); }

@@ -20,8 +20,9 @@ export function hostName(model: { name: string }, v: VersionItem): string {
   return v.name.toLowerCase().includes(model.name.toLowerCase()) ? v.name : `${model.name} · ${v.name}`;
 }
 
-export default function HostModelDialog({ hosts, onClose, onHosted }: {
+export default function HostModelDialog({ hosts, initialModelId = null, onClose, onHosted }: {
   hosts: HostInfo[];
+  initialModelId?: string | null;
   onClose: () => void;
   onHosted: (versionId: string) => void;
 }) {
@@ -33,7 +34,7 @@ export default function HostModelDialog({ hosts, onClose, onHosted }: {
   const [ramGb, setRamGb] = useState(0);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
-  const [selModel, setSelModel] = useState<string | null>(null);
+  const [selModel, setSelModel] = useState<string | null>(initialModelId);
   const [selVersion, setSelVersion] = useState<string | null>(null);
   const [makeDefault, setMakeDefault] = useState(hosts.length === 0);
   const [autoload, setAutoload] = useState(false);

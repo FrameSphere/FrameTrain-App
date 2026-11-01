@@ -23,58 +23,113 @@
     "home": "Home"
   },
   "home": {
+    "pipeline": {
+      "view": "View",
+      "pipeline": "Pipeline",
+      "briefing": "Briefing",
+      "new": "New",
+      "original": "Original",
+      "openDetails": "Open",
+      "showAll": "Show all",
+      "more": "{n} more models",
+      "more_one": "1 more model",
+      "running": "Training, {pct}%",
+      "sleepRisk": "This computer may go to sleep during the run",
+      "keepAwake": "Keep awake",
+      "title": {
+        "attention": "{n} models need you",
+        "attention_one": "1 model needs you",
+        "training": "{model} is training",
+        "clear": "Everything is up to date",
+        "empty": "Start with a model",
+        "noData": "Add data to your models"
+      },
+      "cols": {
+        "model": "Model",
+        "data": "Data",
+        "training": "Training",
+        "test": "Test",
+        "hosting": "Hosting",
+        "duration": "Duration",
+        "last": "Last activity"
+      },
+      "group": {
+        "next": "Next step",
+        "hosted": "Hosted"
+      },
+      "state": {
+        "failed": "Failed",
+        "stopped": "Stopped",
+        "running": "Running",
+        "done": "Done"
+      },
+      "hosting": {
+        "ready": "Ready",
+        "loading": "Loading",
+        "idle": "Not loaded"
+      },
+      "next": {
+        "addDataset": "Add dataset",
+        "train": "Train",
+        "retryTrain": "Retry",
+        "startTest": "Start test",
+        "retryTest": "Retry",
+        "host": "Host model"
+      },
+      "note": {
+        "trainingFailed": "The last training failed.",
+        "trainingStopped": "Stopped, no new attempt since.",
+        "testFailed": "The last test did not finish.",
+        "testStopped": "The last test was stopped.",
+        "overfitting": "Validation loss {val} is well above train loss {train}. Possible overfitting.",
+        "weakResult": "Only {value}% in the last test."
+      },
+      "panel": {
+        "lossPerRun": "Final loss per run",
+        "openAnalysis": "Open in Analysis",
+        "oneRun": "Only one run so far, so there is no trend yet.",
+        "noRuns": "No finished training yet.",
+        "runs": "Runs",
+        "tests": "Tests",
+        "noTests": "No test yet."
+      },
+      "run": {
+        "epoch": "Epoch",
+        "step": "Step",
+        "loss": "Train loss",
+        "elapsed": "Elapsed"
+      },
+      "compare": {
+        "title": "Compare",
+        "scale": "Accuracy, full bar = 100%",
+        "dataset": "Test dataset",
+        "lastTest": "Last test",
+        "best": "Best",
+        "sameDataset": "Same test dataset",
+        "mixedDatasets": "Different test datasets, not directly comparable",
+        "sameData": "Tested on the data it was trained on, so this result may be too high.",
+        "empty": "No test result yet. Run a test and the model appears here.",
+        "noResult": "Without a test result",
+        "more": "{n} more models without a test result",
+        "more_one": "1 more model without a test result",
+        "otherTask": "Other models"
+      },
+      "first": {
+        "intro": "Each model gets one line here. It shows how far the model has come and what to do next.",
+        "model": "Your first model",
+        "data": "Add a dataset",
+        "dataHint": "From disk or Hugging Face",
+        "train": "Train",
+        "trainHint": "On this machine",
+        "test": "Test",
+        "testHint": "See how good it is",
+        "host": "Host",
+        "hostHint": "Use it in your apps"
+      }
+    },
     "newTraining": "New training",
-    "summary": {
-      "models": "{n} models",
-      "models_one": "1 model",
-      "datasets": "{n} datasets",
-      "datasets_one": "1 dataset",
-      "runs": "{n} runs",
-      "runs_one": "1 run",
-      "running": "{n} trainings are running.",
-      "running_one": "One training is running.",
-      "idle": "Nothing is running right now."
-    },
-    "worth": "Worth a look",
-    "cols": {
-      "model": "Model",
-      "loss": "Final loss",
-      "accuracy": "Accuracy",
-      "when": "When"
-    },
-    "status": {
-      "completed": "Done",
-      "failed": "Failed",
-      "stopped": "Stopped",
-      "running": "Running",
-      "pending": "Waiting"
-    },
-    "greeting": {
-      "morning": "Good morning",
-      "day": "Good afternoon",
-      "evening": "Good evening"
-    },
-    "lastVisit": "last here {when}",
-    "relative": {
-      "now": "just now",
-      "minutes": "{n} min ago",
-      "hours": "{n} h ago",
-      "days": "{n} days ago"
-    },
     "running": {
-      "title": "Currently running",
-      "step": "Step {step}/{total}",
-      "epoch": "Epoch {epoch}/{total}",
-      "loss": "Loss {loss}"
-    },
-    "since": {
-      "title": "Since your last visit",
-      "trainingDone": "Training finished: {model}",
-      "trainingFailed": "Training failed: {model}",
-      "trainingStopped": "Training stopped: {model}",
-      "finalLoss": "final loss {loss}",
-      "testDone": "Test finished: {model} ({version})",
-      "accuracy": "accuracy {value}%"
+      "title": "Currently running"
     },
     "firstRun": {
       "title": "Welcome to FrameTrain",
@@ -94,31 +149,6 @@
       "unusedDatasets_one": "{count} dataset has never been used for training ({first})",
       "trainingStopped": "The last run of {model} was stopped — no new attempt since"
     },
-    "stats": {
-      "models": "Models",
-      "versions": "Versions",
-      "datasets": "Datasets",
-      "trainings": "Trainings"
-    },
-    "recentTrainings": {
-      "title": "Recent trainings",
-      "empty": "No training run yet"
-    },
-    "recentTests": {
-      "title": "Recent tests",
-      "empty": "No test run yet"
-    },
-    "trend": {
-      "title": "Loss trend",
-      "subtitle": "Final loss of the last {count} completed trainings",
-      "subtitle_one": "Final loss of the last completed training",
-      "subtitleModel": "{model}: final loss of the last {count} completed trainings",
-      "subtitleModel_one": "{model}: final loss of the last completed training"
-    },
-    "ranking": {
-      "title": "Best results"
-    },
-    "viewAll": "View all",
     "briefing": {
       "title": "AI briefing",
       "create": "Create briefing",

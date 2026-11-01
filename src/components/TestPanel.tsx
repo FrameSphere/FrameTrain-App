@@ -10,6 +10,7 @@ import { usePageContext } from '../contexts/PageContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import PackageCheckBanner from './PackageCheckBanner';
 import { pluginName, pluginDescription } from '../plugins/pluginText';
+import { takeModelFocus } from '../ui/navigationEvents';
 
 // ── Types (analog zu TrainingPanel) ───────────────────────────────────────
 
@@ -187,7 +188,9 @@ export default function TestPanel({ userData }: { userData?: { userId: string; e
           ...listWithVersions.filter(m => m.versions.some(v => !v.is_root)),
           ...listWithVersions.filter(m => !m.versions.some(v => !v.is_root)),
         ];
-        const preferred = lastTrained ?? pickPreferredModelId(trainedFirst, list);
+        const focus = takeModelFocus('tests');
+        const focused = focus && list.some(m => m.id === focus.modelId) ? focus.modelId : null;
+        const preferred = focused ?? lastTrained ?? pickPreferredModelId(trainedFirst, list);
         if (preferred) setSelectedModelId(preferred);
       } catch (e) {
         console.error('[TestPanel] initLoad:', e);
