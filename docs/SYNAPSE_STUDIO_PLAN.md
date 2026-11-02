@@ -1,6 +1,6 @@
 # Synapse Studio: Plan
 
-Stand: 02.11.2026, Basis Version 1.6.13. Status: Phase 0 bis 8 als Kern gebaut und getestet (uncommittet in `feat/synapse-studio`). Offen: ONNX-Lauf, Port-Farben, Budget, Einzelschritt-Ansicht, eigener Optimizer im Editor, Live-Test in der App.
+Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet, in einer Vorschau-App live getestet (Bild, Audio, Text, PyTorch-Export). Offen: Video, Seq2Seq, GAN, Diffusion und Detektion live, ONNX-Lauf, Port-Farben, Budget, Einzelschritt-Ansicht, Erzeugen und Boxen in Labor und Hosting.
 
 ## 1. Ziel
 
