@@ -82,6 +82,10 @@ class LoadedCanvasModel:
             }
 
         # Klassifikation
+        # Hat das Modell mehr Ausgaenge als das Dataset Klassen, zaehlen nur echte Klassen.
+        known = len(self.preprocess.get("class_names") or [])
+        if known and logits.size(-1) > known:
+            logits = logits[..., :known]
         probs = F.softmax(logits, dim=-1).squeeze(0).cpu().tolist()
         if isinstance(probs, float):
             probs = [probs]

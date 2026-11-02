@@ -331,6 +331,10 @@ class CanvasPlugin(TrainPlugin):
                     stub, self.config.dataset_path, batch_size
                 )
 
+            names = self._preprocess.get("class_names") or []
+            if task == "classification" and names and len(names) != self.ir.training.num_classes:
+                MessageProtocol.status("train", f"[Warn] Das Dataset hat {len(names)} Klassen, das Modell ist auf "
+                                                f"{self.ir.training.num_classes} eingestellt.")
             self._final = {
                 "n_train": len(train_loader.dataset),
                 "n_val": len(val_loader.dataset),

@@ -219,6 +219,16 @@ class Inference(Base):
         r = load_canvas_model(out, device="cpu").predict_image(f"{self.img}/hell/0.png")
         self.assertEqual(r["top_predictions"][0]["label"], "hell")
 
+    def test_ueberzaehlige_ausgaenge_erscheinen_nicht(self):
+        g = graph(MLP_NODES[:3] + [n("d2", "dense", "layer", inputSize=16, outputSize=6), MLP_NODES[4]], MLP_EDGES, CSV_DATA,
+                  epochs=5, numClasses=6)
+        out = f"{self.tmp}/extra"
+        ok, _, log = train(g, self.csv, out)
+        self.assertTrue(ok, log[-300:])
+        self.assertIn("Das Dataset hat 2 Klassen", log)
+        r = load_canvas_model(out, device="cpu").predict([1000.0, 1000.0, 1000.0, 1000.0])
+        self.assertEqual({t["label"] for t in r["top_predictions"]}, {"ja", "nein"})
+
     def test_bild_klassen_haben_namen(self):
         nodes = [n("i", "image_loader", "data", imageSize=32, channels="3", normalize=True),
                  n("c1", "conv2d", "layer", inChannels=3, outChannels=8, kernelSize="3", padding="1"),

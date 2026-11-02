@@ -82,7 +82,12 @@ def infer(model_dir: str, kind: str, value: Any) -> Dict[str, Any]:
     if kind == "text":
         return model.predict_text(str(value))
     if kind == "tensor":
-        return model.predict(torch.tensor(value, dtype=torch.float32))
+        wanted = model.preprocess.get("input_shape")
+        try:
+            return model.predict(torch.tensor(value, dtype=torch.float32))
+        except RuntimeError as e:
+            raise ValueError(f"Diese Zahlen passen nicht zum Modell. Erwartet wird die Form {wanted}. "
+                             "Bilder, Audio und Video als Datei waehlen.") from e
     if kind == "file":
         spec = model.preprocess.get("pipeline") or {}
         if spec.get("kind") == "mask":
