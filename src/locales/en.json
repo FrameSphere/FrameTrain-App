@@ -4276,7 +4276,7 @@
       "yolo_pose": "Pose (YOLO)",
       "yolo_obb": "Rotated boxes (YOLO)",
       "yolo_classify": "Image classification (YOLO)",
-      "canvas": "Synapse model · number vector",
+      "canvas": "Synapse model",
       "unknown": "Unknown task"
     },
     "page": {
@@ -4362,7 +4362,7 @@
         "audio": "Attach or record audio",
         "asr": "Record speech or attach audio",
         "video": "Attach or drop a video",
-        "tensor": "Numbers, e.g. 0.5, 1.2, 3.0"
+        "tensor": "Text or numbers, e.g. 0.5, 1.2"
       },
       "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain. If the switch is already on, it no longer applies after an update: reset the permission, turn the switch on again, restart.",
       "openSettings": "Open settings",

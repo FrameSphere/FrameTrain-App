@@ -1,6 +1,6 @@
 # Synapse Studio: Plan
 
-Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet, in einer Vorschau-App live getestet (Bild, Audio, Text, PyTorch-Export). Offen: Video, Seq2Seq, GAN, Diffusion und Detektion live, ONNX-Lauf, Port-Farben, Budget, Einzelschritt-Ansicht, Erzeugen und Boxen in Labor und Hosting.
+Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet. Live in der Vorschau-App geprueft: Bild, Audio, Text, Mini-GPT, Speichern, PyTorch-Export, Inferenz-Tab, Hosting. Nur in Python getestet: Video, Seq2Seq, U-Net, VAE, GAN, Diffusion, Detektion. Offen: Labor, ONNX-Lauf, Datei-Eingabe im Hosting pruefen, Port-Farben, Budget, Einzelschritt-Ansicht.
 
 ## 1. Ziel
 

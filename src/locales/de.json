@@ -4272,7 +4272,7 @@
       "yolo_pose": "Pose (YOLO)",
       "yolo_obb": "Gedrehte Boxen (YOLO)",
       "yolo_classify": "Bildklassifikation (YOLO)",
-      "canvas": "Synapse-Modell · Zahlenvektor",
+      "canvas": "Synapse-Modell",
       "unknown": "Unbekannte Aufgabe"
     },
     "page": {
@@ -4359,7 +4359,7 @@
         "audio": "Audio anhängen oder aufnehmen",
         "asr": "Sprache aufnehmen oder Audio anhängen",
         "video": "Video anhängen oder hineinziehen",
-        "tensor": "Zahlen, z. B. 0.5, 1.2, 3.0"
+        "tensor": "Text oder Zahlen, z. B. 0.5, 1.2"
       },
       "screenPermission": "macOS erlaubt FrameTrain die Bildschirmaufnahme noch nicht. Erlaube sie unter Datenschutz & Sicherheit → Bildschirmaufnahme und starte FrameTrain neu. Ist der Schalter schon an, gilt er nach einem Update nicht mehr: Freigabe zurücksetzen, Schalter neu einschalten, neu starten.",
       "openSettings": "Einstellungen öffnen",
