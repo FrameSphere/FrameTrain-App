@@ -820,6 +820,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       resolveDatasetPath,
       registerTrainingVersion,
       parseStatusLogLine,
+      activeCanvasModelId,
+      activeModelName,
     ]
   );
 
@@ -1539,12 +1541,14 @@ Keine Floskeln, nur Fakten.`;
               </Panel>
             )}
             <Controls/>
-            <MiniMap
-              nodeColor={(node) => ((node.data as any).color as string) ?? "#a78bfa"}
-              nodeStrokeWidth={0}
-              maskColor="rgba(8,12,18,0.75)"
-              style={{ borderRadius: 8 }}
-            />
+            {nodes.length > 0 && (
+              <MiniMap
+                nodeColor={(node) => ((node.data as any).color as string) ?? "#a78bfa"}
+                nodeStrokeWidth={0}
+                maskColor="rgba(8,12,18,0.75)"
+                style={{ borderRadius: 8 }}
+              />
+            )}
             {shapeBannerVisible && shapeErrors.length > 0 && (
               <Panel position="top-center">
                 <ShapeErrorBanner

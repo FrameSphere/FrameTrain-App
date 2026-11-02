@@ -585,7 +585,7 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
             {t('synapse.trainingConsole.doneBannerTitle')}
           </span>
           <span style={{ fontSize: 11, color: "#475569", fontFamily: "'JetBrains Mono',monospace", flex: 1 }}>
-            model.pt · metrics.json · canvas_model.py
+            model.pt · model_best.pt · metrics.json
           </span>
           <button
             onClick={() => onExport("open_folder")}
