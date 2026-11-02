@@ -62,17 +62,12 @@ class CanvasInferenceServer:
         if input_type == "image":
             path = raw if isinstance(raw, str) else str(raw)
             try:
-                result = self.loaded.predict_image(path)
+                result = self.loaded.predict_file(path)
             except FileNotFoundError:
                 return {"type": "error", "message": f"Bild nicht gefunden: {path}"}
             except Exception as e:
                 return {"type": "error", "message": f"Bild-Inferenz: {type(e).__name__}: {e}"}
-            result["type"] = "result"
-            if "predicted" not in result and "predicted_class" in result:
-                result["predicted"] = str(result["predicted_class"])
-            if "inference_time" not in result and "inference_ms" in result:
-                result["inference_time"] = float(result["inference_ms"]) / 1000.0
-            return result
+            return self._finish(result)
 
         # Tensor-Input: Liste von Zahlen oder Liste von Listen
         if input_type == "tensor":
@@ -81,17 +76,25 @@ class CanvasInferenceServer:
             except Exception as e:
                 return {"type": "error", "message": f"Tensor-Konvertierung: {e}"}
         elif input_type == "text":
-            # Text-Input: Feature-Encoding versuchen (einfaches Fallback)
-            return {"type": "error", "message": "Text-Input erfordert einen Tokenizer – nutze ein seq_classification-Modell."}
+            try:
+                result = self.loaded.predict_text(str(raw))
+            except ValueError as e:
+                return {"type": "error", "message": str(e)}
+            return self._finish(result)
         else:
             return {"type": "error", "message": f"Unbekannter input_type: {input_type}"}
 
-        result = self.loaded.predict(x)
+        return self._finish(self.loaded.predict(x))
+
+    @staticmethod
+    def _finish(result: dict) -> dict:
+        # Key-Aliase für den Lab-Server (gleiche Felder wie model_server.py)
         result["type"] = "result"
-        # Key-Aliase für den Lab-Server (gleiche Felder wie model_server.py):
-        # predicted_class → predicted, inference_ms → inference_time (Sekunden)
-        if "predicted" not in result and "predicted_class" in result:
-            result["predicted"] = str(result["predicted_class"])
+        if "predicted" not in result:
+            if "predicted_label" in result:
+                result["predicted"] = result["predicted_label"]
+            elif "predicted_value" in result:
+                result["predicted"] = str(result["predicted_value"])
         if "inference_time" not in result and "inference_ms" in result:
             result["inference_time"] = float(result["inference_ms"]) / 1000.0
         return result

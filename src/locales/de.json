@@ -1668,6 +1668,7 @@
         "exportedLabel": "✓ Exportiert nach: {path}",
         "exportButton": "↓ In Downloads exportieren",
         "exportingButton": "Wird exportiert…",
+        "modelLabel": "Modell",
         "logMetricsLabel": "Log / Metriken exportieren",
         "formatTxt": "Training Log (.txt)",
         "formatCsv": "Metrics CSV (.csv)",
@@ -3181,6 +3182,10 @@
     "noWeightsAfter": "– erst Training durchführen."
   },
   "synapseBuilder": {
+    "blueprints": {"title": "Mit einer Vorlage starten oder Nodes aus der Bibliothek ziehen", "all": "Alle", "image": "Bild", "text": "Text", "audio": "Audio", "video": "Video", "table": "Tabelle"},
+    "block": { "button": "Block", "tooltip": "Markierte Nodes zu einem Block zusammenfassen (Umschalt + Ziehen zum Markieren)", "needTwo": "Markiere mindestens zwei Nodes.", "oneEdge": "Ein Block braucht genau eine Kante hinein und eine hinaus." },
+    "auto": "auto",
+    "liveOk": "✓ Prüfung ok · {params} Parameter",
     "title": "Synapse Builder",
     "subtitle": "Visueller Modell-Pipeline-Builder",
     "exportGraphTooltip": "Graph als neues Modell in FrameTrain-Bibliothek speichern",

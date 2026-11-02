@@ -246,6 +246,14 @@ Analyze the request and decide:
 
 OUTPUT: ONLY a valid JSON array. No prose, no markdown fences.
 
+## BUILDING MODELS
+- Every data kind has a source: image_loader, audio_loader, video_loader, text_loader, mask_loader, csv_loader, parquet_loader. Exactly one source per graph.
+- Text needs text_loader → tokenizer → embedding. Audio can add mel_spectrogram before conv2d, or feed conv1d directly. Video uses conv3d and pool3d.
+- Size params stay "auto" unless the user names a value: inputSize, inChannels, embedDim, normalizedShape, numFeatures, dim. Never set them by hand when building new graphs.
+- dense needs a flat or sequence input: put pool, pool1d, pool3d or flatten between conv layers and dense.
+- output_node.taskType: classification, regression, language_model (dense per token, transformer_block causal=true), segmentation (conv2d with numClasses channels), autoencoder (reparameterize for a VAE), seq2seq (seq2seq_loader, decoder_input, transformer_decoder), diffusion (timestep as second input, model predicts noise), detection (detection_loader, conv2d head with 5 + classes channels), gan (two block nodes with role generator and discriminator).
+- A missing building block goes into a code node: class Node(nn.Module) with __init__(self, shape).
+
 ## CRITICAL RULES FOR PROBLEM-HUNTING (prüfen mode):
 Scan graph for violations (highest priority):
 1. ✗ ILLEGAL: Edges TO optimizer nodes — REMOVE THEM

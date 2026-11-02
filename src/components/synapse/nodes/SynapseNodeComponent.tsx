@@ -50,12 +50,14 @@ export const SynapseNodeComponent = memo(function SynapseNodeComponent({
   const d = data as unknown as SynapseNodeData & {
     _sparkle?: number;
     _shapeErrorRole?: "source" | "target" | "both";
+    liveError?: string;
+    liveParams?: number;
   };
   const meta = CATEGORY_META[d.category as keyof typeof CATEGORY_META];
   if (!meta) return null;
 
   const sparkleActive = Boolean(d._sparkle && Date.now() - d._sparkle < 1500);
-  const shapeRole = d._shapeErrorRole;
+  const shapeRole = d._shapeErrorRole ?? (d.liveError ? "both" : undefined);
   const shapeClass = shapeRole
     ? `synapse-node-shape-error-${shapeRole}`
     : undefined;

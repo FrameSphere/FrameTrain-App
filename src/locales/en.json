@@ -1669,6 +1669,7 @@
         "exportedLabel": "✓ Exported to: {path}",
         "exportButton": "↓ Export to Downloads",
         "exportingButton": "Exporting…",
+        "modelLabel": "Model",
         "logMetricsLabel": "Export log / metrics",
         "formatTxt": "Training Log (.txt)",
         "formatCsv": "Metrics CSV (.csv)",
@@ -3184,6 +3185,10 @@
     "noWeightsAfter": "yet – train it first."
   },
   "synapseBuilder": {
+    "blueprints": {"title": "Start from a blueprint or drag nodes from the library", "all": "All", "image": "Image", "text": "Text", "audio": "Audio", "video": "Video", "table": "Table"},
+    "block": { "button": "Block", "tooltip": "Group selected nodes into a block (Shift + drag to select)", "needTwo": "Select at least two nodes.", "oneEdge": "A block needs exactly one edge in and one edge out." },
+    "auto": "auto",
+    "liveOk": "✓ Check passed · {params} parameters",
     "title": "Synapse Builder",
     "subtitle": "Visual Model Pipeline Builder",
     "addNode": "Add Node",

@@ -172,6 +172,17 @@ const SelectorModal: React.FC<{
 };
 
 // ─── Export Modal ─────────────────────────────────────────────────────────────
+type ModelExportFormat = "pytorch" | "neuron" | "ftmodel" | "torchscript" | "onnx" | "safetensors";
+
+const MODEL_EXPORTS: { id: ModelExportFormat; label: string; ext?: string }[] = [
+  { id: "pytorch", label: "PyTorch project" },
+  { id: "neuron", label: "NeuronEngine (no PyTorch)" },
+  { id: "ftmodel", label: ".ftmodel", ext: "ftmodel" },
+  { id: "torchscript", label: "TorchScript", ext: "pt" },
+  { id: "onnx", label: "ONNX", ext: "onnx" },
+  { id: "safetensors", label: "safetensors", ext: "safetensors" },
+];
+
 const ExportModal: React.FC<{
   completedVersionId: string | null;
   onExportFormat: (fmt: string) => void;
@@ -179,7 +190,10 @@ const ExportModal: React.FC<{
   onClose: () => void;
   exporting: boolean;
   exportPath: string | null;
-}> = ({ completedVersionId, onExportFormat, onExportVersion, onClose, exporting, exportPath }) => {
+  canExportModel: boolean;
+  onExportModel: (format: ModelExportFormat) => void;
+  modelExportNote: string | null;
+}> = ({ completedVersionId, onExportFormat, onExportVersion, onClose, exporting, exportPath, canExportModel, onExportModel, modelExportNote }) => {
   const { t } = useLanguage();
   return (
   <>
@@ -223,6 +237,34 @@ const ExportModal: React.FC<{
               </button>
             )}
           </div>
+        )}
+
+        {/* Eigenes Modell als Code oder Datei */}
+        {canExportModel && (
+          <>
+            <div style={{ fontSize: 10, color: "#334155", fontFamily: "'JetBrains Mono',monospace" }}>
+              {t('synapse.trainingConsole.exportModal.modelLabel')}
+            </div>
+            {MODEL_EXPORTS.map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => onExportModel(id)}
+                disabled={exporting}
+                style={{
+                  padding: "8px 12px", background: "transparent", border: "1px solid #1e293b",
+                  borderRadius: 6, color: "#94a3b8", fontSize: 12, cursor: "pointer", textAlign: "left",
+                  fontFamily: "'JetBrains Mono',monospace",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+            {modelExportNote && (
+              <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", wordBreak: "break-all" }}>
+                {modelExportNote}
+              </div>
+            )}
+          </>
         )}
 
         {/* Log-Export-Formate */}
@@ -385,6 +427,28 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
       setExporting(false);
     }
   }, [completedVersionId, onExport]);
+
+  // ── Eigenes Modell exportieren: Ziel wählen, der Formen-Dienst schreibt ──
+  const [modelExportNote, setModelExportNote] = useState<string | null>(null);
+  const handleExportModel = useCallback(async (format: ModelExportFormat) => {
+    if (!activeCanvasModelId) return;
+    const { open, save } = await import("@tauri-apps/plugin-dialog");
+    const entry = MODEL_EXPORTS.find((m) => m.id === format)!;
+    const target = entry.ext
+      ? await save({ defaultPath: `model.${entry.ext}` })
+      : await open({ directory: true });
+    if (typeof target !== "string") return;
+    setExporting(true);
+    setModelExportNote(null);
+    try {
+      const path = await invoke<string>("synapse_export", { modelId: activeCanvasModelId, format, target });
+      setModelExportNote(t('synapse.trainingConsole.exportModal.exportedLabel', { path }));
+    } catch (e) {
+      setModelExportNote(String(e));
+    } finally {
+      setExporting(false);
+    }
+  }, [activeCanvasModelId, t]);
 
   // ── Log / Metriken / Config als echte Datei exportieren ───────────────────
   // Schreibt tatsächlich .txt/.csv/.json statt nur den Ordner zu öffnen.
@@ -693,6 +757,9 @@ export const TrainingConsole: React.FC<TrainingConsoleProps> = ({
           onClose={() => setShowExportModal(false)}
           exporting={exporting}
           exportPath={exportPath}
+          canExportModel={!!activeCanvasModelId}
+          onExportModel={handleExportModel}
+          modelExportNote={modelExportNote}
         />
       )}
 

@@ -19,6 +19,7 @@ mod test_manager;
 mod plugin_commands;
 mod power_manager;
 mod model_host;
+mod synapse_service;
 mod hosting_manager;
 mod hosting_desktop;
 mod hosting_api;
@@ -250,6 +251,9 @@ fn main() {
             training_manager::get_canvas_network_code,
             training_manager::list_canvas_models_with_pt,
             training_manager::run_canvas_inference,
+            synapse_service::synapse_check,
+            synapse_service::synapse_stop,
+            synapse_service::synapse_export,
             training_manager::get_current_training,
             training_manager::get_training_history,
             training_manager::delete_training_job,

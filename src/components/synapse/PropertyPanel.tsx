@@ -37,20 +37,36 @@ const inputBase: React.CSSProperties = {
 
 // ─── Field components ─────────────────────────────────────────────────────────
 const FieldNumber: React.FC<{
-  param: ParamDefinition; value: number; accent: string; onChange: (v: number) => void;
-}> = ({ param, value, accent, onChange }) => (
-  <input
-    type="number"
-    value={value}
-    min={param.min}
-    max={param.max}
-    step={param.step ?? 1}
-    onChange={(e) => onChange(Number(e.target.value))}
-    onFocus={(e) => (e.target.style.borderColor = accent)}
-    onBlur={(e)  => (e.target.style.borderColor = "#1e293b")}
-    style={inputBase}
-  />
-);
+  param: ParamDefinition; value: number | "auto"; accent: string; onChange: (v: number | "auto") => void;
+}> = ({ param, value, accent, onChange }) => {
+  const { t } = useLanguage();
+  const auto = value === "auto";
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <input
+        type={auto ? "text" : "number"}
+        value={auto ? t('synapseBuilder.auto') : value}
+        readOnly={auto}
+        min={param.min}
+        max={param.max}
+        step={param.step ?? 1}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onFocus={(e) => (e.target.style.borderColor = accent)}
+        onBlur={(e)  => (e.target.style.borderColor = "#1e293b")}
+        style={{ ...inputBase, flex: 1, minWidth: 0, color: auto ? "#7a869e" : inputBase.color }}
+      />
+      {param.default === "auto" && (
+        <button
+          type="button"
+          onClick={() => onChange(auto ? 128 : "auto")}
+          style={{ ...inputBase, width: "auto", cursor: "pointer", color: auto ? accent : "#7a869e" }}
+        >
+          {t('synapseBuilder.auto')}
+        </button>
+      )}
+    </div>
+  );
+};
 
 const FieldText: React.FC<{
   value: string; accent: string; onChange: (v: string) => void;
@@ -134,7 +150,7 @@ const ParamRow: React.FC<{
   const label = nodeText(param.label, language);
   const renderInput = () => {
     switch (param.type) {
-      case "number":  return <FieldNumber param={param} value={value as number} accent={accent} onChange={onChange} />;
+      case "number":  return <FieldNumber param={param} value={value as number | "auto"} accent={accent} onChange={onChange} />;
       case "select":  return <FieldSelect param={param} value={value as string} accent={accent} onChange={onChange} />;
       case "boolean": return <FieldBool label={label} value={value as boolean} accent={accent} onChange={onChange} />;
       case "code":    return <FieldCode value={value as string} accent={accent} onChange={onChange} />;
