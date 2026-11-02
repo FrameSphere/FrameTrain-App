@@ -45,6 +45,9 @@ def main() -> None:
             elif cmd == "export":
                 from synapse.export import export_model
                 emit({"id": rid, "result": export_model(req["model_dir"], req["format"], req["target"])})
+            elif cmd == "infer":
+                from synapse.infer import infer
+                emit({"id": rid, "result": infer(req["model_dir"], req["kind"], req.get("value"))})
             elif cmd == "catalog":
                 emit({"id": rid, "result": catalog()})
             else:

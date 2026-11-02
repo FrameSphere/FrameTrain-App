@@ -144,6 +144,28 @@ pub async fn synapse_export(
     .map_err(|e| e.to_string())?
 }
 
+/// Vorhersage mit einem trainierten Modell: tensor, text, file oder generate.
+#[tauri::command]
+pub async fn synapse_infer(
+    app_handle: tauri::AppHandle,
+    model_id: String,
+    kind: String,
+    value: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let model_dir = crate::model_manager::models_dir_for_export(&app_handle)?.join(&model_id);
+    if !model_dir.join("model.pt").is_file() {
+        return Err("Dieses Modell hat noch keine Gewichte. Trainiere es zuerst.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        request(&app_handle, serde_json::json!({
+            "cmd": "infer", "kind": kind, "value": value,
+            "model_dir": model_dir.to_string_lossy(),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Beendet den Dienst, wenn der Builder geschlossen wird.
 #[tauri::command]
 pub async fn synapse_stop() -> Result<(), String> {

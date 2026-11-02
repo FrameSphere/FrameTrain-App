@@ -80,6 +80,9 @@ class Recipes(unittest.TestCase):
         g = graph(nodes, edges, data, epochs=25, taskType="segmentation", learningRate=0.01, batchSize=8)
         p = fit(self, g, self.seg, f"{self.tmp}/seg_m")
         self.assertGreater(p._final["accuracy"], 0.97)
+        from synapse.infer import infer
+        r = infer(f"{self.tmp}/seg_m", "file", f"{self.seg}/images/0.png")
+        self.assertIn("markiert", r["predicted"])
 
     def test_vae_rekonstruiert_und_nutzt_kl(self):
         nodes = [n("i", "image_loader", "data", imageSize=16, channels="3", normalize=False),
@@ -152,6 +155,10 @@ class Recipes(unittest.TestCase):
         fake = load_canvas_model(out, device="cpu").generate_images(16)
         self.assertEqual(tuple(fake.shape), (16, 3, 8, 8))
         self.assertLess(abs(fake.mean().item() - 200 / 255), 0.12)
+        from synapse.infer import infer
+        shown = infer(out, "generate", None)
+        self.assertEqual(len(shown["images"]), 4)
+        self.assertTrue(shown["images"][0].startswith("data:image/png;base64,"))
 
     def test_diffusion_lernt_das_rauschen_und_erzeugt_bilder(self):
         nodes = [n("i", "image_loader", "data", imageSize=8, channels="3", normalize=False), n("t", "timestep", "data"),
@@ -205,6 +212,8 @@ class Recipes(unittest.TestCase):
             boxes = m.predict_file(f"{ds}/images/{i}.png")["boxes"]
             scores.append(iou(boxes[0]["box"], truth[i]) if boxes else 0)
         self.assertGreater(np.mean(scores), 0.5)
+        from synapse.infer import infer
+        self.assertEqual(len(infer(out, "file", f"{ds}/images/0.png")["images"]), 1)
 
     def test_unbekannte_aufgabe_wird_klar_abgelehnt(self):
         nodes = [n("c", "csv_loader", "data"), n("d", "dense", "layer", inputSize=4, outputSize=2)]

@@ -254,6 +254,7 @@ fn main() {
             synapse_service::synapse_check,
             synapse_service::synapse_stop,
             synapse_service::synapse_export,
+            synapse_service::synapse_infer,
             training_manager::get_current_training,
             training_manager::get_training_history,
             training_manager::delete_training_job,
