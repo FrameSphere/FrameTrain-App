@@ -41,10 +41,10 @@ def one_step(raw: Dict[str, Any], lr: float = 0.01, seed: int = 0) -> Dict[str, 
     if out.dim() >= 2 and out.size(-1) > 1:
         target = torch.randint(0, out.size(-1), out.shape[:-1])
         loss = F.cross_entropy(out.reshape(-1, out.size(-1)), target.reshape(-1))
-        loss_name = "cross_entropy (Zufallsziele)"
+        loss_name = "cross_entropy"
     else:
         loss = (out.float() ** 2).mean()
-        loss_name = "mittleres Quadrat"
+        loss_name = "mean_square"
     before = {n: p.detach().clone() for n, p in model.named_parameters()}
     model.zero_grad()
     loss.backward()

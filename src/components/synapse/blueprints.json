@@ -58,7 +58,9 @@
     "d2",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Table MLP",
+  "description_en": "Numbers to class"
  },
  {
   "id": "cnn",
@@ -176,7 +178,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "CNN",
+  "description_en": "Image to class"
  },
  {
   "id": "resnet",
@@ -294,7 +298,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "ResNet block",
+  "description_en": "Image with skip connection"
  },
  {
   "id": "vit",
@@ -420,7 +426,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Vision Transformer",
+  "description_en": "Image as patches, then attention"
  },
  {
   "id": "unet",
@@ -548,7 +556,9 @@
     "o",
     "out"
    ]
-  ]
+  ],
+  "label_en": "U-Net",
+  "description_en": "Image to mask"
  },
  {
   "id": "textlstm",
@@ -623,7 +633,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Text LSTM",
+  "description_en": "Text to class"
  },
  {
   "id": "texttf",
@@ -721,7 +733,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Text Transformer",
+  "description_en": "Your own encoder for text"
  },
  {
   "id": "gpt",
@@ -822,7 +836,9 @@
     "head",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Mini-GPT",
+  "description_en": "Your own language model"
  },
  {
   "id": "audiomel",
@@ -934,7 +950,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Audio CNN",
+  "description_en": "Mel spectrogram to class"
  },
  {
   "id": "audiowave",
@@ -1023,7 +1041,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Waveform CNN",
+  "description_en": "Raw audio to class"
  },
  {
   "id": "video3d",
@@ -1117,7 +1137,9 @@
     "d",
     "out"
    ]
-  ]
+  ],
+  "label_en": "3D CNN",
+  "description_en": "Video to class"
  },
  {
   "id": "vae",
@@ -1249,7 +1271,9 @@
     "back",
     "out"
    ]
-  ]
+  ],
+  "label_en": "VAE",
+  "description_en": "Compress and generate images"
  },
  {
   "id": "seq2seq",
@@ -1385,7 +1409,9 @@
     "head",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Seq2Seq Transformer",
+  "description_en": "Text to text, e.g. translation"
  },
  {
   "id": "gan",
@@ -1533,7 +1559,9 @@
     }
    }
   ],
-  "edges": []
+  "edges": [],
+  "label_en": "GAN",
+  "description_en": "Generator against discriminator"
  },
  {
   "id": "diffusion",
@@ -1668,7 +1696,9 @@
     "b",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Mini Diffusion",
+  "description_en": "Generates images from noise"
  },
  {
   "id": "detector",
@@ -1813,6 +1843,8 @@
     "h",
     "out"
    ]
-  ]
+  ],
+  "label_en": "Object detector",
+  "description_en": "Image to boxes on a grid"
  }
 ]

@@ -1577,7 +1577,7 @@ Keine Floskeln, nur Fakten.`;
                       <div style={{ color: "#94a0b8", marginBottom: 4 }}>
                         {t('synapseBuilder.step.summary')
                           .replace('{loss}', String(stepResult.loss))
-                          .replace('{name}', stepResult.loss_name)
+                          .replace('{name}', t(`synapseBuilder.step.loss_${stepResult.loss_name}`))
                           .replace('{lr}', String(stepResult.lr))}
                       </div>
                       <table style={{ borderCollapse: "collapse", width: "100%" }}>

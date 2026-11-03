@@ -7,6 +7,8 @@ export interface Blueprint {
   goal: string;
   label: string;
   description: string;
+  label_en?: string;
+  description_en?: string;
   nodes: { id: string; type: string; params: Record<string, unknown> }[];
   edges: (string | undefined)[][];
 }
@@ -15,7 +17,8 @@ const GOALS = ["all", "image", "text", "audio", "video", "table"] as const;
 
 /** Startauswahl auf der leeren Fläche: Ziel wählen, Vorlage übernehmen. */
 export const BlueprintPicker: React.FC<{ onPick: (b: Blueprint) => void }> = ({ onPick }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const en = language === "en";
   const [goal, setGoal] = useState<(typeof GOALS)[number]>("all");
   const shown = useMemo(
     () => (blueprints as Blueprint[]).filter((b) => goal === "all" || b.goal === goal),
@@ -44,8 +47,8 @@ export const BlueprintPicker: React.FC<{ onPick: (b: Blueprint) => void }> = ({ 
             padding: "8px 10px", textAlign: "left", cursor: "pointer", borderRadius: 8,
             background: "#111827", border: "1px solid #334155",
           }}>
-            <div style={{ fontSize: 12, color: "#e6e9f0" }}>{b.label}</div>
-            <div style={{ fontSize: 11, color: "#7a869e" }}>{b.description}</div>
+            <div style={{ fontSize: 12, color: "#e6e9f0" }}>{en ? b.label_en ?? b.label : b.label}</div>
+            <div style={{ fontSize: 11, color: "#7a869e" }}>{en ? b.description_en ?? b.description : b.description}</div>
           </button>
         ))}
       </div>
