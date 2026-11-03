@@ -328,7 +328,10 @@ def export_onnx(module: SynapseModule, preprocess: Dict[str, Any], path: Any, in
         from ft_data.deps import missing
         raise missing("onnx", "onnxscript", what="Der ONNX-Export") from e
     module.eval()
-    torch.onnx.export(module, (_example(module, preprocess, input_shape),), str(path))
+    # Eine Datei statt .onnx plus .onnx.data: sonst geht beim Weitergeben die
+    # Haelfte verloren. Ueber 2 GB erzwingt das Format externe Daten.
+    big = sum(p.numel() * p.element_size() for p in module.parameters()) > 1_800_000_000
+    torch.onnx.export(module, (_example(module, preprocess, input_shape),), str(path), external_data=big)
     return Path(path)
 
 

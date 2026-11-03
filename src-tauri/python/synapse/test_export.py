@@ -181,6 +181,7 @@ class Export(unittest.TestCase):
         path = Path(tempfile.mkdtemp()) / "m.onnx"
         export_onnx(m, {"input_shape": [1, 3, 16, 16]}, path)
         onnx.checker.check_model(onnx.load(str(path)))
+        self.assertFalse(Path(str(path) + ".data").exists())
 
     def test_onnx_ohne_paket_sagt_was_fehlt(self):
         if importlib.util.find_spec("onnx"):

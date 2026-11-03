@@ -1,6 +1,6 @@
 # Synapse Studio: Plan
 
-Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet und in einer Vorschau-App live getestet. ONNX-Export gueltig fuer Bild, Text, Mini-GPT, Video, Detektion und GAN (ohne onnxruntime-Gegenrechnung). Offen: Labor mit Bild-Proben, Sprach-Fix live, Merge.
+Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet und in einer Vorschau-App live getestet, inklusive Export-Knopf mit ONNX, Labor mit Bild- und Textproben und Vorlagen in beiden Sprachen. Offen: Merge, Import-Hinweis fuer Ordner mit nur einer Klasse.
 
 ## 1. Ziel
 
