@@ -159,6 +159,12 @@ class Recipes(unittest.TestCase):
         shown = infer(out, "generate", None)
         self.assertEqual(len(shown["images"]), 4)
         self.assertTrue(shown["images"][0].startswith("data:image/png;base64,"))
+        from canvas_inference_server import CanvasInferenceServer
+        server = CanvasInferenceServer(out)
+        server.load()
+        hosted = server.infer({"input": "egal", "input_type": "text"})
+        self.assertEqual(hosted["predicted"], "Bild erzeugt")
+        self.assertTrue(Path(hosted["image_path"]).exists())
 
     def test_diffusion_lernt_das_rauschen_und_erzeugt_bilder(self):
         nodes = [n("i", "image_loader", "data", imageSize=8, channels="3", normalize=False), n("t", "timestep", "data"),

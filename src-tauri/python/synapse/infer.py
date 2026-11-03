@@ -74,6 +74,15 @@ def _mask_image(model: Any, path: str) -> Dict[str, Any]:
             "inference_ms": 0.0, "task_type": "segmentation"}
 
 
+def to_file(data_url: str) -> str:
+    """data-URL als PNG-Datei; Hosting und Labor zeigen Bilder ueber Pfade an."""
+    import tempfile
+    path = Path(tempfile.gettempdir()) / "frametrain_synapse" / f"{os.getpid()}_{len(_CACHE)}_{abs(hash(data_url)) % 10 ** 9}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(base64.b64decode(data_url.split(",", 1)[1]))
+    return str(path)
+
+
 def infer(model_dir: str, kind: str, value: Any) -> Dict[str, Any]:
     model = _load(model_dir)
     if kind == "generate":

@@ -100,7 +100,7 @@ export default function HostResultView({ result, host, file, inputText = '', com
   if (isDetect && (host?.task ?? 'detect') !== 'classify') {
     body = <Detection r={result} file={file} classes={host?.classes ?? []} compact={compact} />;
     copyText = JSON.stringify(result.boxes ?? [], null, 2);
-  } else if (modality === 'text_to_image' && typeof extra.image_path === 'string') {
+  } else if ((modality === 'text_to_image' || modality === 'canvas') && typeof extra.image_path === 'string') {
     const p = extra.image_path;
     body = (
       <figure className="space-y-1">

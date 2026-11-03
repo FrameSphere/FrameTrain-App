@@ -30,6 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
 _CANVAS_DIR = str(Path(__file__).resolve().parent)
 if _CANVAS_DIR not in sys.path:
     sys.path.insert(0, _CANVAS_DIR)
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 
 def emit(obj: dict):
@@ -54,6 +55,20 @@ class CanvasInferenceServer:
 
         input_type = req.get("input_type", "tensor")
         raw = req.get("input")
+
+        # Erzeugende Modelle und Bild-Ergebnisse gehen ueber den gemeinsamen
+        # Inferenz-Weg; Hosting und Labor bekommen das Bild als Datei.
+        task = self.loaded.task_type
+        pipeline = (self.loaded.preprocess.get("pipeline") or {}).get("kind")
+        if task in ("gan", "diffusion") or (input_type == "image" and pipeline in ("boxes", "mask")):
+            from synapse.infer import infer, to_file
+            result = infer(str(self.model_dir), "generate" if task in ("gan", "diffusion") else "file", raw)
+            images = result.pop("images", [])
+            if images:
+                result["image_path"] = to_file(images[0])
+            if not result.get("predicted"):
+                result["predicted"] = "Bild erzeugt"
+            return self._finish(result)
 
         if raw is None:
             return {"type": "error", "message": "Kein 'input' in Anfrage"}
