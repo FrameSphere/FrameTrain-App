@@ -74,8 +74,10 @@ def make_loss(name: str, regression: bool, reduction: str, smoothing: float, tas
     raise ValueError(f"Unbekannter Loss: {name}")
 
 
-def make_optimizer(name: str, params, lr: float, wd: float) -> optim.Optimizer:
+def make_optimizer(name: str, params, lr: float, wd: float, betas=None) -> optim.Optimizer:
     name = name.lower()
+    if betas is not None and name in ("adam", "adamw"):
+        return (optim.Adam if name == "adam" else optim.AdamW)(params, lr=lr, weight_decay=wd, betas=betas)
     if name == "sgd":
         return optim.SGD(params, lr=lr, momentum=0.9, weight_decay=wd)
     if name == "adam":

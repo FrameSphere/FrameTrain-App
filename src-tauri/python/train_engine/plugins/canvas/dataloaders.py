@@ -27,7 +27,41 @@ from synapse.data import (  # noqa: E402
 )
 
 
+# Erzeugende Modelle und Detektion brauchen viele Schritte. Bei kleinen
+# Datensaetzen waeren das nur zwei, drei je Epoche, deshalb wird der
+# Trainingsteil wiederholt, bis eine Epoche mindestens so viele Schritte hat.
+MIN_STEPS = {"gan": 100, "diffusion": 100, "detection": 50}
+
+
+class _Repeat(torch.utils.data.Dataset):
+    def __init__(self, base, times: int):
+        self.base, self.times = base, times
+
+    def __len__(self):
+        return len(self.base) * self.times
+
+    def __getitem__(self, i):
+        return self.base[i % len(self.base)]
+
+
 def get_dataloaders(
+    ir: CanvasGraphIR,
+    dataset_path: str,
+    batch_size: int,
+    preprocess: Optional[Dict[str, Any]] = None,
+) -> Tuple[DataLoader, DataLoader]:
+    train, val = _get_dataloaders(ir, dataset_path, batch_size, preprocess)
+    task = getattr(ir.training, "task_type", "")
+    wanted = MIN_STEPS.get(task)
+    if wanted and 0 < len(train) < wanted:
+        times = -(-wanted * batch_size // len(train.dataset))
+        _status(f"Kleiner Datensatz: {len(train)} Schritte je Epoche, fuer {task} je Epoche {times}x wiederholt.")
+        train = DataLoader(_Repeat(train.dataset, times), batch_size=batch_size, shuffle=True,
+                           collate_fn=train.collate_fn, generator=torch.Generator().manual_seed(42))
+    return train, val
+
+
+def _get_dataloaders(
     ir: CanvasGraphIR,
     dataset_path: str,
     batch_size: int,

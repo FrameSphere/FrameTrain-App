@@ -149,7 +149,7 @@ class Recipes(unittest.TestCase):
                  n("z", "latent", "data", dim=8), n("g", "block", "logic", graph=gen, role="generator"),
                  n("d", "block", "logic", graph=disc, role="discriminator")]
         data = {"type": "image_loader", "params": {"imageSize": 8, "channels": "3", "normalize": False}}
-        g = graph(nodes, [], data, epochs=500, taskType="gan", optimizer="adam", learningRate=0.0005, numClasses=2, batchSize=16)
+        g = graph(nodes, [], data, epochs=8, taskType="gan", optimizer="adam", learningRate=0.0005, numClasses=2, batchSize=16)
         out = f"{self.tmp}/gan"
         fit(self, g, self.small_images(), out)
         fake = load_canvas_model(out, device="cpu").generate_images(16)
@@ -171,7 +171,7 @@ class Recipes(unittest.TestCase):
         edges = [e("i", "f"), e("f", "d1"), e("t", "tf"), e("d1", "m", th="a"), e("tf", "m", th="b"), e("m", "r"),
                  e("r", "d2"), e("d2", "r2"), e("r2", "d3"), e("d3", "b")]
         data = {"type": "image_loader", "params": {"imageSize": 8, "channels": "3", "normalize": False}}
-        g = graph(nodes, edges, data, epochs=500, taskType="diffusion", loss="mse", learningRate=0.002, numClasses=2, batchSize=16)
+        g = graph(nodes, edges, data, epochs=10, taskType="diffusion", loss="mse", learningRate=0.002, numClasses=2, batchSize=16)
         out = f"{self.tmp}/dif"
         p = fit(self, g, self.small_images(), out)
         self.assertLess(p._final["final_train_loss"], 0.2)
@@ -201,7 +201,7 @@ class Recipes(unittest.TestCase):
                  n("h", "conv2d", "layer", inChannels="auto", outChannels=6, kernelSize="1", padding="0")]
         chain = [x["id"] for x in nodes]
         data = {"type": "detection_loader", "params": {"imageSize": 64, "gridSize": 8}}
-        g = graph(nodes, [e(a, b) for a, b in zip(chain, chain[1:])], data, epochs=40, taskType="detection",
+        g = graph(nodes, [e(a, b) for a, b in zip(chain, chain[1:])], data, epochs=12, taskType="detection",
                   numClasses=1, learningRate=0.003, batchSize=16)
         out = f"{self.tmp}/det"
         fit(self, g, ds, out)

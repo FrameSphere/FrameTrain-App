@@ -146,6 +146,8 @@ class CanvasPlugin(TrainPlugin):
             if self.ir.training.task_type == "diffusion":
                 input_shape, input_dtype = {"out": (1, *sample.shape[1:]), "decoder": (1, 1)}, sample.dtype
                 self._preprocess["sample_shape"] = list(sample.shape[1:])
+                # Wertebereich der Bilder: das Erzeugen bleibt darin, statt wegzulaufen.
+                self._preprocess["sample_range"] = [float(sample.min()), float(sample.max())]
             elif isinstance(sample, (tuple, list)):
                 input_shape = {"out": (1, *sample[0].shape[1:]), "decoder": (1, *sample[1].shape[1:])}
                 input_dtype = sample[0].dtype
@@ -559,8 +561,9 @@ class CanvasPlugin(TrainPlugin):
         """Zwei Optimizer, abwechselnde Schritte; Loss des Generators in der Kurve."""
         loader = (self._loaders or get_dataloaders(self.ir, self.config.dataset_path, batch_size, self._preprocess))[0]
         spec = self.ir.training
-        opt_g = make_optimizer(spec.optimizer, self.model.generator.parameters(), spec.learning_rate, 0.0)
-        opt_d = make_optimizer(spec.optimizer, self.model.discriminator.parameters(), spec.learning_rate, 0.0)
+        # GANs laufen stabiler mit kleinerem erstem Moment (DCGAN-Empfehlung).
+        opt_g = make_optimizer(spec.optimizer, self.model.generator.parameters(), spec.learning_rate, 0.0, (0.5, 0.999))
+        opt_d = make_optimizer(spec.optimizer, self.model.discriminator.parameters(), spec.learning_rate, 0.0, (0.5, 0.999))
         self._optimizer = opt_g
         self._final = {"n_train": len(loader.dataset), "device": self.device, "architecture": "canvas"}
         for epoch in range(epochs):

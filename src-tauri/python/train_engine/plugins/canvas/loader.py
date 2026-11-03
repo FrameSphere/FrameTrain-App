@@ -118,7 +118,8 @@ class LoadedCanvasModel:
         if self.task_type == "gan":
             with torch.no_grad():
                 return self.model(torch.randn(count, self.model.latent, device=self.device))
-        return NoisePlan().sample(self.model, (count, *self.preprocess["sample_shape"]), self.device)
+        return NoisePlan().sample(self.model, (count, *self.preprocess["sample_shape"]), self.device,
+                                  self.preprocess.get("sample_range", (-3, 3)))
 
     def predict_boxes(self, path: str, threshold: float = 0.3) -> Dict[str, Any]:
         import numpy as np

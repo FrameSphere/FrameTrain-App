@@ -81,7 +81,8 @@ class NoisePlan:
         return (keep.sqrt() * x + (1 - keep).sqrt() * noise, (t.float() / self.steps).unsqueeze(1)), noise
 
     @torch.no_grad()
-    def sample(self, model: Any, shape: Sequence[int], device: str) -> torch.Tensor:
+    def sample(self, model: Any, shape: Sequence[int], device: str, value_range: Sequence[float] = (-3, 3)) -> torch.Tensor:
+        low, high = value_range
         x = torch.randn(*shape, device=device)
         for i in reversed(range(self.steps)):
             t = torch.full((shape[0], 1), i / self.steps, device=device)
@@ -90,7 +91,7 @@ class NoisePlan:
             prev = self.bar[i - 1].item() if i > 0 else 1.0
             # Das Bild wird je Schritt begrenzt, sonst schaukeln sich Fehler in den
             # verrauschten Schritten auf.
-            start = ((x - math.sqrt(1 - bar) * eps) / math.sqrt(bar)).clamp(-3, 3)
+            start = ((x - math.sqrt(1 - bar) * eps) / math.sqrt(bar)).clamp(low, high)
             x = (math.sqrt(prev) * b * start + math.sqrt(a) * (1 - prev) * x) / (1 - bar)
             if i > 0:
                 x = x + math.sqrt(b * (1 - prev) / (1 - bar)) * torch.randn_like(x)
