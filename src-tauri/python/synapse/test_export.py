@@ -172,6 +172,16 @@ class Export(unittest.TestCase):
         self.assertTrue(torch.allclose(ts(x), m(x)))
         self.assertTrue(export_safetensors(m, d / "m.safetensors").exists())
 
+    def test_onnx_export_ist_gueltig(self):
+        if not importlib.util.find_spec("onnx"):
+            self.skipTest("onnx fehlt")
+        import onnx
+        m = SynapseModule(chain(("conv2d", {"outChannels": 4, "padding": "1"}), ("relu", {}), ("pool", {}),
+                                ("dense", {"outputSize": 2})), input_shape=(1, 3, 16, 16)).eval()
+        path = Path(tempfile.mkdtemp()) / "m.onnx"
+        export_onnx(m, {"input_shape": [1, 3, 16, 16]}, path)
+        onnx.checker.check_model(onnx.load(str(path)))
+
     def test_onnx_ohne_paket_sagt_was_fehlt(self):
         if importlib.util.find_spec("onnx"):
             self.skipTest("onnx ist installiert")

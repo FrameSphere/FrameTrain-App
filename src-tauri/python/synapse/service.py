@@ -17,8 +17,13 @@ if hasattr(sys.stdout, "reconfigure"):
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+_OUT = sys.stdout
+
+
 def emit(obj: dict) -> None:
-    print(json.dumps(obj, ensure_ascii=False), flush=True)
+    # Immer ueber das echte stdout: waehrend eines Befehls zeigt sys.stdout auf
+    # stderr, damit Bibliotheken (z. B. der ONNX-Exporter) das Protokoll nicht stoeren.
+    print(json.dumps(obj, ensure_ascii=False), file=_OUT, flush=True)
 
 
 def main() -> None:
@@ -34,6 +39,7 @@ def main() -> None:
         if not line:
             continue
         rid = None
+        sys.stdout = sys.stderr
         try:
             req = json.loads(line)
             rid = req.get("id")
@@ -51,12 +57,17 @@ def main() -> None:
             elif cmd == "step":
                 from synapse.step import one_step
                 emit({"id": rid, "result": one_step(req["graph"], float(req.get("lr", 0.01)))})
+            elif cmd == "noisy":  # fuer Tests: Ausgaben einer Bibliothek
+                print("Fortschritt einer Bibliothek")
+                emit({"id": rid, "result": "ok"})
             elif cmd == "catalog":
                 emit({"id": rid, "result": catalog()})
             else:
                 emit({"id": rid, "error": f"Unbekannter Befehl: {cmd}"})
         except Exception as e:
             emit({"id": rid, "error": f"{type(e).__name__}: {e}"})
+        finally:
+            sys.stdout = _OUT
 
 
 if __name__ == "__main__":

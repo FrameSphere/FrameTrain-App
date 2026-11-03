@@ -417,15 +417,19 @@ def export_model(model_dir: str, fmt: str, target: str) -> str:
         return str(export_ftmodel(model_dir, target))
     loaded = load_canvas_model(model_dir, device="cpu")
     module, pre = loaded.model, loaded.preprocess
-    module = getattr(module, "generator", module)  # GAN: exportiert wird der Generator
+    shape = None
+    if hasattr(module, "generator"):  # GAN: exportiert wird der Generator, Eingang ist der Zufallsvektor
+        shape = (1, module.latent)
+        pre = {**pre, "input_shape": list(shape), "input_dtype": "float32"}
+        module = module.generator
     if fmt == "pytorch":
-        return str(export_pytorch(module, pre, target, None))
+        return str(export_pytorch(module, pre, target, shape))
     if fmt == "neuron":
         return str(export_neuron(module, pre, target))
     if fmt == "torchscript":
-        return str(export_torchscript(module, pre, target))
+        return str(export_torchscript(module, pre, target, shape))
     if fmt == "onnx":
-        return str(export_onnx(module, pre, target))
+        return str(export_onnx(module, pre, target, shape))
     if fmt == "safetensors":
         return str(export_safetensors(module, target))
     raise ValueError(f"Unbekanntes Export-Format: {fmt}")

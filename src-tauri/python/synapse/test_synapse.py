@@ -167,6 +167,9 @@ class ServiceTest(unittest.TestCase):
             self.assertEqual(r["id"], 7)
             self.assertEqual(r["result"]["nodes"]["c"]["outputs"]["out"], [1, 8, 32, 32])
             self.assertEqual(r["result"]["errors"], [])
+            p.stdin.write(json.dumps({"id": 8, "cmd": "noisy"}) + "\n")
+            p.stdin.flush()
+            self.assertEqual(json.loads(p.stdout.readline())["id"], 8)
         finally:
             p.stdin.close()
             p.wait(timeout=10)
