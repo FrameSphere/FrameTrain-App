@@ -1669,6 +1669,7 @@
         "exportedLabel": "✓ Exported to: {path}",
         "exportButton": "↓ Export to Downloads",
         "exportingButton": "Exporting…",
+        "modelLabel": "Model",
         "logMetricsLabel": "Export log / metrics",
         "formatTxt": "Training Log (.txt)",
         "formatCsv": "Metrics CSV (.csv)",
@@ -2884,7 +2885,7 @@
       "serverError": "Failed to load – switch versions or restart",
       "loadModelButton": "Load model for inference",
       "loadModelRetryButton": "Try again",
-      "canvasInputHint": "Canvas model: expects numeric feature inputs, e.g. \"0.5, 1.2, 3.0\" — free text is not supported.",
+      "canvasInputHint": "Synapse models take an image, audio, video, text, or numbers like \"0.5, 1.2\", depending on how they are built.",
       "datasetLabel": "Sample Dataset",
       "datasetPlaceholder": "– select dataset –",
       "datasetFileCount": "{count} files",
@@ -3165,7 +3166,9 @@
   },
   "canvasInferenceTab": {
     "modelSelectPlaceholder": "— Select Model —",
-    "inputPlaceholder": "0.1, 0.5, 0.3 …",
+    "inputPlaceholder": "Text or numbers, e.g. 0.1, 0.5, 0.3",
+    "chooseFile": "Choose file",
+    "generate": "Generate",
     "invalidInput": "Invalid input – enter comma-separated numbers, e.g. 0.1, 0.5, 0.3",
     "selectModel": "Select model",
     "loadingModels": "Loading models…",
@@ -3174,7 +3177,7 @@
     "classes": "{count} classes",
     "classes_one": "{count} class",
     "noWeightsTag": "No model.pt",
-    "inputHint": "Comma-separated numbers, e.g.:",
+    "inputHint": "Numbers, text, or a file, depending on the model. Numbers for example:",
     "running": "Running inference…",
     "run": "Run inference",
     "shortcut": "⌘↵ or Ctrl+↵",
@@ -3184,6 +3187,12 @@
     "noWeightsAfter": "yet – train it first."
   },
   "synapseBuilder": {
+    "budget": "Weights {weights} · training from ~{training}",
+    "step": {"loss_cross_entropy": "cross entropy with random targets", "loss_mean_square": "mean square of the output", "button": "Show one learning step", "summary": "Loss {loss} ({name}), learning rate {lr}", "node": "Node", "output": "Output", "grad": "Gradient", "update": "Change"},
+    "blueprints": {"title": "Start from a blueprint or drag nodes from the library", "all": "All", "image": "Image", "text": "Text", "audio": "Audio", "video": "Video", "table": "Table"},
+    "block": { "button": "Block", "tooltip": "Group selected nodes into a block (Shift + drag to select)", "needTwo": "Select at least two nodes.", "oneEdge": "A block needs exactly one edge in and one edge out." },
+    "auto": "auto",
+    "liveOk": "✓ Check passed · {params} parameters",
     "title": "Synapse Builder",
     "subtitle": "Visual Model Pipeline Builder",
     "addNode": "Add Node",
@@ -4269,7 +4278,7 @@
       "yolo_pose": "Pose (YOLO)",
       "yolo_obb": "Rotated boxes (YOLO)",
       "yolo_classify": "Image classification (YOLO)",
-      "canvas": "Synapse model · number vector",
+      "canvas": "Synapse model",
       "unknown": "Unknown task"
     },
     "page": {
@@ -4355,7 +4364,7 @@
         "audio": "Attach or record audio",
         "asr": "Record speech or attach audio",
         "video": "Attach or drop a video",
-        "tensor": "Numbers, e.g. 0.5, 1.2, 3.0"
+        "tensor": "Text or numbers, e.g. 0.5, 1.2"
       },
       "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain. If the switch is already on, it no longer applies after an update: reset the permission, turn the switch on again, restart.",
       "openSettings": "Open settings",

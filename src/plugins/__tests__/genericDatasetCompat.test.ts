@@ -29,8 +29,9 @@ describe('genericDatasetCompat', () => {
     expect(checkDatasetCompat('yolo', [], analysis('yolo_bbox', ['.jpg', '.txt'], pairing), yolo).overallLevel).toBe('warning');
   });
 
-  it('Canvas liest keine YOLO-Datasets', () => {
-    expect(checkDatasetCompat('canvas', [], analysis('yolo_bbox', ['.jpg', '.txt']), canvas).overallLevel).toBe('bad');
+  it('Canvas liest YOLO-Boxen (detection_loader), aber kein COCO', () => {
+    expect(checkDatasetCompat('canvas', [], analysis('yolo_bbox', ['.jpg', '.txt']), canvas).overallLevel).toBe('ok');
+    expect(checkDatasetCompat('canvas', [], analysis('coco_json', ['.jpg', '.json']), canvas).overallLevel).toBe('bad');
     expect(checkDatasetCompat('canvas', [], analysis('folder_class', ['.png']), canvas).overallLevel).toBe('ok');
   });
 

@@ -111,7 +111,7 @@ impl RequestError {
 
 // ============ Pfade ============
 
-fn find_script(app_handle: &tauri::AppHandle, rel: &Path, what: &str) -> Result<PathBuf, String> {
+pub(crate) fn find_script(app_handle: &tauri::AppHandle, rel: &Path, what: &str) -> Result<PathBuf, String> {
     let candidates = vec![
         app_handle.path().resource_dir().ok().map(|p| p.join(rel)),
         Some(PathBuf::from("src-tauri").join(rel)),
@@ -410,17 +410,20 @@ pub fn build_request(is_canvas: bool, input_kind: &str, modality: &str, input: &
             if modality == "seq2seq" { "Text zum Umformulieren" } else { "Text" }
         ));
     } else if is_canvas {
-        // Canvas-Modelle erwarten einen Zahlen-Tensor statt Text
-        let nums: Vec<f64> = text
+        // Zahlen gehen als Tensor, alles andere als Text: nur das Modell weiss,
+        // ob es einen Tokenizer hat, und meldet sonst selbst, was es erwartet.
+        if text.trim().is_empty() {
+            return Err("Keine Eingabe. Gib Zahlen wie \"0.5, 1.2\" oder Text ein.".to_string());
+        }
+        let nums: Result<Vec<f64>, _> = text
             .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
             .filter(|s| !s.is_empty())
             .map(|s| s.parse::<f64>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "Canvas-Modell erwartet numerische Eingaben, z.B. \"0.5, 1.2, 3.0\" — freier Text wird nicht unterstützt.".to_string())?;
-        if nums.is_empty() {
-            return Err("Keine Zahlen in der Eingabe. Canvas-Modelle erwarten einen Feature-Vektor, z.B. \"0.5, 1.2, 3.0\".".to_string());
+            .collect();
+        match nums {
+            Ok(nums) => serde_json::json!({ "input": nums, "input_type": "tensor" }),
+            Err(_) => serde_json::json!({ "input": text, "input_type": "text" }),
         }
-        serde_json::json!({ "input": nums, "input_type": "tensor" })
     } else {
         serde_json::json!({ "text": text })
     };
@@ -570,7 +573,9 @@ mod tests {
     fn canvas_liest_zahlen() {
         let r = build_request(true, "tensor", "canvas", &input("0.5, 1; 2")).unwrap();
         assert_eq!(r["input"], serde_json::json!([0.5, 1.0, 2.0]));
-        assert!(build_request(true, "tensor", "canvas", &input("abc")).is_err());
+        let r = build_request(true, "tensor", "canvas", &input("abc")).unwrap();
+        assert_eq!(r["input_type"], "text");
+        assert!(build_request(true, "tensor", "canvas", &input("  ")).is_err());
     }
 
     #[test]

@@ -1,0 +1,1843 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "type": "gelu",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "approximate",
+          "default": "none",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "leaky_relu",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "negativeSlope",
+          "default": 0.01,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "relu",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inplace",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "sigmoid",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "silu",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "softmax",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "dim",
+          "default": -1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "tanh",
+      "family": "activation",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "audio_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "sampleRate",
+          "default": 16000,
+          "planned": false
+        },
+        {
+          "key": "seconds",
+          "default": 1.0,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "augmentation",
+      "family": "data",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Dataset",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Dataset"
+        }
+      ],
+      "params": [
+        {
+          "key": "flip",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "rotate",
+          "default": 15,
+          "planned": false
+        },
+        {
+          "key": "brightness",
+          "default": 0.2,
+          "planned": false
+        },
+        {
+          "key": "noise",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "csv_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "separator",
+          "default": ",",
+          "planned": false
+        },
+        {
+          "key": "hasHeader",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "targetCol",
+          "default": "label",
+          "planned": false
+        },
+        {
+          "key": "normalize",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "dataset_split",
+      "family": "data",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Dataset",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "train",
+          "type": "Dataset"
+        },
+        {
+          "id": "val",
+          "type": "Dataset"
+        },
+        {
+          "id": "test",
+          "type": "Dataset"
+        }
+      ],
+      "params": [
+        {
+          "key": "trainRatio",
+          "default": 0.8,
+          "planned": false
+        },
+        {
+          "key": "valRatio",
+          "default": 0.1,
+          "planned": false
+        },
+        {
+          "key": "shuffle",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "seed",
+          "default": 42,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "decoder_input",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "detection_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "imageSize",
+          "default": 128,
+          "planned": false
+        },
+        {
+          "key": "gridSize",
+          "default": 8,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "image_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "imageSize",
+          "default": 224,
+          "planned": false
+        },
+        {
+          "key": "channels",
+          "default": "3",
+          "planned": false
+        },
+        {
+          "key": "normalize",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "cacheRam",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "input",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "shape",
+          "default": "-1, 3, 224, 224",
+          "planned": false
+        },
+        {
+          "key": "dtype",
+          "default": "float32",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "latent",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "dim",
+          "default": 64,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "mask_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "imageSize",
+          "default": 128,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "mel_spectrogram",
+      "family": "data",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Dataset",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Dataset"
+        }
+      ],
+      "params": [
+        {
+          "key": "nMels",
+          "default": 64,
+          "planned": false
+        },
+        {
+          "key": "nFft",
+          "default": 400,
+          "planned": false
+        },
+        {
+          "key": "hopLength",
+          "default": 160,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "parquet_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "targetCol",
+          "default": "label",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "seq2seq_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "sourceCol",
+          "default": "source",
+          "planned": false
+        },
+        {
+          "key": "targetCol",
+          "default": "target",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "text_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "textCol",
+          "default": "",
+          "planned": false
+        },
+        {
+          "key": "targetCol",
+          "default": "label",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "timestep",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "tokenizer",
+      "family": "data",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "text",
+          "type": "Dataset",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "tokens",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "level",
+          "default": "word",
+          "planned": false
+        },
+        {
+          "key": "maxLength",
+          "default": 512,
+          "planned": false
+        },
+        {
+          "key": "vocabSize",
+          "default": 50000,
+          "planned": false
+        },
+        {
+          "key": "padding",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "truncation",
+          "default": true,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "video_loader",
+      "family": "data",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "numFrames",
+          "default": 8,
+          "planned": false
+        },
+        {
+          "key": "imageSize",
+          "default": 112,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "attention",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "query",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "key",
+          "type": "Tensor",
+          "optional": true
+        },
+        {
+          "id": "value",
+          "type": "Tensor",
+          "optional": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "embedDim",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "numHeads",
+          "default": 8,
+          "planned": false
+        },
+        {
+          "key": "dropout",
+          "default": 0.1,
+          "planned": false
+        },
+        {
+          "key": "causal",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "batchnorm",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "numFeatures",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "eps",
+          "default": 1e-05,
+          "planned": false
+        },
+        {
+          "key": "momentum",
+          "default": 0.1,
+          "planned": false
+        },
+        {
+          "key": "affine",
+          "default": true,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "code",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "code",
+          "default": "class Node(nn.Module):\n    def __init__(self, shape):\n        super().__init__()\n        self.scale = nn.Parameter(torch.ones(1))\n\n    def forward(self, x):\n        return x * self.scale\n",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "conv1d",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inChannels",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "outChannels",
+          "default": 32,
+          "planned": false
+        },
+        {
+          "key": "kernelSize",
+          "default": 3,
+          "planned": false
+        },
+        {
+          "key": "stride",
+          "default": 1,
+          "planned": false
+        },
+        {
+          "key": "padding",
+          "default": 1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "conv2d",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inChannels",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "outChannels",
+          "default": 64,
+          "planned": false
+        },
+        {
+          "key": "kernelSize",
+          "default": "3",
+          "planned": false
+        },
+        {
+          "key": "stride",
+          "default": 1,
+          "planned": false
+        },
+        {
+          "key": "padding",
+          "default": "1",
+          "planned": false
+        },
+        {
+          "key": "groups",
+          "default": 1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "conv3d",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inChannels",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "outChannels",
+          "default": 16,
+          "planned": false
+        },
+        {
+          "key": "kernelSize",
+          "default": 3,
+          "planned": false
+        },
+        {
+          "key": "stride",
+          "default": 1,
+          "planned": false
+        },
+        {
+          "key": "padding",
+          "default": 1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "conv_transpose2d",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inChannels",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "outChannels",
+          "default": 32,
+          "planned": false
+        },
+        {
+          "key": "kernelSize",
+          "default": 2,
+          "planned": false
+        },
+        {
+          "key": "stride",
+          "default": 2,
+          "planned": false
+        },
+        {
+          "key": "padding",
+          "default": 0,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "dense",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inputSize",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "outputSize",
+          "default": 256,
+          "planned": false
+        },
+        {
+          "key": "bias",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "initializer",
+          "default": "xavier_uniform",
+          "planned": false
+        },
+        {
+          "key": "implicitPool",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "dropout",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "p",
+          "default": 0.1,
+          "planned": false
+        },
+        {
+          "key": "inplace",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "embedding",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "tokens",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "vocabSize",
+          "default": 50000,
+          "planned": false
+        },
+        {
+          "key": "embeddingDim",
+          "default": 512,
+          "planned": false
+        },
+        {
+          "key": "paddingIdx",
+          "default": 0,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "gru",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        },
+        {
+          "id": "hidden",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inputSize",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "hiddenSize",
+          "default": 256,
+          "planned": false
+        },
+        {
+          "key": "numLayers",
+          "default": 1,
+          "planned": false
+        },
+        {
+          "key": "bidirectional",
+          "default": false,
+          "planned": false
+        },
+        {
+          "key": "dropout",
+          "default": 0.0,
+          "planned": false
+        },
+        {
+          "key": "returnSequence",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "layernorm",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "normalizedShape",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "eps",
+          "default": 1e-05,
+          "planned": false
+        },
+        {
+          "key": "affine",
+          "default": true,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "lstm",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        },
+        {
+          "id": "hidden",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "inputSize",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "hiddenSize",
+          "default": 512,
+          "planned": false
+        },
+        {
+          "key": "numLayers",
+          "default": 2,
+          "planned": false
+        },
+        {
+          "key": "bidirectional",
+          "default": false,
+          "planned": false
+        },
+        {
+          "key": "dropout",
+          "default": 0.1,
+          "planned": false
+        },
+        {
+          "key": "returnSequence",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "positional",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "maxLength",
+          "default": 512,
+          "planned": false
+        },
+        {
+          "key": "dim",
+          "default": "auto",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "pretrained",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "path",
+          "default": "",
+          "planned": false
+        },
+        {
+          "key": "freeze",
+          "default": true,
+          "planned": false
+        },
+        {
+          "key": "inputKind",
+          "default": "tokens",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "reparameterize",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "mu",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "logvar",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        },
+        {
+          "id": "kl",
+          "type": "Scalar"
+        }
+      ],
+      "params": [
+        {
+          "key": "beta",
+          "default": 1.0,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "transformer_block",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "embedDim",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "numHeads",
+          "default": 8,
+          "planned": false
+        },
+        {
+          "key": "ffnDim",
+          "default": 2048,
+          "planned": false
+        },
+        {
+          "key": "dropout",
+          "default": 0.1,
+          "planned": false
+        },
+        {
+          "key": "causal",
+          "default": false,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "transformer_decoder",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "memory",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "embedDim",
+          "default": "auto",
+          "planned": false
+        },
+        {
+          "key": "numHeads",
+          "default": 8,
+          "planned": false
+        },
+        {
+          "key": "ffnDim",
+          "default": 2048,
+          "planned": false
+        },
+        {
+          "key": "dropout",
+          "default": 0.1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "upsample",
+      "family": "layer",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "scale",
+          "default": 2,
+          "planned": false
+        },
+        {
+          "key": "mode",
+          "default": "nearest",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "merge",
+      "family": "logic",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "a",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "b",
+          "type": "Tensor",
+          "optional": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "dim",
+          "default": -1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "pool",
+      "family": "logic",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "type",
+          "default": "global_avg",
+          "planned": false
+        },
+        {
+          "key": "stride",
+          "default": 2,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "pool1d",
+      "family": "logic",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "type",
+          "default": "max",
+          "planned": false
+        },
+        {
+          "key": "kernel",
+          "default": 2,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "pool3d",
+      "family": "logic",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "type",
+          "default": "max",
+          "planned": false
+        },
+        {
+          "key": "kernel",
+          "default": 2,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "split_node",
+      "family": "logic",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "a",
+          "type": "Tensor"
+        },
+        {
+          "id": "b",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "chunks",
+          "default": 2,
+          "planned": false
+        },
+        {
+          "key": "dim",
+          "default": -1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "add_node",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "a",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "b",
+          "type": "Tensor",
+          "optional": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "flatten",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "matmul",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "a",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "b",
+          "type": "Tensor",
+          "optional": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "multiply_node",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "a",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "b",
+          "type": "Tensor",
+          "optional": true
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "normalize",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "p",
+          "default": 2,
+          "planned": false
+        },
+        {
+          "key": "dim",
+          "default": -1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "reshape",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "shape",
+          "default": "-1, 512",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "transpose",
+      "family": "math",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "dim0",
+          "default": -2,
+          "planned": false
+        },
+        {
+          "key": "dim1",
+          "default": -1,
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "block",
+      "family": "structure",
+      "structural": false,
+      "inputs": [
+        {
+          "id": "in",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "type": "Tensor"
+        }
+      ],
+      "params": [
+        {
+          "key": "graph",
+          "default": null,
+          "planned": false
+        },
+        {
+          "key": "repeat",
+          "default": 1,
+          "planned": false
+        },
+        {
+          "key": "role",
+          "default": "",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "loss",
+      "family": "training",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "pred",
+          "type": "Tensor",
+          "optional": false
+        },
+        {
+          "id": "targets",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "loss",
+          "type": "Scalar"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "optimizer",
+      "family": "training",
+      "structural": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "optimizer",
+          "type": "Any"
+        }
+      ],
+      "params": []
+    },
+    {
+      "type": "output_node",
+      "family": "training",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "logits",
+          "type": "Tensor",
+          "optional": false
+        }
+      ],
+      "outputs": [],
+      "params": [
+        {
+          "key": "numClasses",
+          "default": 10,
+          "planned": false
+        },
+        {
+          "key": "taskType",
+          "default": "classification",
+          "planned": false
+        }
+      ]
+    },
+    {
+      "type": "scheduler",
+      "family": "training",
+      "structural": true,
+      "inputs": [
+        {
+          "id": "optimizer",
+          "type": "Any",
+          "optional": false
+        }
+      ],
+      "outputs": [
+        {
+          "id": "scheduler",
+          "type": "Any"
+        }
+      ],
+      "params": []
+    }
+  ]
+}

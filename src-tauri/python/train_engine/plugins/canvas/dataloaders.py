@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import torch
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
 
 import sys
 from pathlib import Path
@@ -16,36 +16,82 @@ _CANVAS_DIR = str(Path(__file__).resolve().parent)
 if _CANVAS_DIR not in sys.path:
     sys.path.insert(0, _CANVAS_DIR)
 
+_PY_DIR = str(Path(__file__).resolve().parents[3])
+if _PY_DIR not in sys.path:
+    sys.path.insert(0, _PY_DIR)
+
 from ir import CanvasGraphIR, IRDataSpec  # noqa: E402
+from synapse.data import (  # noqa: E402
+    MEDIA_TYPES, lm_loaders, mask_loaders, media_loaders, seq2seq_loaders, split_settings, split_subset, step,
+    text_loaders,
+)
 
 
-def _infer_input_features(ir: CanvasGraphIR) -> int:
-    for nid in ir.execution_order:
-        node = ir.node_by_id().get(nid)
-        if not node:
-            continue
-        if node.type == "dense":
-            return int(node.params.get("inputSize", 128))
-        if node.type == "lstm":
-            return int(node.params.get("inputSize", 256))
-        if node.type == "conv2d":
-            return int(node.params.get("inChannels", 3))
-        if node.type == "embedding":
-            return 32
-    return 128
+# Erzeugende Modelle und Detektion brauchen viele Schritte. Bei kleinen
+# Datensaetzen waeren das nur zwei, drei je Epoche, deshalb wird der
+# Trainingsteil wiederholt, bis eine Epoche mindestens so viele Schritte hat.
+MIN_STEPS = {"gan": 100, "diffusion": 100, "detection": 50}
+
+
+class _Repeat(torch.utils.data.Dataset):
+    def __init__(self, base, times: int):
+        self.base, self.times = base, times
+
+    def __len__(self):
+        return len(self.base) * self.times
+
+    def __getitem__(self, i):
+        return self.base[i % len(self.base)]
 
 
 def get_dataloaders(
     ir: CanvasGraphIR,
     dataset_path: str,
     batch_size: int,
+    preprocess: Optional[Dict[str, Any]] = None,
 ) -> Tuple[DataLoader, DataLoader]:
+    train, val = _get_dataloaders(ir, dataset_path, batch_size, preprocess)
+    task = getattr(ir.training, "task_type", "")
+    wanted = MIN_STEPS.get(task)
+    if wanted and 0 < len(train) < wanted:
+        times = -(-wanted * batch_size // len(train.dataset))
+        _status(f"Kleiner Datensatz: {len(train)} Schritte je Epoche, fuer {task} je Epoche {times}x wiederholt.")
+        train = DataLoader(_Repeat(train.dataset, times), batch_size=batch_size, shuffle=True,
+                           collate_fn=train.collate_fn, generator=torch.Generator().manual_seed(42))
+    return train, val
+
+
+def _get_dataloaders(
+    ir: CanvasGraphIR,
+    dataset_path: str,
+    batch_size: int,
+    preprocess: Optional[Dict[str, Any]] = None,
+) -> Tuple[DataLoader, DataLoader]:
+    # preprocess sammelt, was die Vorhersage spaeter wissen muss (Klassennamen,
+    # Normalisierung). Es wird mit den Gewichten gespeichert.
+    preprocess = preprocess if preprocess is not None else {}
     num_classes    = ir.training.num_classes
-    input_features = _infer_input_features(ir)
     data           = ir.data
     data_type      = data.type if data else "default"
     data_params    = data.params if data else {}
+    pipeline       = getattr(data, "pipeline", None) or []
     dsp            = dataset_path or os.environ.get("DATASET_PATH", "")
+
+    if data_type in MEDIA_TYPES or data_type in ("text_loader", "mask_loader", "seq2seq_loader", "detection_loader"):
+        if not dsp:
+            raise ValueError(f"{data_type}: kein Dataset-Pfad angegeben.")
+        if data_type == "detection_loader":
+            from synapse.generative import box_loaders
+            return box_loaders(dsp, data_params, pipeline, batch_size, num_classes, preprocess, _status)
+        if data_type == "seq2seq_loader":
+            return seq2seq_loaders(dsp, data_params, pipeline, batch_size, preprocess, _status, _read_text)
+        if data_type == "mask_loader":
+            return mask_loaders(dsp, data_params, pipeline, batch_size, num_classes, preprocess, _status)
+        if data_type == "text_loader" and ir.training.task_type in ("language_model", "generation"):
+            return lm_loaders(dsp, pipeline, data_params, batch_size, preprocess, _status, _read_text)
+        if data_type == "text_loader":
+            return text_loaders(dsp, data_params, pipeline, batch_size, num_classes, preprocess, _status, _read_text)
+        return media_loaders(data_type, dsp, data_params, pipeline, batch_size, num_classes, preprocess, _status)
 
     # ── image_loader ─────────────────────────────────────────────
     if data_type == "image_loader":
@@ -102,6 +148,22 @@ def get_dataloaders(
                 else transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             )
         tfm = transforms.Compose(steps)
+        aug = step(pipeline, "augmentation")
+        split = split_settings(pipeline)
+        train_steps = list(steps)
+        if aug is not None:
+            extra = []
+            if aug.get("flip", True) is True:
+                extra.append(transforms.RandomHorizontalFlip())
+            if float(aug.get("rotate", 0) or 0) > 0:
+                extra.append(transforms.RandomRotation(float(aug["rotate"])))
+            if float(aug.get("brightness", 0) or 0) > 0:
+                extra.append(transforms.ColorJitter(brightness=float(aug["brightness"])))
+            train_steps = extra + train_steps
+            if aug.get("noise") is True:
+                train_steps.append(transforms.Lambda(lambda t: t + torch.randn_like(t) * 0.02))
+        train_tfm = transforms.Compose(train_steps)
+        cache_ram = data_params.get("cacheRam") is True or str(data_params.get("cacheRam")).lower() == "true"
 
         if not root.is_dir():
             raise ValueError(
@@ -109,7 +171,11 @@ def get_dataloaders(
                 "Bitte einen Ordner mit Klassen-Unterordnern ausw\u00e4hlen."
             )
         try:
-            layout = resolve_class_layout(root, "image", val_fraction=0.2)
+            if ir.training.task_type in ("gan", "diffusion", "autoencoder"):
+                # Erzeugende Modelle brauchen keine Klassen: ein Ordner reicht.
+                layout = _all_images(root, split)
+            else:
+                layout = resolve_class_layout(root, "image", seed=split["seed"], val_fraction=split["val"])
         except ValueError as e:
             has_parquet = list(root.glob("*.parquet")) or list((root / "train").glob("*.parquet"))
             if has_parquet:
@@ -132,10 +198,13 @@ def get_dataloaders(
                 f"Train: {len(layout.train)} | Val: {len(layout.val)}")
 
         rgb = channels != 1
+        preprocess["class_names"] = [str(c) for c in layout.classes]
 
         class _Files(torch.utils.data.Dataset):
-            def __init__(self, items):
+            def __init__(self, items, transform):
                 self.items = list(items)
+                self.transform = transform
+                self.cache = {}
 
             def __len__(self):
                 return len(self.items)
@@ -143,8 +212,13 @@ def get_dataloaders(
             def __getitem__(self, i):
                 from PIL import Image
                 path, label = self.items[i]
-                with Image.open(path) as im:
-                    return tfm(im.convert("RGB") if rgb else im.convert("L")), label
+                image = self.cache.get(i)
+                if image is None:
+                    with Image.open(path) as im:
+                        image = im.convert("RGB") if rgb else im.convert("L")
+                    if cache_ram:
+                        self.cache[i] = image
+                return self.transform(image), label
 
         if num_classes and len(layout.classes) > int(num_classes):
             raise ValueError(
@@ -154,19 +228,19 @@ def get_dataloaders(
             )
         gen = torch.Generator().manual_seed(42)
         return (
-            DataLoader(_Files(layout.train), batch_size=batch_size, shuffle=True, num_workers=0, generator=gen),
-            DataLoader(_Files(layout.val),   batch_size=batch_size, shuffle=False, num_workers=0),
+            DataLoader(_Files(layout.train, train_tfm), batch_size=batch_size, shuffle=True, num_workers=0, generator=gen),
+            DataLoader(_Files(layout.val, tfm), batch_size=batch_size, shuffle=False, num_workers=0),
         )
 
     # ── csv_loader / parquet_loader ─────────────────────────────
     if data_type in ("csv_loader", "parquet_loader"):
         regression = getattr(ir.training, "task_type", "") == "regression"
-        return _tabular_loaders(data_type, dsp, data_params, num_classes, batch_size, regression)
+        return _tabular_loaders(data_type, dsp, data_params, num_classes, batch_size, regression, preprocess, pipeline)
 
     # ── Unbekannter data_type ────────────────────────────────────────
     # KEIN stiller Dummy-Fallback mehr -- expliziter Fehler damit der User
     # weiss was er falsch konfiguriert hat.
-    supported = ["image_loader", "csv_loader", "parquet_loader"]
+    supported = ["image_loader", "audio_loader", "video_loader", "text_loader", "csv_loader", "parquet_loader"]
     raise ValueError(
         f"Canvas data_type '{data_type}' wird nicht unterst\u00fctzt.\n"
         f"Unterst\u00fctzte Typen: {supported}\n"
@@ -224,6 +298,35 @@ def _tabular_files(root: Path, exts: Tuple[str, ...]):
     return [f for f in loose if _split_of(f.stem) != "test"] or loose, []
 
 
+def _all_images(root: Path, split):
+    from types import SimpleNamespace
+    from ft_data.media import IMAGE_EXTS
+    from synapse.data import split_indices
+    files = sorted(f for f in root.rglob("*") if f.is_file() and f.suffix.lower() in IMAGE_EXTS)
+    if not files:
+        raise ValueError(f"Keine Bilder in {root}")
+    tr, va = split_indices(len(files), split)
+    return SimpleNamespace(classes=["image"], train=[(files[i], 0) for i in tr], val=[(files[i], 0) for i in va], notes=[])
+
+
+def _read_text(root: Path):
+    """Text-Tabellen als (train, val oder None); test wird nie trainiert."""
+    import pandas as pd
+
+    def read(f: Path):
+        if f.suffix.lower() == ".parquet":
+            return pd.read_parquet(str(f))
+        if f.suffix.lower() in (".jsonl", ".json"):
+            return pd.read_json(str(f), lines=f.suffix.lower() == ".jsonl")
+        return pd.read_csv(str(f), sep="\t" if f.suffix.lower() == ".tsv" else ",", encoding="utf-8-sig")
+
+    train, val = _tabular_files(root, (".csv", ".tsv", ".jsonl", ".json", ".parquet"))
+    if not train:
+        raise ValueError(f"text_loader: Keine Textdateien in {root}. Erwartet: csv, tsv, jsonl oder parquet.")
+    df = pd.concat([read(f) for f in train], ignore_index=True)
+    return df, (pd.concat([read(f) for f in val], ignore_index=True) if val else None)
+
+
 def _is_unlabeled(v) -> bool:
     if v is None:
         return True
@@ -239,7 +342,7 @@ def _is_unlabeled(v) -> bool:
 
 
 def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_classes, batch_size: int,
-                     regression: bool = False):
+                     regression: bool = False, preprocess: Optional[Dict[str, Any]] = None, pipeline=()):
     import numpy as np
     import pandas as pd
 
@@ -303,7 +406,7 @@ def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_
         _status(f"{name}: {dropped} Zeilen ohne Label (leer/-1) ignoriert.")
 
     feat_cols = [c for c in df_train.columns
-                 if c != tgt and not str(c).startswith("__") and np.issubdtype(df_train[c].dtype, np.number)]
+                 if c != tgt and not str(c).startswith("__") and pd.api.types.is_numeric_dtype(df_train[c])]
     skipped = [c for c in df_train.columns if c != tgt and c not in feat_cols and not str(c).startswith("__")]
     if not feat_cols:
         raise ValueError(
@@ -316,19 +419,37 @@ def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_
     if skipped:
         _status(f"{name}: nicht-numerische Spalten ignoriert: {skipped[:8]}")
 
+    preprocess = preprocess if preprocess is not None else {}
+    preprocess["feature_columns"] = [str(c) for c in feat_cols]
+    do_norm = data_params.get("normalize", False)
+    do_norm = do_norm is True or str(do_norm).lower() in ("true", "1", "yes")
+
+    def fit_norm(X):
+        """Mittelwert und Streuung aus Train, gespeichert fuer die Vorhersage."""
+        mean = X.mean(dim=0, keepdim=True)
+        std = X.std(dim=0, keepdim=True)
+        std[std == 0] = 1.0
+        preprocess["mean"] = mean.squeeze(0).tolist()
+        preprocess["std"] = std.squeeze(0).tolist()
+        return mean, std
+
     if regression:
         def to_reg(df):
             feats = df[feat_cols].astype("float32").fillna(0.0)
             return torch.tensor(feats.values), torch.tensor(df[tgt].astype("float32").values)
         X_train, y_train = to_reg(df_train)
+        reg_mean = reg_std = None
+        if do_norm:
+            reg_mean, reg_std = fit_norm(X_train)
+            X_train = (X_train - reg_mean) / reg_std
         gen = torch.Generator().manual_seed(42)
         if df_val is not None and len(df_val):
             X_val, y_val = to_reg(df_val)
+            if reg_mean is not None:
+                X_val = (X_val - reg_mean) / reg_std
             return (DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, generator=gen),
                     DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size))
-        ds = TensorDataset(X_train, y_train)
-        n = max(1, int(len(ds) * 0.8))
-        tr, va = random_split(ds, [n, len(ds) - n], generator=torch.Generator().manual_seed(42))
+        tr, va = split_subset(TensorDataset(X_train, y_train), split_settings(pipeline))
         return (DataLoader(tr, batch_size=batch_size, shuffle=True, generator=gen), DataLoader(va, batch_size=batch_size))
 
     # Labels immer auf 0..K-1 abbilden: Text-Labels und Labels ab 1 funktionieren so auch.
@@ -336,6 +457,7 @@ def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_
     numeric = all(isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool) for v in values)
     keys = sorted({float(v) for v in values}) if numeric else sorted({str(v) for v in values})
     label_map = {k: i for i, k in enumerate(keys)}
+    preprocess["class_names"] = [str(int(k)) if numeric and float(k).is_integer() else str(k) for k in keys]
     if len(keys) < 2:
         raise ValueError(f"{name}: Label-Spalte '{tgt}' hat nur einen Wert ({keys[:1]}) — keine Klassifikation moeglich.")
     if num_classes and len(keys) > int(num_classes):
@@ -355,12 +477,9 @@ def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_
         return X, y
 
     X_train, y_train = to_tensors(df_train)
-    do_norm = data_params.get("normalize", False)
     mean = std = None
-    if do_norm is True or str(do_norm).lower() in ("true", "1", "yes"):
-        mean = X_train.mean(dim=0, keepdim=True)
-        std = X_train.std(dim=0, keepdim=True)
-        std[std == 0] = 1.0
+    if do_norm:
+        mean, std = fit_norm(X_train)
         X_train = (X_train - mean) / std
     ds_train = TensorDataset(X_train, y_train)
 
@@ -372,8 +491,7 @@ def _tabular_loaders(data_type: str, dsp: str, data_params: Dict[str, Any], num_
         return (DataLoader(ds_train, batch_size=batch_size, shuffle=True, generator=gen),
                 DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size))
 
-    n = max(1, int(len(ds_train) * 0.8))
-    tr, va = random_split(ds_train, [n, len(ds_train) - n], generator=torch.Generator().manual_seed(42))
+    tr, va = split_subset(ds_train, split_settings(pipeline))
     return (DataLoader(tr, batch_size=batch_size, shuffle=True, generator=gen),
             DataLoader(va, batch_size=batch_size))
 

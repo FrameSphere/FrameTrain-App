@@ -45,11 +45,15 @@ export interface IRTrainingSpec {
   precision: "fp32" | "fp16" | "bf16";
   gradAccum: number;
   gpu: string;
+  /** Gerät wurde in der Konsole gewählt; sonst nimmt das Training das beste vorhandene */
+  gpuExplicit?: boolean;
 }
 
 export interface IRDataSpec {
   type: string;
   params: Record<string, unknown>;
+  /** Daten-Nodes hinter der Quelle, in Kantenfolge */
+  pipeline: { type: string; params: Record<string, unknown> }[];
 }
 
 export interface CanvasGraphIR {
@@ -64,6 +68,28 @@ export interface CanvasGraphIR {
     edge_count: number;
     built_at: string;
   };
+}
+
+export const LOADER_NODE_TYPES = [
+  "image_loader", "audio_loader", "video_loader", "text_loader", "seq2seq_loader", "mask_loader", "detection_loader", "csv_loader", "parquet_loader",
+];
+
+/** Folgt den Kanten ab der Quelle durch alle Daten-Nodes. */
+function dataPipeline(start: Node, nodes: Node[], edges: Edge[]): IRDataSpec["pipeline"] {
+  const out: IRDataSpec["pipeline"] = [];
+  const seen = new Set([start.id]);
+  const queue = [start.id];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const e of edges) {
+      const next = e.source === id ? nodes.find((n) => n.id === e.target) : undefined;
+      if (!next || seen.has(next.id) || getCategory(next) !== "data") continue;
+      seen.add(next.id);
+      queue.push(next.id);
+      out.push({ type: getSynapseNodeType(next), params: getParams(next) });
+    }
+  }
+  return out;
 }
 
 function getCategory(n: Node): string {
@@ -105,7 +131,7 @@ export function buildCanvasGraphIR(
   // Datenquelle: echte Loader-Nodes haben Vorrang vor dem generischen "input"-
   // Platzhalter — sonst würde bei input + image_loader im Graph zufällig
   // "input" als data_type in der Engine landen (→ "wird nicht unterstützt").
-  const LOADER_TYPES = new Set(["image_loader", "csv_loader", "parquet_loader"]);
+  const LOADER_TYPES = new Set(LOADER_NODE_TYPES);
   const dataNode =
     nodes.find((n) => LOADER_TYPES.has(getSynapseNodeType(n)))
     ?? nodes.find((n) => getCategory(n) === "data");
@@ -146,7 +172,7 @@ export function buildCanvasGraphIR(
       gpu: config.gpu ?? "cpu",
     },
     data: dataNode
-      ? { type: getSynapseNodeType(dataNode), params: getParams(dataNode) }
+      ? { type: getSynapseNodeType(dataNode), params: getParams(dataNode), pipeline: dataPipeline(dataNode, nodes, edges) }
       : null,
     metadata: {
       node_count: nodes.length,

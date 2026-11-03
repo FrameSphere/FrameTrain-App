@@ -2227,6 +2227,14 @@ pub async fn get_dataset_files(
             let path = entry.path();
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if matches!(file_name, "train"|"val"|"test"|"unused"|"images"|"labels"|"clips") { continue; }
+            // Ein Ordner pro Klasse (hund/, katze/): Dateien darin gehoeren zum
+            // Dataset, sonst fand das Labor bei Klassen-Ordnern keine Proben.
+            if path.is_dir() && !file_name.starts_with('.') && !file_name.starts_with("__") {
+                for file in collect_files_recursive(&path) {
+                    push(&file, "unsplit", &mut files, &mut seen);
+                }
+                continue;
+            }
             if path.is_file() {
                 if let Ok(meta) = fs::metadata(&path) {
                     let tag = if matches!(file_name, "dataset_infos.json"|"metadata.json"|".gitkeep"|".DS_Store") { "info" } else { "unsplit" };
