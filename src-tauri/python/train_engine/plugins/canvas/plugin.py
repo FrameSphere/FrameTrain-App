@@ -545,7 +545,8 @@ class CanvasPlugin(TrainPlugin):
                 MessageProtocol.status(
                     "train",
                     f"[Metric] epoch={epoch + 1} loss={avg_loss:.6f} val_loss={val_loss:.6f} "
-                    f"accuracy={acc:.6f} lr={lr_now:.8f} optimizer_steps={optimizer_steps}",
+                    + (f"accuracy={acc:.6f} " if is_clf else "")
+                    + f"lr={lr_now:.8f} optimizer_steps={optimizer_steps}",
                 )
 
             MessageProtocol.status("train", "✓ Training komplett (Canvas IR Runtime)")

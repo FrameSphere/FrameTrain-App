@@ -156,7 +156,7 @@ def box_loss(pred: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return loss
 
 
-def decode_boxes(pred: torch.Tensor, threshold: float = 0.5) -> List[Dict[str, Any]]:
+def decode_boxes(pred: torch.Tensor, threshold: float = 0.3) -> List[Dict[str, Any]]:
     """Gitter zurueck in Boxen (normiert 0 bis 1, Mitte und Groesse) fuer ein Bild."""
     p = pred[0]
     grid = p.size(-1)

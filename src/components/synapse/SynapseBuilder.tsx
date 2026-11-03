@@ -835,11 +835,16 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
 
   // Eigentliches Speichern: Update des aktiven Modells oder Neuanlage mit Name.
   const performSave = useCallback(async (newModelName?: string) => {
-    const graphConfig = generateModelConfigFromGraph(nodes, edges, NODE_DEFINITIONS);
-    if (!graphConfig) {
-      setLogLines((p) => [...p, "[Error] Kein gültiger Graph zum Speichern."]);
-      return;
-    }
+    // Graphen ohne durchgehende Kette (z. B. GAN aus zwei Blöcken) sind gültig:
+    // gespeichert wird dann nur die Kurzbeschreibung, gerechnet wird mit dem IR.
+    const graphConfig = generateModelConfigFromGraph(nodes, edges, NODE_DEFINITIONS) ?? {
+      id: `canvas_${Date.now()}`,
+      name: "Canvas Network",
+      layers: [],
+      inputShape: "",
+      outputSize: 0,
+      graphMetadata: { nodeCount: nodes.length, edgeCount: edges.length, generatedAt: Date.now() },
+    };
     const script = generateTrainingScript(nodes, edges, {
       epochs: 1, batchSize: 32, learningRate: 0.001, gpu: "cpu", precision: "fp32", gradAccum: 1,
     });

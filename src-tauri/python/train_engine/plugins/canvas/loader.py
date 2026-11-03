@@ -120,7 +120,7 @@ class LoadedCanvasModel:
                 return self.model(torch.randn(count, self.model.latent, device=self.device))
         return NoisePlan().sample(self.model, (count, *self.preprocess["sample_shape"]), self.device)
 
-    def predict_boxes(self, path: str, threshold: float = 0.5) -> Dict[str, Any]:
+    def predict_boxes(self, path: str, threshold: float = 0.3) -> Dict[str, Any]:
         import numpy as np
         import torch
         from PIL import Image

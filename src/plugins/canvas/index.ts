@@ -39,7 +39,7 @@ const canvasPlugin: ModelPlugin = {
   // (Ordner pro Klasse, auch train/val/test), Text, CSV und Parquet. YOLO, Pascal VOC, COCO und Audio-Transkripte standen hier
   // vorher auch — geladen werden konnten sie nie.
   // Kein preferredDatasetType gesetzt – zeigt stattdessen "flexibel" im UI.
-  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],
+  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard', 'yolo_bbox'],
 };
 
 export default canvasPlugin;
