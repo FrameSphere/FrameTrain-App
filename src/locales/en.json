@@ -2885,7 +2885,7 @@
       "serverError": "Failed to load – switch versions or restart",
       "loadModelButton": "Load model for inference",
       "loadModelRetryButton": "Try again",
-      "canvasInputHint": "Canvas model: expects numeric feature inputs, e.g. \"0.5, 1.2, 3.0\" — free text is not supported.",
+      "canvasInputHint": "Synapse models take an image, audio, video, text, or numbers like \"0.5, 1.2\", depending on how they are built.",
       "datasetLabel": "Sample Dataset",
       "datasetPlaceholder": "– select dataset –",
       "datasetFileCount": "{count} files",

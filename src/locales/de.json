@@ -2881,7 +2881,7 @@
       "serverError": "Fehler beim Laden – Version wechseln oder neu starten",
       "loadModelButton": "Modell in Inferenz laden",
       "loadModelRetryButton": "Erneut versuchen",
-      "canvasInputHint": "Canvas-Modell: erwartet numerische Feature-Eingaben, z. B. \"0.5, 1.2, 3.0\" — freier Text wird nicht unterstützt.",
+      "canvasInputHint": "Synapse-Modelle nehmen je nach Aufbau ein Bild, Audio, Video, Text oder Zahlen wie \"0.5, 1.2\" an.",
       "datasetLabel": "Sample-Dataset",
       "datasetPlaceholder": "– Dataset wählen –",
       "datasetFileCount": "{count} Dateien",
