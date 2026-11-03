@@ -1,6 +1,6 @@
 # Synapse Studio: Plan
 
-Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet. Live in der Vorschau-App: Bild, Audio, Text, Mini-GPT, Video, Detektion, GAN (Speichern, Training, Vorhersage, Export, Hosting). Mit der gebuendelten Engine der App: U-Net, VAE, Seq2Seq, Diffusion. Offen: Labor, ONNX-Lauf, Qualitaet von GAN und Detektion mit Standardwerten, Port-Farben, Budget, Einzelschritt-Ansicht.
+Stand: 02.11.2026, Basis Version 1.6.13. Status: Kern aller Phasen gebaut, auf `feat/synapse-studio` committet. Live in der Vorschau-App: Bild, Audio, Text, Mini-GPT, Video, Detektion (Box im Bild), GAN (Erzeugen im Hosting), Speichern, Export, Inferenz-Tab, Hosting mit Datei, Labor mit Text. Mit der gebuendelten Engine: U-Net, VAE, Seq2Seq, Diffusion. Offen: ONNX-Lauf (Pakete fehlen), Labor mit Bild-Proben, Startseite deutet GAN-Loss als Overfitting, Port-Farben, Budget, Einzelschritt-Ansicht.
 
 ## 1. Ziel
 
