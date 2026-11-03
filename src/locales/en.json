@@ -3187,6 +3187,8 @@
     "noWeightsAfter": "yet – train it first."
   },
   "synapseBuilder": {
+    "budget": "Weights {weights} · training from ~{training}",
+    "step": {"button": "Show one learning step", "summary": "Loss {loss} ({name}), learning rate {lr}", "node": "Node", "output": "Output", "grad": "Gradient", "update": "Change"},
     "blueprints": {"title": "Start from a blueprint or drag nodes from the library", "all": "All", "image": "Image", "text": "Text", "audio": "Audio", "video": "Video", "table": "Table"},
     "block": { "button": "Block", "tooltip": "Group selected nodes into a block (Shift + drag to select)", "needTwo": "Select at least two nodes.", "oneEdge": "A block needs exactly one edge in and one edge out." },
     "auto": "auto",

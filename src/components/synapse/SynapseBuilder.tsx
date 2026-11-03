@@ -22,7 +22,7 @@ import { Save as SaveIcon, Sparkles as SparklesIcon, FolderOpen as LibraryIcon, 
 import { useContextMenuActions } from "../../ui/contextMenuRegistry";
 
 import { NodeLibrary } from "./NodeLibrary";
-import { decorateEdges, decorateNodes, formatParams, structureKey, type LiveCheckResult } from "./liveCheck";
+import { decorateEdges, decorateNodes, formatBytes, formatParams, memoryBudget, structureKey, type LiveCheckResult, type StepResult } from "./liveCheck";
 import { groupToBlock } from "./blockGroup";
 import { BlueprintPicker, type Blueprint } from "./BlueprintPicker";
 import { emptyHistory, record, redo, undo, type HistoryState } from "./graphHistory";
@@ -297,8 +297,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
   const liveKey = useMemo(() => structureKey(nodes, edges), [nodes, edges]);
   const liveSeqRef = useRef(0);
   useEffect(() => {
+    const seq = ++liveSeqRef.current;  // auch beim Leeren: alte Antworten verfallen
     if (nodes.length === 0) { setLiveCheck(null); return; }
-    const seq = ++liveSeqRef.current;
     const timer = setTimeout(() => {
       const graph = buildCanvasGraphIR(nodes, edges, {
         epochs: 1, batchSize: 1, learningRate: 0.001, gpu: "cpu", precision: "fp32", gradAccum: 1,
@@ -311,6 +311,20 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKey]);
   useEffect(() => () => { invoke("synapse_stop").catch(() => {}); }, []);
+
+  // ── Einzelschritt: was ein Lernschritt im Netz bewegt ──────────────
+  const [stepResult, setStepResult] = useState<StepResult | null>(null);
+  const [stepError, setStepError] = useState<string | null>(null);
+  useEffect(() => { setStepResult(null); setStepError(null); }, [liveKey]);
+  const runStep = useCallback(() => {
+    const graph = buildCanvasGraphIR(nodes, edges, {
+      epochs: 1, batchSize: 1, learningRate: 0.01, gpu: "cpu", precision: "fp32", gradAccum: 1,
+    });
+    setStepError(null);
+    invoke<StepResult>("synapse_step", { graph, lr: 0.01 })
+      .then(setStepResult)
+      .catch((e) => setStepError(String(e)));
+  }, [nodes, edges]);
   const shownNodes = useMemo(() => decorateNodes(nodes, liveCheck), [nodes, liveCheck]);
   const shownEdges = useMemo(() => decorateEdges(edges, liveCheck), [edges, liveCheck]);
 
@@ -1537,11 +1551,60 @@ Keine Floskeln, nur Fakten.`;
                 <div style={{
                   padding: "6px 10px", borderRadius: 8, fontSize: 11, background: "#0d1117",
                   border: `1px solid ${liveCheck.ok ? "#1e293b" : "#ef4444"}`,
-                  color: liveCheck.ok ? "#94a0b8" : "#fca5a5", maxWidth: 320,
+                  color: liveCheck.ok ? "#94a0b8" : "#fca5a5", maxWidth: stepResult ? 460 : 320,
                 }}>
                   {liveCheck.ok
                     ? t('synapseBuilder.liveOk').replace('{params}', formatParams(liveCheck.params))
                     : `✗ ${liveCheck.errors[0]?.node ? `${liveCheck.errors[0].node}: ` : ""}${liveCheck.errors[0]?.message ?? ""}`}
+                  {liveCheck.ok && (
+                    <div style={{ marginTop: 4, color: "#7a869e" }}>
+                      {t('synapseBuilder.budget')
+                        .replace('{weights}', formatBytes(memoryBudget(liveCheck.params).weights))
+                        .replace('{training}', formatBytes(memoryBudget(liveCheck.params).training))}
+                    </div>
+                  )}
+                  {liveCheck.ok && (
+                    <button onClick={runStep} style={{
+                      marginTop: 6, padding: "3px 8px", borderRadius: 6, border: "1px solid #334155",
+                      background: "transparent", color: "#a5b4fc", fontSize: 11, cursor: "pointer",
+                    }}>
+                      {t('synapseBuilder.step.button')}
+                    </button>
+                  )}
+                  {stepError && <div style={{ marginTop: 6, color: "#fca5a5" }}>{stepError}</div>}
+                  {stepResult && (
+                    <div style={{ marginTop: 8, maxHeight: 260, overflowY: "auto", fontFamily: "'JetBrains Mono', monospace" }}>
+                      <div style={{ color: "#94a0b8", marginBottom: 4 }}>
+                        {t('synapseBuilder.step.summary')
+                          .replace('{loss}', String(stepResult.loss))
+                          .replace('{name}', stepResult.loss_name)
+                          .replace('{lr}', String(stepResult.lr))}
+                      </div>
+                      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                        <thead>
+                          <tr style={{ color: "#7a869e", textAlign: "left" }}>
+                            <th>{t('synapseBuilder.step.node')}</th>
+                            <th>{t('synapseBuilder.step.output')}</th>
+                            <th>{t('synapseBuilder.step.grad')}</th>
+                            <th>{t('synapseBuilder.step.update')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stepResult.order.map((id) => {
+                            const n = stepResult.nodes[id];
+                            return (
+                              <tr key={id} style={{ color: "#c3cad8" }}>
+                                <td style={{ paddingRight: 6 }}>{id}</td>
+                                <td style={{ paddingRight: 6 }}>{n.mean !== undefined ? `${n.mean} ± ${n.std}` : "–"}</td>
+                                <td style={{ paddingRight: 6 }}>{n.grad !== undefined ? n.grad.toExponential(1) : "–"}</td>
+                                <td>{n.update !== undefined ? n.update.toExponential(1) : "–"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </Panel>
             )}

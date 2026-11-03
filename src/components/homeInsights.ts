@@ -17,6 +17,14 @@ export interface TrainingLike {
   created_at: string;
   completed_at?: string | null;
   progress?: { train_loss?: number; val_loss?: number | null } | null;
+  /** Synapse-Läufe tragen ihre Aufgabe im Graph */
+  config?: { canvas_graph?: { training?: { taskType?: string } } } | null;
+}
+
+/** Bei GAN und Diffusion misst "val_loss" etwas anderes als Overfitting. */
+function lossComparable(job: TrainingLike): boolean {
+  const task = job.config?.canvas_graph?.training?.taskType;
+  return task !== 'gan' && task !== 'diffusion';
 }
 
 export interface TestLike {
@@ -123,7 +131,7 @@ export function buildInsights(input: InsightInput): Insight[] {
   }
 
   // 3) Overfitting-Verdacht im juengsten abgeschlossenen Lauf.
-  const lastDone = byNewest(trainings).find(j => j.status === 'completed');
+  const lastDone = byNewest(trainings).find(j => j.status === 'completed' && lossComparable(j));
   const trainLoss = lastDone?.progress?.train_loss;
   const valLoss = lastDone?.progress?.val_loss;
   if (

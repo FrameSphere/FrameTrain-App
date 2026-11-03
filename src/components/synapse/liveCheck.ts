@@ -46,6 +46,41 @@ function edgeShape(edge: Edge, result: LiveCheckResult): number[] | undefined {
   return source?.[0] === "__input__" ? result.input_shape : undefined;
 }
 
+/** Farbe je Tensorform: Vektor, Sequenz, Bild, Video. */
+export const RANK_COLORS: Record<number, string> = { 2: "#34d399", 3: "#c084fc", 4: "#60a5fa", 5: "#fb923c" };
+
+export function rankColor(shape: number[] | undefined): string | undefined {
+  return shape ? RANK_COLORS[shape.length] : undefined;
+}
+
+/** Speicherbedarf in Bytes: Gewichte (fp32) und Training mit AdamW (Gewichte, Gradienten, zwei Momente). */
+export function memoryBudget(params: number): { weights: number; training: number } {
+  return { weights: params * 4, training: params * 16 };
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+export interface StepNode {
+  shape?: number[];
+  mean?: number;
+  std?: number;
+  grad?: number;
+  update?: number;
+  params?: number;
+}
+
+export interface StepResult {
+  loss: number;
+  loss_name: string;
+  lr: number;
+  nodes: Record<string, StepNode>;
+  order: string[];
+}
+
 const EDGE_LABEL = {
   labelStyle: { fill: "#a5b4fc", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" },
   labelBgStyle: { fill: "#0d1117", stroke: "#1e293b" },
@@ -57,7 +92,12 @@ export function decorateEdges(edges: Edge[], result: LiveCheckResult | null): Ed
   if (!result) return edges;
   return edges.map((edge) => {
     const shape = edgeShape(edge, result);
-    return shape ? { ...edge, label: formatShape(shape), ...EDGE_LABEL } : edge;
+    if (!shape) return edge;
+    const stroke = rankColor(shape);
+    return {
+      ...edge, label: formatShape(shape), ...EDGE_LABEL,
+      ...(stroke ? { style: { ...(edge.style ?? {}), stroke } } : {}),
+    };
   });
 }
 

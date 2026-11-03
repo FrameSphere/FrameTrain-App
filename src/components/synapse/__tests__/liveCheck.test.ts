@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Edge, Node } from "@xyflow/react";
-import { decorateEdges, decorateNodes, formatParams, formatShape, structureKey, type LiveCheckResult } from "../liveCheck";
+import { decorateEdges, decorateNodes, formatBytes, formatParams, formatShape, memoryBudget, rankColor, structureKey, type LiveCheckResult } from "../liveCheck";
 import { groupToBlock } from "../blockGroup";
 import { emptyHistory, record, redo, undo } from "../graphHistory";
 
@@ -21,10 +21,23 @@ describe("Live-Prüfung", () => {
     expect(structureKey([node("a")], [])).not.toBe(structureKey([node("a", { outputSize: 2 })], []));
   });
 
-  it("schreibt Formen an die Kanten", () => {
+  it("schreibt Formen an die Kanten und färbt nach Tensorform", () => {
     const [ab, input] = decorateEdges([edge("a", "b"), edge("loader", "a")], result);
     expect(ab.label).toBe("[B,8]");
     expect(input.label).toBe("[B,4]");
+    expect((ab.style as any).stroke).toBe(rankColor([1, 8]));
+  });
+
+  it("unterscheidet Vektor, Sequenz, Bild und Video", () => {
+    const colors = [[1, 8], [1, 4, 8], [1, 3, 8, 8], [1, 3, 4, 8, 8]].map(rankColor);
+    expect(new Set(colors).size).toBe(4);
+    expect(rankColor(undefined)).toBeUndefined();
+  });
+
+  it("schätzt den Speicher für Gewichte und Training", () => {
+    expect(memoryBudget(1_000_000)).toEqual({ weights: 4_000_000, training: 16_000_000 });
+    expect(formatBytes(16_000_000)).toBe("15.3 MB");
+    expect(formatBytes(4 * 1024 ** 3)).toBe("4.0 GB");
   });
 
   it("legt Fehler und Parameter an die Nodes", () => {

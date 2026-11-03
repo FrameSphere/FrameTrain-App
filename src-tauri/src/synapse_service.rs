@@ -121,6 +121,20 @@ pub async fn synapse_check(
     .map_err(|e| e.to_string())?
 }
 
+/// Ein Lernschritt mit Zufallsdaten: Ausgabe, Gradient und Update je Node.
+#[tauri::command]
+pub async fn synapse_step(
+    app_handle: tauri::AppHandle,
+    graph: serde_json::Value,
+    lr: f64,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        request(&app_handle, serde_json::json!({ "cmd": "step", "graph": graph, "lr": lr }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Exportiert ein trainiertes Modell (pytorch, ftmodel, torchscript, onnx, safetensors).
 #[tauri::command]
 pub async fn synapse_export(

@@ -3184,6 +3184,8 @@
     "noWeightsAfter": "– erst Training durchführen."
   },
   "synapseBuilder": {
+    "budget": "Gewichte {weights} · Training ab ~{training}",
+    "step": {"button": "Einen Lernschritt zeigen", "summary": "Loss {loss} ({name}), Lernrate {lr}", "node": "Node", "output": "Ausgabe", "grad": "Gradient", "update": "Änderung"},
     "blueprints": {"title": "Mit einer Vorlage starten oder Nodes aus der Bibliothek ziehen", "all": "Alle", "image": "Bild", "text": "Text", "audio": "Audio", "video": "Video", "table": "Tabelle"},
     "block": { "button": "Block", "tooltip": "Markierte Nodes zu einem Block zusammenfassen (Umschalt + Ziehen zum Markieren)", "needTwo": "Markiere mindestens zwei Nodes.", "oneEdge": "Ein Block braucht genau eine Kante hinein und eine hinaus." },
     "auto": "auto",

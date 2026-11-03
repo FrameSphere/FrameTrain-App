@@ -95,6 +95,16 @@ describe('buildInsights', () => {
     expect(res.map(i => i.kind)).toContain('overfitting');
   });
 
+  it('warnt bei GAN und Diffusion nicht vor Overfitting', () => {
+    for (const taskType of ['gan', 'diffusion']) {
+      const res = buildInsights(input({
+        trainings: [training({ progress: { train_loss: 0.69, val_loss: 1.39 },
+          config: { canvas_graph: { training: { taskType } } } })],
+      }));
+      expect(res.map(i => i.kind)).not.toContain('overfitting');
+    }
+  });
+
   it('sieht ein normales val_loss nicht als Overfitting', () => {
     const res = buildInsights(input({
       trainings: [training({ progress: { train_loss: 0.2, val_loss: 0.25 } })],

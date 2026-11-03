@@ -121,6 +121,24 @@ class CheckTest(unittest.TestCase):
         self.assertLess(time.time() - t, 0.5)
 
 
+class StepTest(unittest.TestCase):
+    def test_ein_schritt_zeigt_forward_gradient_und_update(self):
+        from synapse.step import one_step
+        raw = {"version": 1, "execution_order": ["i", "a", "r", "b"], "nodes": [
+            {"id": "i", "type": "input", "params": {"shape": "-1, 6"}},
+            {"id": "a", "type": "dense", "params": {"inputSize": "auto", "outputSize": 8, "implicitPool": False}},
+            {"id": "r", "type": "relu", "params": {}},
+            {"id": "b", "type": "dense", "params": {"inputSize": "auto", "outputSize": 3, "implicitPool": False}}],
+            "edges": [{"source": "i", "target": "a"}, {"source": "a", "target": "r"}, {"source": "r", "target": "b"}]}
+        r = one_step(raw, lr=0.1)
+        self.assertEqual(r["order"], ["a", "r", "b"])
+        self.assertEqual(r["nodes"]["b"]["shape"], [4, 3])
+        self.assertGreater(r["nodes"]["a"]["grad"], 0)
+        self.assertAlmostEqual(r["nodes"]["a"]["update"], 0.1 * r["nodes"]["a"]["grad"], places=4)
+        self.assertEqual(r["nodes"]["a"]["params"], 6 * 8 + 8)
+        self.assertNotIn("grad", r["nodes"]["r"])
+
+
 class GuessInputTest(unittest.TestCase):
     def test_feste_dense_groesse_schlaegt_standard_des_input_nodes(self):
         raw = {"version": 1, "execution_order": ["i", "d"], "edges": [{"source": "i", "target": "d"}], "nodes": [

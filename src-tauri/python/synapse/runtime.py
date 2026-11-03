@@ -84,7 +84,7 @@ class SynapseModule(nn.Module):
                 raise ValueError(f"Eingang '{port.id}' von Node {nid} ({node.type}) ist nicht verbunden")
         return got
 
-    def forward(self, x: Any, decoder: Optional[torch.Tensor] = None) -> Any:
+    def forward(self, x: Any, decoder: Optional[torch.Tensor] = None, trace: Optional[Dict[Key, torch.Tensor]] = None) -> Any:
         if isinstance(x, (tuple, list)):
             x, decoder = x
         values: Dict[Key, torch.Tensor] = {(ENTRY, "out"): x}
@@ -102,6 +102,8 @@ class SynapseModule(nn.Module):
             if "kl" in out:
                 aux = out["kl"] if aux is None else aux + out["kl"]
         self.aux_loss = aux
+        if trace is not None:
+            trace.update(values)
         results = {name: values[key] for name, key in self.graph.outputs.items()}
         return next(iter(results.values())) if len(results) == 1 else results
 

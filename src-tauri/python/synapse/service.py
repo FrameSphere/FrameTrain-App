@@ -48,6 +48,9 @@ def main() -> None:
             elif cmd == "infer":
                 from synapse.infer import infer
                 emit({"id": rid, "result": infer(req["model_dir"], req["kind"], req.get("value"))})
+            elif cmd == "step":
+                from synapse.step import one_step
+                emit({"id": rid, "result": one_step(req["graph"], float(req.get("lr", 0.01)))})
             elif cmd == "catalog":
                 emit({"id": rid, "result": catalog()})
             else:
