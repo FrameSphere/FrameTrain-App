@@ -50,6 +50,15 @@ class CanvasInferenceServer:
         from loader import load_canvas_model
         self.loaded = load_canvas_model(self.model_dir)
 
+    def input_kind(self) -> str:
+        """Was Hosting und Labor als Eingabe anbieten: Datei, Text oder Zahlen."""
+        if self.loaded.task_type in ("gan", "diffusion"):
+            return "text"
+        data = getattr(getattr(self.loaded.ir, "data", None), "type", "")
+        return {"image_loader": "image", "mask_loader": "image", "detection_loader": "image",
+                "audio_loader": "audio", "video_loader": "video", "text_loader": "text",
+                "seq2seq_loader": "text"}.get(data, "tensor")
+
     def infer(self, req: dict) -> dict:
         import torch
 
@@ -126,6 +135,8 @@ class CanvasInferenceServer:
             "num_classes": self.loaded.num_classes,
             "task_type": self.loaded.task_type,
             "device": self.loaded.device,
+            "input_kind": self.input_kind(),
+            "classes": self.loaded.preprocess.get("class_names") or [],
         })
 
         for raw_line in sys.stdin:

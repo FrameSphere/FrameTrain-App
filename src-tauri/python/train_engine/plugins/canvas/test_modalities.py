@@ -66,6 +66,10 @@ class EndToEnd(Base):
         _, m = fit(self, g, self.audio, f"{self.tmp}/m_audio")
         self.assertEqual(m.predict_file(f"{self.audio}/hoch/0.wav")["predicted_label"], "hoch")
         self.assertEqual(m.predict_file(f"{self.audio}/tief/0.wav")["predicted_label"], "tief")
+        from canvas_inference_server import CanvasInferenceServer
+        server = CanvasInferenceServer(f"{self.tmp}/m_audio")
+        server.load()
+        self.assertEqual(server.input_kind(), "audio")
 
     def test_audio_mel_spektrogramm_mit_conv2d(self):
         mel = n("mel", "mel_spectrogram", "data", nMels=32, nFft=256, hopLength=128)
@@ -86,6 +90,10 @@ class EndToEnd(Base):
         g = graph(nodes, [e("v", "c"), e("c", "p"), e("p", "d")], data, epochs=12)
         _, m = fit(self, g, self.video, f"{self.tmp}/m_video")
         self.assertEqual(m.predict_file(f"{self.video}/hell/0.mp4")["predicted_label"], "hell")
+        from canvas_inference_server import CanvasInferenceServer
+        server = CanvasInferenceServer(f"{self.tmp}/m_video")
+        server.load()
+        self.assertEqual(server.input_kind(), "video")
 
     def test_text_mit_eigenem_tokenizer_und_lstm(self):
         tok = n("t", "tokenizer", "data", maxLength=12, vocabSize=64)

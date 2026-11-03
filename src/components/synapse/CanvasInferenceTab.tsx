@@ -374,7 +374,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
           {result.images && result.images.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, marginBottom: 10 }}>
               {result.images.map((src, i) => (
-                <img key={i} src={src} alt="" style={{ maxWidth: 240, borderRadius: 6, imageRendering: "pixelated" }} />
+                <img key={i} src={src} alt="" style={{ width: 240, maxWidth: "100%", borderRadius: 6, imageRendering: "pixelated" }} />
               ))}
             </div>
           )}
