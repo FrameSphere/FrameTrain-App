@@ -34,6 +34,8 @@ export type ToolExecutorContext = {
   nodeDefinitions: any[];
   /** Fired after each visual sync so the canvas can animate (design layer only). */
   onGraphMutation?: (event: GraphMutationEvent) => void;
+  /** Pause nach jeder Aenderung fuer die Animation; 0 fuer Werkzeuge ohne Leinwand. Standard 320 ms. */
+  visualDelayMs?: number;
 };
 
 export type ToolExecutorHandle = {
@@ -84,10 +86,10 @@ export function parsePosition(raw: unknown): { x: number; y: number } | null {
 let _edgeCounter = 0;
 const VISUAL_MUTATION_DELAY_MS = 320;
 
-const waitForVisualMutation = () =>
-  new Promise((resolve) => setTimeout(resolve, VISUAL_MUTATION_DELAY_MS));
-
 export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle {
+  const delay = ctx.visualDelayMs ?? VISUAL_MUTATION_DELAY_MS;
+  const waitForVisualMutation = () =>
+    delay > 0 ? new Promise((resolve) => setTimeout(resolve, delay)) : Promise.resolve();
   // Mutable internal copies — updates are visible within the same batch
   let _nodes: any[] = [...ctx.nodes];
   let _edges: any[] = [...ctx.edges];

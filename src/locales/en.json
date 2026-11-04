@@ -4596,5 +4596,23 @@
     "failed": "Saving failed. Check your internet connection and try again.",
     "updatedTitle": "Our Terms have been updated",
     "updatedIntro": "We have revised the Terms and the Privacy Policy (October 2026). Changes only apply once you agree. Please read the new version and agree to keep using FrameTrain."
+  },
+  "mcp": {
+    "tools": {
+      "approval": {
+        "title": "{client} wants to perform an action in FrameTrain",
+        "sourceLocal": "Local connection on this computer",
+        "sourceRemote": "Remote access via frame-train.com",
+        "action": "Action",
+        "arguments": "Details",
+        "destructiveHint": "This cannot be undone.",
+        "queue": "{count} more requests are waiting.",
+        "queue_one": "1 more request is waiting.",
+        "allow": "Allow",
+        "deny": "Deny",
+        "always": "Always allow for {client}",
+        "revokeHint": "Permissions can be revoked in Settings under AI connections."
+      }
+    }
   }
 }

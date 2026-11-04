@@ -4578,5 +4578,23 @@
     "failed": "Speichern fehlgeschlagen. Prüfe deine Internetverbindung und versuche es erneut.",
     "updatedTitle": "Unsere AGB wurden aktualisiert",
     "updatedIntro": "Wir haben die AGB und die Datenschutzerklärung überarbeitet (Stand Oktober 2026). Änderungen gelten erst mit deiner Zustimmung. Bitte lies die neue Fassung und stimme zu, um FrameTrain weiter zu nutzen."
+  },
+  "mcp": {
+    "tools": {
+      "approval": {
+        "title": "{client} möchte eine Aktion in FrameTrain ausführen",
+        "sourceLocal": "Lokale Verbindung auf diesem Rechner",
+        "sourceRemote": "Fernzugriff über frame-train.com",
+        "action": "Aktion",
+        "arguments": "Angaben",
+        "destructiveHint": "Das lässt sich nicht rückgängig machen.",
+        "queue": "Danach warten noch {count} weitere Anfragen.",
+        "queue_one": "Danach wartet noch 1 weitere Anfrage.",
+        "allow": "Erlauben",
+        "deny": "Ablehnen",
+        "always": "Für {client} immer erlauben",
+        "revokeHint": "Freigaben lassen sich in den Einstellungen unter KI-Verbindungen widerrufen."
+      }
+    }
   }
 }

@@ -33,6 +33,7 @@ import { SynapseNodeComponent } from "./nodes/SynapseNodeComponent";
 import { dragState } from "./dragState";
 import { generateTrainingScript, extractCanvasModelClass } from "./codeGenerator";
 import { buildCanvasGraphIR, LOADER_NODE_TYPES } from "./graphIR";
+import { attachSynapseBuilder, type SynapseSnapshot } from "./synapseGraphStore";
 import { generateModelConfigFromGraph } from "./graphToModel";
 import {
   validateEdgeConnection,
@@ -930,6 +931,33 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     clearShapeIssues();
     try { localStorage.removeItem(autosaveKey); } catch { /* ignore */ }
   }, [setNodes, setEdges, clearShapeIssues, autosaveKey]);
+
+  // ── Zugriff fuer Werkzeuge (MCP): Graph lesen/schreiben, Training starten ──
+  const mcpStateRef = useRef<SynapseSnapshot>({ nodes, edges, modelId: activeCanvasModelId, modelName: activeModelName, dirty: hasUnsavedChanges });
+  mcpStateRef.current = { nodes, edges, modelId: activeCanvasModelId, modelName: activeModelName, dirty: hasUnsavedChanges };
+  const mcpTrainRef = useRef(handleStartTraining);
+  mcpTrainRef.current = handleStartTraining;
+  useEffect(() => attachSynapseBuilder({
+    userId,
+    get: () => mcpStateRef.current,
+    apply: (next, origin) => {
+      const graphChanged = next.nodes !== undefined || next.edges !== undefined;
+      if (graphChanged) {
+        setNodes(next.nodes ?? mcpStateRef.current.nodes);
+        setEdges(next.edges ?? mcpStateRef.current.edges);
+        setSelectedNodeId(null);
+      }
+      if (next.modelId !== undefined) setActiveCanvasModelId(next.modelId);
+      if (next.modelName !== undefined) setActiveModelName(next.modelName);
+      if (next.dirty !== undefined) {
+        // Der Dirty-Effekt laeuft nach setNodes; ihn bei "gespeichert" ueberspringen.
+        if (!next.dirty && graphChanged) skipDirtyRef.current = true;
+        setHasUnsavedChanges(next.dirty);
+      }
+      if (origin) setLogLines((p) => [...p, `[MCP] ${origin}`]);
+    },
+    startTraining: (config) => mcpTrainRef.current(config),
+  }), [userId, setNodes, setEdges]);
 
   const requestClear = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) return;

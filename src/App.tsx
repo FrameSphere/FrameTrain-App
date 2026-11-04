@@ -16,6 +16,8 @@ import { TrainingContextProvider } from './contexts/TrainingContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import TermsGate from './components/TermsGate';
 import { applyAccountDiagnosticsConsent } from './utils/diagnosticsConsent';
+import ApprovalDialog from './mcp/ApprovalDialog';
+import { setMcpUser, startMcpBridge } from './mcp/bridge';
 import './App.css';
 
 interface ApiKeyValidation {
@@ -136,6 +138,11 @@ function App() {
   const [needsTerms, setNeedsTerms] = useState<null | 'missing' | 'updated'>(null);
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
   const [showFirstLaunch, setShowFirstLaunch] = useState(false);
+
+  // KI-Clients (MCP): Werkzeug-Manifest melden und Aufrufe annehmen.
+  // Ohne die Rust-Seite laeuft die App unveraendert weiter (Aufrufe abgesichert).
+  useEffect(() => { void startMcpBridge(); }, []);
+  useEffect(() => { setMcpUser(isAuthenticated ? userData?.userId ?? null : null); }, [isAuthenticated, userData?.userId]);
 
   // Close-Dialog State
   const [showCloseDialog, setShowCloseDialog] = useState(false);
@@ -389,6 +396,9 @@ function App() {
                 <Login onLogin={handleLogin} />
               )}
             </div>
+
+              {/* Freigabe fuer Werkzeug-Aufrufe von KI-Clients (MCP) */}
+              <ApprovalDialog />
 
               {/* App-Close-Dialog — über allem */}
               {showCloseDialog && (
