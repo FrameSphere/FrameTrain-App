@@ -97,6 +97,22 @@ describe('HomePanel', () => {
     expect(screen.getByText(/CUDA out of memory/)).toBeTruthy();
   });
 
+  it('gruppiert nach naechstem Schritt und klappt Modelle ohne Lauf zu', async () => {
+    mockBackend({
+      list_models: [MODEL, { id: 'm2', name: 'bert-base' }, { id: 'm3', name: 'leer' }],
+      list_all_datasets: [{ id: 'd2', name: 'saetze', model_id: 'm2' }, { id: 'd3', name: 'bilder', model_id: 'm3' }],
+      get_training_history: [training()],
+      get_test_history: [{ id: 't1', model_id: 'm2', model_name: 'bert-base', status: 'completed', created_at: '2026-09-03T02:00:00Z', completed_at: '2026-09-03T02:10:00Z', dataset_name: 'saetze', results: { accuracy: 0.9 } }],
+    });
+    render(<HomePanel userId="u1" />);
+
+    const heads = await screen.findAllByRole('heading', { level: 2 });
+    expect(heads.map(h => h.firstChild?.textContent)).toEqual([de.home.pipeline.group.ready, de.home.pipeline.group.test]);
+    expect(screen.queryByText('leer')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(de.home.pipeline.group.unused) }));
+    expect(screen.getByText('leer')).toBeTruthy();
+  });
+
   it('springt mit dem Modell in den naechsten Schritt', async () => {
     mockBackend({ list_models: [MODEL], get_training_history: [training()] });
     render(<HomePanel userId="u1" />);
@@ -183,6 +199,6 @@ describe('HomePanel', () => {
 
     fireEvent.click(await screen.findByText(de.home.pipeline.compare.title));
     expect(screen.getByText('92,3%')).toBeTruthy();
-    expect(screen.getByText('holdout')).toBeTruthy();
+    expect(screen.getAllByText('holdout')[0]).toBeTruthy();
   });
 });

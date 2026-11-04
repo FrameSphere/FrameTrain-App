@@ -5,7 +5,7 @@
 // Die Aktion steht immer in der Spalte ihres Schritts: ein gescheiterter Test
 // wird in der Test-Spalte wiederholt, nicht unter "Hosting".
 
-import { OVERFIT_RATIO, WEAK_ACCURACY, byNewest, endedAt } from './homeInsights';
+import { OVERFIT_RATIO, REGRESSION_RATIO, WEAK_ACCURACY, byNewest, endedAt } from './homeInsights';
 
 export interface PipelineModel { id: string; name: string }
 export interface PipelineDataset { id: string; name: string; model_id?: string }
@@ -22,6 +22,7 @@ export interface PipelineTraining {
   completed_at?: string | null;
   error?: string | null;
   progress?: { train_loss?: number | null; val_loss?: number | null };
+  config?: { epochs?: number | null; learning_rate?: number | null; batch_size?: number | null } | null;
 }
 
 export interface PipelineTest {
@@ -49,7 +50,7 @@ export interface PipelineHost { model_id: string; status: string }
 export type StepState = 'none' | 'done' | 'failed' | 'stopped' | 'running';
 export type GroupId = 'attention' | 'next' | 'hosted';
 export type NextKind = 'addDataset' | 'train' | 'retryTrain' | 'startTest' | 'retryTest' | 'host';
-export type NoteKind = 'trainingFailed' | 'trainingStopped' | 'testFailed' | 'testStopped' | 'overfitting' | 'weakResult';
+export type NoteKind = 'trainingFailed' | 'trainingStopped' | 'testFailed' | 'testStopped' | 'regression' | 'overfitting' | 'weakResult';
 
 export interface RunPoint {
   id: string;
@@ -57,6 +58,8 @@ export interface RunPoint {
   loss: number;
   durationSec: number | null;
   dataset: string;
+  /** Epochen, Lernrate und Batch-Groesse; ohne Angabe ist der Lauf nicht vergleichbar */
+  setup: string | null;
 }
 
 export interface TestMetric {
@@ -134,6 +137,26 @@ export function testMetric(test: PipelineTest | undefined): TestMetric | null {
   return null;
 }
 
+function setupOf(job: PipelineTraining): string | null {
+  const c = job.config;
+  return c?.epochs != null && c.learning_rate != null && c.batch_size != null
+    ? `${c.epochs}|${c.learning_rate}|${c.batch_size}`
+    : null;
+}
+
+/**
+ * Bester frueherer Lauf, wenn der letzte deutlich schlechter ist. Loss-Werte sind
+ * nur bei gleichen Daten und gleichen Einstellungen vergleichbar.
+ */
+function regressionFrom(runs: RunPoint[]): number | null {
+  const latest = runs[runs.length - 1];
+  if (!latest?.dataset || !latest.setup) return null;
+  const peers = runs.slice(0, -1).filter(r => r.dataset === latest.dataset && r.setup === latest.setup);
+  if (peers.length === 0) return null;
+  const best = Math.min(...peers.map(r => r.loss));
+  return latest.loss >= best * REGRESSION_RATIO ? best : null;
+}
+
 const belongsTo = (job: { model_id?: string; model_name: string }, m: PipelineModel) =>
   job.model_id ? job.model_id === m.id : job.model_name === m.name;
 
@@ -160,6 +183,7 @@ function buildRow(m: PipelineModel, input: PipelineInput): ModelRow {
       loss: j.progress!.train_loss as number,
       durationSec: durationOf(j),
       dataset: j.dataset_name ?? '',
+      setup: setupOf(j),
     }))
     .reverse();
 
@@ -190,12 +214,16 @@ function buildRow(m: PipelineModel, input: PipelineInput): ModelRow {
   else if (testOpen) next = 'startTest';
   else if (testState === 'done' && hosting.state === 'none') next = 'host';
 
+  const regressedFrom = trainState === 'done' ? regressionFrom(runs) : null;
+
   let note: ModelRow['note'] = null;
   if (trainState === 'failed') note = { kind: 'trainingFailed', params: { error: lastTrain?.error ?? '' } };
   else if (trainState === 'stopped') note = { kind: 'trainingStopped', params: {} };
   else if (!retrainedSinceTest && testState === 'failed') note = { kind: 'testFailed', params: { error: lastTest?.error ?? '' } };
   else if (!retrainedSinceTest && testState === 'stopped') note = { kind: 'testStopped', params: {} };
-  else if (trainingLoss !== null && valLoss !== null && valLoss > trainingLoss * OVERFIT_RATIO) {
+  else if (regressedFrom !== null) {
+    note = { kind: 'regression', params: { best: regressedFrom.toFixed(4), last: runs[runs.length - 1].loss.toFixed(4) } };
+  } else if (trainingLoss !== null && valLoss !== null && valLoss > trainingLoss * OVERFIT_RATIO) {
     note = { kind: 'overfitting', params: { val: valLoss.toFixed(4), train: trainingLoss.toFixed(4) } };
   } else if (metric?.fraction != null && metric.fraction < WEAK_ACCURACY) {
     note = { kind: 'weakResult', params: { value: (metric.fraction * 100).toFixed(1) } };
@@ -236,7 +264,7 @@ function buildRow(m: PipelineModel, input: PipelineInput): ModelRow {
 }
 
 const NOTE_RANK: Record<NoteKind, number> = {
-  trainingFailed: 0, testFailed: 1, overfitting: 2, trainingStopped: 3, testStopped: 4, weakResult: 5,
+  trainingFailed: 0, testFailed: 1, regression: 2, overfitting: 3, trainingStopped: 4, testStopped: 5, weakResult: 6,
 };
 
 /** Probleme zuerst, sonst das zuletzt Bearbeitete; nie benutzte Modelle am Ende. */
@@ -251,6 +279,30 @@ export function buildPipeline(input: PipelineInput): ModelRow[] {
     }
     return (b.last?.at ?? 0) - (a.last?.at ?? 0) || a.name.localeCompare(b.name);
   });
+}
+
+export type SectionKey = 'attention' | 'ready' | 'test' | 'next' | 'hosted';
+
+/**
+ * Gruppen der Startseite in Bildschirm-Reihenfolge, benannt nach dem naechsten
+ * Schritt. Modelle ohne jeden Lauf stehen getrennt (zugeklappt), ausser es gibt
+ * nur solche. Seite und Coach-Kontext lesen beide hier, damit Zahlen und Namen
+ * uebereinstimmen.
+ */
+export function pipelineSections(rows: ModelRow[]): { sections: { key: SectionKey; rows: ModelRow[] }[]; unused: ModelRow[] } {
+  const allUnused = rows.filter(r => r.group === 'next' && !r.last);
+  const unused = allUnused.length === rows.length ? [] : allUnused;
+  const others = rows.filter(r => r.group !== 'attention' && !unused.includes(r));
+  return {
+    sections: [
+      { key: 'attention', rows: rows.filter(r => r.group === 'attention') },
+      { key: 'ready', rows: others.filter(r => r.group === 'next' && r.next === 'host') },
+      { key: 'test', rows: others.filter(r => r.group === 'next' && r.next === 'startTest') },
+      { key: 'next', rows: others.filter(r => r.group === 'next' && r.next !== 'host' && r.next !== 'startTest') },
+      { key: 'hosted', rows: others.filter(r => r.group === 'hosted') },
+    ],
+    unused,
+  };
 }
 
 // ── Benchmarks ───────────────────────────────────────────────────────────

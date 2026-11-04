@@ -80,6 +80,8 @@ export function byNewest<T extends { completed_at?: string | null; created_at: s
 
 /** Ab diesem Verhaeltnis val_loss/train_loss sprechen wir von Overfitting-Verdacht. */
 export const OVERFIT_RATIO = 1.5;
+/** Ab diesem Faktor gilt der letzte Lauf als Rueckschritt gegenueber dem besten vergleichbaren */
+export const REGRESSION_RATIO = 1.25;
 /** Unterhalb dieser Accuracy weisen wir auf ein schwaches Ergebnis hin. */
 export const WEAK_ACCURACY = 0.6;
 /** Mehr Hinweise auf einmal ueberfordern eher, als dass sie helfen. */

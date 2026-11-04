@@ -28,8 +28,7 @@
       "pipeline": "Pipeline",
       "briefing": "Briefing",
       "new": "New",
-      "original": "Original",
-      "openDetails": "Open",
+      "original": "Pretrained",
       "showAll": "Show all",
       "more": "{n} more models",
       "more_one": "1 more model",
@@ -54,14 +53,19 @@
         "last": "Last activity"
       },
       "group": {
+        "attention": "Needs attention",
+        "ready": "Ready to host",
+        "test": "Ready to test",
         "next": "Next step",
-        "hosted": "Hosted"
+        "hosted": "Hosted",
+        "unused": "Without a run"
       },
       "state": {
         "failed": "Failed",
         "stopped": "Stopped",
         "running": "Running",
-        "done": "Done"
+        "done": "Done",
+        "notTested": "Not tested"
       },
       "hosting": {
         "ready": "Ready",
@@ -81,6 +85,7 @@
         "trainingStopped": "Stopped, no new attempt since.",
         "testFailed": "The last test did not finish.",
         "testStopped": "The last test was stopped.",
+        "regression": "Best comparable run: {best}, latest run: {last}. Same data, same settings.",
         "overfitting": "Validation loss {val} is well above train loss {train}. Possible overfitting.",
         "weakResult": "Only {value}% in the last test."
       },
@@ -91,7 +96,9 @@
         "noRuns": "No finished training yet.",
         "runs": "Runs",
         "tests": "Tests",
-        "noTests": "No test yet."
+        "noTests": "No test yet.",
+        "finished": "Finished",
+        "loss": "Loss"
       },
       "run": {
         "epoch": "Epoch",
@@ -109,9 +116,7 @@
         "mixedDatasets": "Different test datasets, not directly comparable",
         "sameData": "Tested on the data it was trained on, so this result may be too high.",
         "empty": "No test result yet. Run a test and the model appears here.",
-        "noResult": "Without a test result",
-        "more": "{n} more models without a test result",
-        "more_one": "1 more model without a test result"
+        "noResult": "Without a test result"
       },
       "first": {
         "intro": "Each model gets one line here. It shows how far the model has come and what to do next.",
@@ -143,8 +148,33 @@
         "time_series": "Time series",
         "other": "Other models"
       },
-      "moreUnused": "{n} models without a run",
-      "moreUnused_one": "1 model without a run"
+      "open": {
+        "training": "Open training",
+        "tests": "Open test",
+        "analysis": "Open in Analysis"
+      },
+      "bench": {
+        "chartTitle": "Result per test dataset",
+        "chartNote": "Each group is one test dataset, each colour one model. The axis starts at 0, and only results on the same test dataset stand side by side.",
+        "scatterTitle": "Accuracy vs speed on {dataset}",
+        "scatterNote": "Top left is best: accurate and fast. Helps choose what to host.",
+        "faster": "faster",
+        "noComparisonHint": "The dashed slot is for a second model. Test another model on {dataset}, then the results stand side by side. Best with data the models were not trained on.",
+        "fewSamples": "Only {n} samples, so this result says little. Aim for 50 or more.",
+        "speedChange": "Speed changed from {before} to {after} per sample since the previous test.",
+        "testDataset": "Test dataset",
+        "ranked": "ranked",
+        "model": "Model · version",
+        "result": "Result",
+        "samples": "Samples",
+        "speed": "Speed",
+        "perSample": "per sample",
+        "notOnDataset": "{model} has no result on this test dataset yet",
+        "freeSlot": "Room for a second model: test another model on this dataset",
+        "stepBetter": "{model}: {newer} is {points} points better than {older} on this dataset.",
+        "stepWorse": "{model}: {newer} is {points} points worse than {older} on this dataset.",
+        "stepSame": "{model}: {newer} scores the same as {older} on this dataset."
+      }
     },
     "newTraining": "New training",
     "running": {

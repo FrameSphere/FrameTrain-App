@@ -52,3 +52,22 @@ export function takeModelFocus(view: AppView): ModelFocus | null {
   setTimeout(() => { requestedFocus = null; }, 0);
   return focus;
 }
+
+// Modelle, die der Coach per Name ansteuern darf ("[[go:tests:t5-small]]"). Die
+// Startseite meldet sie mit denselben Fokus-Daten wie ihre eigenen Knoepfe.
+let modelTargets = new Map<string, ModelFocus>();
+
+export function setModelTargets(targets: Map<string, ModelFocus>) {
+  modelTargets = targets;
+}
+
+export function hasModelTarget(name: string): boolean {
+  return modelTargets.has(name.trim().toLowerCase());
+}
+
+/** Springt mit Modell, wenn der Name bekannt ist, sonst nur zur Seite. */
+export function navigateToModelByName(view: AppView, name: string) {
+  const focus = modelTargets.get(name.trim().toLowerCase());
+  if (focus) navigateToModel(view, focus);
+  else navigateTo(view);
+}

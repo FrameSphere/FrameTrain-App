@@ -109,21 +109,33 @@ const PAGE_KNOWLEDGE: Partial<Record<PageId, Bilingual>> = {
   // stellt. Der Coach kannte die Kacheln nicht, auf die der User zeigte.
   home: {
     de: `### Seiten-Wissen: Start
-Zweck: Lage-Überblick und Einstieg. Zeigt keine Einstellungen, sondern den Stand des Projekts.
-- **Kennzahlen oben**: Anzahl Modelle, Versionen, Datasets, Trainings.
-- **Laufende Trainings**: mit Fortschritt; Klick führt zum Live-Dashboard.
-- **Letztes Training / letzter Test / bestes Testergebnis**: der jüngste Stand mit Modell- und Versionsnamen.
-- **Loss-Trend**: Entwicklung über die letzten Läufe (negativ = Verbesserung).
-- **Hinweise**: automatisch erkannte offene Punkte (z.B. ungesplittetes Dataset, Training ohne Analyse).
-Typische Fragen: "Was soll ich als Nächstes tun?" → aus Live-Zustand ableiten und per Navigations-Tool dorthin lotsen. "Wie steht mein Projekt?" → Kennzahlen und Trend deuten, nicht nur vorlesen.`,
+Zweck: Wo steht jedes Modell, und was ist sein nächster Schritt? Keine Einstellungen.
+- **Überschrift** oben links fasst die Lage zusammen (z. B. "4 Modelle brauchen dich"). Rechts: Umschalter **Pipeline / Vergleich**, Aktualisieren, **Briefing** (Zusammenfassung zum Aufklappen), **New training** (einziger gefüllter Knopf).
+- **Pipeline**: eine Zeile je Modell mit den Spalten **Daten, Training, Test, Hosting, Zuletzt**. Der Stand steht als Wert in der Spalte (Loss beim Training, Genauigkeit beim Test). Leere Spalte = Schritt noch nicht gemacht. "Vortrainiert" = nicht selbst trainiert. Hosting "Nicht geladen" = gehostet, aber gerade nicht im Speicher.
+- **Knopf in der Zeile** ("Test starten", "Erneut", "Hosten", "Dataset hinzufügen") steht immer in der Spalte des nächsten Schritts und springt mit vorgewähltem Modell auf die passende Seite. Er startet nichts sofort.
+- **Gruppen** von oben nach unten: **Braucht dich** (Fehler, Abbruch, Overfitting, Rückschritt), **Bereit zum Hosten**, **Bereit zum Testen** (trainiert oder vortrainiert, noch ohne Testergebnis), **Nächster Schritt**, **Gehostet**; unten zugeklappt **Ohne Lauf**. Die Zahl neben dem Titel ist die Anzahl.
+- **Hinweis unter dem Namen**: der Grund für "Braucht dich", mit grauem Link zur Detailseite. Rückschritt = letzter Lauf deutlich schlechter als der beste mit gleichen Daten und gleichen Einstellungen. Overfitting = Validation-Loss deutlich über Train-Loss.
+- **Zeile aufklappen** (Klick auf den Namen): Final-Loss je Lauf als Kurve, Liste der Läufe mit Dauer, letzte Tests, Link "In Analyse öffnen".
+- **Vergleich**: Testergebnisse je Aufgabe. "Bestes" und der orange Balken nur bei mindestens zwei Ergebnissen auf demselben Test-Dataset. Warnung, wenn auf den Trainingsdaten getestet wurde.
+So antwortest du hier:
+- Nutze die Wörter, Zahlen und Gruppen aus dem Live-Zustand genau so, wie sie auf dem Bildschirm stehen. Nenne nie interne Kennungen (startTest, failed, train_loss, nextStep).
+- Nenne Modelle mit vollem Namen, wie in der Liste. Sag, wo etwas steht: "Knopf **Erneut** in der Spalte Training bei YOLO11".
+- Zähle wie die Seite: die Zahl hinter einer Gruppe. Modelle unter "Ohne Lauf" sind zugeklappt.
+- Für den nächsten Schritt eines Modells: \`[[go:SEITE:Modellname]]\` (springt mit vorgewähltem Modell).`,
     en: `### Page knowledge: Home
-Purpose: overview and entry point. Shows no settings, but the state of the project.
-- **Key figures at the top**: number of models, versions, datasets, trainings.
-- **Running trainings**: with progress; clicking leads to the live dashboard.
-- **Last training / last test / best test result**: the most recent state with model and version names.
-- **Loss trend**: development across recent runs (negative = improvement).
-- **Hints**: automatically detected open items (e.g. unsplit dataset, training without analysis).
-Typical questions: "what should I do next?" → derive it from the live state and route there with the navigation tool. "how is my project doing?" → interpret figures and trend, don't just read them out.`,
+Purpose: where does each model stand, and what is its next step? No settings here.
+- **Heading** top left sums up the situation (e.g. "4 models need you"). On the right: **Pipeline / Compare** switch, refresh, **Briefing** (expandable summary), **New training** (the only filled button).
+- **Pipeline**: one row per model with the columns **Data, Training, Test, Hosting, Last activity**. The state is the value in the column (loss for training, accuracy for test). Empty column = step not done yet. "Pretrained" = not trained by the user. Hosting "Not loaded" = hosted but not in memory right now.
+- **Button in the row** ("Start test", "Retry", "Host model", "Add dataset") always sits in the column of the next step and jumps to the matching page with the model preselected. It does not start anything right away.
+- **Groups** from top to bottom: **Needs attention** (failure, stop, overfitting, regression), **Ready to host**, **Ready to test** (trained or pretrained, no test result yet), **Next step**, **Hosted**; collapsed at the bottom **Without a run**. The number next to the title is the count.
+- **Hint below the name**: the reason for "Needs attention", with a grey link to the detail page. Regression = latest run clearly worse than the best one with the same data and settings. Overfitting = validation loss well above train loss.
+- **Expand a row** (click the name): final loss per run as a chart, list of runs with duration, latest tests, link "Open in Analysis".
+- **Compare**: test results per task. "Best" and the orange bar only with at least two results on the same test dataset. Warning when tested on the training data.
+How to answer here:
+- Use the words, numbers and groups from the live state exactly as they appear on screen. Never name internal identifiers (startTest, failed, train_loss, nextStep).
+- Name models by their full name as in the list. Say where things are: "the **Retry** button in YOLO11's Training column".
+- Count like the page: the number after a group. Models under "Without a run" are collapsed.
+- For a model's next step: \`[[go:PAGE:model name]]\` (jumps with the model preselected).`,
   },
   models: {
     de: `### Seiten-Wissen: Models
@@ -524,8 +536,8 @@ function toolsProtocol(language: Language, automation: boolean, pageId: PageId |
   const line = (key: string, de: string, enText: string) => (on.has(key) ? [en ? enText : de] : []);
 
   const items: string[] = [
-    ...line('go', `- **Navigieren**: \`[[go:SEITE]]\` — SEITE ∈ ${nav}.`,
-                  `- **Navigate**: \`[[go:PAGE]]\` — PAGE ∈ ${nav}.`),
+    ...line('go', `- **Navigieren**: \`[[go:SEITE]]\` — SEITE ∈ ${nav}. Mit Modell: \`[[go:SEITE:Modellname]]\` wählt es dort vor (voller Name wie in der Liste).`,
+                  `- **Navigate**: \`[[go:PAGE]]\` — PAGE ∈ ${nav}. With a model: \`[[go:PAGE:model name]]\` preselects it there (full name as in the list).`),
     ...line('ask', '- **Rückfrage**: `[[ask:kurze Frage]]` — Ein-Klick-Anschlussfrage.',
                    '- **Follow-up question**: `[[ask:short question]]` — one-click follow-up.'),
     ...line('link', `- **Hilfe-Link**: \`[[link:KEY]]\` — KEY ∈ ${links}. Öffnet die offizielle Seite.`,
@@ -570,7 +582,7 @@ Setze ein Token nur, wenn es wirklich hilft. Maximal 3 Tokens insgesamt.`;
 }
 
 export type CoachAction =
-  | { type: 'navigate'; view: AppView }
+  | { type: 'navigate'; view: AppView; model?: string }
   | { type: 'ask'; text: string }
   | { type: 'link'; key: string; url: string }
   | { type: 'set'; patch: CoachConfigPatch; summary: string }
@@ -621,11 +633,14 @@ export function parseCoachActions(text: string): { cleanedText: string; actions:
         const op = arg.toLowerCase() === 'stop' ? 'stop' : 'start';
         once(`train:${op}`, () => ({ type: 'train', op }));
       } else if (k === 'go') {
-        const view = arg.toLowerCase() as AppView;
-        const key = `go:${view}`;
+        // "tests" oder "tests:t5-small"; der Modellname darf selbst Doppelpunkte enthalten.
+        const sep = arg.indexOf(':');
+        const view = (sep < 0 ? arg : arg.slice(0, sep)).trim().toLowerCase() as AppView;
+        const model = sep < 0 ? '' : arg.slice(sep + 1).trim().slice(0, 120);
+        const key = `go:${view}:${model.toLowerCase()}`;
         if ((NAV_KEYS as string[]).includes(view) && !seen.has(key)) {
           seen.add(key);
-          actions.push({ type: 'navigate', view });
+          actions.push(model ? { type: 'navigate', view, model } : { type: 'navigate', view });
         }
       } else if (k === 'link') {
         const lk = arg.toLowerCase();

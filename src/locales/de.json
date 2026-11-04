@@ -28,8 +28,7 @@
       "pipeline": "Pipeline",
       "briefing": "Briefing",
       "new": "Neu",
-      "original": "Original",
-      "openDetails": "Öffnen",
+      "original": "Vortrainiert",
       "showAll": "Alle zeigen",
       "more": "{n} weitere Modelle",
       "more_one": "1 weiteres Modell",
@@ -54,14 +53,19 @@
         "last": "Zuletzt"
       },
       "group": {
+        "attention": "Braucht dich",
+        "ready": "Bereit zum Hosten",
+        "test": "Bereit zum Testen",
         "next": "Nächster Schritt",
-        "hosted": "Gehostet"
+        "hosted": "Gehostet",
+        "unused": "Ohne Lauf"
       },
       "state": {
         "failed": "Fehler",
         "stopped": "Gestoppt",
         "running": "Läuft",
-        "done": "Fertig"
+        "done": "Fertig",
+        "notTested": "Nicht getestet"
       },
       "hosting": {
         "ready": "Bereit",
@@ -81,6 +85,7 @@
         "trainingStopped": "Gestoppt, seitdem kein neuer Versuch.",
         "testFailed": "Der letzte Test ist nicht durchgelaufen.",
         "testStopped": "Der letzte Test wurde gestoppt.",
+        "regression": "Bester vergleichbarer Lauf: {best}, letzter Lauf: {last}. Gleiche Daten, gleiche Einstellungen.",
         "overfitting": "Validation-Loss {val} liegt deutlich über Train-Loss {train}. Verdacht auf Overfitting.",
         "weakResult": "Nur {value} % im letzten Test."
       },
@@ -91,7 +96,9 @@
         "noRuns": "Noch kein abgeschlossenes Training.",
         "runs": "Läufe",
         "tests": "Tests",
-        "noTests": "Noch kein Test."
+        "noTests": "Noch kein Test.",
+        "finished": "Beendet",
+        "loss": "Loss"
       },
       "run": {
         "epoch": "Epoche",
@@ -109,9 +116,7 @@
         "mixedDatasets": "Verschiedene Test-Datasets, nicht direkt vergleichbar",
         "sameData": "Auf den Trainingsdaten getestet, das Ergebnis kann zu hoch sein.",
         "empty": "Noch kein Testergebnis. Starte einen Test, dann erscheint das Modell hier.",
-        "noResult": "Ohne Testergebnis",
-        "more": "{n} weitere Modelle ohne Testergebnis",
-        "more_one": "1 weiteres Modell ohne Testergebnis"
+        "noResult": "Ohne Testergebnis"
       },
       "first": {
         "intro": "Jedes Modell bekommt hier eine Zeile. Sie zeigt, wie weit es ist und was als Nächstes ansteht.",
@@ -143,8 +148,33 @@
         "time_series": "Zeitreihen",
         "other": "Weitere Modelle"
       },
-      "moreUnused": "{n} Modelle ohne Lauf",
-      "moreUnused_one": "1 Modell ohne Lauf"
+      "open": {
+        "training": "Training öffnen",
+        "tests": "Test öffnen",
+        "analysis": "In Analyse öffnen"
+      },
+      "bench": {
+        "chartTitle": "Ergebnis je Test-Dataset",
+        "chartNote": "Jede Gruppe ist ein Test-Dataset, jede Farbe ein Modell. Die Achse beginnt bei 0, und nebeneinander steht nur, was auf demselben Test-Dataset gemessen wurde.",
+        "scatterTitle": "Genauigkeit gegen Geschwindigkeit auf {dataset}",
+        "scatterNote": "Oben links ist am besten: genau und schnell. Hilft bei der Wahl, was du hostest.",
+        "faster": "schneller",
+        "noComparisonHint": "Der gestrichelte Platz ist für ein zweites Modell. Teste ein weiteres Modell auf {dataset}, dann stehen die Ergebnisse nebeneinander. Am besten mit Daten, auf denen die Modelle nicht trainiert wurden.",
+        "fewSamples": "Nur {n} Testbeispiele, das Ergebnis sagt wenig aus. Besser 50 oder mehr.",
+        "speedChange": "Geschwindigkeit seit dem vorherigen Test von {before} auf {after} pro Beispiel.",
+        "testDataset": "Test-Dataset",
+        "ranked": "gerankt",
+        "model": "Modell · Version",
+        "result": "Ergebnis",
+        "samples": "Beispiele",
+        "speed": "Tempo",
+        "perSample": "pro Beispiel",
+        "notOnDataset": "{model} hat auf diesem Test-Dataset noch kein Ergebnis",
+        "freeSlot": "Platz für ein zweites Modell: teste ein weiteres Modell auf diesem Dataset",
+        "stepBetter": "{model}: {newer} ist auf diesem Dataset {points} Punkte besser als {older}.",
+        "stepWorse": "{model}: {newer} ist auf diesem Dataset {points} Punkte schlechter als {older}.",
+        "stepSame": "{model}: {newer} liegt auf diesem Dataset gleichauf mit {older}."
+      }
     },
     "newTraining": "Neues Training",
     "running": {

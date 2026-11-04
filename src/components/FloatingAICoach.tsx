@@ -21,7 +21,7 @@ import {
   commandLabel, hasPageKnowledge, dropUnavailableSetFields, type CoachAction, type PageId,
 } from '../ai/coachContext';
 import { matchSkills, skillLabel, skillHint, skillPrompt, type CoachSkill } from '../ai/coachSkills';
-import { navigateTo } from '../ui/navigationEvents';
+import { navigateTo, navigateToModelByName } from '../ui/navigationEvents';
 import { applyCoachConfig, runCoachCommand, getUnavailableConfigFields, recommendedParamsApplicable } from '../ai/coachToolEvents';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import type { Language } from '../contexts/LanguageContext';
@@ -441,17 +441,18 @@ function CoachActionChips({
         }
         // ── Navigation (primär, Theme-Gradient) ──
         if (a.type === 'navigate') {
-          const label = t('aiCoach.openPage').replace('{page}', navTargetLabel(a.view, language));
+          const page = t('aiCoach.openPage').replace('{page}', navTargetLabel(a.view, language));
+          const label = a.model ? `${page}: ${a.model}` : page;
           return (
             <button
-              key={`nav-${a.view}-${i}`}
-              onClick={() => { navigateTo(a.view); onNavigate(); }}
+              key={`nav-${a.view}-${a.model ?? ''}-${i}`}
+              onClick={() => { if (a.model) navigateToModelByName(a.view, a.model); else navigateTo(a.view); onNavigate(); }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-white text-[11px] font-medium shadow-lg shadow-black/20 transition-all hover:scale-[1.03]"
               style={{ background: gradient, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.16)' }}
               title={label}
             >
-              <ArrowRight className="w-3 h-3 opacity-90" />
-              {label}
+              <ArrowRight className="w-3 h-3 opacity-90 flex-none" />
+              <span className="truncate max-w-[240px]">{label}</span>
             </button>
           );
         }

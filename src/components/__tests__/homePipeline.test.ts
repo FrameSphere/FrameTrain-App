@@ -17,6 +17,30 @@ const input = (over: Partial<PipelineInput> = {}): PipelineInput => ({
 const one = (over: Partial<PipelineInput>) => buildPipeline(input(over))[0];
 
 describe('buildPipeline', () => {
+  describe('Rueckschritt', () => {
+    const setup = { epochs: 3, learning_rate: 0.001, batch_size: 8 };
+    const run = (id: string, minAgo: number, loss: number, over: Partial<PipelineTraining> = {}) => train({
+      id, created_at: iso(minAgo), started_at: iso(minAgo), completed_at: iso(minAgo - 1), progress: { train_loss: loss }, config: setup, ...over,
+    });
+
+    it('meldet einen deutlich schlechteren Lauf bei gleichen Daten und Einstellungen', () => {
+      const row = one({ trainings: [run('a', 200, 0.4), run('b', 100, 0.6)] });
+      expect(row.note).toEqual({ kind: 'regression', params: { best: '0.4000', last: '0.6000' } });
+      expect(row.group).toBe('attention');
+    });
+
+    it('vergleicht nicht ueber andere Daten oder Einstellungen hinweg', () => {
+      expect(one({ trainings: [run('a', 200, 0.4, { dataset_name: 'andere' }), run('b', 100, 2.9)] }).note).toBeNull();
+      expect(one({ trainings: [run('a', 200, 0.4, { config: { ...setup, epochs: 5 } }), run('b', 100, 2.9)] }).note).toBeNull();
+      expect(one({ trainings: [run('a', 200, 0.4, { config: undefined }), run('b', 100, 2.9, { config: undefined })] }).note).toBeNull();
+    });
+
+    it('bleibt bei kleinen Schwankungen und nach einer Verbesserung still', () => {
+      expect(one({ trainings: [run('a', 200, 0.4), run('b', 100, 0.45)] }).note).toBeNull();
+      expect(one({ trainings: [run('a', 300, 0.4), run('b', 200, 0.9), run('c', 100, 0.41)] }).note).toBeNull();
+    });
+  });
+
   it('schlaegt ohne Daten zuerst ein Dataset vor', () => {
     const row = one({});
     expect(row.next).toBe('addDataset');

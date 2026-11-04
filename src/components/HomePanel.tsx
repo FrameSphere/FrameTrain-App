@@ -13,14 +13,17 @@ import { Layers, Loader2, Play, PlayCircle, RefreshCw } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { usePageContext } from '../contexts/PageContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
-import { navigateTo } from '../ui/navigationEvents';
+import { navigateTo, setModelTargets } from '../ui/navigationEvents';
 import { dateLocale } from '../utils/dateLocale';
 import { VIDEOS, youtubeWatchUrl } from '../utils/videos';
 import { detectPluginForModel, timeSeriesFamily } from '../plugins/registry';
 import HomeBriefing from './HomeBriefing';
-import { CompareView, FirstRunSteps, PipelineHead, PipelineList } from './HomeStellwerk';
-import { buildInsights, buildBriefingFacts, factsHash, topResults, type InsightInput } from './homeInsights';
+import { FirstRunSteps, PipelineHead, PipelineList } from './HomeStellwerk';
+import { BenchmarkView } from './BenchmarkView';
+import { buildBenchmarks } from './homeBenchmarks';
+import { buildInsights, buildBriefingFacts, factsHash, type InsightInput } from './homeInsights';
 import { buildCompare, buildPipeline, homeHeadline } from './homePipeline';
+import { buildHomeCoachContext } from './homeCoachContext';
 import type { HostInfo } from './hosting/hostingModel';
 
 // ============ Types (Spiegel der Rust-Structs) ============
@@ -163,8 +166,11 @@ export default function HomePanel({ userId }: HomePanelProps) {
     };
   }, [userId]);
 
+  // Nur das erste Laden zeigt den Spinner. Beim Aktualisieren bleibt die Liste stehen,
+  // damit Zeilen, die die Gruppe wechseln, sichtbar an ihren neuen Platz gleiten.
+  const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     const [th, sh, at, ml, ds, hs, sp] = await Promise.allSettled([
       invoke<TrainingJob[]>('get_training_history'),
       invoke<TestJob[]>('get_test_history'),
@@ -184,6 +190,7 @@ export default function HomePanel({ userId }: HomePanelProps) {
     // Im Zweifel KEINE Warnung: ein nicht lesbarer Status ist kein Befund.
     setSleepPrevented(sp.status === 'fulfilled' ? sp.value : true);
     setLoading(false);
+    setRefreshing(false);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -232,6 +239,10 @@ export default function HomePanel({ userId }: HomePanelProps) {
       })),
     };
   }, [allRows, taskKey, datasets]);
+  const benchmarks = useMemo(() => buildBenchmarks(
+    allRows, taskKey,
+    name => (datasets.find(d => d.name === name)?.split_info?.test_count ?? 0) > 0,
+  ), [allRows, taskKey, datasets]);
 
   const insightInput: InsightInput = {
     trainings, tests, models, datasets,
@@ -239,7 +250,6 @@ export default function HomePanel({ userId }: HomePanelProps) {
     sleepPrevented,
   };
   const insights = buildInsights(insightInput);
-  const ranking = topResults(tests);
   const briefingFacts = buildBriefingFacts(insightInput);
   const sleepRisk = insights.some(i => i.kind === 'sleepRisk');
 
@@ -248,31 +258,35 @@ export default function HomePanel({ userId }: HomePanelProps) {
       if (!ms) return '–';
       return new Date(ms).toLocaleString(locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     },
+    ago: (ms: number | null | undefined) => {
+      if (!ms) return '–';
+      const sec = (ms - Date.now()) / 1000;
+      const units: [Intl.RelativeTimeFormatUnit, number][] = [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]];
+      const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+      for (const [unit, size] of units) {
+        if (Math.abs(sec) >= size) return rtf.format(Math.round(sec / size), unit);
+      }
+      return rtf.format(0, 'minute');
+    },
     duration: (seconds: number | null | undefined) => (seconds === null || seconds === undefined ? '–' : formatDuration(seconds)),
     number: (value: number, digits: number) => value.toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }),
   }), [locale]);
 
   // ── Seiten-Kontext für den AI-Coach ──────────────────────────────────────
+  // Dieselben Gruppen, Zahlen und Woerter wie auf dem Bildschirm (homeCoachContext.ts).
+  const coachContext = buildHomeCoachContext({
+    language, t, ago: format.ago, number: format.number, title, view, rows,
+    running: job ? { model: runningName ?? '', percent: Math.round(job.progress_percentage) } : null,
+    sleepRisk, compare, groupLabel,
+  });
   useEffect(() => {
-    const insightKey = (insight: { kind: string; params: Record<string, string> }) =>
-      insight.params.count === '1' ? `home.insights.${insight.kind}_one` : `home.insights.${insight.kind}`;
-    const lines = [
-      'SEITE: Start',
-      `Modelle: ${models.length}, Datasets: ${datasets.length}, Trainings gesamt: ${trainings.length}`,
-      `Laufende Trainings: ${active.length}`,
-      `Bestes Testergebnis: ${ranking[0] ? `${ranking[0].model_name} ${ranking[0].version_name} — ${(ranking[0].accuracy * 100).toFixed(1)}%` : 'noch keins'}`,
-      'Modelle (Stand je Schritt):',
-      ...allRows.slice(0, 12).map(r => `  - ${r.name}: Training ${r.training.state}, Test ${r.test.state}, Hosting ${r.hosting.state}${r.next ? `, naechster Schritt ${r.next}` : ''}`),
-      // Dieselben Saetze, die der Nutzer auf der Seite liest. Vorher gingen die
-      // internen Kennungen raus ("trainingFailed"), und der Coach zitierte sie
-      // woertlich in seiner Antwort.
-      insights.length > 0
-        ? `Offene Hinweise:\n${insights.map(i => `  - ${t(insightKey(i), i.params)}`).join('\n')}`
-        : 'Offene Hinweise: keine',
-    ];
-    setCurrentPageContent(lines.join('\n'), 'home');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, datasets, trainings, tests, active, hosts, setCurrentPageContent]);
+    setCurrentPageContent(coachContext, 'home');
+  }, [coachContext, setCurrentPageContent]);
+
+  // Der Coach springt per Modellname mit demselben Fokus wie die Knoepfe der Seite.
+  useEffect(() => {
+    setModelTargets(new Map(allRows.map(r => [r.name.trim().toLowerCase(), { modelId: r.id, datasetId: r.data.id, versionId: r.test.versionId }])));
+  }, [allRows]);
 
   if (loading) {
     return (
@@ -300,7 +314,7 @@ export default function HomePanel({ userId }: HomePanelProps) {
               <button className={`ft-seg-item ${view === 'compare' ? 'is-active' : ''}`} aria-pressed={view === 'compare'} onClick={() => setView('compare')}>{t('home.pipeline.compare.title')}</button>
             </div>
             <button onClick={() => void load()} title={t('common.refresh')} aria-label={t('common.refresh')} className="ft-icon-btn">
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             </button>
             <button onClick={() => setShowBriefing(v => !v)} aria-expanded={showBriefing} className="ft-btn ft-btn-ghost">{t('home.pipeline.briefing')}</button>
             <button onClick={() => navigateTo('training')} className="ft-btn ft-btn-primary">
@@ -363,14 +377,13 @@ export default function HomePanel({ userId }: HomePanelProps) {
             f={format}
             lastSeen={lastSeen?.getTime() ?? null}
             limit={visibleRows()}
-            attentionHead={isRunning ? needsYou : null}
           />
         </div>
       )}
 
       {hasData && view === 'compare' && (
         <div className="ft-sw-list">
-          <CompareView groups={compare.groups} withoutResult={compare.withoutResult} groupLabel={groupLabel} f={format} />
+          <BenchmarkView tasks={benchmarks.tasks} withoutResult={benchmarks.withoutResult} taskLabel={groupLabel} f={format} />
         </div>
       )}
     </div>
@@ -380,10 +393,15 @@ export default function HomePanel({ userId }: HomePanelProps) {
 function LiveCurve({ values }: { values: number[] }) {
   const recent = values.slice(-80);
   const max = Math.max(...recent), min = Math.min(...recent), span = max - min || 1;
-  const points = recent.map((v, i) => `${(i / (recent.length - 1)) * 170},${2 + ((max - v) / span) * 36}`).join(' ');
+  const pts = recent.map((v, i) => [(i / (recent.length - 1)) * 170, 2 + ((max - v) / span) * 36] as const);
+  const [lx, ly] = pts[pts.length - 1];
+  const [px, py] = pts[pts.length - 2];
+  // Der neueste Abschnitt zeichnet sich nach; der Rest steht schon.
   return (
     <svg viewBox="0 0 170 40" className="ft-track-curve" aria-hidden="true">
-      <polyline points={points} />
+      <polyline points={pts.slice(0, -1).map(p => p.join(',')).join(' ')} />
+      <line key={values.length} x1={px} y1={py} x2={lx} y2={ly} pathLength={1} className="ft-curve-new" />
+      <circle key={`d${values.length}`} cx={lx} cy={ly} r={2.4} className="ft-curve-dot" />
     </svg>
   );
 }

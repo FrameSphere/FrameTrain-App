@@ -1,18 +1,19 @@
 // HomeStellwerk.tsx – Bausteine der Startseite.
 //
-// Jedes Modell ist ein Streifen aus Daten, Training, Test und Hosting. Der
-// Streifen waechst nach rechts, die naechste Aktion steht in der Spalte ihres
-// Schritts. Reihenfolge und Zustaende kommen aus homePipeline.ts.
+// Jedes Modell ist eine Zeile durch Daten, Training, Test und Hosting. Der Stand
+// liest sich an den Spalten, der Knopf steht in der Spalte des naechsten Schritts.
+// Reihenfolge und Zustaende kommen aus homePipeline.ts.
 
-import { useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, Square, X, AlertTriangle } from 'lucide-react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronRight, XCircle, StopCircle, Loader2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { navigateToModel, type AppView } from '../ui/navigationEvents';
-import { sparklinePoints } from './homeInsights';
-import type { CompareGroup, ModelRow, NextKind, RunPoint, TestMetric } from './homePipeline';
+import { pipelineSections, type ModelRow, type NextKind, type RunPoint, type StepState, type TestMetric } from './homePipeline';
 
 type Format = {
   date: (ms: number | null | undefined) => string;
+  /** Relative Zeit fuer die Liste ("vor 5 Tagen"); das Datum steht im Tooltip */
+  ago: (ms: number | null | undefined) => string;
   duration: (seconds: number | null | undefined) => string;
   number: (value: number, digits: number) => string;
 };
@@ -34,104 +35,103 @@ function ActionButton({ row, kind }: { row: ModelRow; kind: NextKind }) {
   );
 }
 
-function Spark({ runs }: { runs: RunPoint[] }) {
-  const points = sparklinePoints(runs.map(r => ({ id: r.id, label: '', at: r.at, loss: r.loss })), 54, 16, 1);
-  return (
-    <svg viewBox="0 0 54 16" className="ft-spark" aria-hidden="true">
-      <polyline points={points} />
-    </svg>
-  );
-}
+type Tone = 'bad' | 'warn' | 'live';
 
-function StateWord({ glyph, label }: { glyph: ReactNode; label: string }) {
+/** Status: Zeichen und Wort, nie klickbar. */
+function Status({ tone, label }: { tone: Tone; label: string }) {
+  const glyph = tone === 'bad' ? <XCircle className="w-3.5 h-3.5" />
+    : tone === 'warn' ? <StopCircle className="w-3.5 h-3.5" />
+      : <Loader2 className="w-3.5 h-3.5 animate-spin" />;
   return (
-    <span className="ft-st" title={label}>
-      <span className="ft-st-g" aria-hidden="true">{glyph}</span>
+    <span className={`ft-st is-${tone}`} title={label}>
+      <span aria-hidden="true" className="inline-flex">{glyph}</span>
       <span className="ft-st-word">{label}</span>
     </span>
   );
 }
 
-function FailedWord() {
+function FailedOrStopped({ state }: { state: StepState }) {
   const { t } = useLanguage();
-  return <StateWord glyph={<X className="w-3.5 h-3.5" />} label={t('home.pipeline.state.failed')} />;
+  return state === 'failed'
+    ? <Status tone="bad" label={t('home.pipeline.state.failed')} />
+    : <Status tone="warn" label={t('home.pipeline.state.stopped')} />;
 }
 
-function StoppedWord() {
+function Running() {
   const { t } = useLanguage();
-  return <StateWord glyph={<Square className="w-2.5 h-2.5" fill="currentColor" strokeWidth={0} />} label={t('home.pipeline.state.stopped')} />;
+  return <Status tone="live" label={t('home.pipeline.state.running')} />;
 }
 
 function metricText(metric: TestMetric, f: Format): string {
   return metric.fraction !== null ? `${f.number(metric.fraction * 100, 1)}%` : f.number(metric.value, 3);
 }
 
+const Cell = ({ children }: { children?: ReactNode }) => <div className="ft-cell">{children}</div>;
+
 function DataCell({ row }: { row: ModelRow }) {
-  if (row.next === 'addDataset') return <div className="ft-blk ft-front"><ActionButton row={row} kind="addDataset" /></div>;
-  return <div className="ft-blk ft-done ft-first" title={row.data.name ?? undefined}><span className="ft-v">{row.data.name ?? '–'}</span></div>;
+  if (row.next === 'addDataset') return <Cell><ActionButton row={row} kind="addDataset" /></Cell>;
+  if (!row.data.name) return <Cell><span className="ft-quiet">–</span></Cell>;
+  return <Cell><span className="ft-ds" title={row.data.name}>{row.data.name}</span></Cell>;
 }
 
 function TrainingCell({ row, f }: { row: ModelRow; f: Format }) {
   const { t } = useLanguage();
-  const { state, loss, runs } = row.training;
-  if (state === 'running') return <div className="ft-blk ft-live"><span className="ft-v">{t('home.pipeline.state.running')}</span></div>;
-  if (state === 'failed' || state === 'stopped') {
-    return (
-      <div className={`ft-blk ${state === 'failed' ? 'ft-bad' : 'ft-warn'}`}>
-        {state === 'failed' ? <FailedWord /> : <StoppedWord />}
-        <ActionButton row={row} kind="retryTrain" />
-      </div>
-    );
-  }
+  const { state, loss } = row.training;
+  if (state === 'running') return <Cell><Running /></Cell>;
+  if (state === 'failed' || state === 'stopped') return <Cell><FailedOrStopped state={state} /><ActionButton row={row} kind="retryTrain" /></Cell>;
   if (loss !== null) {
-    const overfit = row.note?.kind === 'overfitting';
-    return (
-      <div className={`ft-blk ${overfit ? 'ft-warn' : 'ft-done'}`}>
-        {overfit && <span aria-hidden="true">▲</span>}
-        <span className="ft-v font-mono tabular-nums">{f.number(loss, 4)}</span>
-        {runs.length > 1 && <Spark runs={runs} />}
-      </div>
-    );
+    const warn = row.note?.kind === 'overfitting' || row.note?.kind === 'regression';
+    return <Cell><span className={`ft-v ${warn ? 'is-warn' : ''}`}>{f.number(loss, 4)}</span></Cell>;
   }
-  if (row.next === 'addDataset') return <div className="ft-blk ft-rest" />;
-  return <div className="ft-blk ft-skip"><span className="ft-v">{t('home.pipeline.original')}</span></div>;
+  if (row.next === 'addDataset') return <Cell />;
+  return <Cell><span className="ft-quiet">{t('home.pipeline.original')}</span></Cell>;
 }
 
-function TestCell({ row, f }: { row: ModelRow; f: Format }) {
+function TestCell({ row, f, quiet }: { row: ModelRow; f: Format; quiet?: boolean }) {
   const { t } = useLanguage();
   const { state, metric } = row.test;
-  if (state === 'running') return <div className="ft-blk ft-live"><span className="ft-v">{t('home.pipeline.state.running')}</span></div>;
-  if (row.next === 'retryTest') {
-    return (
-      <div className={`ft-blk ${state === 'failed' ? 'ft-bad' : 'ft-warn'}`}>
-        {state === 'failed' ? <FailedWord /> : <StoppedWord />}
-        <ActionButton row={row} kind="retryTest" />
-      </div>
-    );
-  }
+  if (state === 'running') return <Cell><Running /></Cell>;
+  if (row.next === 'retryTest') return <Cell><FailedOrStopped state={state} /><ActionButton row={row} kind="retryTest" /></Cell>;
   if (metric) {
     const weak = row.note?.kind === 'weakResult';
     return (
-      <div className={`ft-blk ${weak ? 'ft-warn' : 'ft-done'}`}>
-        <span className="ft-v font-mono tabular-nums" title={metric.fraction === null ? metric.label : undefined}>{metricText(metric, f)}</span>
+      <Cell>
+        <span className={`ft-v ${weak ? 'is-warn' : ''}`} title={metric.fraction === null ? metric.label : undefined}>{metricText(metric, f)}</span>
         {row.next === 'startTest' && <ActionButton row={row} kind="startTest" />}
-      </div>
+      </Cell>
     );
   }
-  if (row.next === 'startTest') return <div className="ft-blk ft-front"><ActionButton row={row} kind="startTest" /></div>;
-  if (state === 'done') return <div className="ft-blk ft-done"><span className="ft-v">{t('home.pipeline.state.done')}</span></div>;
-  return <div className="ft-blk ft-rest" />;
+  if (row.next === 'startTest') {
+    // In einer Gruppe, in der jede Zeile denselben Knopf haette, steht er erst beim Zeigen auf die Zeile.
+    if (quiet) {
+      return (
+        <Cell>
+          <span className="ft-quiet ft-rest-label">{t('home.pipeline.state.notTested')}</span>
+          <span className="ft-hover-go"><ActionButton row={row} kind="startTest" /></span>
+        </Cell>
+      );
+    }
+    return <Cell><ActionButton row={row} kind="startTest" /></Cell>;
+  }
+  if (state === 'done') return <Cell><span className="ft-quiet">{t('home.pipeline.state.done')}</span></Cell>;
+  return <Cell />;
 }
 
 function HostingCell({ row }: { row: ModelRow }) {
   const { t } = useLanguage();
   const state = row.hosting.state;
-  if (state === 'failed') return <div className="ft-blk ft-bad ft-last"><FailedWord /></div>;
-  if (state === 'loading') return <div className="ft-blk ft-live ft-last"><span className="ft-v">{t('home.pipeline.hosting.loading')}</span></div>;
-  if (state === 'ready') return <div className="ft-blk ft-done ft-last"><span className="ft-v">{t('home.pipeline.hosting.ready')}</span></div>;
-  if (state === 'idle') return <div className="ft-blk ft-done ft-last"><span className="ft-v">{t('home.pipeline.hosting.idle')}</span></div>;
-  if (row.next === 'host') return <div className="ft-blk ft-front"><ActionButton row={row} kind="host" /></div>;
-  return <div className="ft-blk ft-rest" />;
+  if (state === 'failed') return <Cell><Status tone="bad" label={t('home.pipeline.state.failed')} /></Cell>;
+  if (state === 'loading') return <Cell><Status tone="live" label={t('home.pipeline.hosting.loading')} /></Cell>;
+  if (state === 'ready' || state === 'idle') {
+    return (
+      <Cell>
+        <span className={`ft-dot ${state === 'ready' ? 'is-on' : ''}`} aria-hidden="true" />
+        <span className="ft-quiet">{t(`home.pipeline.hosting.${state}`)}</span>
+      </Cell>
+    );
+  }
+  if (row.next === 'host') return <Cell><ActionButton row={row} kind="host" /></Cell>;
+  return <Cell />;
 }
 
 function noteText(row: ModelRow, t: (key: string, p?: Record<string, string>) => string): string | null {
@@ -165,51 +165,95 @@ function RowPanel({ row, f }: { row: ModelRow; f: Format }) {
   const { t } = useLanguage();
   const runs = row.training.runs;
   const tests = row.test.attempts.slice(0, 3);
+  const analysisLink = (
+    <button className="ft-ref" onClick={() => navigateToModel('analysis', { modelId: row.id })}>{t('home.pipeline.panel.openAnalysis')}</button>
+  );
+  const runList = (
+    <>
+      {runs.length > 0 && (
+        <div className="ft-pl is-head">
+          <span>{t('home.pipeline.panel.finished')}</span>
+          <span>{t('home.pipeline.panel.loss')}</span>
+          <span>{t('home.pipeline.cols.duration')}</span>
+        </div>
+      )}
+      {[...runs].reverse().slice(0, 4).map(r => (
+        <div key={r.id} className="ft-pl">
+          <span>{f.date(r.at)}</span>
+          <span className="font-mono tabular-nums">{f.number(r.loss, 4)}</span>
+          <span className="font-mono tabular-nums">{f.duration(r.durationSec)}</span>
+        </div>
+      ))}
+      {runs.length === 0 && <p>{t('home.pipeline.panel.noRuns')}</p>}
+    </>
+  );
+  const testList = tests.length === 0
+    ? <p>{t('home.pipeline.panel.noTests')}</p>
+    : tests.map(job => {
+      const at = new Date(job.completed_at ?? job.created_at).getTime();
+      return (
+        <div key={job.id} className="ft-pl">
+          <span title={job.dataset_name}>{job.version_name} · {job.dataset_name}</span>
+          <span className="font-mono tabular-nums">
+            {typeof job.results?.accuracy === 'number' ? `${f.number(job.results.accuracy * 100, 1)}%` : t(`home.pipeline.state.${job.status === 'completed' ? 'done' : job.status === 'failed' ? 'failed' : job.status === 'stopped' ? 'stopped' : 'running'}`)}
+          </span>
+          <span>{f.date(at)}</span>
+        </div>
+      );
+    });
+
+  // Erst ab zwei Laeufen gibt es einen Verlauf; vorher bekommen Laeufe und Tests die volle Breite.
+  if (runs.length < 2) {
+    return (
+      <section className="ft-peek is-flat" aria-label={row.name}>
+        <div className="min-w-0">
+          <div className="ft-peek-h"><span>{t('home.pipeline.panel.runs')}</span>{runs.length > 0 && analysisLink}</div>
+          {runList}
+        </div>
+        <div className="min-w-0">
+          <div className="ft-peek-h"><span>{t('home.pipeline.panel.tests')}</span></div>
+          {testList}
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="ft-peek" aria-label={row.name}>
       <div className="min-w-0">
-        <div className="ft-peek-h">
-          <b>{t('home.pipeline.panel.lossPerRun')}</b>
-          <button className="ft-link" onClick={() => navigateToModel('analysis', { modelId: row.id })}>{t('home.pipeline.panel.openAnalysis')}</button>
-        </div>
-        {runs.length > 1
-          ? <RunChart runs={runs} f={f} />
-          : <p>{t(runs.length === 1 ? 'home.pipeline.panel.oneRun' : 'home.pipeline.panel.noRuns')}</p>}
+        <div className="ft-peek-h"><span>{t('home.pipeline.panel.lossPerRun')}</span>{analysisLink}</div>
+        <RunChart runs={runs} f={f} />
       </div>
       <div className="min-w-0">
-        <div className="ft-peek-h"><b>{t('home.pipeline.panel.runs')}</b></div>
-        {[...runs].reverse().slice(0, 4).map(r => (
-          <div key={r.id} className="ft-pl">
-            <span className="font-mono">{f.date(r.at)}</span>
-            <span className="font-mono tabular-nums">{f.number(r.loss, 4)}</span>
-            <span className="font-mono tabular-nums">{f.duration(r.durationSec)}</span>
-          </div>
-        ))}
-        <div className="ft-peek-h pt-3.5"><b>{t('home.pipeline.panel.tests')}</b></div>
-        {tests.length === 0
-          ? <p>{t('home.pipeline.panel.noTests')}</p>
-          : tests.map(job => (
-            <div key={job.id} className="ft-pl">
-              <span className="truncate" title={job.dataset_name}>{job.version_name} · {job.dataset_name}</span>
-              <span className="font-mono tabular-nums">
-                {typeof job.results?.accuracy === 'number' ? `${f.number(job.results.accuracy * 100, 1)}%` : t(`home.pipeline.state.${job.status === 'completed' ? 'done' : job.status === 'failed' ? 'failed' : job.status === 'stopped' ? 'stopped' : 'running'}`)}
-              </span>
-              <span className="font-mono">{f.date(new Date(job.completed_at ?? job.created_at).getTime())}</span>
-            </div>
-          ))}
+        <div className="ft-peek-h"><span>{t('home.pipeline.panel.runs')}</span></div>
+        {runList}
+        <div className="ft-peek-h pt-5"><span>{t('home.pipeline.panel.tests')}</span></div>
+        {testList}
       </div>
     </section>
   );
 }
 
-function PipelineRow({ row, f, isNew }: { row: ModelRow; f: Format; isNew: boolean }) {
+function PipelineRow({ row, f, isNew, quietAction, section }: { row: ModelRow; f: Format; isNew: boolean; quietAction?: boolean; section: string }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const note = noteText(row, t);
-  const noteTarget: AppView | null = row.note?.kind.startsWith('training') ? 'training' : row.note?.kind.startsWith('test') ? 'tests' : null;
+  const noteTarget: AppView | null = row.note?.kind === 'regression' ? 'analysis'
+    : row.note?.kind.startsWith('training') ? 'training'
+      : row.note?.kind.startsWith('test') ? 'tests'
+        : null;
   const Chevron = open ? ChevronDown : ChevronRight;
+  // Aufklappen: die Details wachsen in der Hoehe, die Zeilen darunter ruecken mit.
+  const peekRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = peekRef.current;
+    if (!open || !el || prefersStill()) return;
+    el.animate?.(
+      [{ height: '0px', opacity: 0 }, { height: `${el.scrollHeight}px`, opacity: 1 }],
+      { duration: 260, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' },
+    );
+  }, [open]);
   return (
-    <>
+    <div className={open ? 'ft-unit is-open' : 'ft-unit'} data-row={row.id} data-section={section}>
       <div className="ft-r ft-row">
         <button className="ft-name" onClick={() => setOpen(v => !v)} aria-expanded={open} title={row.name}>
           <Chevron className="w-3.5 h-3.5 flex-none" aria-hidden="true" />
@@ -218,21 +262,22 @@ function PipelineRow({ row, f, isNew }: { row: ModelRow; f: Format; isNew: boole
         </button>
         <DataCell row={row} />
         <TrainingCell row={row} f={f} />
-        <TestCell row={row} f={f} />
+        <TestCell row={row} f={f} quiet={quietAction} />
         <HostingCell row={row} />
-        <span className="ft-t ft-dur font-mono tabular-nums">{f.duration(row.last?.durationSec)}</span>
-        <span className="ft-t font-mono tabular-nums">{f.date(row.last?.at)}</span>
-      </div>
-      {note && (
-        <div className="ft-r ft-note">
-          <p title={note}>
+        <span className="ft-t" title={row.last ? f.date(row.last.at) : undefined}>{row.last ? f.ago(row.last.at) : '–'}</span>
+        {note && (
+          <p className="ft-note" title={note}>
             {note}
-            {noteTarget && <button className="ft-link ml-3" onClick={() => navigateToModel(noteTarget, { modelId: row.id })}>{t('home.pipeline.openDetails')}</button>}
+            {noteTarget && (
+              <button className="ft-ref" onClick={() => navigateToModel(noteTarget, { modelId: row.id })}>
+                {t(`home.pipeline.open.${noteTarget}`)}
+              </button>
+            )}
           </p>
-        </div>
-      )}
-      {open && <RowPanel row={row} f={f} />}
-    </>
+        )}
+      </div>
+      {open && <div ref={peekRef} className="ft-peek-wrap"><RowPanel row={row} f={f} /></div>}
+    </div>
   );
 }
 
@@ -245,138 +290,102 @@ export function PipelineHead() {
       <span>{t('home.pipeline.cols.training')}</span>
       <span>{t('home.pipeline.cols.test')}</span>
       <span>{t('home.pipeline.cols.hosting')}</span>
-      <span className="ft-num ft-dur">{t('home.pipeline.cols.duration')}</span>
       <span className="ft-num">{t('home.pipeline.cols.last')}</span>
     </div>
   );
 }
 
-export function PipelineList({ rows, f, lastSeen, limit, attentionHead }: {
+function GroupHead({ label, count, sub }: { label: string; count: number; sub?: string }) {
+  return <h2 className="ft-gh">{label}<b>{count}</b>{sub && <small>{sub}</small>}</h2>;
+}
+
+function GroupFold({ label, count, onOpen }: { label: string; count: number; onOpen: () => void }) {
+  return (
+    <button className="ft-gh-fold" aria-expanded="false" onClick={onOpen}>
+      <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+      {label}<b>{count}</b>
+    </button>
+  );
+}
+
+const prefersStill = () =>
+  typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Wechselt ein Modell die Gruppe (Training fertig, Test gescheitert), gleitet
+ * seine Zeile von der alten an die neue Stelle und leuchtet kurz auf, statt zu
+ * springen. Aufklappen verschiebt andere Zeilen auch, bewegt aber nichts.
+ */
+function useRowMoves() {
+  const ref = useRef<HTMLDivElement>(null);
+  const before = useRef(new Map<string, { top: number; section: string }>());
+  useLayoutEffect(() => {
+    const list = ref.current;
+    if (!list) return;
+    const still = prefersStill();
+    const now = new Map<string, { top: number; section: string }>();
+    list.querySelectorAll<HTMLElement>('[data-row]').forEach(node => {
+      const id = node.dataset.row!;
+      const section = node.dataset.section ?? '';
+      const top = node.getBoundingClientRect().top;
+      now.set(id, { top, section });
+      const prev = before.current.get(id);
+      if (!prev || prev.section === section || still) return;
+      node.classList.remove('is-moved');
+      void node.offsetWidth;
+      node.classList.add('is-moved');
+      const dy = prev.top - top;
+      if (Math.abs(dy) > 1) {
+        node.animate?.([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 360, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
+      }
+    });
+    before.current = now;
+  });
+  return ref;
+}
+
+export function PipelineList({ rows, f, lastSeen, limit }: {
   rows: ModelRow[];
   f: Format;
   lastSeen: number | null;
   limit: number;
-  /** Laeuft ein Training, steht "braucht dich" nicht mehr in der Ueberschrift */
-  attentionHead: string | null;
 }) {
   const { t } = useLanguage();
   const [showAll, setShowAll] = useState(false);
-  const attention = rows.filter(r => r.group === 'attention');
-  // Modelle ohne jeden Lauf wiederholen nur ihre erste Aktion: eine Zeile reicht.
-  const allUnused = rows.filter(r => r.group === 'next' && !r.last);
-  const onlyUnused = allUnused.length === rows.length;
-  const unused = onlyUnused ? [] : allUnused;
-  const rest = rows.filter(r => r.group !== 'attention' && !unused.includes(r));
+  // Modelle ohne jeden Lauf wiederholen nur ihre erste Aktion: eine zugeklappte Gruppe reicht.
+  const { sections: grouped, unused } = pipelineSections(rows);
+  const sections: { key: string; rows: ModelRow[] }[] = [...grouped];
+  const attention = grouped[0].rows;
+  const rest = sections.slice(1).flatMap(s => s.rows);
   const shownRest = showAll ? rest : rest.slice(0, Math.max(4, limit - attention.length));
   const hiddenStarted = showAll ? 0 : rest.length - shownRest.length;
-  const hiddenUnused = showAll ? 0 : unused.length;
-  const next = [...shownRest.filter(r => r.group === 'next'), ...(showAll ? unused : [])];
-  const hosted = shownRest.filter(r => r.group === 'hosted');
   const isNew = (r: ModelRow) => lastSeen !== null && (r.last?.at ?? 0) > lastSeen;
+  if (showAll && unused.length > 0) sections.push({ key: 'unused', rows: unused });
+  const listRef = useRowMoves();
 
   return (
-    <>
-      {attentionHead && attention.length > 0 && <span className="ft-gh">{attentionHead}</span>}
-      {attention.map(r => <PipelineRow key={r.id} row={r} f={f} isNew={isNew(r)} />)}
-      {next.length > 0 && <span className="ft-gh">{t('home.pipeline.group.next')}</span>}
-      {next.map(r => <PipelineRow key={r.id} row={r} f={f} isNew={isNew(r)} />)}
-      {hosted.length > 0 && <span className="ft-gh">{t('home.pipeline.group.hosted')}</span>}
-      {hosted.map(r => <PipelineRow key={r.id} row={r} f={f} isNew={isNew(r)} />)}
-      {hiddenStarted + hiddenUnused > 0 && (
-        <div className="ft-more">
-          <span>
-            {hiddenStarted > 0
-              ? t(hiddenStarted + hiddenUnused === 1 ? 'home.pipeline.more_one' : 'home.pipeline.more', { n: String(hiddenStarted + hiddenUnused) })
-              : t(hiddenUnused === 1 ? 'home.pipeline.moreUnused_one' : 'home.pipeline.moreUnused', { n: String(hiddenUnused) })}
-          </span>
-          <button className="ft-go ft-go-quiet" onClick={() => setShowAll(true)}>{t('home.pipeline.showAll')}</button>
-        </div>
-      )}
-    </>
-  );
-}
-
-// ── Benchmarks ───────────────────────────────────────────────────────────
-
-function CompareAction({ row }: { row: ModelRow }) {
-  const { t } = useLanguage();
-  const failed = row.test.state === 'failed';
-  return (
-    <div className="ft-open">
-      {(failed || row.test.state === 'stopped') && (
-        <span className={`ft-blk ${failed ? 'ft-bad' : 'ft-warn'}`}>{failed ? <FailedWord /> : <StoppedWord />}</span>
-      )}
-      {row.next && <ActionButton row={row} kind={row.next} />}
-      {!row.next && row.test.state === 'running' && <span className="ft-blk ft-live">{t('home.pipeline.state.running')}</span>}
-      <span className="ft-dash" />
-    </div>
-  );
-}
-
-function CompareRowView({ row, best, sameData, f }: { row: ModelRow; best: boolean; sameData: boolean; f: Format }) {
-  const { t } = useLanguage();
-  const metric = row.test.metric;
-  return (
-    <>
-      <div className="ft-cmp ft-crow">
-        <span className="ft-name ft-name-plain" title={row.name}><span className="truncate">{row.name}</span></span>
-        {metric ? (
-          <div className={`ft-acc ${best ? 'is-best' : ''}`}>
-            {metric.fraction !== null && <i style={{ width: `${Math.min(100, metric.fraction * 100)}%` }} aria-hidden="true" />}
-            <span className="font-mono tabular-nums">{metricText(metric, f)}</span>
-            {metric.fraction === null && <span className="ft-acc-label">{metric.label}</span>}
-            {best && <em>{t('home.pipeline.compare.best')}</em>}
+    <div className="ft-pipe" ref={listRef}>
+      {sections.map(s => {
+        const shown = s.rows.filter(r => s.key === 'attention' || showAll || shownRest.includes(r));
+        if (shown.length === 0) return null;
+        return (
+          <div key={s.key}>
+            <GroupHead label={t(`home.pipeline.group.${s.key}`)} count={s.rows.length} />
+            {shown.map(r => <PipelineRow key={r.id} row={r} f={f} isNew={isNew(r)} quietAction={s.key === 'test' && s.rows.length > 1} section={s.key} />)}
           </div>
-        ) : <CompareAction row={row} />}
-        <span className="ft-ds" title={row.test.dataset ?? undefined}>{row.test.dataset ?? '–'}</span>
-        <span className="ft-t font-mono tabular-nums">{f.date(row.test.at)}</span>
-      </div>
-      {sameData && (
-        <div className="ft-cmp ft-note">
-          <p><AlertTriangle className="w-3 h-3 inline mr-1.5 -mt-0.5" aria-hidden="true" />{t('home.pipeline.compare.sameData')}</p>
-        </div>
+        );
+      })}
+      {hiddenStarted > 0 && (
+        <GroupFold
+          label={t(hiddenStarted === 1 ? 'home.pipeline.more_one' : 'home.pipeline.more', { n: String(hiddenStarted) })}
+          count={hiddenStarted}
+          onOpen={() => setShowAll(true)}
+        />
       )}
-    </>
-  );
-}
-
-export function CompareView({ groups, withoutResult, groupLabel, f }: {
-  groups: CompareGroup[];
-  withoutResult: ModelRow[];
-  groupLabel: (key: string) => string;
-  f: Format;
-}) {
-  const { t } = useLanguage();
-  const [showAll, setShowAll] = useState(false);
-  return (
-    <>
-      <div className="ft-cmp ft-heads">
-        <span>{t('home.pipeline.cols.model')}</span>
-        <span>{t('home.pipeline.compare.scale')}</span>
-        <span>{t('home.pipeline.compare.dataset')}</span>
-        <span className="ft-num">{t('home.pipeline.compare.lastTest')}</span>
-      </div>
-      {groups.length === 0 && <p className="ft-intro mt-4">{t('home.pipeline.compare.empty')}</p>}
-      {groups.map(g => (
-        <div key={g.key}>
-          <span className="ft-gh">
-            {groupLabel(g.key)}
-            {g.rows.filter(r => r.row.test.metric).length > 1 && (
-              <small>{t(g.sameDataset ? 'home.pipeline.compare.sameDataset' : 'home.pipeline.compare.mixedDatasets')}</small>
-            )}
-          </span>
-          {g.rows.map(({ row, best, sameData }) => <CompareRowView key={row.id} row={row} best={best} sameData={sameData} f={f} />)}
-        </div>
-      ))}
-      {withoutResult.length > 0 && !showAll && (
-        <div className="ft-more">
-          <span>{t(withoutResult.length === 1 ? 'home.pipeline.compare.more_one' : 'home.pipeline.compare.more', { n: String(withoutResult.length) })}</span>
-          <button className="ft-go ft-go-quiet" onClick={() => setShowAll(true)}>{t('home.pipeline.showAll')}</button>
-        </div>
+      {!showAll && unused.length > 0 && (
+        <GroupFold label={t('home.pipeline.group.unused')} count={unused.length} onOpen={() => setShowAll(true)} />
       )}
-      {showAll && withoutResult.length > 0 && <span className="ft-gh">{t('home.pipeline.compare.noResult')}</span>}
-      {showAll && withoutResult.map(row => <CompareRowView key={row.id} row={row} best={false} sameData={false} f={f} />)}
-    </>
+    </div>
   );
 }
 

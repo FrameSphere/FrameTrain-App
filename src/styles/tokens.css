@@ -26,6 +26,10 @@
 .ft-night {
   --ft-wall-base: #1c1c21;
   --ft-panel: #121214;
+  /* Modellfarben fuer Benchmark-Diagramme: feste Reihenfolge, gegen Farbenblindheit
+     geprueft (benachbarte Paare). Farbe haengt am Modell, nie am Rang. */
+  --ft-series-1: #3987e5; --ft-series-2: #d95926; --ft-series-3: #199e70; --ft-series-4: #c98500;
+  --ft-series-5: #d55181; --ft-series-6: #008300; --ft-series-7: #9085e9; --ft-series-8: #e66767;
   --ft-panel-2: #19191c;
   --ft-ink: #f4f4f6;
   --ft-muted: #a3a3ad;
@@ -63,6 +67,8 @@
 .ft-day {
   --ft-wall-base: #e6e6ec;
   --ft-panel: #ffffff;
+  --ft-series-1: #2a78d6; --ft-series-2: #eb6834; --ft-series-3: #1baf7a; --ft-series-4: #eda100;
+  --ft-series-5: #e87ba4; --ft-series-6: #008300; --ft-series-7: #6250d6; --ft-series-8: #e34948;
   --ft-panel-2: #f6f6f8;
   --ft-ink: #111114;
   --ft-muted: #55555f;

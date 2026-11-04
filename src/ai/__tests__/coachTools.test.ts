@@ -161,3 +161,28 @@ describe('Nicht verfuegbare Felder', () => {
     expect(recommendedParamsApplicable()).toBe(false);
   });
 });
+
+// Startseite (1.6.14): Der Coach bot "Open Tests" an und landete ohne Modell auf
+// der Seite. Mit Modellnamen springt er wie die Knoepfe der Startseite.
+describe('Navigation mit Modell', () => {
+  it('liest Seite und Modellnamen, auch mit Doppelpunkt im Namen', () => {
+    const { actions, cleanedText } = parseCoachActions('Los [[go:tests:t5-small]] [[go:training:Run: v2]] [[go:tests]]');
+    expect(cleanedText.trim()).toBe('Los');
+    expect(actions).toEqual([
+      { type: 'navigate', view: 'tests', model: 't5-small' },
+      { type: 'navigate', view: 'training', model: 'Run: v2' },
+      { type: 'navigate', view: 'tests' },
+    ]);
+  });
+
+  it('verwirft unbekannte Seiten auch mit Modell', () => {
+    expect(parseCoachActions('[[go:nirgends:t5-small]]').actions).toEqual([]);
+  });
+
+  it('erklaert auf der Startseite die Woerter der Oberflaeche statt interner Kennungen', () => {
+    const en = pageKnowledge('home', 'en');
+    expect(en).toContain('Ready to test');
+    expect(en).toContain('[[go:PAGE:model name]]');
+    expect(en).not.toMatch(/Loss trend|Key figures/);
+  });
+});
