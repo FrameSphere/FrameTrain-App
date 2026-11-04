@@ -178,7 +178,8 @@
       "docs": "Documentation",
       "support": "Support",
       "about": "About",
-      "quick": "Quick access"
+      "quick": "Quick access",
+      "aiConnections": "AI connections"
     },
     "account": {
       "title": "User Information",
@@ -4596,5 +4597,81 @@
     "failed": "Saving failed. Check your internet connection and try again.",
     "updatedTitle": "Our Terms have been updated",
     "updatedIntro": "We have revised the Terms and the Privacy Policy (October 2026). Changes only apply once you agree. Please read the new version and agree to keep using FrameTrain."
+  },
+  "mcp": {
+    "settings": {
+      "title": "AI connections",
+      "intro": "Let Claude, Cursor or ChatGPT drive FrameTrain: build datasets, start training runs, check results. Everything runs on your computer, and every sensitive action asks you first, here in the app.",
+      "loading": "Loading connection status …",
+      "copy": "Copy",
+      "cancel": "Cancel",
+      "local": {
+        "title": "Local access (MCP)",
+        "hint": "Programs on this computer reach FrameTrain via 127.0.0.1. Nobody gets in without the token.",
+        "running": "Running at {url}",
+        "noManifest": "The tool list is still loading – until then only system_ping is available.",
+        "offHint": "Off. \"Connect to Claude Desktop\" turns access on automatically.",
+        "port": "Port",
+        "token": "Token",
+        "tokenHint": "Anyone with this token can control FrameTrain on this computer.",
+        "showToken": "Show token",
+        "rotate": "Generate new token",
+        "rotateTitle": "Generate a new token?",
+        "rotateText": "Claude Code and Cursor lose access until you add the new command or configuration. Claude Desktop reads the token itself and stays connected."
+      },
+      "apps": {
+        "title": "Connect apps",
+        "hint": "Set up once, then FrameTrain shows up there as a tool.",
+        "tokenNote": "The command and configuration contain your token. Do not share them."
+      },
+      "claudeDesktop": {
+        "title": "Claude Desktop",
+        "hint": "Adds FrameTrain to Claude's configuration. Existing entries stay, a backup is made first.",
+        "configured": "Added. After restarting Claude Desktop, FrameTrain is available there.",
+        "connect": "Connect to Claude Desktop",
+        "reconnect": "Add again",
+        "done": "Added. Please quit and reopen Claude Desktop.",
+        "doneBackup": "Added, backup saved at {path}. Please quit and reopen Claude Desktop.",
+        "failed": "Could not add FrameTrain: {error}",
+        "notFound": "Claude Desktop was not found on this computer. Install it and open it once.",
+        "invalidConfig": "Claude's configuration is not valid JSON. FrameTrain leaves it untouched – please check the file.",
+        "translocated": "FrameTrain is running from a temporary folder. Move the app to Applications and restart it before connecting it to Claude."
+      },
+      "claudeCode": {
+        "title": "Claude Code – run this command in a terminal"
+      },
+      "cursor": {
+        "title": "Cursor – add to ~/.cursor/mcp.json"
+      },
+      "remote": {
+        "title": "Remote access via frame-train.com",
+        "hint": "For ChatGPT and Claude.ai in the browser. The website only relays, everything runs here. Default: off.",
+        "offHint": "Off. Only local programs can control FrameTrain.",
+        "online": "Connected to frame-train.com (last {time})",
+        "offlineError": "Not connected: {error}",
+        "connecting": "Connecting to frame-train.com …",
+        "connectorUrl": "Connector URL for Claude.ai or ChatGPT",
+        "clients": "Connected clients",
+        "noClients": "No client connected yet.",
+        "refresh": "Refresh",
+        "lastUsed": "last {time}",
+        "disconnect": "Disconnect",
+        "recent": "Recent calls via the website"
+      },
+      "activity": {
+        "title": "Recent calls",
+        "hint": "What AI programs have run in FrameTrain since the app started.",
+        "empty": "No calls yet.",
+        "local": "local",
+        "remote": "via website"
+      },
+      "approvals": {
+        "title": "Approvals per client",
+        "hint": "Actions you permanently allowed for a program. After revoking, FrameTrain asks again.",
+        "empty": "No permanent approvals.",
+        "revoke": "Revoke",
+        "revokeFor": "Revoke {tool} for {client}"
+      }
+    }
   }
 }
