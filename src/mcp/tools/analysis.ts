@@ -33,7 +33,7 @@ export function summarizeMetrics(metrics: Json | null | undefined, full?: Json |
 export const analysisTools: McpTool[] = [
   defineTool({
     name: 'analysis_metrics',
-    title: 'Trainingsmetriken',
+    title: 'Training metrics',
     description: 'Returns the stored training metrics of a version (final/best losses, epochs, steps, duration) plus a short summary with an overfitting hint. include_full adds the full stored training record (loss history, config) which can be large.',
     properties: { version_id: S.str('Trained version id.'), include_full: S.bool('Include the full training record. Default false.') },
     required: ['version_id'],
@@ -48,7 +48,7 @@ export const analysisTools: McpTool[] = [
   }),
   defineTool({
     name: 'analysis_logs',
-    title: 'Trainingslogs',
+    title: 'Training logs',
     description: 'Returns the stored training log entries of a version (newest last), limited to the last N entries.',
     properties: { version_id: S.str('Trained version id.'), limit: S.int('Default 100.', { minimum: 1, maximum: 1000 }) },
     required: ['version_id'],
@@ -60,7 +60,7 @@ export const analysisTools: McpTool[] = [
   }),
   defineTool({
     name: 'analysis_version_details',
-    title: 'Versionsdetails',
+    title: 'Version details',
     description: 'Returns details of a trained version: model, parent version, dataset, config, metrics and stored AI analysis report if any.',
     properties: { version_id: S.str('Trained version id.') },
     required: ['version_id'],
@@ -74,7 +74,7 @@ export const analysisTools: McpTool[] = [
   }),
   defineTool({
     name: 'analysis_runs_compare',
-    title: 'Laeufe vergleichen',
+    title: 'Compare runs',
     description: 'Compares 2-10 trained versions side by side: final/best losses, epochs, duration and key hyperparameters. Use it to pick the best run or to explain what changed.',
     properties: { version_ids: S.strArr('Version ids to compare.', { minItems: 2, maxItems: 10 }) },
     required: ['version_ids'],

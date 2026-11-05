@@ -61,7 +61,7 @@ function boxesArg(args: ToolArgs): { cls: number; x: number; y: number; w: numbe
 export const studioTools: McpTool[] = [
   defineTool({
     name: 'studio_projects_list',
-    title: 'Studio-Projekte',
+    title: 'Studio projects',
     description: 'Lists Dataset Builder (Studio) projects with id, name, modality, task, classes and sample counts. A Studio project collects and labels raw samples and is exported into a training dataset with studio_export.',
     async run() {
       const list = await call<unknown[]>('studio_list_projects');
@@ -70,7 +70,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_project_create',
-    title: 'Studio-Projekt anlegen',
+    title: 'Create studio project',
     description: `Creates a Dataset Builder project. kind: ${Object.entries(STUDIO_KINDS).map(([k, v]) => `${k} = ${v.hint}`).join(' ')} Classes are required for kinds with classes and can be extended later with studio_project_update.`,
     properties: {
       name: S.str('Project name.'),
@@ -93,7 +93,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_project_update',
-    title: 'Studio-Projekt aendern',
+    title: 'Update studio project',
     description: 'Renames a Studio project and/or replaces its class list. Keep the existing order when adding classes: box annotations reference classes by index.',
     properties: { project_id: projectId, name: S.str('New name.'), classes: S.strArr('Full new class list.') },
     required: ['project_id'],
@@ -109,7 +109,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_project_delete',
-    title: 'Studio-Projekt loeschen',
+    title: 'Delete studio project',
     description: 'Permanently deletes a Studio project with all samples and annotations. The user must confirm every call.',
     properties: { project_id: projectId },
     required: ['project_id'],
@@ -124,7 +124,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_samples_list',
-    title: 'Samples auflisten',
+    title: 'List samples',
     description: 'Lists samples of a Studio project (paginated), optionally filtered by status (new, suggested, confirmed, skipped). Each sample has its id, content/text or media path, label/target/boxes and status.',
     properties: {
       project_id: projectId,
@@ -143,7 +143,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_stats',
-    title: 'Projekt-Statistik',
+    title: 'Project statistics',
     description: 'Returns counts per status, boxes per class, empty confirmed samples and model doubts for a Studio project. Use it to judge whether a project is ready for export.',
     properties: { project_id: projectId },
     required: ['project_id'],
@@ -154,7 +154,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_add_texts',
-    title: 'Texte hinzufuegen',
+    title: 'Add texts',
     description: 'Adds text samples to a text Studio project. For text_classify projects set label (a class name); for text_pairs projects set target (the expected output). Samples with label/target arrive as suggestions; confirm them with studio_set_annotation or in the app.',
     properties: {
       project_id: projectId,
@@ -178,7 +178,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_edit_text',
-    title: 'Text bearbeiten',
+    title: 'Edit text',
     description: 'Replaces the text content of one text sample in a Studio project (annotation stays).',
     properties: { project_id: projectId, sample_id: S.str('Sample id.'), content: S.str('New text.') },
     required: ['project_id', 'sample_id', 'content'],
@@ -192,7 +192,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_add_image',
-    title: 'Bild hinzufuegen',
+    title: 'Add image',
     description: 'Adds one image (base64-encoded PNG/JPEG/WebP, max ~15 MB) to an image Studio project. To collect many images from the web use studio_fetch_web instead.',
     properties: {
       project_id: projectId,
@@ -212,7 +212,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_delete_samples',
-    title: 'Samples loeschen',
+    title: 'Delete samples',
     description: 'Permanently removes samples from a Studio project. The user must confirm every call.',
     properties: { project_id: projectId, sample_ids: S.strArr('Sample ids to delete.', { minItems: 1 }) },
     required: ['project_id', 'sample_ids'],
@@ -227,7 +227,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_inspect_source',
-    title: 'Quelle pruefen',
+    title: 'Inspect source',
     description: 'Inspects a local folder (images/audio with class subfolders or YOLO labels) or a text file (CSV/JSONL/TXT: detected columns, label column) before importing it. The user confirms the path.',
     properties: {
       source_path: S.str('Absolute path of the folder or file.'),
@@ -247,7 +247,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_import',
-    title: 'In Projekt importieren',
+    title: 'Import into project',
     description: 'Imports local files into a Studio project. source: "folder" (images, class subfolders or YOLO labels), "text" (CSV/JSONL/TXT file), "audio" (folder), "videos" (list of video files as clips), "video_frames" (extract frames of one video into an image project). The user confirms the path. Large imports return a job_id.',
     properties: {
       project_id: projectId,
@@ -297,7 +297,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_fetch_web',
-    title: 'Aus dem Web holen',
+    title: 'Fetch from the web',
     description: 'Downloads images or text from web pages into a Studio project (respecting robots.txt). mode "urls" fetches the given pages/files, "crawl" follows links up to max_depth within the allowlist, "sitemap" reads sitemaps. Fetched samples arrive as suggestions (with label if given). Returns a job_id when it takes longer than ~20 s.',
     properties: {
       project_id: projectId,
@@ -342,7 +342,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_set_annotation',
-    title: 'Annotation setzen',
+    title: 'Set annotation',
     description: 'Sets the annotation of one sample: status (new, suggested, confirmed, skipped) plus label (class name for classification), target (pair/transcript projects) or boxes (detection: cls = class index, x/y = box center, w/h = size, all normalized 0..1). Only confirmed samples are exported by default.',
     properties: {
       project_id: projectId,
@@ -368,7 +368,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_suggest',
-    title: 'Vorschlaege per Modell',
+    title: 'Model suggestions',
     description: 'Lets a trained model version pre-label open samples of a Studio project (boxes, classes or target texts). Confirmed samples are never changed. Can take a while; returns a job_id after ~20 s.',
     properties: {
       project_id: projectId,
@@ -393,7 +393,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_review',
-    title: 'Pruefung per Modell',
+    title: 'Model review',
     description: 'Lets a trained model check confirmed labels and marks samples where the model disagrees as doubts (see studio_stats.doubts). Returns checked/agree/doubts counts.',
     properties: {
       project_id: projectId,
@@ -413,7 +413,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_near_duplicates',
-    title: 'Fast-Dubletten',
+    title: 'Near duplicates',
     description: 'Finds groups of near-duplicate samples (similar texts or images; exact duplicates for audio/video). Images without a perceptual hash are reported under "missing" (hashes are computed when the project is opened in the app).',
     properties: { project_id: projectId },
     required: ['project_id'],
@@ -424,7 +424,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_quality',
-    title: 'Qualitaetsbericht',
+    title: 'Quality report',
     description: 'One-call quality overview of a Studio project: status counts, class balance, empty confirmed samples, model doubts and near-duplicate groups, plus plain-language warnings.',
     properties: { project_id: projectId },
     required: ['project_id'],
@@ -448,7 +448,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_export',
-    title: 'Als Datensatz exportieren',
+    title: 'Export as dataset',
     description: 'Exports a Studio project as a training dataset attached to a model (with train/val/test split, provenance and data card). Returns the new dataset id (via job_id if it takes longer than ~20 s).',
     properties: {
       project_id: projectId,
@@ -477,7 +477,7 @@ export const studioTools: McpTool[] = [
   }),
   defineTool({
     name: 'studio_model_classes',
-    title: 'Klassen eines Modells',
+    title: 'Model classes',
     description: 'Returns the class names a trained model version predicts — useful to set up a Studio project that matches a model for studio_suggest.',
     properties: { version_id: S.str('Trained model version id.') },
     required: ['version_id'],

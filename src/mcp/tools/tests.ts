@@ -17,7 +17,7 @@ function resultsBrief(r: TestResults) {
 export const testsTools: McpTool[] = [
   defineTool({
     name: 'tests_start',
-    title: 'Test starten',
+    title: 'Start test',
     description: 'Evaluates a trained model version on a dataset (accuracy, loss, per-sample predictions). Runs in the background; returns the test job immediately — poll tests_status, then read tests_results.',
     properties: {
       version_id: S.str('Trained version id.'),
@@ -44,7 +44,7 @@ export const testsTools: McpTool[] = [
   }),
   defineTool({
     name: 'tests_status',
-    title: 'Teststatus',
+    title: 'Test status',
     description: 'Returns the running or most recent test job with progress and, when finished, a summary of the results.',
     async run() {
       const active = await call<TestJob | null>('get_active_test_job').catch(() => null);
@@ -55,7 +55,7 @@ export const testsTools: McpTool[] = [
   }),
   defineTool({
     name: 'tests_stop',
-    title: 'Test stoppen',
+    title: 'Stop test',
     description: 'Stops the running evaluation job started with tests_start.',
     approval: 'once',
     async run() {
@@ -65,7 +65,7 @@ export const testsTools: McpTool[] = [
   }),
   defineTool({
     name: 'tests_results',
-    title: 'Testergebnisse',
+    title: 'Test results',
     description: 'Returns the stored test results of a version (newest first): totals, accuracy, metrics and up to 10 wrong predictions per run.',
     properties: { version_id: S.str('Trained version id.'), limit: S.int('Runs to return. Default 3.', { minimum: 1, maximum: 20 }) },
     required: ['version_id'],
@@ -77,7 +77,7 @@ export const testsTools: McpTool[] = [
   }),
   defineTool({
     name: 'tests_history',
-    title: 'Testverlauf',
+    title: 'Test history',
     description: 'Lists past test jobs (newest first) with model, version, dataset and status.',
     properties: { limit: S.int('Default 20.', { minimum: 1, maximum: 100 }) },
     async run(args) {
@@ -88,7 +88,7 @@ export const testsTools: McpTool[] = [
   }),
   defineTool({
     name: 'tests_single_input',
-    title: 'Einzeltest',
+    title: 'Single test',
     description: 'Runs a trained version on one input without a dataset. input_type: "text" or "file" (absolute path to an image/audio file).',
     properties: {
       version_id: S.str('Trained version id.'),
@@ -109,7 +109,7 @@ export const testsTools: McpTool[] = [
   }),
   defineTool({
     name: 'tests_hard_examples_export',
-    title: 'Schwere Beispiele exportieren',
+    title: 'Export hard examples',
     description: 'Exports the wrong predictions of the latest stored test run of a version as a file (jsonl or csv) for retraining. Returns the file path.',
     properties: { version_id: S.str('Trained version id.'), format: S.enumOf('Default jsonl.', ['jsonl', 'csv']) },
     required: ['version_id'],

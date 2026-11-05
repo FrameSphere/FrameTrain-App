@@ -56,7 +56,7 @@ describe('MCP-Manifest', () => {
       expect(schemaProblems(t.inputSchema, t.name)).toEqual([]);
       // Ein leerer Aufruf scheitert nur an fehlenden Pflichtfeldern, nie am Schema selbst.
       const errs = validateArgs(t.inputSchema, {});
-      expect(errs.every((e) => e.endsWith('fehlt'))).toBe(true);
+      expect(errs.every((e) => e.endsWith('missing'))).toBe(true);
     }
   });
 

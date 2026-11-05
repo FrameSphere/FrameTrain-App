@@ -8,7 +8,7 @@ import { findModel, listModels, listVersions, modelBrief, type ModelInfo } from 
 export const modelsTools: McpTool[] = [
   defineTool({
     name: 'models_list',
-    title: 'Modelle auflisten',
+    title: 'List models',
     description: 'Lists all models in the local FrameTrain library (imported or downloaded base models and Synapse canvas models) with id, name, type, plugin and size. Model ids are needed by most training, dataset and test tools.',
     async run() {
       const models = await listModels();
@@ -18,7 +18,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_info',
-    title: 'Modell-Details',
+    title: 'Model details',
     description: 'Returns details of one library model (paths, type, size) plus its trained versions (version ids, names, training metrics). Version ids are used by lab, tests, hosting and analysis tools.',
     properties: { model_id: S.str('Model id from models_list.') },
     required: ['model_id'],
@@ -32,7 +32,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_search_hf',
-    title: 'Hugging Face durchsuchen',
+    title: 'Search Hugging Face',
     description: 'Searches the Hugging Face Hub for models by free-text query. Returns repo ids, downloads, likes and pipeline tags. Use models_download_hf with a repo_id to add one to the library.',
     properties: {
       query: S.str('Search text, e.g. "distilbert sentiment" or "yolov8".'),
@@ -49,7 +49,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_hf_files',
-    title: 'Hugging-Face-Dateien',
+    title: 'Hugging Face files',
     description: 'Lists the files of a Hugging Face model repo with sizes, so you can judge download size and format before calling models_download_hf.',
     properties: { repo_id: S.str('Repo id, e.g. "distilbert-base-uncased".') },
     required: ['repo_id'],
@@ -62,7 +62,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_download_hf',
-    title: 'Modell herunterladen',
+    title: 'Download model',
     description: 'Downloads a model from Hugging Face into the local library. Runs in the background and returns a job_id immediately; poll system_job_status (the finished result contains the new model id).',
     properties: {
       repo_id: S.str('Hugging Face repo id.'),
@@ -82,7 +82,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_import_local',
-    title: 'Lokales Modell importieren',
+    title: 'Import local model',
     description: 'Imports a model folder from the local disk into the library (copied). The user confirms the source path in FrameTrain.',
     properties: {
       source_path: S.str('Absolute path of the model folder on this computer.'),
@@ -98,7 +98,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_rename',
-    title: 'Modell umbenennen',
+    title: 'Rename model',
     description: 'Renames a library model (display name only; id, files and versions stay unchanged).',
     properties: { model_id: S.str('Model id.'), new_name: S.str('New display name.') },
     required: ['model_id', 'new_name'],
@@ -111,7 +111,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_delete',
-    title: 'Modell loeschen',
+    title: 'Delete model',
     description: 'Permanently deletes a library model including its files. The user must confirm every call.',
     properties: { model_id: S.str('Model id.') },
     required: ['model_id'],
@@ -125,7 +125,7 @@ export const modelsTools: McpTool[] = [
   }),
   defineTool({
     name: 'models_version_delete',
-    title: 'Version loeschen',
+    title: 'Delete version',
     description: 'Permanently deletes one trained version of a model. The user must confirm every call.',
     properties: { version_id: S.str('Version id from models_info.') },
     required: ['version_id'],

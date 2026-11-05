@@ -14,7 +14,7 @@ async function datasetFiles(datasetId: string): Promise<DatasetFile[]> {
 export const datasetsTools: McpTool[] = [
   defineTool({
     name: 'datasets_list',
-    title: 'Datensaetze auflisten',
+    title: 'List datasets',
     description: 'Lists datasets in FrameTrain with id, name, owning model, type, file count and split info. Optionally only the datasets of one model (datasets belong to a model in FrameTrain).',
     properties: { model_id: S.str('Only datasets of this model.') },
     async run(args) {
@@ -28,7 +28,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_info',
-    title: 'Datensatz-Details',
+    title: 'Dataset details',
     description: 'Returns full details of a dataset: storage path, type, splits, warnings and (for YOLO datasets) the data.yaml contents.',
     properties: { dataset_id: S.str('Dataset id from datasets_list.') },
     required: ['dataset_id'],
@@ -41,7 +41,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_files',
-    title: 'Dateien eines Datensatzes',
+    title: 'Dataset files',
     description: 'Lists the files of a dataset (name, path, size, split). Paginated with offset/limit because image datasets can have many thousand files.',
     properties: {
       dataset_id: S.str('Dataset id.'),
@@ -64,7 +64,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_preview',
-    title: 'Datensatz-Vorschau',
+    title: 'Preview dataset',
     description: 'Shows the content of one dataset file: first rows of parquet/CSV/JSONL/text files, or a description for media files. Without file_path the first readable file is used. Only files belonging to the dataset can be read.',
     properties: {
       dataset_id: S.str('Dataset id.'),
@@ -89,7 +89,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_search_hf',
-    title: 'Hugging-Face-Datensaetze suchen',
+    title: 'Search Hugging Face datasets',
     description: 'Searches Hugging Face Hub datasets by query, optionally filtered by task (e.g. "text-classification") and language (e.g. "de").',
     properties: {
       query: S.str('Search text.'),
@@ -109,7 +109,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_download_hf',
-    title: 'Datensatz herunterladen',
+    title: 'Download dataset',
     description: 'Downloads a Hugging Face dataset and attaches it to a library model. Returns a job_id immediately; poll system_job_status (the result contains the new dataset id).',
     properties: {
       repo_id: S.str('Hugging Face dataset repo id, e.g. "imdb".'),
@@ -132,7 +132,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_import_local',
-    title: 'Lokalen Datensatz importieren',
+    title: 'Import local dataset',
     description: 'Imports a file or folder from the local disk as a dataset of a model. structured=true for already split folders (train/val/test, YOLO data.yaml). The user confirms the source path in FrameTrain.',
     properties: {
       source_path: S.str('Absolute path of the dataset file or folder.'),
@@ -154,7 +154,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_split',
-    title: 'Datensatz aufteilen',
+    title: 'Split dataset',
     description: 'Splits a dataset into train/val/test by ratio (ratios must sum to 1). Moves files on disk.',
     properties: {
       dataset_id: S.str('Dataset id.'),
@@ -175,7 +175,7 @@ export const datasetsTools: McpTool[] = [
   }),
   defineTool({
     name: 'datasets_delete',
-    title: 'Datensatz loeschen',
+    title: 'Delete dataset',
     description: 'Permanently deletes a dataset and its files. The user must confirm every call.',
     properties: { dataset_id: S.str('Dataset id.') },
     required: ['dataset_id'],

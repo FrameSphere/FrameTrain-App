@@ -107,7 +107,7 @@ async function saveGraph(snap: { nodes: Node[]; edges: Edge[]; modelId: string |
 export const synapseTools: McpTool[] = [
   defineTool({
     name: 'synapse_node_catalog',
-    title: 'Knoten-Katalog',
+    title: 'Node catalog',
     description: 'Lists the node types available in the Synapse Builder with category, description, input/output port ids and parameters (key, type, default, options, range). Filter by category (data, layer, activation, training, math, logic) or by types to keep the answer small. Read this before building or editing a graph.',
     properties: {
       category: S.enumOf('Only this category.', ['data', 'layer', 'activation', 'training', 'math', 'logic']),
@@ -130,7 +130,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_blueprints',
-    title: 'Vorlagen',
+    title: 'Blueprints',
     description: 'Lists ready-made Synapse graph templates (MLP, CNN, ResNet, ViT, U-Net, LSTM, Transformer, Mini-GPT, audio, video, VAE, GAN, diffusion, detector). Pass blueprint_id to get the full graph, which you can adapt and write with synapse_graph_set.',
     properties: { blueprint_id: S.str('Return the full graph of this template.') },
     async run(args) {
@@ -149,7 +149,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_graph_get',
-    title: 'Graph lesen',
+    title: 'Read graph',
     description: 'Returns the current Synapse Builder graph (nodes with type/params/position, edges with ports), the saved model it belongs to, whether there are unsaved changes, and whether the builder page is open. Works when the page is closed (last autosave).',
     properties: { include_validation: S.bool('Also run the shape validation. Default true.') },
     async run(args, ctx) {
@@ -164,7 +164,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_graph_set',
-    title: 'Graph ersetzen',
+    title: 'Replace graph',
     description: 'Replaces the whole Synapse graph with the given nodes and edges (same format as synapse_graph_get / synapse_blueprints). Missing positions are auto-laid-out. The open builder canvas updates immediately; otherwise the graph appears next time the page opens. Returns the shape validation of the new graph. keep_model=false detaches the graph from the currently loaded saved model.',
     properties: {
       nodes: S.arr('Nodes.', COMPACT_NODE),
@@ -194,7 +194,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_graph_edit',
-    title: 'Graph bearbeiten',
+    title: 'Edit graph',
     description: 'Applies a list of edit operations to the current Synapse graph in order (add_node, remove_node, set_param, set_label, move_node, add_edge, remove_edge) — the same operations the built-in Synapse agent uses. Invalid ports fall back to the first port. Stops at the first failing operation unless continue_on_error is true. Returns per-op results and the validation of the edited graph.',
     properties: {
       ops: S.arr('Operations to apply.', EDIT_OP, { minItems: 1, maxItems: 200 }),
@@ -233,7 +233,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_validate',
-    title: 'Graph pruefen',
+    title: 'Validate graph',
     description: 'Validates the current Synapse graph: connectivity, port types and tensor shapes (static check), and with runtime=true also builds the network in the Python shape service (real tensor shapes, parameter count, memory). Returns errors with the affected node ids and fix suggestions.',
     properties: { runtime: S.bool('Also run the Python shape service. Default true.') },
     async run(args, ctx) {
@@ -254,7 +254,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_generate_code',
-    title: 'PyTorch-Code erzeugen',
+    title: 'Generate PyTorch code',
     description: 'Generates PyTorch code from the current Synapse graph: either just the nn.Module class (part "model") or the full standalone training script (part "script").',
     properties: {
       part: S.enumOf('Which code. Default "model".', ['model', 'script']),
@@ -274,7 +274,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_models_list',
-    title: 'Gespeicherte Synapse-Modelle',
+    title: 'Saved Synapse models',
     description: 'Lists saved Synapse (canvas) models with id, name, task, number of classes and whether trained weights exist.',
     async run(_args, ctx) {
       const list = await call<unknown[]>('list_canvas_models_with_pt', { userId: userOf(ctx) });
@@ -283,7 +283,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_open_model',
-    title: 'Synapse-Modell laden',
+    title: 'Open Synapse model',
     description: 'Loads a saved Synapse model design into the builder (replacing the current graph). Unsaved changes of the current graph are lost unless saved first with synapse_save.',
     properties: { model_id: S.str('Canvas model id from synapse_models_list.') },
     required: ['model_id'],
@@ -304,7 +304,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_save',
-    title: 'Als Modell speichern',
+    title: 'Save as model',
     description: 'Saves the current Synapse graph as a model in the library (graph, generated PyTorch code and IR). If the graph belongs to a saved model it is overwritten, unless name is given — then a new model is created. The model id can be used for synapse_train and the inference tab.',
     properties: { name: S.str('Create a new model with this name (instead of updating the loaded one).') },
     approval: 'once',
@@ -320,7 +320,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_train',
-    title: 'Synapse-Graph trainieren',
+    title: 'Train Synapse graph',
     description: 'Trains the current Synapse graph (runtime IR) on a dataset. The graph must validate; graphs with a data loader node need a dataset_id of the matching kind. If the builder page is open, training runs there with live charts. Uses GPU/CPU for a long time — the user confirms each start. Follow progress with training_status (or synapse_train_status). Save the graph first (synapse_save) so the trained weights are attached to a model.',
     properties: {
       dataset_id: S.str('Dataset id (required when the graph has a loader node).'),
@@ -372,7 +372,7 @@ export const synapseTools: McpTool[] = [
   }),
   defineTool({
     name: 'synapse_train_status',
-    title: 'Synapse-Trainingsstatus',
+    title: 'Synapse training status',
     description: 'Status, epoch losses and recent log lines of a Synapse training job (same data as training_status).',
     properties: { job_id: S.str('Training job id.') },
     async run(args) {

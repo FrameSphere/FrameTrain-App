@@ -127,7 +127,7 @@ export const S = {
 
 export function reqStr(args: ToolArgs, key: string): string {
   const v = args[key];
-  if (typeof v !== 'string' || v.trim() === '') throw new ToolArgError(`Argument "${key}" fehlt oder ist leer.`);
+  if (typeof v !== 'string' || v.trim() === '') throw new ToolArgError(`Argument "${key}" is missing or empty.`);
   return v;
 }
 
@@ -143,7 +143,7 @@ export function optNum(args: ToolArgs, key: string, fallback?: number): number |
 
 export function reqNum(args: ToolArgs, key: string): number {
   const v = optNum(args, key);
-  if (v === undefined) throw new ToolArgError(`Argument "${key}" muss eine Zahl sein.`);
+  if (v === undefined) throw new ToolArgError(`Argument "${key}" must be a number.`);
   return v;
 }
 
@@ -156,7 +156,7 @@ export function strArr(args: ToolArgs, key: string, required = false): string[] 
   const v = args[key];
   if (v === undefined && !required) return [];
   if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
-    throw new ToolArgError(`Argument "${key}" muss eine Liste von Texten sein.`);
+    throw new ToolArgError(`Argument "${key}" must be a list of strings.`);
   }
   if (required && v.length === 0) throw new ToolArgError(`Argument "${key}" darf nicht leer sein.`);
   return v as string[];
@@ -183,7 +183,7 @@ export function validateArgs(schema: JsonSchema, value: unknown, path = 'args'):
         : t === 'number' ? typeof value === 'number' && Number.isFinite(value)
           : t === actual;
     if (!matches) {
-      errors.push(`${path}: erwartet ${t}, bekommen ${actual}`);
+      errors.push(`${path}: expected ${t}, got ${actual}`);
       return errors;
     }
   }
@@ -206,14 +206,14 @@ export function validateArgs(schema: JsonSchema, value: unknown, path = 'args'):
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
     for (const key of schema.required ?? []) {
-      if (obj[key] === undefined) errors.push(`${path}.${key}: fehlt`);
+      if (obj[key] === undefined) errors.push(`${path}.${key}: missing`);
     }
     const props = schema.properties ?? {};
     for (const [key, v] of Object.entries(obj)) {
       if (v === undefined) continue;
       const sub = props[key];
       if (sub) errors.push(...validateArgs(sub, v, `${path}.${key}`));
-      else if (schema.additionalProperties === false) errors.push(`${path}.${key}: unbekanntes Argument`);
+      else if (schema.additionalProperties === false) errors.push(`${path}.${key}: unknown argument`);
       else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
         errors.push(...validateArgs(schema.additionalProperties, v, `${path}.${key}`));
       }

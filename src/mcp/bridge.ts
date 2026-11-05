@@ -18,7 +18,7 @@ import type {
 import { errorText, fail, ToolArgError, ToolFailure, validateArgs } from './util';
 import { announceChange } from './tools/common';
 
-export const MSG_DENIED = 'Der Nutzer hat die Aktion in FrameTrain abgelehnt.';
+export const MSG_DENIED = 'The user declined this action in FrameTrain.';
 export const MSG_APPROVAL_TIMEOUT = 'Keine Freigabe in FrameTrain erteilt (Zeitlimit). Bitte den Nutzer bitten, die App zu oeffnen und erneut versuchen.';
 export const MSG_NOT_SIGNED_IN = 'In FrameTrain ist niemand angemeldet. Bitte den Nutzer bitten, sich in der App anzumelden.';
 /**

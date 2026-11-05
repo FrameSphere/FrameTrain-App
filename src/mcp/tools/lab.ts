@@ -7,7 +7,7 @@ import { runAsJob } from './common';
 export const labTools: McpTool[] = [
   defineTool({
     name: 'lab_server_start',
-    title: 'Labor-Server starten',
+    title: 'Start lab server',
     description: 'Loads a trained model version into the Laboratory model server (one at a time) so lab_infer can run predictions. Loading can take a while; returns a job_id if it takes longer than ~20 s.',
     properties: { version_id: S.str('Trained model version id.') },
     required: ['version_id'],
@@ -23,7 +23,7 @@ export const labTools: McpTool[] = [
   }),
   defineTool({
     name: 'lab_server_status',
-    title: 'Labor-Server-Status',
+    title: 'Lab server status',
     description: 'Returns whether a Laboratory model server is running, which version it serves and its task/modality.',
     async run() {
       const status = await call<Record<string, unknown>>('lab_get_server_status');
@@ -32,7 +32,7 @@ export const labTools: McpTool[] = [
   }),
   defineTool({
     name: 'lab_server_stop',
-    title: 'Labor-Server stoppen',
+    title: 'Stop lab server',
     description: 'Stops the Laboratory model server and frees its memory.',
     approval: 'once',
     async run() {
@@ -42,7 +42,7 @@ export const labTools: McpTool[] = [
   }),
   defineTool({
     name: 'lab_infer',
-    title: 'Einzel-Inferenz',
+    title: 'Single inference',
     description: 'Runs one prediction on the loaded Laboratory model: text input for text models, or file_path (image/audio/video inside FrameTrain data folders) for media models; question for vision-language models; start/end seconds for video clips. Start the server first with lab_server_start.',
     properties: {
       text: S.str('Text input (text models, LLM prompt).'),
@@ -64,7 +64,7 @@ export const labTools: McpTool[] = [
   }),
   defineTool({
     name: 'lab_sessions',
-    title: 'Labor-Sitzungen',
+    title: 'Lab sessions',
     description: 'Lists saved Laboratory sessions (manual evaluation sessions).',
     async run() {
       const sessions = await call<unknown[]>('lab_get_sessions');
@@ -73,7 +73,7 @@ export const labTools: McpTool[] = [
   }),
   defineTool({
     name: 'lab_stats',
-    title: 'Labor-Statistik',
+    title: 'Lab statistics',
     description: 'Returns aggregate Laboratory statistics (evaluated samples, corrections).',
     async run() {
       const stats = await call<Record<string, unknown>>('lab_get_stats');

@@ -62,7 +62,7 @@ function jobBrief(j: TrainingJob | null | undefined) {
 export const trainingTools: McpTool[] = [
   defineTool({
     name: 'training_presets',
-    title: 'Trainings-Presets',
+    title: 'Training presets',
     description: 'Returns the built-in training presets (id, name, description, full config). Good starting points for training_start.config.',
     async run() {
       const presets = await call<{ id: string; name: string }[]>('get_training_presets');
@@ -71,7 +71,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_check_requirements',
-    title: 'Voraussetzungen pruefen',
+    title: 'Check requirements',
     description: 'Checks whether the Python ML stack is ready for training (Python, PyTorch, CUDA/MPS, transformers, peft) and returns versions.',
     async run() {
       const r = await call<Record<string, unknown>>('check_training_requirements');
@@ -80,7 +80,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_estimate_resources',
-    title: 'Speicherbedarf schaetzen',
+    title: 'Estimate memory',
     description: 'Estimates peak RAM/VRAM for training a model with a config (weights, gradients, optimizer, activations) and compares it with system RAM. Verdict: fits, tight, exceeds or unknown. Use before training_start to choose batch size, LoRA or precision.',
     properties: { model_id: S.str('Model id.'), config: TRAINING_CONFIG_SCHEMA },
     required: ['model_id'],
@@ -112,7 +112,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_rate_config',
-    title: 'Konfiguration bewerten',
+    title: 'Rate configuration',
     description: 'Rates a training config with FrameTrain\'s rule set (score plus warnings and hints for learning rate, batch size, epochs, etc.).',
     properties: { config: TRAINING_CONFIG_SCHEMA },
     required: ['config'],
@@ -123,7 +123,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_start',
-    title: 'Training starten',
+    title: 'Start training',
     description: 'Starts fine-tuning a library model (or continuing from one of its versions) on a dataset. Uses the GPU/CPU for a long time; the user confirms every start. Returns the training job id immediately; follow it with training_status. Only one training runs at a time.',
     properties: {
       model_id: S.str('Model id.'),
@@ -147,7 +147,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_status',
-    title: 'Trainingsstatus',
+    title: 'Training status',
     description: 'Returns the current or a specific training job: status, epoch/step progress, latest losses and recent log lines. Without job_id it reports the currently running training (also Synapse and Dev Train runs).',
     properties: {
       job_id: S.str('Training job id. Default: current training.'),
@@ -172,7 +172,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_stop',
-    title: 'Training stoppen',
+    title: 'Stop training',
     description: 'Stops the currently running (regular) training. The user confirms. Dev Train runs are stopped with devtrain_stop.',
     approval: 'always',
     async run() {
@@ -183,7 +183,7 @@ export const trainingTools: McpTool[] = [
   }),
   defineTool({
     name: 'training_history',
-    title: 'Trainingsverlauf',
+    title: 'Training history',
     description: 'Lists past training jobs (newest first) with status, model, dataset, final progress and errors.',
     properties: { limit: S.int('Maximum entries (1-100). Default 20.', { minimum: 1, maximum: 100 }) },
     async run(args) {

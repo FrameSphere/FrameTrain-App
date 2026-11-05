@@ -79,11 +79,11 @@ describe('executeCall', () => {
     expect((await executeCall(call('nope'), deps())).isError).toBe(true);
     const bad = await executeCall(call('models_list', { word: 3 }), deps());
     expect(bad.isError).toBe(true);
-    expect(bad.content[0].text).toMatch(/word: erwartet string/);
+    expect(bad.content[0].text).toMatch(/word: expected string/);
     const extra = await executeCall(call('models_list', { other: 1 }), deps());
-    expect(extra.content[0].text).toMatch(/unbekanntes Argument/);
+    expect(extra.content[0].text).toMatch(/unknown argument/);
     const missing = await executeCall(call('training_start', {}), deps());
-    expect(missing.content[0].text).toMatch(/model_id: fehlt/);
+    expect(missing.content[0].text).toMatch(/model_id: missing/);
   });
 
   it('ohne angemeldeten Nutzer laufen nur system-Werkzeuge', async () => {

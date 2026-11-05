@@ -18,6 +18,27 @@ async function safe<T>(fn: () => Promise<T>): Promise<T | { error: string }> {
   try { return await fn(); } catch (e) { return { error: errorText(e) }; }
 }
 
+/** Python-Pruefungen starten einen Interpreter (bis ~13 s beim ersten Mal).
+ *  Ergebnis 10 min merken; system_info wartet hoechstens INFO_WAIT_MS darauf. */
+const PROBE_TTL_MS = 10 * 60 * 1000;
+export const INFO_WAIT_MS = 4000;
+const probes = new Map<string, { at: number; value: Promise<unknown> }>();
+
+export function cachedProbe(command: string, now = Date.now()): Promise<unknown> {
+  const hit = probes.get(command);
+  if (hit && now - hit.at < PROBE_TTL_MS) return hit.value;
+  const value = safe(() => call<unknown>(command));
+  probes.set(command, { at: now, value });
+  return value;
+}
+
+export function resetProbeCache(): void { probes.clear(); }
+
+const PENDING = Symbol('pending');
+function withinWait<T>(p: Promise<T>, ms: number): Promise<T | typeof PENDING> {
+  return Promise.race([p, new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), ms))]);
+}
+
 export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_ping',
@@ -32,27 +53,33 @@ export const systemTools: McpTool[] = [
   }),
   defineTool({
     name: 'system_info',
-    title: 'Systeminfo',
+    title: 'System info',
     description: 'Returns app version, system RAM, Python interpreter and the ML stack status (PyTorch, CUDA/MPS GPU availability, transformers, peft). Call this before planning a training run to know what the machine can do.',
     requiresUser: false,
     async run(_args, ctx) {
-      const [version, ram, python, requirements] = await Promise.all([
+      const [version, ram, pythonRaw, requirementsRaw] = await Promise.all([
         appVersion(),
         safe(() => call<number>('get_system_ram_gb')),
-        safe(() => call<unknown>('get_python_info')),
-        safe(() => call<Record<string, unknown>>('check_training_requirements')),
+        withinWait(cachedProbe('get_python_info'), INFO_WAIT_MS),
+        withinWait(cachedProbe('check_training_requirements'), INFO_WAIT_MS),
       ]);
+      const stillChecking = pythonRaw === PENDING || requirementsRaw === PENDING;
+      const python = pythonRaw === PENDING ? { status: 'checking' } : pythonRaw;
+      const requirements = requirementsRaw === PENDING ? { status: 'checking' } : requirementsRaw;
       const data = { version, signed_in: !!ctx.userId, system_ram_gb: ram, python, requirements };
       const req = requirements as Record<string, unknown>;
-      const gpu = req && !('error' in req)
-        ? (req.cuda_available ? 'CUDA GPU' : req.mps_available ? 'Apple MPS GPU' : 'CPU only')
-        : 'unknown';
-      return ok(`FrameTrain ${version ?? '?'}, RAM ${typeof ram === 'number' ? ram.toFixed(1) + ' GB' : '?'}, compute: ${gpu}.`, data);
+      const gpu = stillChecking
+        ? 'still being checked'
+        : req && !('error' in req)
+          ? (req.cuda_available ? 'CUDA GPU' : req.mps_available ? 'Apple MPS GPU' : 'CPU only')
+          : 'unknown';
+      const hint = stillChecking ? ' The Python/GPU check is still running; call system_info again in ~10 s for the full ML stack status.' : '';
+      return ok(`FrameTrain ${version ?? '?'}, RAM ${typeof ram === 'number' ? ram.toFixed(1) + ' GB' : '?'}, compute: ${gpu}.${hint}`, data);
     },
   }),
   defineTool({
     name: 'system_capabilities',
-    title: 'Faehigkeiten',
+    title: 'Capabilities',
     description: 'Describes what FrameTrain can do through these tools (one entry per domain) and lists the installed task plugins (model families/tasks the app can train). Use it to orient yourself before a multi-step workflow.',
     requiresUser: false,
     async run() {
@@ -76,7 +103,7 @@ export const systemTools: McpTool[] = [
   }),
   defineTool({
     name: 'system_job_status',
-    title: 'Auftragsstatus',
+    title: 'Job status',
     description: 'Returns the state of a background job (download, export, web fetch, ...) that another tool started and returned as job_id. Optionally waits up to wait_seconds (max 45) for it to finish. Training runs have their own training_status / devtrain_status tools.',
     properties: {
       job_id: S.str('The job_id returned by the tool that started the job.'),
@@ -97,7 +124,7 @@ export const systemTools: McpTool[] = [
   }),
   defineTool({
     name: 'system_jobs_list',
-    title: 'Auftraege',
+    title: 'Jobs',
     description: 'Lists background jobs started by tools in this app session (newest first) with their state.',
     requiresUser: false,
     async run() {

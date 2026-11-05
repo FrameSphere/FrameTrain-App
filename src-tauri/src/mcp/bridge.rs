@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MANIFEST_WAIT: Duration = Duration::from_secs(15);
-pub const TIMEOUT_TEXT: &str = "FrameTrain hat nicht rechtzeitig geantwortet";
+pub const TIMEOUT_TEXT: &str = "FrameTrain did not respond in time";
 pub const PING_TOOL: &str = "system_ping";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -63,7 +63,7 @@ pub fn ping_result(version: &str, ready: bool, tool_count: usize) -> Value {
     let text = if ready {
         format!("FrameTrain {} is running with {} tools available.", version, tool_count)
     } else {
-        format!("FrameTrain {} is running, but the app is still starting (App startet noch). Try tools/list again in a few seconds.", version)
+        format!("FrameTrain {} is running, but the app is still starting. Try tools/list again in a few seconds.", version)
     };
     json!({
         "content": [{ "type": "text", "text": text }],
@@ -208,7 +208,7 @@ impl Bridge {
             return r;
         }
         let result = if !self.has_manifest() {
-            error_result("FrameTrain startet noch (App startet noch). Bitte gleich noch einmal versuchen.")
+            error_result("FrameTrain is still starting. Please try again in a few seconds.")
         } else if !self.manifest_has(tool) {
             error_result(&format!("Unbekanntes Werkzeug: {}", tool))
         } else {
@@ -301,7 +301,7 @@ mod tests {
         let r = b.call(PING_TOOL, json!({}), Source::Local, client(), "9.9.9", Duration::from_millis(50), || {}, |_| panic!("kein Event fuer ping"));
         assert!(r.get("isError").is_none());
         assert_eq!(r["structuredContent"]["ready"], false);
-        assert!(r["content"][0]["text"].as_str().unwrap().contains("App startet noch"));
+        assert!(r["content"][0]["text"].as_str().unwrap().contains("still starting"));
         assert_eq!(b.tools()[0]["name"], PING_TOOL);
     }
 

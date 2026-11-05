@@ -124,7 +124,7 @@ impl Proxy {
                             cfg = config::read_from(&config::config_path());
                             continue;
                         }
-                        401 => return Err("FrameTrain hat den Token abgelehnt. In Einstellungen > KI-Verbindungen erneut 'Mit Claude Desktop verbinden'.".into()),
+                        401 => return Err("FrameTrain rejected the token. In FrameTrain open Settings > AI connections and click 'Connect to Claude Desktop' again.".into()),
                         s => {
                             let body = resp.text().await.unwrap_or_default();
                             if let Ok(v) = serde_json::from_str::<Value>(&body) {

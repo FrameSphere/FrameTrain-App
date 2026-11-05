@@ -60,7 +60,7 @@ async function resolveRun(args: ToolArgs, ctx: McpCallContext) {
 export const devtrainTools: McpTool[] = [
   defineTool({
     name: 'devtrain_context',
-    title: 'Dev-Train-Kontext',
+    title: 'Dev Train context',
     description: `Describes what a Dev Train script will see for a model (and dataset): the environment variables with concrete paths, a description of the model files, dataset layout and installed Python packages, and the stdout protocol. Read this before writing a script. Protocol: ${DEVTRAIN_PROTOCOL}`,
     properties: {
       model_id: S.str('Model id. Default: model selected in the Dev Train panel.'),
@@ -88,7 +88,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_script_get',
-    title: 'Skript lesen',
+    title: 'Read script',
     description: 'Returns the current Dev Train script (from the open editor or the pending draft), or a saved script from the library by script_id.',
     properties: { script_id: S.str('Id from devtrain_scripts_list. Default: the current editor script.') },
     async run(args, ctx) {
@@ -106,7 +106,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_script_set',
-    title: 'Skript schreiben',
+    title: 'Write script',
     description: 'Replaces the Dev Train script. The open editor updates immediately; if the panel is closed the script is kept as a draft and loaded when the panel opens. save_name additionally stores it in the script library.',
     properties: {
       script: S.str('Full Python script.'),
@@ -126,7 +126,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_scripts_list',
-    title: 'Skript-Bibliothek',
+    title: 'Script library',
     description: 'Lists saved Dev Train scripts (id, name, saved date, length).',
     async run(_args, ctx) {
       const list = listSavedDevScripts(userOf(ctx)).map((s) => ({ id: s.id, name: s.name, saved_at: s.savedAt, lines: s.script.split('\n').length }));
@@ -135,7 +135,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_start',
-    title: 'Dev Train starten',
+    title: 'Start Dev Train',
     description: `Runs a Dev Train script (the given one, else the current editor script) for a model and dataset. Long-running; the user confirms each start. Returns the job id immediately; follow with devtrain_status. ${DEVTRAIN_PROTOCOL}`,
     properties: {
       model_id: S.str('Model id. Default: model selected in the panel.'),
@@ -158,7 +158,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_status',
-    title: 'Dev-Train-Status',
+    title: 'Dev Train status',
     description: 'Status, progress events and the last stdout/stderr lines of a Dev Train run (default: the current one). Use the log lines to debug a failing script, then fix it with devtrain_script_set and start again.',
     properties: {
       job_id: S.str('Job id from devtrain_start. Default: current training.'),
@@ -174,7 +174,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_stop',
-    title: 'Dev Train stoppen',
+    title: 'Stop Dev Train',
     description: 'Stops the running Dev Train script; output written so far stays in devtrain_status.',
     approval: 'always',
     async run() {
@@ -185,7 +185,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_test_start',
-    title: 'Dev Test starten',
+    title: 'Start Dev Test',
     description: 'Runs a Dev Test script (evaluation/inference script, same environment variables as Dev Train) against a model or version and dataset. Returns immediately; poll devtrain_test_status for output.',
     properties: {
       script: S.str('Python test script.'),
@@ -214,7 +214,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_test_status',
-    title: 'Dev-Test-Status',
+    title: 'Dev Test status',
     description: 'Output lines and completion state of the latest (or given) Dev Test run.',
     properties: { job_id: S.str('Dev Test job id. Default: latest.'), log_lines: S.int('Default 80.', { minimum: 0, maximum: 200 }) },
     async run(args) {
@@ -226,7 +226,7 @@ export const devtrainTools: McpTool[] = [
   }),
   defineTool({
     name: 'devtrain_test_stop',
-    title: 'Dev Test stoppen',
+    title: 'Stop Dev Test',
     description: 'Stops the running Dev Test script started with devtrain_test_start.',
     approval: 'once',
     async run() {

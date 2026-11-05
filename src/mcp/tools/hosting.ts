@@ -8,7 +8,7 @@ import { findVersion } from './lookup';
 export const hostingTools: McpTool[] = [
   defineTool({
     name: 'hosting_list',
-    title: 'Gehostete Modelle',
+    title: 'Hosted models',
     description: 'Lists models registered for local hosting with status (loaded, loading, stopped, error), API name, modality, classes and whether busy.',
     async run() {
       const list = await call<{ id: string; name: string; status: unknown }[]>('hosting_list');
@@ -17,7 +17,7 @@ export const hostingTools: McpTool[] = [
   }),
   defineTool({
     name: 'hosting_load',
-    title: 'Modell bereitstellen',
+    title: 'Host model',
     description: 'Loads a trained version into local hosting so it can answer hosting_infer requests (and the local hosting API). Uses RAM/VRAM while loaded.',
     properties: {
       version_id: S.str('Trained version id.'),
@@ -40,7 +40,7 @@ export const hostingTools: McpTool[] = [
   }),
   defineTool({
     name: 'hosting_unload',
-    title: 'Modell entladen',
+    title: 'Unload model',
     description: 'Unloads a hosted model (frees memory). It stays registered and can be loaded again.',
     properties: { id: S.str('Hosted model id from hosting_list.') },
     required: ['id'],
@@ -52,7 +52,7 @@ export const hostingTools: McpTool[] = [
   }),
   defineTool({
     name: 'hosting_infer',
-    title: 'Gehostetes Modell abfragen',
+    title: 'Query hosted model',
     description: 'Sends one request to a loaded hosted model: text (or a chat history in messages for LLMs), or file_path for image/audio/video models, optional question for vision-language models.',
     properties: {
       id: S.str('Hosted model id.'),

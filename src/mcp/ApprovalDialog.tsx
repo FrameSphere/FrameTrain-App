@@ -26,6 +26,13 @@ export function formatArgs(args: Record<string, unknown>, max = 400): { key: str
   });
 }
 
+/** Werkzeugtitel in der UI-Sprache; das Manifest selbst bleibt englisch (fuer die KI). */
+export function toolTitle(t: (key: string) => string, name: string, fallback: string): string {
+  const key = `mcp.tools.titles.${name}`;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+}
+
 export default function ApprovalDialog() {
   const { t } = useLanguage();
   const [request, setRequest] = useState<ApprovalRequest | null>(null);
@@ -79,7 +86,7 @@ export default function ApprovalDialog() {
 
             <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
               <div className="text-xs uppercase tracking-wide text-gray-500">{t('mcp.tools.approval.action')}</div>
-              <div className="text-white font-medium">{request.tool.title}</div>
+              <div className="text-white font-medium">{toolTitle(t, request.tool.name, request.tool.title)}</div>
               <code className="text-xs text-gray-400">{request.tool.name}</code>
             </div>
 
