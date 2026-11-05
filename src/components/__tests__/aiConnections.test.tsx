@@ -115,6 +115,45 @@ describe('Einstellungs-Tab KI-Verbindungen', { timeout: 15000 }, () => {
     expect(screen.getByText('Erneut eintragen')).toBeInTheDocument();
   });
 
+  it('Claude Desktop laeuft noch: wartet auf Beenden, traegt dann selbst ein', async () => {
+    let running = true;
+    let connects = 0;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'mcp_get_status') return Promise.resolve(status());
+      if (cmd === 'mcp_claude_desktop_running') return Promise.resolve(running);
+      if (cmd === 'mcp_connect_claude_desktop') {
+        connects += 1;
+        if (running) return Promise.reject('CLAUDE_RUNNING');
+        return Promise.resolve({ configPath: '/x/c.json', backupPath: null,
+          status: status({ claudeDesktop: { configPath: '/x', installed: true, configured: true } }) });
+      }
+      return Promise.resolve(null);
+    });
+    wrap(<AIConnectionsSettings approvalsApi={null} />);
+    fireEvent.click(await screen.findByText('Mit Claude Desktop verbinden'));
+    expect(await screen.findByText(/läuft noch und würde den Eintrag/)).toBeInTheDocument();
+    expect(screen.getByText('Mit Claude Desktop verbinden').closest('button')).toBeDisabled();
+    expect(connects).toBe(1);
+    running = false;
+    expect(await screen.findByText(/Öffne jetzt Claude Desktop/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(connects).toBe(2);
+    expect(screen.queryByText(/läuft noch und würde den Eintrag/)).not.toBeInTheDocument();
+  });
+
+  it('Warten auf Claude Desktop laesst sich abbrechen', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'mcp_get_status') return Promise.resolve(status());
+      if (cmd === 'mcp_claude_desktop_running') return Promise.resolve(true);
+      if (cmd === 'mcp_connect_claude_desktop') return Promise.reject('CLAUDE_RUNNING');
+      return Promise.resolve(null);
+    });
+    wrap(<AIConnectionsSettings approvalsApi={null} />);
+    fireEvent.click(await screen.findByText('Mit Claude Desktop verbinden'));
+    fireEvent.click(await screen.findByText('Abbrechen'));
+    expect(screen.queryByText(/läuft noch und würde den Eintrag/)).not.toBeInTheDocument();
+    expect(screen.getByText('Mit Claude Desktop verbinden').closest('button')).not.toBeDisabled();
+  });
+
   it('Claude Desktop fehlt: Knopf aus, Hinweis da; Fehlercode wird uebersetzt', async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'mcp_get_status') return Promise.resolve(status({ claudeDesktop: { configPath: null, installed: false, configured: false } }));

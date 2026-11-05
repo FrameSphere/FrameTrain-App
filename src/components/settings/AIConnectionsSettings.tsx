@@ -51,6 +51,11 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
+type ClaudePhase = 'idle' | 'waitQuit' | 'reopen' | 'done' | 'lost';
+const CLAUDE_POLL_MS = 1500;
+/** Claude Desktop schreibt die Konfiguration kurz nach dem Start; erst danach pruefen. */
+const CLAUDE_SETTLE_MS = 5000;
+
 function StatusLine({ ok, text }: { ok: boolean; text: string }) {
   return (
     <div className={`flex items-center gap-2 text-xs py-2 ${ok ? 'text-emerald-300' : 'text-amber-300'}`}>
@@ -81,6 +86,8 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectInfo, setConnectInfo] = useState<{ ok: boolean; text: string } | null>(null);
+  // Claude Desktop ueberschreibt seine Konfiguration beim Beenden: erst eintragen, wenn es zu ist.
+  const [claudePhase, setClaudePhase] = useState<ClaudePhase>('idle');
   const [remote, setRemote] = useState<RemoteStatus | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(false);
@@ -161,12 +168,13 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
     try { setStatus(await invoke<McpStatus>('mcp_rotate_token')); } catch (e) { setError(String(e)); }
   };
 
-  const connectClaude = async () => {
+  const connectClaude = useCallback(async () => {
     setConnecting(true);
     setConnectInfo(null);
     try {
       const r = await invoke<{ configPath: string; backupPath: string | null; status: McpStatus }>('mcp_connect_claude_desktop');
       setStatus(r.status);
+      setClaudePhase('reopen');
       setConnectInfo({
         ok: true,
         text: r.backupPath
@@ -174,12 +182,49 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
           : t('mcp.settings.claudeDesktop.done'),
       });
     } catch (e) {
-      const key = connectErrorKey(String(e));
-      setConnectInfo({ ok: false, text: key ? t(key) : t('mcp.settings.claudeDesktop.failed', { error: String(e) }) });
+      const err = String(e);
+      if (err.startsWith('CLAUDE_RUNNING')) {
+        setClaudePhase('waitQuit');
+        return;
+      }
+      setClaudePhase('idle');
+      const key = connectErrorKey(err);
+      setConnectInfo({ ok: false, text: key ? t(key) : t('mcp.settings.claudeDesktop.failed', { error: err }) });
     } finally {
       setConnecting(false);
     }
-  };
+  }, [t]);
+
+  // Warten, bis Claude Desktop beendet ist, dann eintragen; danach pruefen, ob der Eintrag den Start uebersteht.
+  useEffect(() => {
+    if (claudePhase !== 'waitQuit' && claudePhase !== 'reopen') return;
+    let cancelled = false;
+    let seenRunningAt: number | null = null;
+    const tick = async () => {
+      let running: boolean;
+      try { running = await invoke<boolean>('mcp_claude_desktop_running'); } catch { return; }
+      if (cancelled) return;
+      if (claudePhase === 'waitQuit') {
+        if (!running) void connectClaude();
+        return;
+      }
+      if (!running) { seenRunningAt = null; return; }
+      seenRunningAt ??= Date.now();
+      if (Date.now() - seenRunningAt < CLAUDE_SETTLE_MS) return;
+      try {
+        const s = await invoke<McpStatus>('mcp_get_status');
+        if (cancelled) return;
+        setStatus(s);
+        setClaudePhase(s.claudeDesktop.configured ? 'done' : 'lost');
+        setConnectInfo(s.claudeDesktop.configured
+          ? { ok: true, text: t('mcp.settings.claudeDesktop.verified') }
+          : { ok: false, text: t('mcp.settings.claudeDesktop.lost') });
+      } catch { /* naechster Versuch */ }
+    };
+    const id = setInterval(() => void tick(), CLAUDE_POLL_MS);
+    void tick();
+    return () => { cancelled = true; clearInterval(id); };
+  }, [claudePhase, connectClaude, t]);
 
   const disconnectRemote = async (id: string) => {
     try { await invoke('mcp_remote_disconnect', { connectionId: id }); } catch (e) { setRemoteError(String(e)); }
@@ -248,7 +293,7 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
         <Row label={t('mcp.settings.claudeDesktop.title')}
           hint={status.claudeDesktop.configured ? t('mcp.settings.claudeDesktop.configured') : t('mcp.settings.claudeDesktop.hint')}>
           {status.claudeDesktop.configured && <CheckCircle2 className="w-4 h-4 text-emerald-400" aria-label={t('mcp.settings.claudeDesktop.configured')} />}
-          <button onClick={() => void connectClaude()} disabled={connecting || !status.claudeDesktop.installed}
+          <button onClick={() => void connectClaude()} disabled={connecting || claudePhase === 'waitQuit' || !status.claudeDesktop.installed}
             className="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed text-sm text-white px-3 py-1.5">
             {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Laptop className="w-4 h-4" />}
             {status.claudeDesktop.configured ? t('mcp.settings.claudeDesktop.reconnect') : t('mcp.settings.claudeDesktop.connect')}
@@ -256,7 +301,16 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
         </Row>
         {!status.claudeDesktop.installed && <p className="text-xs text-gray-500 pb-2">{t('mcp.settings.claudeDesktop.notFound')}</p>}
         {status.exeTranslocated && <StatusLine ok={false} text={t('mcp.settings.claudeDesktop.translocated')} />}
-        {connectInfo && <StatusLine ok={connectInfo.ok} text={connectInfo.text} />}
+        {claudePhase === 'waitQuit' && (
+          <div className="flex items-center gap-2 text-xs py-2 text-amber-300" role="status">
+            <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+            <span className="flex-1">{t('mcp.settings.claudeDesktop.quitFirst')}</span>
+            <button onClick={() => setClaudePhase('idle')} className="text-gray-400 hover:text-white underline">
+              {t('mcp.settings.claudeDesktop.cancelWait')}
+            </button>
+          </div>
+        )}
+        {claudePhase !== 'waitQuit' && connectInfo && <StatusLine ok={connectInfo.ok} text={connectInfo.text} />}
         <Snippet title={t('mcp.settings.claudeCode.title')} copyLabel={t('mcp.settings.copy')}
           text={claudeCodeCommand(cfg.port, cfg.token)} shown={claudeCodeCommand(cfg.port, shownToken)} />
         <Snippet title={t('mcp.settings.cursor.title')} copyLabel={t('mcp.settings.copy')}

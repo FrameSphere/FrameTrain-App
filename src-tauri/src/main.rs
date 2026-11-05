@@ -400,6 +400,7 @@ fn main() {
             mcp::mcp_save_settings,
             mcp::mcp_rotate_token,
             mcp::mcp_connect_claude_desktop,
+            mcp::mcp_claude_desktop_running,
             mcp::mcp_remote_status,
             mcp::mcp_remote_disconnect,
         ])

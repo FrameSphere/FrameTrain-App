@@ -4742,12 +4742,16 @@
         "configured": "Added. After restarting Claude Desktop, FrameTrain is available there.",
         "connect": "Connect to Claude Desktop",
         "reconnect": "Add again",
-        "done": "Added. Please quit and reopen Claude Desktop.",
-        "doneBackup": "Added, backup saved at {path}. Please quit and reopen Claude Desktop.",
+        "done": "Added. Now open Claude Desktop; FrameTrain will appear among its tools.",
+        "doneBackup": "Added, backup at {path}. Now open Claude Desktop; FrameTrain will appear among its tools.",
         "failed": "Could not add FrameTrain: {error}",
         "notFound": "Claude Desktop was not found on this computer. Install it and open it once.",
         "invalidConfig": "Claude's configuration is not valid JSON. FrameTrain leaves it untouched – please check the file.",
-        "translocated": "FrameTrain is running from a temporary folder. Move the app to Applications and restart it before connecting it to Claude."
+        "translocated": "FrameTrain is running from a temporary folder. Move the app to Applications and restart it before connecting it to Claude.",
+        "quitFirst": "Claude Desktop is still running and would overwrite the entry when it quits. Quit Claude Desktop completely (⌘Q, or \"Quit\" in the system tray). FrameTrain then adds itself automatically.",
+        "cancelWait": "Cancel",
+        "verified": "Claude Desktop is running and the entry is still there. FrameTrain is connected.",
+        "lost": "Claude Desktop removed the entry on startup. Quit Claude Desktop and click \"Add again\"."
       },
       "claudeCode": {
         "title": "Claude Code – run this command in a terminal"

@@ -133,6 +133,44 @@ fn exe_path() -> String {
     std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
 }
 
+// Claude Desktop schreibt seine Konfiguration beim Beenden/Neustart aus dem Speicher zurueck.
+// Ein Eintrag, den wir waehrend es laeuft schreiben, ist danach wieder weg (Live-Test 1.6.14).
+// Deshalb tragen wir nur ein, wenn Claude Desktop beendet ist.
+
+/// macOS: Ausgabe von `ps -axo comm`. Nur das Hauptprogramm zaehlt, nicht Helper oder Claude Code.
+pub fn claude_running_in_ps(ps: &str) -> bool {
+    ps.lines().map(str::trim).any(|l| l.ends_with(".app/Contents/MacOS/Claude"))
+}
+
+/// Windows: Pfade der Prozesse namens claude.exe. Claude Code heisst ebenfalls claude.exe,
+/// deshalb zaehlt nur der Installationsordner der Desktop-App.
+pub fn claude_running_in_paths(paths: &str) -> bool {
+    paths.lines().map(|l| l.trim().to_lowercase()).any(|l| {
+        l.ends_with("claude.exe") && (l.contains("\\anthropicclaude\\") || l.contains("\\windowsapps\\claude"))
+    })
+}
+
+pub fn claude_desktop_running() -> bool {
+    use crate::command_ext::NoWindow;
+    #[cfg(target_os = "macos")]
+    {
+        return std::process::Command::new("ps").args(["-axo", "comm"]).no_window().output()
+            .map(|o| claude_running_in_ps(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or(false);
+    }
+    #[cfg(windows)]
+    {
+        return std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command",
+                   "Get-Process -Name claude -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }"])
+            .no_window().output()
+            .map(|o| claude_running_in_paths(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or(false);
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
 // ============ Tauri-Commands ============
 
 /// Webview meldet ihr Werkzeug-Manifest (beim Start und bei Aenderung).
@@ -213,6 +251,10 @@ pub fn mcp_connect_claude_desktop(app: tauri::AppHandle) -> Result<Value, String
     if exe.is_empty() {
         return Err("Programmpfad unbekannt".into());
     }
+    if claude_desktop_running() {
+        // Ohne Abbruch wuerde Claude den Eintrag beim Beenden ueberschreiben. Die UI wartet und ruft erneut.
+        return Err("CLAUDE_RUNNING".into());
+    }
     let backup = write_claude_config(&path, &exe)?;
     let mut cfg = app.state::<McpState>().config.lock().unwrap().clone();
     if !cfg.enabled {
@@ -225,6 +267,12 @@ pub fn mcp_connect_claude_desktop(app: tauri::AppHandle) -> Result<Value, String
         "backupPath": backup.map(|b| b.to_string_lossy().to_string()),
         "status": mcp_get_status(app),
     }))
+}
+
+/// Fuer den Warte-Zustand im Button: laeuft Claude Desktop noch? (ps/powershell, daher async)
+#[tauri::command]
+pub async fn mcp_claude_desktop_running() -> bool {
+    tauri::async_runtime::spawn_blocking(claude_desktop_running).await.unwrap_or(false)
 }
 
 /// Verbundene Clients und letzte Aufrufe laut Website (/api/desktop/mcp/status).
@@ -268,6 +316,22 @@ mod tests {
         assert_eq!(out["mcpServers"]["frametrain"]["command"], EXE);
         assert!(claude_config_has_entry(&out.to_string(), EXE));
         assert!(!claude_config_has_entry(existing, EXE));
+    }
+
+    #[test]
+    fn running_detection_mac() {
+        let ps = "COMM\n/Applications/Claude.app/Contents/MacOS/Claude\n/usr/bin/zsh\n";
+        assert!(claude_running_in_ps(ps));
+        let helpers_only = "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper\nclaude\n/Users/k/.local/bin/claude\n";
+        assert!(!claude_running_in_ps(helpers_only));
+        assert!(claude_running_in_ps("/Users/k/Applications/Claude.app/Contents/MacOS/Claude"));
+    }
+
+    #[test]
+    fn running_detection_windows() {
+        assert!(claude_running_in_paths("C:\\Users\\k\\AppData\\Local\\AnthropicClaude\\app-1.2.3\\claude.exe\r\n"));
+        assert!(!claude_running_in_paths("C:\\Users\\k\\.local\\bin\\claude.exe\r\n"));
+        assert!(!claude_running_in_paths(""));
     }
 
     #[test]

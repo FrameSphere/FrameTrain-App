@@ -4724,12 +4724,16 @@
         "configured": "Eingetragen. Nach einem Neustart von Claude Desktop ist FrameTrain dort verfügbar.",
         "connect": "Mit Claude Desktop verbinden",
         "reconnect": "Erneut eintragen",
-        "done": "Eingetragen. Bitte Claude Desktop beenden und neu öffnen.",
-        "doneBackup": "Eingetragen, Sicherung unter {path}. Bitte Claude Desktop beenden und neu öffnen.",
+        "done": "Eingetragen. Öffne jetzt Claude Desktop, FrameTrain erscheint dort unter den Werkzeugen.",
+        "doneBackup": "Eingetragen, Sicherung unter {path}. Öffne jetzt Claude Desktop, FrameTrain erscheint dort unter den Werkzeugen.",
         "failed": "Eintragen fehlgeschlagen: {error}",
         "notFound": "Claude Desktop wurde auf diesem Rechner nicht gefunden. Installiere es und öffne es einmal.",
         "invalidConfig": "Die Claude-Konfiguration ist kein gültiges JSON. FrameTrain ändert sie nicht – bitte die Datei prüfen.",
-        "translocated": "FrameTrain läuft aus einem temporären Ordner. Verschiebe die App in „Programme“ und starte sie neu, bevor du sie mit Claude verbindest."
+        "translocated": "FrameTrain läuft aus einem temporären Ordner. Verschiebe die App in „Programme“ und starte sie neu, bevor du sie mit Claude verbindest.",
+        "quitFirst": "Claude Desktop läuft noch und würde den Eintrag beim Beenden überschreiben. Beende Claude Desktop ganz (⌘Q bzw. im Infobereich „Beenden“). FrameTrain trägt sich danach automatisch ein.",
+        "cancelWait": "Abbrechen",
+        "verified": "Claude Desktop läuft und der Eintrag ist erhalten geblieben. FrameTrain ist verbunden.",
+        "lost": "Claude Desktop hat den Eintrag beim Start wieder entfernt. Beende Claude Desktop und klicke erneut auf „Erneut eintragen“."
       },
       "claudeCode": {
         "title": "Claude Code – Befehl im Terminal ausführen"
