@@ -178,7 +178,8 @@
       "docs": "Dokumentation",
       "support": "Support",
       "about": "Über",
-      "quick": "Schnell-Zugriff"
+      "quick": "Schnell-Zugriff",
+      "aiConnections": "KI-Verbindungen"
     },
     "account": {
       "title": "Benutzerinformationen",
@@ -4594,6 +4595,80 @@
         "deny": "Ablehnen",
         "always": "Für {client} immer erlauben",
         "revokeHint": "Freigaben lassen sich in den Einstellungen unter KI-Verbindungen widerrufen."
+      }
+    },
+    "settings": {
+      "title": "KI-Verbindungen",
+      "intro": "Lass Claude, Cursor oder ChatGPT FrameTrain steuern: Datensätze bauen, Trainings starten, Ergebnisse prüfen. Alles läuft auf deinem Rechner, jede heikle Aktion fragt dich vorher hier in der App.",
+      "loading": "Lade Verbindungsstatus …",
+      "copy": "Kopieren",
+      "cancel": "Abbrechen",
+      "local": {
+        "title": "Lokaler Zugang (MCP)",
+        "hint": "Programme auf diesem Rechner sprechen FrameTrain über 127.0.0.1 an. Ohne Token kommt niemand hinein.",
+        "running": "Läuft auf {url}",
+        "noManifest": "Die Werkzeugliste lädt noch – bis dahin gibt es nur system_ping.",
+        "offHint": "Aus. „Mit Claude Desktop verbinden“ schaltet den Zugang automatisch ein.",
+        "port": "Port",
+        "token": "Token",
+        "tokenHint": "Wer den Token kennt, kann FrameTrain auf diesem Rechner steuern.",
+        "showToken": "Token zeigen",
+        "rotate": "Neuen Token erzeugen",
+        "rotateTitle": "Neuen Token erzeugen?",
+        "rotateText": "Claude Code und Cursor verlieren damit den Zugang, bis du den neuen Befehl bzw. die neue Konfiguration eingetragen hast. Claude Desktop liest den Token selbst und bleibt verbunden."
+      },
+      "apps": {
+        "title": "Programme verbinden",
+        "hint": "Einmal einrichten, danach erscheint FrameTrain dort als Werkzeug.",
+        "tokenNote": "Befehl und Konfiguration enthalten deinen Token. Nicht weitergeben."
+      },
+      "claudeDesktop": {
+        "title": "Claude Desktop",
+        "hint": "Trägt FrameTrain in die Claude-Konfiguration ein. Vorhandene Einträge bleiben, vorher wird eine Sicherung angelegt.",
+        "configured": "Eingetragen. Nach einem Neustart von Claude Desktop ist FrameTrain dort verfügbar.",
+        "connect": "Mit Claude Desktop verbinden",
+        "reconnect": "Erneut eintragen",
+        "done": "Eingetragen. Bitte Claude Desktop beenden und neu öffnen.",
+        "doneBackup": "Eingetragen, Sicherung unter {path}. Bitte Claude Desktop beenden und neu öffnen.",
+        "failed": "Eintragen fehlgeschlagen: {error}",
+        "notFound": "Claude Desktop wurde auf diesem Rechner nicht gefunden. Installiere es und öffne es einmal.",
+        "invalidConfig": "Die Claude-Konfiguration ist kein gültiges JSON. FrameTrain ändert sie nicht – bitte die Datei prüfen.",
+        "translocated": "FrameTrain läuft aus einem temporären Ordner. Verschiebe die App in „Programme“ und starte sie neu, bevor du sie mit Claude verbindest."
+      },
+      "claudeCode": {
+        "title": "Claude Code – Befehl im Terminal ausführen"
+      },
+      "cursor": {
+        "title": "Cursor – in ~/.cursor/mcp.json eintragen"
+      },
+      "remote": {
+        "title": "Fernzugriff über frame-train.com",
+        "hint": "Für ChatGPT und Claude.ai im Browser. Die Website vermittelt nur, ausgeführt wird alles hier. Standard: aus.",
+        "offHint": "Aus. Nur lokale Programme können FrameTrain steuern.",
+        "online": "Verbunden mit frame-train.com (zuletzt {time})",
+        "offlineError": "Keine Verbindung: {error}",
+        "connecting": "Verbinde mit frame-train.com …",
+        "connectorUrl": "Connector-URL für Claude.ai bzw. ChatGPT",
+        "clients": "Verbundene Clients",
+        "noClients": "Noch kein Client verbunden.",
+        "refresh": "Aktualisieren",
+        "lastUsed": "zuletzt {time}",
+        "disconnect": "Trennen",
+        "recent": "Letzte Aufrufe über die Website"
+      },
+      "activity": {
+        "title": "Letzte Aufrufe",
+        "hint": "Was KI-Programme seit dem Start der App in FrameTrain ausgeführt haben.",
+        "empty": "Noch keine Aufrufe.",
+        "local": "lokal",
+        "remote": "über Website"
+      },
+      "approvals": {
+        "title": "Freigaben je Client",
+        "hint": "Aktionen, die du für ein Programm dauerhaft erlaubt hast. Nach dem Widerrufen fragt FrameTrain wieder nach.",
+        "empty": "Keine dauerhaften Freigaben.",
+        "revoke": "Widerrufen",
+        "revokeFor": "{tool} für {client} widerrufen"
       }
     }
   }

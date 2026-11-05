@@ -763,7 +763,7 @@ pub fn is_preview_build() -> bool {
     APP_ID != "com.frametrain.desktop"
 }
 
-fn get_data_directory() -> PathBuf {
+pub(crate) fn get_data_directory() -> PathBuf {
     // Muss zum identifier in tauri.conf.json passen (Tauri legt app_data_dir genauso an)
     #[cfg(target_os = "windows")]
     {
