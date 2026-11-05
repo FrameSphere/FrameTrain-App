@@ -89,6 +89,14 @@ export default function StudioPanel() {
   }, [t]);
 
   useEffect(() => { void load(); }, [load]);
+  // Ein KI-Client (MCP) hat Projekte geaendert: Liste neu laden.
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      if ((e as CustomEvent<{ domain?: string }>).detail?.domain === 'studio') void load();
+    };
+    window.addEventListener('ft-mcp-changed', onChange);
+    return () => window.removeEventListener('ft-mcp-changed', onChange);
+  }, [load]);
 
   const openProject = projects.find(p => p.id === openId) ?? null;
   const listeAktiv = !openProject && !showCreate && !confirmDelete;

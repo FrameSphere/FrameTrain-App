@@ -63,6 +63,9 @@ class IRTrainingSpec:
     precision: str = "fp32"
     grad_accum: int = 1
     gpu: str = "cpu"
+    # Nur ein Start aus der Konsole legt das Geraet fest. Gespeicherte Graphen
+    # tragen immer "cpu" und liefen schon bisher auf dem besten Geraet.
+    gpu_explicit: bool = False
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "IRTrainingSpec":
@@ -84,6 +87,7 @@ class IRTrainingSpec:
             precision=str(d.get("precision", "fp32")),
             grad_accum=int(d.get("gradAccum", d.get("grad_accum", 1))),
             gpu=str(d.get("gpu", "cpu")),
+            gpu_explicit=bool(d.get("gpuExplicit", d.get("gpu_explicit", False))),
         )
 
 
@@ -91,10 +95,13 @@ class IRTrainingSpec:
 class IRDataSpec:
     type: str
     params: Dict[str, Any] = field(default_factory=dict)
+    # Daten-Nodes hinter der Quelle: Tokenizer, Split, Augmentation, Mel
+    pipeline: List[Dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "IRDataSpec":
-        return cls(type=str(d.get("type", "default")), params=dict(d.get("params") or {}))
+        return cls(type=str(d.get("type", "default")), params=dict(d.get("params") or {}),
+                   pipeline=list(d.get("pipeline") or []))
 
 
 @dataclass

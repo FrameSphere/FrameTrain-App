@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Upload, Trash2, Infinity as InfinityIcon } from 'lucide-react';
+import { User, Key, Shield, Bell, Palette, Info, ExternalLink, LogOut, AlertCircle, CheckCircle, Check, Download, BookOpen, Loader2, Zap, MessageCircle, Send, ChevronDown, Plus, RefreshCw, Star, AlertTriangle, Inbox, Edit, Wrench, FileText, Lightbulb, MailX, Brain, Monitor, Cable, Pencil, Globe, Sparkles, X, Flame, Leaf, Scale, Save, RotateCcw, ShieldCheck, XCircle, Upload, Trash2, Infinity as InfinityIcon } from 'lucide-react';
 import { useTheme, ThemeId } from '../contexts/ThemeContext';
 import { useLanguage, translate, LANGUAGE_META, type Language } from '../contexts/LanguageContext';
 import ThemePicker from './ui/ThemePicker';
@@ -19,6 +19,7 @@ import { testAIConnection } from '../ai/aiClient';
 import { getStoredAuthorName, saveAuthorName, fetchCommunityName } from './OpenLibraryModal';
 import { dateLocale } from '../utils/dateLocale';
 import QuickAccessSettings, { Toggle } from './hosting/QuickAccessSettings';
+import AIConnectionsSettings from './settings/AIConnectionsSettings';
 import { isAutoErrorReportingEnabled } from '../utils/errorReport';
 import { changeDiagnosticsConsent } from '../utils/diagnosticsConsent';
 import ThirdPartyNotices from './ThirdPartyNotices';
@@ -61,7 +62,7 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system' | 'quick';
+type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system' | 'quick' | 'ai-connections';
 
 // Schluesselbund-Konto fuer den HuggingFace-Token — identisch im Versionen-Export.
 const HF_TOKEN_ACCOUNT = 'ft_hf_token';
@@ -402,6 +403,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       'ai-assistant': 'KI-Assistent (Provider, API-Key, Modell konfigurieren)',
       about:        'Informationen (Über FrameTrain)',
       system:       'System (Training-Pakete, Hardware, Anti-Sleep)',
+      'ai-connections': 'KI-Verbindungen (FrameTrain per MCP aus Claude, Cursor, ChatGPT steuern)',
     };
     setCurrentPageContent(buildPageContext({
       pageId: 'settings',
@@ -714,6 +716,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
     { id: 'notifications'as SettingsTab, label: t('settings.tabs.notifications'),  icon: Bell },
     { id: 'ai-assistant' as SettingsTab, label: t('settings.tabs.aiAssistant'),        icon: Brain },
     { id: 'quick'        as SettingsTab, label: t('settings.tabs.quick'),              icon: Zap },
+    { id: 'ai-connections' as SettingsTab, label: t('settings.tabs.aiConnections'),    icon: Cable },
     { id: 'system'       as SettingsTab, label: t('settings.tabs.system'),              icon: Monitor },
     { id: 'updates'      as SettingsTab, label: t('settings.tabs.updates'),             icon: Download },
     { id: 'docs'         as SettingsTab, label: t('settings.tabs.docs'),       icon: BookOpen },
@@ -2461,6 +2464,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'ai-assistant'   && renderAIAssistantTab()}
           {activeTab === 'system'         && renderSystemTab()}
           {activeTab === 'quick'          && <QuickAccessSettings />}
+          {activeTab === 'ai-connections' && <AIConnectionsSettings />}
           {activeTab === 'updates'        && renderUpdatesTab()}
           {activeTab === 'docs'           && renderDocsTab()}
           {activeTab === 'support'        && renderSupportTab()}

@@ -35,12 +35,11 @@ const canvasPlugin: ModelPlugin = {
     'max_seq_length', 'warmup_ratio', 'lora', 'gradient_checkpointing',
     'group_by_length', 'dropout', 'seed',
   ],
-  // Nur was die Canvas-Loader wirklich lesen koennen: image_loader (Ordner pro
-  // Klasse, auch train/val/test oder HF-Parquet mit Bildspalte), csv_loader und
-  // parquet_loader. YOLO, Pascal VOC, COCO und Audio-Transkripte standen hier
+  // Nur was die Canvas-Loader wirklich lesen koennen: Bild, Audio und Video
+  // (Ordner pro Klasse, auch train/val/test), Text, CSV und Parquet. YOLO, Pascal VOC, COCO und Audio-Transkripte standen hier
   // vorher auch — geladen werden konnten sie nie.
   // Kein preferredDatasetType gesetzt – zeigt stattdessen "flexibel" im UI.
-  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard'],
+  supportedDatasetTypes: ['flat_file', 'folder_class', 'pre_split', 'multi_shard', 'yolo_bbox'],
 };
 
 export default canvasPlugin;

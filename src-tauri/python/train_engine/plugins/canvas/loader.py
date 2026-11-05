@@ -34,6 +34,19 @@ class LoadedCanvasModel:
     training_history: Dict[str, Any] = field(default_factory=dict)
     num_classes: int = 10
     task_type: str = "classification"
+    preprocess: Dict[str, Any] = field(default_factory=dict)
+
+    def _tabular(self, x: Any) -> Any:
+        """Normalisierung aus dem Training anwenden."""
+        mean, std = self.preprocess.get("mean"), self.preprocess.get("std")
+        if mean is None or x.dim() != 2 or x.size(-1) != len(mean):
+            return x
+        import torch
+        return (x - torch.tensor(mean, device=x.device)) / torch.tensor(std, device=x.device)
+
+    def _label(self, idx: int) -> str:
+        names = self.preprocess.get("class_names") or []
+        return names[idx] if idx < len(names) else f"Klasse {idx}"
 
     def predict(self, x: Any) -> Dict[str, Any]:
         """
@@ -46,11 +59,12 @@ class LoadedCanvasModel:
 
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(x, dtype=torch.float32)
+        x = x if x.is_floating_point() or x.dtype == torch.long else x.float()
 
         if x.dim() == 1:
             x = x.unsqueeze(0)  # Batch-Dimension hinzufügen
 
-        x = x.to(self.device)
+        x = self._tabular(x.to(self.device))
         t0 = time.time()
 
         self.model.eval()
@@ -68,6 +82,10 @@ class LoadedCanvasModel:
             }
 
         # Klassifikation
+        # Hat das Modell mehr Ausgaenge als das Dataset Klassen, zaehlen nur echte Klassen.
+        known = len(self.preprocess.get("class_names") or [])
+        if known and logits.size(-1) > known:
+            logits = logits[..., :known]
         probs = F.softmax(logits, dim=-1).squeeze(0).cpu().tolist()
         if isinstance(probs, float):
             probs = [probs]
@@ -80,17 +98,74 @@ class LoadedCanvasModel:
 
         return {
             "predicted_class": pred_idx,
+            "predicted_label": self._label(pred_idx),
             "confidence": confidence,
             # "label" ergänzt — der Lab-Server/UI zeigt top_predictions über 'label'.
-            # Canvas-Modelle kennen keine Klassennamen → Klassen-Index als Label.
             "top_predictions": [
-                {"class_idx": i, "label": f"Klasse {i}", "score": round(float(probs[i]), 6)}
+                {"class_idx": i, "label": self._label(i), "score": round(float(probs[i]), 6)}
                 for i in top
             ],
             "all_probs": [round(float(p), 6) for p in probs],
             "inference_ms": round(inference_ms, 2),
             "task_type": "classification",
         }
+
+    def generate_images(self, count: int = 4) -> Any:
+        """GAN und Diffusion: neue Beispiele erzeugen."""
+        import torch
+        from synapse.generative import NoisePlan
+        self.model.eval()
+        if self.task_type == "gan":
+            with torch.no_grad():
+                return self.model(torch.randn(count, self.model.latent, device=self.device))
+        return NoisePlan().sample(self.model, (count, *self.preprocess["sample_shape"]), self.device,
+                                  self.preprocess.get("sample_range", (-3, 3)))
+
+    def predict_boxes(self, path: str, threshold: float = 0.3) -> Dict[str, Any]:
+        import numpy as np
+        import torch
+        from PIL import Image
+        from synapse.generative import decode_boxes
+        spec = self.preprocess["pipeline"]
+        with Image.open(path) as im:
+            arr = np.asarray(im.convert("RGB").resize((spec["size"], spec["size"])), dtype="float32") / 255.0
+        x = ((torch.from_numpy(arr).permute(2, 0, 1) - 0.5) / 0.5).unsqueeze(0).to(self.device)
+        self.model.eval()
+        t0 = time.time()
+        with torch.no_grad():
+            boxes = decode_boxes(self.model(x), threshold)
+        return {"predicted": f"{len(boxes)} Objekte", "boxes": boxes,
+                "inference_ms": (time.time() - t0) * 1000, "task_type": "detection"}
+
+    def predict_file(self, path: str) -> Dict[str, Any]:
+        """Bild, Audio oder Video mit derselben Vorverarbeitung wie im Training."""
+        spec = self.preprocess.get("pipeline") or {}
+        if spec.get("kind") == "boxes":
+            return self.predict_boxes(path)
+        if spec.get("kind") in ("audio", "video"):
+            from synapse.data import load_file
+            return self.predict(load_file(path, spec).unsqueeze(0))
+        return self.predict_image(path)
+
+    def predict_text(self, text: str) -> Dict[str, Any]:
+        import torch
+        from synapse.data import encode
+        tok = self.preprocess.get("tokenizer")
+        if not tok:
+            raise ValueError("Dieses Modell wurde nicht mit Text trainiert. Es erwartet Zahlen oder eine Datei.")
+        if self.task_type == "seq2seq":
+            from synapse.data import translate
+            self.model.eval()
+            t0 = time.time()
+            text = translate(self.model, tok, text, self.device)
+            return {"predicted": text, "inference_ms": (time.time() - t0) * 1000, "task_type": "seq2seq"}
+        if self.task_type in ("language_model", "generation"):
+            from synapse.data import generate
+            self.model.eval()
+            t0 = time.time()
+            text = generate(self.model, tok, text, self.device)
+            return {"predicted": text, "inference_ms": (time.time() - t0) * 1000, "task_type": "language_model"}
+        return self.predict(torch.tensor([encode(text, tok)], dtype=torch.long))
 
     def predict_batch(self, xs: List[Any]) -> List[Dict[str, Any]]:
         """Mehrere Vorhersagen auf einmal."""
@@ -112,7 +187,7 @@ class LoadedCanvasModel:
                 channels = int(p.get("channels", channels))
             except Exception:
                 pass
-            normalize = bool(p.get("normalize", False))
+            normalize = p.get("normalize", False) is True or str(p.get("normalize")).lower() == "true"
         else:
             # Kanäle aus erstem Conv2D-Layer schätzen
             for n in getattr(self.ir, "nodes", []):
@@ -143,7 +218,9 @@ class LoadedCanvasModel:
             arr = arr[:, :, None]
         tensor = torch.from_numpy(arr).permute(2, 0, 1).contiguous()  # [C, H, W]
 
-        if normalize and channels == 3:
+        if normalize and channels == 1:
+            tensor = (tensor - 0.5) / 0.5
+        elif normalize:
             mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
             std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
             tensor = (tensor - mean) / std
@@ -209,7 +286,6 @@ def load_canvas_model(
 
     # ── 2. Parse + Build ──────────────────────────────────────────────────────
     ir = parse_ir(raw_ir)
-    model = build_model_from_graph(ir)
 
     # ── 3. state_dict laden ───────────────────────────────────────────────────
     pt_path = _find_model_pt(model_dir)
@@ -220,7 +296,16 @@ def load_canvas_model(
         )
 
     checkpoint = torch.load(str(pt_path), map_location=device, weights_only=False)
-    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    # auto-Groessen stammen aus der Datenform des Trainings.
+    input_shape = (checkpoint.get("preprocess") or {}).get("input_shape")
+    input_dtype = getattr(torch, (checkpoint.get("preprocess") or {}).get("input_dtype", "float32"))
+    if isinstance(input_shape, dict):
+        input_shape = {k: tuple(v) for k, v in input_shape.items()}
+    elif input_shape:
+        input_shape = tuple(input_shape)
+    model = build_model_from_graph(ir, input_shape or None, input_dtype)
+    # Das beste Modell des Laufs sagt vorher, nicht die letzte Epoche.
+    state_dict = checkpoint.get("best_state_dict") or checkpoint.get("model_state_dict", checkpoint)
     try:
         model.load_state_dict(state_dict)
     except RuntimeError as e:
@@ -246,6 +331,7 @@ def load_canvas_model(
         training_history=training_history,
         num_classes=num_classes,
         task_type=task_type,
+        preprocess=checkpoint.get("preprocess") or {},
     )
 
 

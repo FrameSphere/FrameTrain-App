@@ -30,6 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
 _CANVAS_DIR = str(Path(__file__).resolve().parent)
 if _CANVAS_DIR not in sys.path:
     sys.path.insert(0, _CANVAS_DIR)
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 
 def emit(obj: dict):
@@ -49,11 +50,34 @@ class CanvasInferenceServer:
         from loader import load_canvas_model
         self.loaded = load_canvas_model(self.model_dir)
 
+    def input_kind(self) -> str:
+        """Was Hosting und Labor als Eingabe anbieten: Datei, Text oder Zahlen."""
+        if self.loaded.task_type in ("gan", "diffusion"):
+            return "text"
+        data = getattr(getattr(self.loaded.ir, "data", None), "type", "")
+        return {"image_loader": "image", "mask_loader": "image", "detection_loader": "image",
+                "audio_loader": "audio", "video_loader": "video", "text_loader": "text",
+                "seq2seq_loader": "text"}.get(data, "tensor")
+
     def infer(self, req: dict) -> dict:
         import torch
 
         input_type = req.get("input_type", "tensor")
         raw = req.get("input")
+
+        # Erzeugende Modelle und Bild-Ergebnisse gehen ueber den gemeinsamen
+        # Inferenz-Weg; Hosting und Labor bekommen das Bild als Datei.
+        task = self.loaded.task_type
+        pipeline = (self.loaded.preprocess.get("pipeline") or {}).get("kind")
+        if task in ("gan", "diffusion") or (input_type == "image" and pipeline in ("boxes", "mask")):
+            from synapse.infer import infer, to_file
+            result = infer(str(self.model_dir), "generate" if task in ("gan", "diffusion") else "file", raw)
+            images = result.pop("images", [])
+            if images:
+                result["image_path"] = to_file(images[0])
+            if not result.get("predicted"):
+                result["predicted"] = "Bild erzeugt"
+            return self._finish(result)
 
         if raw is None:
             return {"type": "error", "message": "Kein 'input' in Anfrage"}
@@ -62,17 +86,12 @@ class CanvasInferenceServer:
         if input_type == "image":
             path = raw if isinstance(raw, str) else str(raw)
             try:
-                result = self.loaded.predict_image(path)
+                result = self.loaded.predict_file(path)
             except FileNotFoundError:
                 return {"type": "error", "message": f"Bild nicht gefunden: {path}"}
             except Exception as e:
                 return {"type": "error", "message": f"Bild-Inferenz: {type(e).__name__}: {e}"}
-            result["type"] = "result"
-            if "predicted" not in result and "predicted_class" in result:
-                result["predicted"] = str(result["predicted_class"])
-            if "inference_time" not in result and "inference_ms" in result:
-                result["inference_time"] = float(result["inference_ms"]) / 1000.0
-            return result
+            return self._finish(result)
 
         # Tensor-Input: Liste von Zahlen oder Liste von Listen
         if input_type == "tensor":
@@ -81,17 +100,25 @@ class CanvasInferenceServer:
             except Exception as e:
                 return {"type": "error", "message": f"Tensor-Konvertierung: {e}"}
         elif input_type == "text":
-            # Text-Input: Feature-Encoding versuchen (einfaches Fallback)
-            return {"type": "error", "message": "Text-Input erfordert einen Tokenizer – nutze ein seq_classification-Modell."}
+            try:
+                result = self.loaded.predict_text(str(raw))
+            except ValueError as e:
+                return {"type": "error", "message": str(e)}
+            return self._finish(result)
         else:
             return {"type": "error", "message": f"Unbekannter input_type: {input_type}"}
 
-        result = self.loaded.predict(x)
+        return self._finish(self.loaded.predict(x))
+
+    @staticmethod
+    def _finish(result: dict) -> dict:
+        # Key-Aliase für den Lab-Server (gleiche Felder wie model_server.py)
         result["type"] = "result"
-        # Key-Aliase für den Lab-Server (gleiche Felder wie model_server.py):
-        # predicted_class → predicted, inference_ms → inference_time (Sekunden)
-        if "predicted" not in result and "predicted_class" in result:
-            result["predicted"] = str(result["predicted_class"])
+        if "predicted" not in result:
+            if "predicted_label" in result:
+                result["predicted"] = result["predicted_label"]
+            elif "predicted_value" in result:
+                result["predicted"] = str(result["predicted_value"])
         if "inference_time" not in result and "inference_ms" in result:
             result["inference_time"] = float(result["inference_ms"]) / 1000.0
         return result
@@ -108,6 +135,8 @@ class CanvasInferenceServer:
             "num_classes": self.loaded.num_classes,
             "task_type": self.loaded.task_type,
             "device": self.loaded.device,
+            "input_kind": self.input_kind(),
+            "classes": self.loaded.preprocess.get("class_names") or [],
         })
 
         for raw_line in sys.stdin:

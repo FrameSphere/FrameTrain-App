@@ -5,7 +5,7 @@
   "task_type": "canvas",
   "entry": "plugin.py",
   "class": "CanvasPlugin",
-  "dataset_formats": ["image_loader", "csv_loader", "parquet_loader"],
+  "dataset_formats": ["image_loader", "audio_loader", "video_loader", "text_loader", "seq2seq_loader", "mask_loader", "detection_loader", "csv_loader", "parquet_loader"],
   "requirements": [
     "torch>=2.0.0",
     "numpy>=1.26.0",

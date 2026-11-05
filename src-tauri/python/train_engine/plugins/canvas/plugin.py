@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 from core.config import TrainingConfig
@@ -28,8 +27,10 @@ if _CANVAS_DIR not in sys.path:
 
 from dataloaders import get_dataloaders  # noqa: E402
 from ir import CanvasGraphIR, IRTrainingSpec, is_non_empty_ir, parse_ir  # noqa: E402
-from model_builder import build_model_from_graph  # noqa: E402
-from shape_propagate import ShapeValidationError  # noqa: E402
+from model_builder import build_model_from_graph, has_auto_params  # noqa: E402
+from synapse.learn import make_loss, make_optimizer  # noqa: E402
+from synapse.generative import NoisePlan, gan_epoch  # noqa: E402
+from synapse.recipes import has_accuracy, loss_of, prepare, resolve_task, score_of  # noqa: E402
 
 
 class CanvasPlugin(TrainPlugin):
@@ -38,11 +39,7 @@ class CanvasPlugin(TrainPlugin):
     def __init__(self, config: TrainingConfig):
         self.config = config
         # Fix 1.2: MPS-Support für Apple Silicon
-        self.device = (
-            "cuda" if torch.cuda.is_available()
-            else "mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
-            else "cpu"
-        )
+        self.device = self._auto_device()
         self.model: Optional[nn.Module] = None
         self.model_class = None
         self.ir = None
@@ -59,6 +56,40 @@ class CanvasPlugin(TrainPlugin):
         # {"val_loss": 0.0}: die Analyse zeigte "Final Train Loss 0.0000",
         # "Val N/A", "0 Steps", "device cpu" und "n_train 0" — egal was lief.
         self._final: Dict[str, Any] = {}
+        self._best_state: Optional[Dict[str, torch.Tensor]] = None
+        self._preprocess: Dict[str, Any] = {}
+        self._loaders = None
+
+    @staticmethod
+    def _auto_device() -> str:
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    def _to_device(self, x: Any) -> Any:
+        if isinstance(x, (tuple, list)):
+            return tuple(v.to(self.device) for v in x)
+        return x.to(self.device)
+
+    def _chosen_device(self) -> str:
+        """Die Auswahl aus der Konsole gilt, wenn das Geraet vorhanden ist."""
+        spec = self.ir.training
+        wanted = str(spec.gpu or "").lower()
+        if not spec.gpu_explicit or wanted in ("", "auto"):
+            return self._auto_device()
+        usable = (
+            wanted == "cpu"
+            or (wanted == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+            or (wanted.startswith("cuda") and torch.cuda.is_available()
+                and int((wanted.split(":") + ["0"])[1]) < torch.cuda.device_count())
+        )
+        if usable:
+            return wanted
+        fallback = self._auto_device()
+        MessageProtocol.status("setup", f"[Warn] Geraet {wanted} ist nicht verfuegbar, nutze {fallback}")
+        return fallback
 
     # ── K2: Legacy-Erkennung ─────────────────────────────────────────────────
     _LEGACY_ERROR = (
@@ -97,24 +128,35 @@ class CanvasPlugin(TrainPlugin):
                 "Weder canvas_graph (IR) noch canvas_model_code gesetzt.",
             )
             return False
-        except ShapeValidationError as e:
-            MessageProtocol.error("Shape Validation", str(e))
-            try:
-                MessageProtocol.status(
-                    "train",
-                    f"[DIAGNOSTIC_JSON]\n{json.dumps({'error_type': 'shape_mismatch', 'raw_error': str(e)})}\n[/DIAGNOSTIC_JSON]",
-                )
-            except Exception:
-                pass
-            return False
         except Exception as e:
             MessageProtocol.error("Canvas Setup", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
             return False
 
     def _setup_from_ir(self, raw_graph: Any) -> bool:
         self.ir = parse_ir(raw_graph)
+        self.device = self._chosen_device()
         MessageProtocol.status("setup", f"[Canvas IR] {len(self.ir.nodes)} nodes, {len(self.ir.edges)} edges")
-        self.model = build_model_from_graph(self.ir).to(self.device)
+        input_shape, input_dtype = None, None
+        if has_auto_params(self.ir):
+            # auto-Groessen folgen der echten Datenform, also Daten vor dem Modell.
+            self._loaders = get_dataloaders(
+                self.ir, self.config.dataset_path, self.ir.training.batch_size, self._preprocess
+            )
+            sample, _ = next(iter(self._loaders[0]))
+            if self.ir.training.task_type == "diffusion":
+                input_shape, input_dtype = {"out": (1, *sample.shape[1:]), "decoder": (1, 1)}, sample.dtype
+                self._preprocess["sample_shape"] = list(sample.shape[1:])
+                # Wertebereich der Bilder: das Erzeugen bleibt darin, statt wegzulaufen.
+                self._preprocess["sample_range"] = [float(sample.min()), float(sample.max())]
+            elif isinstance(sample, (tuple, list)):
+                input_shape = {"out": (1, *sample[0].shape[1:]), "decoder": (1, *sample[1].shape[1:])}
+                input_dtype = sample[0].dtype
+            else:
+                input_shape, input_dtype = (1, *sample.shape[1:]), sample.dtype
+            self._preprocess["input_shape"] = (
+                {k: list(v) for k, v in input_shape.items()} if isinstance(input_shape, dict) else list(input_shape))
+            self._preprocess["input_dtype"] = str(input_dtype).replace("torch.", "")
+        self.model = build_model_from_graph(self.ir, input_shape, input_dtype).to(self.device)
         self.model_class = type(self.model)
         total = sum(p.numel() for p in self.model.parameters())
         trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -171,15 +213,8 @@ class CanvasPlugin(TrainPlugin):
         spec = self.ir.training if self.ir else None
         lr = spec.learning_rate if spec else self.config.learning_rate
         wd = spec.weight_decay if spec else self.config.weight_decay
-        name = (spec.optimizer if spec else self.config.optimizer).lower()
-        params = self.model.parameters()
-        if name == "sgd":
-            return optim.SGD(params, lr=lr, momentum=0.9, weight_decay=wd)
-        if name == "adam":
-            return optim.Adam(params, lr=lr, weight_decay=wd)
-        if name == "rmsprop":
-            return optim.RMSprop(params, lr=lr, weight_decay=wd)
-        return optim.AdamW(params, lr=lr, weight_decay=wd)
+        name = spec.optimizer if spec else self.config.optimizer
+        return make_optimizer(name, self.model.parameters(), lr, wd)
 
     def _make_loss(self) -> nn.Module:
         spec = self.ir.training if self.ir else None
@@ -195,15 +230,8 @@ class CanvasPlugin(TrainPlugin):
         smoothing = 0.0
         if spec is not None:
             smoothing = max(0.0, min(float(getattr(spec, "label_smoothing", 0.0) or 0.0), 0.9))
-        loss_map = {
-            "cross_entropy": nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing),
-            "mse": nn.MSELoss(reduction=reduction),
-            "mae": nn.L1Loss(reduction=reduction),
-            "bce": nn.BCEWithLogitsLoss(reduction=reduction),
-            "huber": nn.HuberLoss(reduction=reduction),
-            "nll": nn.NLLLoss(reduction=reduction),
-        }
-        return loss_map.get(loss_name, nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing))
+        task = resolve_task(spec.task_type) if spec else "classification"
+        return make_loss(loss_name, task == "regression", reduction, smoothing, task)
 
     def _make_scheduler(self, optimizer: optim.Optimizer, epochs: int, steps_per_epoch: int):
         """W1: Scheduler-Instanz basierend auf IR-Konfiguration.
@@ -282,13 +310,15 @@ class CanvasPlugin(TrainPlugin):
         try:
             epochs = self.ir.training.epochs if self.ir else self.config.epochs
             batch_size = self.ir.training.batch_size if self.ir else self.config.batch_size
-            is_clf = True
-            if self.ir and self.ir.training.task_type == "regression":
-                is_clf = False
+            task = resolve_task(self.ir.training.task_type)
+            is_clf = has_accuracy(task)
+            if task == "gan":
+                return self._train_gan(epochs, batch_size)
+            plan = NoisePlan() if task == "diffusion" else None
 
             if self.ir:
-                train_loader, val_loader = get_dataloaders(
-                    self.ir, self.config.dataset_path, batch_size
+                train_loader, val_loader = self._loaders or get_dataloaders(
+                    self.ir, self.config.dataset_path, batch_size, self._preprocess
                 )
             else:
                 stub = CanvasGraphIR(
@@ -303,6 +333,10 @@ class CanvasPlugin(TrainPlugin):
                     stub, self.config.dataset_path, batch_size
                 )
 
+            names = self._preprocess.get("class_names") or []
+            if task == "classification" and names and len(names) != self.ir.training.num_classes:
+                MessageProtocol.status("train", f"[Warn] Das Dataset hat {len(names)} Klassen, das Modell ist auf "
+                                                f"{self.ir.training.num_classes} eingestellt.")
             self._final = {
                 "n_train": len(train_loader.dataset),
                 "n_val": len(val_loader.dataset),
@@ -323,23 +357,27 @@ class CanvasPlugin(TrainPlugin):
             criterion = self._make_loss()
             # AMP/fp16 ist CUDA-gebunden. Auf MPS/CPU liefert autocast(cuda)+GradScaler
             # kein echtes fp16 (no-op/Warnung) → sauber auf fp32 zurückfallen.
-            use_amp = bool(self.config.fp16) and self.device == "cuda"
-            if self.config.fp16 and not use_amp:
+            bf16 = bool(getattr(self.config, "bf16", False))
+            amp_dtype = torch.bfloat16 if bf16 else torch.float16
+            wants_amp = bool(self.config.fp16) or bf16
+            use_amp = wants_amp and self.device.startswith("cuda")
+            if wants_amp and not use_amp:
                 MessageProtocol.status(
                     "train",
-                    f"[Warn] fp16 wird nur auf CUDA unterstützt (Device: {self.device}) — Training läuft in fp32.",
+                    f"[Warn] fp16/bf16 wird nur auf CUDA unterstützt (Device: {self.device}) — Training läuft in fp32.",
                 )
-            scaler = GradScaler() if use_amp else None
+            # bf16 braucht keine Gradient-Skalierung
+            scaler = torch.amp.GradScaler("cuda") if use_amp and not bf16 else None
 
             # Shape test
             try:
-                sample_x, _ = next(iter(train_loader))
-                sample_x = sample_x.to(self.device)
+                sample_x, sample_y = next(iter(train_loader))
+                sample_x, _ = prepare(task, self._to_device(sample_x), sample_y, plan)
                 with torch.no_grad():
                     out = self.model(sample_x)
                 MessageProtocol.status(
                     "train",
-                    f"✓ Shape Test: {list(sample_x.shape)} → {list(out.shape)}",
+                    f"✓ Shape Test: → {list(out.shape)}",
                 )
             except RuntimeError as e:
                 err = str(e)
@@ -402,19 +440,18 @@ class CanvasPlugin(TrainPlugin):
                 for batch_idx, (batch_x, batch_y) in enumerate(train_loader):
                     if self.is_stopped:
                         break
-                    batch_x = batch_x.to(self.device)
-                    batch_y = batch_y.to(self.device)
+                    batch_x, batch_y = prepare(task, self._to_device(batch_x), batch_y.to(self.device), plan)
 
                     # W2: Loss skalieren für korrekte Gradientenmagnitude
                     if use_amp:
-                        with autocast():
+                        with torch.amp.autocast("cuda", dtype=amp_dtype):
                             out = self.model(batch_x)
-                            loss_raw = criterion(out, batch_y) if is_clf else criterion(out.squeeze(-1), batch_y.float())
+                            loss_raw = loss_of(task, self.model, out, batch_x, batch_y, criterion)
                             loss = loss_raw / accum_steps
-                        scaler.scale(loss).backward()
+                        (scaler.scale(loss) if scaler else loss).backward()
                     else:
                         out = self.model(batch_x)
-                        loss_raw = criterion(out, batch_y) if is_clf else criterion(out.squeeze(-1), batch_y.float())
+                        loss_raw = loss_of(task, self.model, out, batch_x, batch_y, criterion)
                         loss = loss_raw / accum_steps
                         loss.backward()
 
@@ -423,7 +460,7 @@ class CanvasPlugin(TrainPlugin):
                     do_step = ((batch_idx + 1) % accum_steps == 0) or is_last_batch
 
                     if do_step:
-                        if use_amp:
+                        if scaler:
                             if max_grad > 0:
                                 scaler.unscale_(optimizer)
                                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad)
@@ -443,9 +480,9 @@ class CanvasPlugin(TrainPlugin):
 
                     # Metriken auf ungeskaltem loss_raw
                     total_loss += loss_raw.item()
-                    if is_clf and out.dim() >= 2:
-                        correct += (out.argmax(dim=-1) == batch_y).sum().item()
-                    n_samples += batch_y.size(0)
+                    hits, counted = score_of(task, out, batch_y)
+                    correct += hits
+                    n_samples += counted
                     steps += 1
 
                 avg_loss = total_loss / max(steps, 1)
@@ -458,22 +495,19 @@ class CanvasPlugin(TrainPlugin):
                 val_n = 0
                 with torch.no_grad():
                     for vx, vy in val_loader:
-                        vx, vy = vx.to(self.device), vy.to(self.device)
+                        vx, vy = prepare(task, self._to_device(vx), vy.to(self.device), plan)
                         vo = self.model(vx)
-                        val_sum += (
-                            criterion(vo, vy).item()
-                            if is_clf
-                            else criterion(vo.squeeze(-1), vy.float()).item()
-                        )
-                        if is_clf and vo.dim() >= 2:
-                            val_correct += (vo.argmax(dim=-1) == vy).sum().item()
-                        val_n += vy.size(0)
+                        val_sum += loss_of(task, self.model, vo, vx, vy, criterion).item()
+                        hits, counted = score_of(task, vo, vy)
+                        val_correct += hits
+                        val_n += counted
                         val_steps += 1
                 val_loss = val_sum / max(val_steps, 1)
                 val_acc = val_correct / val_n if (is_clf and val_n) else None
                 if val_loss < best_val:
                     best_val = val_loss
                     self._final["best_epoch"] = epoch + 1
+                    self._best_state = {k: v.detach().cpu().clone() for k, v in self.model.state_dict().items()}
 
                 # W1 Edit 3c: Epoch-Level Scheduler (cosine, linear, exponential)
                 if scheduler is not None and not is_batch_scheduler:
@@ -513,7 +547,8 @@ class CanvasPlugin(TrainPlugin):
                 MessageProtocol.status(
                     "train",
                     f"[Metric] epoch={epoch + 1} loss={avg_loss:.6f} val_loss={val_loss:.6f} "
-                    f"accuracy={acc:.6f} lr={lr_now:.8f} optimizer_steps={optimizer_steps}",
+                    + (f"accuracy={acc:.6f} " if is_clf else "")
+                    + f"lr={lr_now:.8f} optimizer_steps={optimizer_steps}",
                 )
 
             MessageProtocol.status("train", "✓ Training komplett (Canvas IR Runtime)")
@@ -521,6 +556,27 @@ class CanvasPlugin(TrainPlugin):
         except Exception as e:
             MessageProtocol.error("Training Fehler", f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
             return False
+
+    def _train_gan(self, epochs: int, batch_size: int) -> bool:
+        """Zwei Optimizer, abwechselnde Schritte; Loss des Generators in der Kurve."""
+        loader = (self._loaders or get_dataloaders(self.ir, self.config.dataset_path, batch_size, self._preprocess))[0]
+        spec = self.ir.training
+        # GANs laufen stabiler mit kleinerem erstem Moment (DCGAN-Empfehlung).
+        opt_g = make_optimizer(spec.optimizer, self.model.generator.parameters(), spec.learning_rate, 0.0, (0.5, 0.999))
+        opt_d = make_optimizer(spec.optimizer, self.model.discriminator.parameters(), spec.learning_rate, 0.0, (0.5, 0.999))
+        self._optimizer = opt_g
+        self._final = {"n_train": len(loader.dataset), "device": self.device, "architecture": "canvas"}
+        for epoch in range(epochs):
+            if self.is_stopped:
+                break
+            g_loss, d_loss = gan_epoch(self.model, loader, opt_g, opt_d, self.device, lambda: self.is_stopped)
+            self.train_history["epochs"].append(epoch + 1)
+            self.train_history["train_losses"].append(g_loss)
+            self.train_history["val_losses"].append(d_loss)
+            self._final.update(final_train_loss=g_loss, final_val_loss=d_loss, total_epochs=epoch + 1)
+            MessageProtocol.progress(epoch=epoch + 1, total_epochs=epochs, step=epoch + 1, total_steps=epochs,
+                                     train_loss=g_loss, val_loss=d_loss, learning_rate=spec.learning_rate, metrics={})
+        return True
 
     def validate(self) -> Dict[str, Any]:
         """Abschlusswerte in den Namen, die die Analyse-Seite liest."""
@@ -539,7 +595,10 @@ class CanvasPlugin(TrainPlugin):
             payload = {
                 "model_state_dict": self.model.state_dict(),
                 "training_history": self.train_history,
+                "preprocess": self._preprocess,
             }
+            if self._best_state is not None:
+                payload["best_state_dict"] = self._best_state
             if self.ir:
                 payload["graph_ir"] = {
                     "version": self.ir.version,
@@ -603,6 +662,9 @@ class CanvasPlugin(TrainPlugin):
             output_dir.mkdir(parents=True, exist_ok=True)
             model_path = output_dir / "model.pt"
             self.save_model(str(model_path), optimizer=self._optimizer)
+            if self._best_state is not None:
+                torch.save({"model_state_dict": self._best_state, "preprocess": self._preprocess},
+                           output_dir / "model_best.pt")
             metrics_path = output_dir / "metrics.json"
             with open(metrics_path, "w") as f:
                 json.dump(self.get_metrics(), f, indent=2, default=str)

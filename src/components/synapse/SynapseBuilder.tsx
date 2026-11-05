@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -22,13 +22,18 @@ import { Save as SaveIcon, Sparkles as SparklesIcon, FolderOpen as LibraryIcon, 
 import { useContextMenuActions } from "../../ui/contextMenuRegistry";
 
 import { NodeLibrary } from "./NodeLibrary";
+import { decorateEdges, decorateNodes, formatBytes, formatParams, memoryBudget, structureKey, type LiveCheckResult, type StepResult } from "./liveCheck";
+import { groupToBlock } from "./blockGroup";
+import { BlueprintPicker, type Blueprint } from "./BlueprintPicker";
+import { emptyHistory, record, redo, undo, type HistoryState } from "./graphHistory";
 import { PropertyPanel } from "./PropertyPanel";
 import { TrainingConsole, TrainingConfig, TrainingMetrics, TrainingStatus } from "./TrainingConsole";
 import { NODE_DEFINITIONS, NodeDefinition } from "./nodeTypes";
 import { SynapseNodeComponent } from "./nodes/SynapseNodeComponent";
 import { dragState } from "./dragState";
 import { generateTrainingScript, extractCanvasModelClass } from "./codeGenerator";
-import { buildCanvasGraphIR } from "./graphIR";
+import { buildCanvasGraphIR, LOADER_NODE_TYPES } from "./graphIR";
+import { attachSynapseBuilder, type SynapseSnapshot } from "./synapseGraphStore";
 import { generateModelConfigFromGraph } from "./graphToModel";
 import {
   validateEdgeConnection,
@@ -287,6 +292,66 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     }, 120);
     return () => { if (fitTimerRef.current) clearTimeout(fitTimerRef.current); };
   }, [nodes.length]);
+
+  // ── Live-Prüfung: Graph nach jeder Strukturänderung an den Formen-Dienst ──
+  const [liveCheck, setLiveCheck] = useState<LiveCheckResult | null>(null);
+  const liveKey = useMemo(() => structureKey(nodes, edges), [nodes, edges]);
+  const liveSeqRef = useRef(0);
+  useEffect(() => {
+    const seq = ++liveSeqRef.current;  // auch beim Leeren: alte Antworten verfallen
+    if (nodes.length === 0) { setLiveCheck(null); return; }
+    const timer = setTimeout(() => {
+      const graph = buildCanvasGraphIR(nodes, edges, {
+        epochs: 1, batchSize: 1, learningRate: 0.001, gpu: "cpu", precision: "fp32", gradAccum: 1,
+      });
+      invoke<LiveCheckResult>("synapse_check", { graph })
+        .then((r) => { if (seq === liveSeqRef.current) setLiveCheck(r); })
+        .catch(() => { if (seq === liveSeqRef.current) setLiveCheck(null); });
+    }, 200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey]);
+  useEffect(() => () => { invoke("synapse_stop").catch(() => {}); }, []);
+
+  // ── Einzelschritt: was ein Lernschritt im Netz bewegt ──────────────
+  const [stepResult, setStepResult] = useState<StepResult | null>(null);
+  const [stepError, setStepError] = useState<string | null>(null);
+  useEffect(() => { setStepResult(null); setStepError(null); }, [liveKey]);
+  const runStep = useCallback(() => {
+    const graph = buildCanvasGraphIR(nodes, edges, {
+      epochs: 1, batchSize: 1, learningRate: 0.01, gpu: "cpu", precision: "fp32", gradAccum: 1,
+    });
+    setStepError(null);
+    invoke<StepResult>("synapse_step", { graph, lr: 0.01 })
+      .then(setStepResult)
+      .catch((e) => setStepError(String(e)));
+  }, [nodes, edges]);
+  const shownNodes = useMemo(() => decorateNodes(nodes, liveCheck), [nodes, liveCheck]);
+  const shownEdges = useMemo(() => decorateEdges(edges, liveCheck), [edges, liveCheck]);
+
+  // ── Undo/Redo: Stand merken, sobald sich die Struktur geändert hat ─────
+  const historyRef = useRef<HistoryState<{ nodes: Node[]; edges: Edge[] }>>(emptyHistory());
+  const historySnapRef = useRef<{ key: string; state: { nodes: Node[]; edges: Edge[] } } | null>(null);
+  const historyRestoringRef = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const prev = historySnapRef.current;
+      if (prev?.key === liveKey) return;
+      if (prev && !historyRestoringRef.current) historyRef.current = record(historyRef.current, prev.state);
+      historyRestoringRef.current = false;
+      historySnapRef.current = { key: liveKey, state: { nodes, edges } };
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey]);
+  const stepHistory = useCallback((dir: "undo" | "redo") => {
+    const step = (dir === "undo" ? undo : redo)(historyRef.current, { nodes, edges });
+    if (!step) return;
+    historyRef.current = step.history;
+    historyRestoringRef.current = true;
+    setNodes(step.value.nodes);
+    setEdges(step.value.edges);
+  }, [nodes, edges, setNodes, setEdges]);
 
   // ── Cleanup event listeners ────────────────────────────────────────────
   const cleanupListeners = useCallback(() => {
@@ -581,7 +646,7 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       // sonst früher klarer Abbruch statt kryptischem Engine-Fehler.
       const loaderNode = nodes.find((n) => {
         const t = (n.data as any)?._def?.type ?? (n.data as any)?.nodeType;
-        return t === "image_loader" || t === "csv_loader" || t === "parquet_loader";
+        return LOADER_NODE_TYPES.includes(t);
       });
       if (loaderNode && !datasetPath) {
         const loaderType = (loaderNode.data as any)?._def?.type ?? "data";
@@ -590,13 +655,14 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
           config.selectedDatasetId
             ? `[Error] Dataset "${config.selectedDatasetName ?? config.selectedDatasetId}" — Pfad konnte nicht aufgelöst werden.`
             : `[Error] Der Graph enthält einen ${loaderType}-Node, aber es ist kein Dataset ausgewählt.`,
-          `[Error] Bitte unten in der Trainingsleiste ein passendes Dataset wählen (${loaderType === "image_loader" ? "Bilder in Klassen-Ordnern" : loaderType === "csv_loader" ? "CSV-Datei" : "Parquet-Dateien"}) und erneut starten.`,
+          `[Error] Bitte unten in der Trainingsleiste ein passendes Dataset wählen (${({ image_loader: "Bilder in Klassen-Ordnern", audio_loader: "Audio in Klassen-Ordnern", video_loader: "Videos in Klassen-Ordnern", text_loader: "Texte", seq2seq_loader: "Textpaare", mask_loader: "Bilder mit Masken", detection_loader: "Bilder mit Boxen", csv_loader: "CSV-Datei" } as Record<string, string>)[loaderType] ?? "Parquet-Dateien"}) und erneut starten.`,
         ]);
         setTrainingStatus("error");
         return;
       }
 
       const canvasGraph = buildCanvasGraphIR(nodes, edges, config);
+      canvasGraph.training.gpuExplicit = true;
 
       setCompletedVersionId(null);
       setShowAICoach(false);
@@ -769,6 +835,8 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       resolveDatasetPath,
       registerTrainingVersion,
       parseStatusLogLine,
+      activeCanvasModelId,
+      activeModelName,
     ]
   );
 
@@ -782,11 +850,16 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
 
   // Eigentliches Speichern: Update des aktiven Modells oder Neuanlage mit Name.
   const performSave = useCallback(async (newModelName?: string) => {
-    const graphConfig = generateModelConfigFromGraph(nodes, edges, NODE_DEFINITIONS);
-    if (!graphConfig) {
-      setLogLines((p) => [...p, "[Error] Kein gültiger Graph zum Speichern."]);
-      return;
-    }
+    // Graphen ohne durchgehende Kette (z. B. GAN aus zwei Blöcken) sind gültig:
+    // gespeichert wird dann nur die Kurzbeschreibung, gerechnet wird mit dem IR.
+    const graphConfig = generateModelConfigFromGraph(nodes, edges, NODE_DEFINITIONS) ?? {
+      id: `canvas_${Date.now()}`,
+      name: "Canvas Network",
+      layers: [],
+      inputShape: "",
+      outputSize: 0,
+      graphMetadata: { nodeCount: nodes.length, edgeCount: edges.length, generatedAt: Date.now() },
+    };
     const script = generateTrainingScript(nodes, edges, {
       epochs: 1, batchSize: 32, learningRate: 0.001, gpu: "cpu", precision: "fp32", gradAccum: 1,
     });
@@ -859,11 +932,72 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     try { localStorage.removeItem(autosaveKey); } catch { /* ignore */ }
   }, [setNodes, setEdges, clearShapeIssues, autosaveKey]);
 
+  // ── Zugriff fuer Werkzeuge (MCP): Graph lesen/schreiben, Training starten ──
+  const mcpStateRef = useRef<SynapseSnapshot>({ nodes, edges, modelId: activeCanvasModelId, modelName: activeModelName, dirty: hasUnsavedChanges });
+  mcpStateRef.current = { nodes, edges, modelId: activeCanvasModelId, modelName: activeModelName, dirty: hasUnsavedChanges };
+  const mcpTrainRef = useRef(handleStartTraining);
+  mcpTrainRef.current = handleStartTraining;
+  useEffect(() => attachSynapseBuilder({
+    userId,
+    get: () => mcpStateRef.current,
+    apply: (next, origin) => {
+      const graphChanged = next.nodes !== undefined || next.edges !== undefined;
+      if (graphChanged) {
+        setNodes(next.nodes ?? mcpStateRef.current.nodes);
+        setEdges(next.edges ?? mcpStateRef.current.edges);
+        setSelectedNodeId(null);
+      }
+      if (next.modelId !== undefined) setActiveCanvasModelId(next.modelId);
+      if (next.modelName !== undefined) setActiveModelName(next.modelName);
+      if (next.dirty !== undefined) {
+        // Der Dirty-Effekt laeuft nach setNodes; ihn bei "gespeichert" ueberspringen.
+        if (!next.dirty && graphChanged) skipDirtyRef.current = true;
+        setHasUnsavedChanges(next.dirty);
+      }
+      if (origin) setLogLines((p) => [...p, `[MCP] ${origin}`]);
+    },
+    startTraining: (config) => mcpTrainRef.current(config),
+  }), [userId, setNodes, setEdges]);
+
   const requestClear = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) return;
     if (hasUnsavedChanges) setConfirmClearOpen(true);
     else performClear();
   }, [nodes.length, edges.length, hasUnsavedChanges, performClear]);
+
+  // Vorlage übernehmen: Nodes anlegen, verbinden, dann anordnen.
+  const handleBlueprint = useCallback((bp: Blueprint) => {
+    const next = bp.nodes.flatMap((n, i) => {
+      const def = NODE_DEFINITIONS.find((d) => d.type === n.type);
+      if (!def) return [];
+      const node = makeNode(def, { x: i * 260, y: 120 });
+      const data = node.data as Record<string, unknown>;
+      return [{ ...node, id: n.id, data: { ...data, nodeType: n.type, params: { ...(data.params as object), ...n.params } } }];
+    });
+    const links: Edge[] = bp.edges.map(([source, target, sourceHandle, targetHandle]) => ({
+      id: `${source}-${target}-${targetHandle ?? ""}`,
+      source: source!, target: target!,
+      sourceHandle: sourceHandle || undefined, targetHandle: targetHandle || undefined,
+      animated: true, style: { stroke: "#a78bfa", strokeWidth: 1.5 },
+    }));
+    setNodes(next);
+    setEdges(links);
+    setTimeout(() => runAutoLayout(next, links), 60);
+  }, [setNodes, setEdges]);
+
+  // Markierte Nodes (Umschalt + Ziehen) werden ein wiederholbarer Block.
+  const handleGroupBlock = useCallback(() => {
+    const def = NODE_DEFINITIONS.find((d) => d.type === "block");
+    if (!def) return;
+    const result = groupToBlock(nodes, edges, makeNode(def, { x: 0, y: 0 }));
+    if (typeof result === "string") {
+      setLogLines((p) => [...p, `[Synapse] ${t(`synapseBuilder.block.${result}`)}`]);
+      return;
+    }
+    setNodes(result.nodes);
+    setEdges(result.edges);
+    setSelectedNodeId(result.block.id);
+  }, [nodes, edges, setNodes, setEdges, t]);
 
   // ── Auto-Layout: Fluss-Layout links→rechts, lange Netze in Bahnen ─────────
   // Die Canvas-Größe bestimmt, in wie viele Bahnen umgebrochen wird. Knoten
@@ -1247,6 +1381,12 @@ Keine Floskeln, nur Fakten.`;
         handleSaveToModelLibrary();
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z"
+        && !(e.target as HTMLElement).closest("input,textarea,select")) {
+        e.preventDefault();
+        stepHistory(e.shiftKey ? "redo" : "undo");
+        return;
+      }
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
         selectedNodeId &&
@@ -1259,7 +1399,7 @@ Keine Floskeln, nur Fakten.`;
         setSelectedNodeId(null);
       }
     },
-    [selectedNodeId, setNodes, setEdges, handleSaveToModelLibrary]
+    [stepHistory, selectedNodeId, setNodes, setEdges, handleSaveToModelLibrary]
   );
 
   // ─── Render ─────────────────────────────────────────────────────────────
@@ -1367,6 +1507,9 @@ Keine Floskeln, nur Fakten.`;
           </button>
 
           {/* Auto-Layout — Knoten automatisch anordnen */}
+          <button onClick={handleGroupBlock} style={btnStyle} title={t('synapseBuilder.block.tooltip')}>
+            {t('synapseBuilder.block.button')}
+          </button>
           <button onClick={handleAutoLayout} disabled={nodes.length === 0} style={btnStyle} title={t('synapseBuilder.autoLayoutHint')}>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
               <rect x="1"   y="1"   width="3" height="10" rx="1" stroke="currentColor" strokeWidth="1.3"/>
@@ -1403,8 +1546,8 @@ Keine Floskeln, nur Fakten.`;
         {/* Canvas — onDrop/onDragOver on <ReactFlow> directly (v12 requirement) */}
         <div ref={canvasWrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <ReactFlow
-            nodes={nodes}
-            edges={edges}
+            nodes={shownNodes}
+            edges={shownEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -1426,13 +1569,82 @@ Keine Floskeln, nur Fakten.`;
             }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1e293b"/>
+            {nodes.length === 0 && (
+              <Panel position="top-center">
+                <BlueprintPicker onPick={handleBlueprint} />
+              </Panel>
+            )}
+            {liveCheck && (
+              <Panel position="top-right">
+                <div style={{
+                  padding: "6px 10px", borderRadius: 8, fontSize: 11, background: "#0d1117",
+                  border: `1px solid ${liveCheck.ok ? "#1e293b" : "#ef4444"}`,
+                  color: liveCheck.ok ? "#94a0b8" : "#fca5a5", maxWidth: stepResult ? 460 : 320,
+                }}>
+                  {liveCheck.ok
+                    ? t('synapseBuilder.liveOk').replace('{params}', formatParams(liveCheck.params))
+                    : `✗ ${liveCheck.errors[0]?.node ? `${liveCheck.errors[0].node}: ` : ""}${liveCheck.errors[0]?.message ?? ""}`}
+                  {liveCheck.ok && (
+                    <div style={{ marginTop: 4, color: "#7a869e" }}>
+                      {t('synapseBuilder.budget')
+                        .replace('{weights}', formatBytes(memoryBudget(liveCheck.params).weights))
+                        .replace('{training}', formatBytes(memoryBudget(liveCheck.params).training))}
+                    </div>
+                  )}
+                  {liveCheck.ok && (
+                    <button onClick={runStep} style={{
+                      marginTop: 6, padding: "3px 8px", borderRadius: 6, border: "1px solid #334155",
+                      background: "transparent", color: "#a5b4fc", fontSize: 11, cursor: "pointer",
+                    }}>
+                      {t('synapseBuilder.step.button')}
+                    </button>
+                  )}
+                  {stepError && <div style={{ marginTop: 6, color: "#fca5a5" }}>{stepError}</div>}
+                  {stepResult && (
+                    <div style={{ marginTop: 8, maxHeight: 260, overflowY: "auto", fontFamily: "'JetBrains Mono', monospace" }}>
+                      <div style={{ color: "#94a0b8", marginBottom: 4 }}>
+                        {t('synapseBuilder.step.summary')
+                          .replace('{loss}', String(stepResult.loss))
+                          .replace('{name}', t(`synapseBuilder.step.loss_${stepResult.loss_name}`))
+                          .replace('{lr}', String(stepResult.lr))}
+                      </div>
+                      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                        <thead>
+                          <tr style={{ color: "#7a869e", textAlign: "left" }}>
+                            <th>{t('synapseBuilder.step.node')}</th>
+                            <th>{t('synapseBuilder.step.output')}</th>
+                            <th>{t('synapseBuilder.step.grad')}</th>
+                            <th>{t('synapseBuilder.step.update')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stepResult.order.map((id) => {
+                            const n = stepResult.nodes[id];
+                            return (
+                              <tr key={id} style={{ color: "#c3cad8" }}>
+                                <td style={{ paddingRight: 6 }}>{id}</td>
+                                <td style={{ paddingRight: 6 }}>{n.mean !== undefined ? `${n.mean} ± ${n.std}` : "–"}</td>
+                                <td style={{ paddingRight: 6 }}>{n.grad !== undefined ? n.grad.toExponential(1) : "–"}</td>
+                                <td>{n.update !== undefined ? n.update.toExponential(1) : "–"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </Panel>
+            )}
             <Controls/>
-            <MiniMap
-              nodeColor={(node) => ((node.data as any).color as string) ?? "#a78bfa"}
-              nodeStrokeWidth={0}
-              maskColor="rgba(8,12,18,0.75)"
-              style={{ borderRadius: 8 }}
-            />
+            {nodes.length > 0 && (
+              <MiniMap
+                nodeColor={(node) => ((node.data as any).color as string) ?? "#a78bfa"}
+                nodeStrokeWidth={0}
+                maskColor="rgba(8,12,18,0.75)"
+                style={{ borderRadius: 8 }}
+              />
+            )}
             {shapeBannerVisible && shapeErrors.length > 0 && (
               <Panel position="top-center">
                 <ShapeErrorBanner
@@ -1450,16 +1662,6 @@ Keine Floskeln, nur Fakten.`;
                   onOpenAI={requestShapeFixWithAI}
                   onFocusNodes={() => focusShapeNodesByErrors(shapeErrors)}
                 />
-              </Panel>
-            )}
-            {nodes.length === 0 && !shapeBannerVisible && (
-              <Panel position="top-center">
-                <div style={{ marginTop: 80, textAlign: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: 40, opacity: 0.05, marginBottom: 10 }}>◈</div>
-                  <div style={{ fontSize: 12, color: "#1e2d3d", lineHeight: 1.9 }}>
-                    Drag nodes from the library<br/>or click a node to place it
-                  </div>
-                </div>
               </Panel>
             )}
           </ReactFlow>

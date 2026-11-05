@@ -19,6 +19,7 @@ mod test_manager;
 mod plugin_commands;
 mod power_manager;
 mod model_host;
+mod synapse_service;
 mod hosting_manager;
 mod hosting_desktop;
 mod hosting_api;
@@ -29,6 +30,7 @@ mod yolo_export;
 mod python_env;
 mod secret_store;
 mod ai_proxy;
+mod mcp;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -124,6 +126,13 @@ fn open_path_in_finder(app_handle: tauri::AppHandle, path: String) -> Result<(),
 }
 
 fn main() {
+    // MCP-Stdio-Bruecke (Claude Desktop): VOR allem anderen abzweigen – kein Tauri,
+    // keine Fenster, keine Datenbank, nichts auf stdout ausser JSON-RPC.
+    let args: Vec<String> = std::env::args().collect();
+    if mcp::stdio::requested(&args) {
+        std::process::exit(mcp::stdio::run());
+    }
+
     #[cfg(debug_assertions)]
     {
         if let Err(e) = dotenvy::dotenv() {
@@ -171,6 +180,8 @@ fn main() {
             let settings = hosting_manager::load_settings(app.handle());
             app.manage(std::sync::Arc::new(hosting_manager::HostingState::new(settings)));
             hosting_desktop::setup(app.handle());
+            // MCP: lokaler Endpunkt + ggf. Fernzugriff
+            mcp::setup(app.handle());
             Ok(())
         })
         .plugin(tauri_plugin_os::init())
@@ -250,6 +261,11 @@ fn main() {
             training_manager::get_canvas_network_code,
             training_manager::list_canvas_models_with_pt,
             training_manager::run_canvas_inference,
+            synapse_service::synapse_check,
+            synapse_service::synapse_stop,
+            synapse_service::synapse_export,
+            synapse_service::synapse_infer,
+            synapse_service::synapse_step,
             training_manager::get_current_training,
             training_manager::get_training_history,
             training_manager::delete_training_job,
@@ -378,6 +394,15 @@ fn main() {
             studio_manager::studio_suggest,
             studio_manager::studio_review,
             studio_manager::studio_export,
+            mcp::mcp_register_manifest,
+            mcp::mcp_tool_result,
+            mcp::mcp_get_status,
+            mcp::mcp_save_settings,
+            mcp::mcp_rotate_token,
+            mcp::mcp_connect_claude_desktop,
+            mcp::mcp_claude_desktop_running,
+            mcp::mcp_remote_status,
+            mcp::mcp_remote_disconnect,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

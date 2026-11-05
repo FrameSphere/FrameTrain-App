@@ -80,6 +80,10 @@ fn parse_db_time(s: &str) -> DateTime<Utc> {
         .unwrap_or_else(|_| Utc::now())
 }
 
+pub(crate) fn models_dir_for_export(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    get_models_dir(app_handle)
+}
+
 fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data_dir = app_handle.path().app_data_dir()
         .map_err(|e| format!("AppDataDir: {}", e))?;

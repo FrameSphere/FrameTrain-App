@@ -30,11 +30,25 @@ interface CanvasInferenceResult {
   predicted_class: number | null;
   confidence: number | null;
   predicted_value: unknown | null;
-  top_predictions: Array<{ class_idx: number; score: number }> | null;
-  all_probs: number[] | null;
+  top_predictions: Array<{ class_idx: number; label?: string; score: number }> | null;
+  all_probs?: number[] | null;
   inference_ms: number;
   task_type: string;
-  error: string | null;
+  error?: string | null;
+  /** Klasse als Name, generierter Text oder Zusammenfassung */
+  predicted?: string;
+  predicted_label?: string;
+  /** Erzeugte Bilder, Boxen oder Masken als data-URL */
+  images?: string[];
+}
+
+export type InferKind = "tensor" | "text" | "file" | "generate";
+
+/** Zahlen gehen als Tensor ans Modell, alles andere als Text. */
+export function inputFor(raw: string): { kind: InferKind; value: unknown } | null {
+  if (!raw.trim()) return null;
+  const nums = parseInputString(raw);
+  return nums && nums.length > 0 ? { kind: "tensor", value: nums } : { kind: "text", value: raw };
 }
 
 interface Props {
@@ -98,21 +112,13 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
   const selected = models.find((m) => m.model_id === selectedModelId);
 
   // ── Inference ausführen ───────────────────────────────────────────────────
-  const runInference = useCallback(async () => {
+  const infer = useCallback(async (kind: InferKind, value: unknown) => {
     if (!selectedModelId) return;
-    const nums = parseInputString(inputRaw);
-    if (!nums || nums.length === 0) {
-      setError(t('canvasInferenceTab.invalidInput'));
-      return;
-    }
     setRunning(true);
     setError(null);
     setResult(null);
     try {
-      const res = await invoke<CanvasInferenceResult>("run_canvas_inference", {
-        modelId: selectedModelId,
-        input: nums,
-      });
+      const res = await invoke<CanvasInferenceResult>("synapse_infer", { modelId: selectedModelId, kind, value });
       setResult(res);
       if (res.error) setError(res.error);
     } catch (e: unknown) {
@@ -120,7 +126,22 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
     } finally {
       setRunning(false);
     }
-  }, [selectedModelId, inputRaw]);
+  }, [selectedModelId]);
+
+  const runInference = useCallback(() => {
+    const input = inputFor(inputRaw);
+    if (!input) {
+      setError(t('canvasInferenceTab.invalidInput'));
+      return;
+    }
+    void infer(input.kind, input.value);
+  }, [inputRaw, infer, t]);
+
+  const runFile = useCallback(async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({ multiple: false });
+    if (typeof path === "string") void infer("file", path);
+  }, [infer]);
 
   // ─── Styles ───────────────────────────────────────────────────────────────
   const S = {
@@ -261,7 +282,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
 
       {/* ── Input ──────────────────────────────────────────────────────────── */}
       <div style={S.section}>
-        <div style={S.label}>Tensor-Input</div>
+        <div style={S.label}>Input</div>
         <div style={{ fontSize: 10, color: "#334155", marginBottom: 6 }}>
           {t('canvasInferenceTab.inputHint')}{" "}
           <code style={{ color: "#475569" }}>0.1, 0.5, 0.3, 0.8</code>
@@ -296,6 +317,20 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
             ) : (
               <>▶ {t('canvasInferenceTab.run')}</>
             )}
+          </button>
+          <button
+            style={{ ...S.btn, ...(!selected?.has_weights || running ? S.btnDisabled : {}) }}
+            onClick={runFile}
+            disabled={!selected?.has_weights || running}
+          >
+            {t('canvasInferenceTab.chooseFile')}
+          </button>
+          <button
+            style={{ ...S.btn, ...(!selected?.has_weights || running ? S.btnDisabled : {}) }}
+            onClick={() => infer("generate", null)}
+            disabled={!selected?.has_weights || running}
+          >
+            {t('canvasInferenceTab.generate')}
           </button>
           <span style={{ fontSize: 10, color: "#334155" }}>{t('canvasInferenceTab.shortcut')}</span>
         </div>
@@ -336,7 +371,17 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
             </span>
           </div>
 
-          {result.task_type === "regression" ? (
+          {result.images && result.images.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, marginBottom: 10 }}>
+              {result.images.map((src, i) => (
+                <img key={i} src={src} alt="" style={{ width: 240, maxWidth: "100%", borderRadius: 6, imageRendering: "pixelated" }} />
+              ))}
+            </div>
+          )}
+
+          {!result.top_predictions && result.task_type !== "regression" ? (
+            <div style={{ fontSize: 13, color: "#e2e8f0", whiteSpace: "pre-wrap" as const }}>{result.predicted}</div>
+          ) : result.task_type === "regression" ? (
             // ── Regression ──
             <div style={{ fontSize: 18, color: "#e2e8f0", fontWeight: 700 }}>
               {typeof result.predicted_value === "number"
@@ -358,7 +403,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
                 }}
               >
                 <span style={{ fontSize: 22, color: "#e2e8f0", fontWeight: 700 }}>
-                  {t('canvasInferenceTab.classN', { n: String(result.predicted_class ?? "?") })}
+                  {result.predicted_label ?? t('canvasInferenceTab.classN', { n: String(result.predicted_class ?? "?") })}
                 </span>
                 <span style={{ fontSize: 13, color: "#22c55e", fontWeight: 600 }}>
                   {result.confidence != null ? pct(result.confidence) : ""}
@@ -380,7 +425,7 @@ export const CanvasInferenceTab: React.FC<Props> = ({ userId, preferredModelId }
                               tp.class_idx === result.predicted_class ? "#a78bfa" : "#64748b",
                           }}
                         >
-                          {t('canvasInferenceTab.classN', { n: tp.class_idx })}
+                          {tp.label ?? t('canvasInferenceTab.classN', { n: tp.class_idx })}
                         </span>
                         <span style={{ color: "#94a3b8" }}>{pct(tp.score)}</span>
                       </div>

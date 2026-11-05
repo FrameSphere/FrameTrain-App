@@ -32,6 +32,7 @@ import { CONTINUE_PROMPT, continueTruncated } from '../ai/continueTruncated';
 import { sendAppErrorReport, type AppErrorReport } from '../utils/errorReport';
 import ReportPreview from './ReportPreview';
 import { migrateLegacyDevScripts } from '../utils/devScriptStorage';
+import { attachDevTrainPanel, clearDevDraft, readDevDraft } from '../utils/devScriptStore';
 import { detectScriptModality, isCausalLmModel, pyPath, templateOutputPath, type ScriptModality } from './scriptModality';
 import { generateCausalLmTrainScript } from './llmDevScript';
 import { localizeScript } from './scriptLocale';
@@ -1235,6 +1236,29 @@ export default function DevTrainPanel({ modelInfo, selectedVersionPath, selected
   const [savedScript, setSavedScript] = useState('');
   const [isDirty, setIsDirty]     = useState(false);
   const [currentScriptId, setCurrentScriptId] = useState<string | null>(null);
+
+  // ── Zugriff fuer Werkzeuge (MCP): Skript lesen/schreiben ──────────────
+  const mcpScriptRef = useRef(script);
+  mcpScriptRef.current = script;
+  const mcpSelRef = useRef({ modelId: modelInfo?.id ?? null, datasetIds: allDatasets.map(d => d.id), versionId: selectedVersionId ?? null });
+  mcpSelRef.current = { modelId: modelInfo?.id ?? null, datasetIds: datasets.map(d => d.id), versionId: selectedVersionId ?? null };
+  useEffect(() => {
+    const uid = userData?.userId;
+    if (!uid) return;
+    // Entwurf, den ein Werkzeug bei geschlossenem Panel geschrieben hat
+    const draft = readDevDraft(uid);
+    if (draft) {
+      setScript(draft.script);
+      setIsDirty(true);
+      clearDevDraft(uid);
+    }
+    return attachDevTrainPanel({
+      userId: uid,
+      getScript: () => mcpScriptRef.current,
+      setScript: (next) => { setScript(next); setIsDirty(true); },
+      getSelection: () => mcpSelRef.current,
+    });
+  }, [userData?.userId]);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName]   = useState('');
   const [showAI, setShowAI]       = useState(false);
