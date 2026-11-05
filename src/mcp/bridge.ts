@@ -7,6 +7,7 @@
 // Die Rust-Commands baut Strang B. Fehlen sie (aelterer Stand, Tests, Vite-
 // Vorschau), laeuft die App ohne MCP weiter: jeder Aufruf ist abgesichert.
 
+import { friendlyClientName } from './clientNames';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { needsApproval, recordDecision, requestApprovalViaDialog, hasApprovalHost } from './approval';
@@ -64,7 +65,7 @@ function normalizeCall(raw: unknown): McpCallEvent | null {
     tool: c.tool,
     args: c.args && typeof c.args === 'object' && !Array.isArray(c.args) ? c.args as ToolArgs : {},
     source: c.source === 'remote' ? 'remote' : 'local',
-    client: { name: typeof client.name === 'string' && client.name ? client.name : 'Unbekannter Client', version: typeof client.version === 'string' ? client.version : undefined },
+    client: { name: friendlyClientName(client.name), version: typeof client.version === 'string' ? client.version : undefined },
   };
 }
 

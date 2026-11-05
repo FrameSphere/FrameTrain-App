@@ -9,6 +9,7 @@
 // `revokeAllGrants`, `subscribeGrants`) sind fuer den Einstellungs-Tab
 // "KI-Verbindungen" (Strang B) gedacht.
 
+import { friendlyClientName } from './clientNames';
 import type { ApprovalDecision, ApprovalRequest, McpClientInfo, Tool, ToolArgs, McpCallSource } from './types';
 
 export const GRANTS_KEY = 'ft_mcp_grants_v1';
@@ -32,10 +33,24 @@ function readStore(): Store {
   try {
     const raw = localStorage.getItem(GRANTS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Store : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? migrateNames(parsed as Store) : {};
   } catch {
     return {};
   }
+}
+
+/** Alte Eintraege unter technischen Kennungen ("local-agent-mode-x") auf den Produktnamen zusammenfuehren. */
+function migrateNames(store: Store): Store {
+  const out: Store = {};
+  for (const [key, tools] of Object.entries(store)) {
+    const sample = Object.values(tools ?? {})[0];
+    const label = friendlyClientName(sample?.clientName ?? key);
+    const k = clientKey(label);
+    for (const [tool, g] of Object.entries(tools ?? {})) {
+      out[k] = { ...(out[k] ?? {}), [tool]: { ...g, clientName: label } };
+    }
+  }
+  return out;
 }
 
 function writeStore(store: Store) {
@@ -46,7 +61,7 @@ function writeStore(store: Store) {
 /** Client-Name normalisiert (Gross/Klein und Leerraum spielen keine Rolle). */
 export function clientKey(client: McpClientInfo | string): string {
   const name = typeof client === 'string' ? client : client.name;
-  return (name || 'unknown').trim().toLowerCase();
+  return friendlyClientName(name).trim().toLowerCase();
 }
 
 export function isDestructive(tool: Tool): boolean {

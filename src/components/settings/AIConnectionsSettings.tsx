@@ -7,6 +7,7 @@ import {
   Cable, Plug, KeyRound, Eye, EyeOff, RefreshCw, AlertTriangle, CheckCircle2, Loader2, Terminal,
   Laptop, Cloud, ShieldCheck, History, Trash2, Unplug,
 } from 'lucide-react';
+import { friendlyClientName } from '../../mcp/clientNames';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { dateLocale } from '../../utils/dateLocale';
 import { Toggle } from '../hosting/QuickAccessSettings';
@@ -340,7 +341,7 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
             {remote && remote.connections.length === 0 && <p className="text-xs text-gray-500">{t('mcp.settings.remote.noClients')}</p>}
             {remote?.connections.map((c, i) => (
               <div key={c.id ?? `${c.clientName}-${i}`} className="flex items-center justify-between text-xs py-1">
-                <span className="text-white">{c.clientName}</span>
+                <span className="text-white">{friendlyClientName(c.clientName)}</span>
                 <span className="flex items-center gap-3 text-gray-500">
                   {t('mcp.settings.remote.lastUsed', { time: fmt(c.lastUsedAt ?? c.createdAt) })}
                   {c.id && (
@@ -357,7 +358,7 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
                 {remote.recentJobs.slice(0, 10).map((j, i) => (
                   <div key={`${j.createdAt}-${i}`} className="grid grid-cols-[1fr_auto_auto] gap-3 text-xs py-0.5">
                     <span className="text-gray-300 font-mono truncate">{j.tool}</span>
-                    <span className="text-gray-500">{j.clientName} · {j.status}</span>
+                    <span className="text-gray-500">{friendlyClientName(j.clientName)} · {j.status}</span>
                     <span className="text-gray-600">{fmt(j.createdAt)}</span>
                   </div>
                 ))}
@@ -376,7 +377,7 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
           : status.recentCalls.slice(0, 12).map((c, i) => (
             <div key={`${c.at}-${i}`} className="grid grid-cols-[1fr_auto_auto] gap-3 text-xs py-0.5">
               <span className={`font-mono truncate ${c.isError ? 'text-amber-300' : 'text-gray-300'}`}>{c.tool}</span>
-              <span className="text-gray-500">{c.clientName} · {c.source === 'remote' ? t('mcp.settings.activity.remote') : t('mcp.settings.activity.local')}</span>
+              <span className="text-gray-500">{friendlyClientName(c.clientName)} · {c.source === 'remote' ? t('mcp.settings.activity.remote') : t('mcp.settings.activity.local')}</span>
               <span className="text-gray-600">{fmt(c.at)}</span>
             </div>
           ))}

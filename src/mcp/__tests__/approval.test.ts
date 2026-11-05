@@ -61,7 +61,7 @@ describe('Freigabe-Regeln', () => {
     recordDecision(alwaysTool, claude, 'always');
     recordDecision(onceTool, gpt, 'allow');
     expect(listGrants().map((g) => `${g.client}/${g.tool}/${g.kind}`)).toEqual([
-      'ChatGPT/models_rename/once', 'Claude Desktop/models_rename/once', 'Claude Desktop/training_start/always',
+      'ChatGPT/models_rename/once', 'Claude/models_rename/once', 'Claude/training_start/always',
     ]);
     revokeGrant('Claude Desktop', 'training_start');
     expect(needsApproval(alwaysTool, claude)).toBe(true);
@@ -113,7 +113,7 @@ describe('Schnittstelle fuer Strang B (approvals.ts)', () => {
     const cb = vi.fn();
     const off = onApprovalsChanged(cb);
     recordDecision(alwaysTool, claude, 'always');
-    expect(listApprovals()).toEqual([expect.objectContaining({ client: 'Claude Desktop', tool: 'training_start', kind: 'always' })]);
+    expect(listApprovals()).toEqual([expect.objectContaining({ client: 'Claude', tool: 'training_start', kind: 'always' })]);
     revokeApproval('Claude Desktop', 'training_start');
     expect(listApprovals()).toEqual([]);
     expect(cb).toHaveBeenCalledTimes(2);
