@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "frametrain-desktop"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "base64 0.22.1",
  "bytes",
