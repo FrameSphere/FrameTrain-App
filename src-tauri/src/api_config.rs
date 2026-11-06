@@ -60,6 +60,11 @@ pub mod endpoints {
     pub fn accept_terms() -> String {
         format!("{}/desktop/accept-terms", get_api_base_url())
     }
+
+    /// Support-Tickets dem Konto zuordnen und die Konto-Liste holen
+    pub fn support_tickets() -> String {
+        format!("{}/desktop/support-tickets", get_api_base_url())
+    }
 }
 
 #[cfg(test)]

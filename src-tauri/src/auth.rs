@@ -163,6 +163,28 @@ pub async fn accept_terms(api_key: String) -> Result<(), String> {
     post_with_api_key(endpoints::accept_terms(), serde_json::json!({ "apiKey": api_key })).await
 }
 
+/// Gleicht Support-Tickets mit dem Konto ab: schickt die lokal bekannten
+/// (ticket_id, user_token, subject) und liefert alle Tickets des Kontos – so
+/// erscheinen Anfragen aus der App auch auf der Website und umgekehrt.
+#[tauri::command]
+pub async fn sync_support_tickets(api_key: String, tickets: serde_json::Value) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Fehler beim Erstellen des HTTP-Clients: {}", e))?;
+    let response = client
+        .post(endpoints::support_tickets())
+        .json(&serde_json::json!({ "apiKey": api_key, "tickets": tickets }))
+        .send()
+        .await
+        .map_err(|e| format!("Netzwerkfehler: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Server antwortet mit {}", response.status()));
+    }
+    let body: serde_json::Value = response.json().await.map_err(|e| format!("Antwort unlesbar: {}", e))?;
+    Ok(body.get("tickets").cloned().unwrap_or_else(|| serde_json::json!([])))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

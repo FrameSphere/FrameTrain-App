@@ -77,7 +77,7 @@ const STATUS_COLOR: Record<string, string> = {
 // PROVIDER_META ist zentral definiert in src/ai/providerMeta.ts
 
 import {
-  MANAGER_API, readStoredTickets, submitSupportTicket, type StoredTicket,
+  MANAGER_API, readStoredTickets, submitSupportTicket, syncSupportTickets, type StoredTicket,
 } from '../utils/supportTicket';
 import ModalPortal from './ui/ModalPortal';
 import { pluginName } from '../plugins/pluginText';
@@ -451,6 +451,8 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   // Check for unread admin replies
   useEffect(() => {
     async function checkBadge() {
+      // Tickets von Website-Chat und Dashboard ueber das Konto holen
+      await syncSupportTickets(userData.userId, userData.apiKey);
       const tickets = getAll();
       if (!tickets.length) return;
       let unread = 0;
@@ -474,7 +476,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
       setSupportBadge(unread);
     }
     checkBadge();
-  }, [supportOpen, getAll]);
+  }, [supportOpen, getAll, userData.userId, userData.apiKey]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -484,8 +486,14 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
   useEffect(() => {
     if (activeTab === 'support' && supportOpen) {
       setStoredTickets(getAll());
+      // Danach mit dem Konto abgleichen und die Liste auffrischen
+      let cancelled = false;
+      void syncSupportTickets(userData.userId, userData.apiKey).then(() => {
+        if (!cancelled) setStoredTickets(getAll());
+      });
+      return () => { cancelled = true; };
     }
-  }, [activeTab, supportOpen, getAll]);
+  }, [activeTab, supportOpen, getAll, userData.userId, userData.apiKey]);
 
   useEffect(() => {
     if (activeTab === 'system') {
@@ -656,6 +664,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
         subject: newSubject.trim(),
         message: newMessage.trim(),
       });
+      void syncSupportTickets(userData.userId, userData.apiKey);
       setStoredTickets(getAll());
       setNewSubject('');
       setNewMessage('');

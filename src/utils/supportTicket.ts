@@ -75,3 +75,25 @@ export async function submitSupportTicket(input: SupportTicketInput): Promise<St
   storeTicket(input.userId, ticket);
   return ticket;
 }
+
+/**
+ * Gleicht die lokalen Tickets mit dem Konto ab (frame-train.com, per API-Key).
+ * Danach kennt die App auch Tickets aus Website-Chat und Dashboard, und die
+ * Website kennt die aus der App. Ohne Netz bleibt die lokale Liste unveraendert.
+ */
+export async function syncSupportTickets(userId: string, apiKey: string): Promise<StoredTicket[]> {
+  const local = readStoredTickets(userId);
+  if (!apiKey) return local;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const remote = await invoke<StoredTicket[]>('sync_support_tickets', { apiKey, tickets: local });
+    if (Array.isArray(remote)) {
+      for (const t of [...remote].reverse()) {
+        if (t && typeof t.ticket_id === 'number' && typeof t.user_token === 'string') storeTicket(userId, t);
+      }
+    }
+  } catch {
+    // Offline oder Website nicht erreichbar: lokale Tickets reichen.
+  }
+  return readStoredTickets(userId);
+}
