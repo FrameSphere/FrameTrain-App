@@ -50,7 +50,7 @@ pub fn initialize_result(version: &str, requested: Option<&str>) -> Value {
         "protocolVersion": negotiate_version(requested),
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": { "name": "frametrain", "title": "FrameTrain", "version": version },
-        "instructions": "FrameTrain trains AI models locally on this computer. Use the tools to manage models and datasets, build datasets, start and monitor training, and test or host the results. Long-running work returns a job_id; poll the matching *_status tool. Some actions ask the user for approval inside the FrameTrain app."
+        "instructions": "FrameTrain trains AI models locally on this computer. The tools manage models and datasets, build datasets, start and monitor training, and test or host the results. Long-running work returns a job_id; the matching *_status tool reports its progress. Some actions ask the user for approval inside the FrameTrain app."
     })
 }
 

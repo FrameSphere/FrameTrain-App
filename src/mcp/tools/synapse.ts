@@ -108,7 +108,7 @@ export const synapseTools: McpTool[] = [
   defineTool({
     name: 'synapse_node_catalog',
     title: 'Node catalog',
-    description: 'Lists the node types available in the Synapse Builder with category, description, input/output port ids and parameters (key, type, default, options, range). Filter by category (data, layer, activation, training, math, logic) or by types to keep the answer small. Read this before building or editing a graph.',
+    description: 'Lists the node types available in the Synapse Builder with category, description, input/output port ids and parameters (key, type, default, options, range). Filter by category (data, layer, activation, training, math, logic) or by types to keep the answer small. Lists the building blocks for a graph.',
     properties: {
       category: S.enumOf('Only this category.', ['data', 'layer', 'activation', 'training', 'math', 'logic']),
       types: S.strArr('Only these node types.'),
@@ -321,7 +321,7 @@ export const synapseTools: McpTool[] = [
   defineTool({
     name: 'synapse_train',
     title: 'Train Synapse graph',
-    description: 'Trains the current Synapse graph (runtime IR) on a dataset. The graph must validate; graphs with a data loader node need a dataset_id of the matching kind. If the builder page is open, training runs there with live charts. Uses GPU/CPU for a long time — the user confirms each start. Follow progress with training_status (or synapse_train_status). Save the graph first (synapse_save) so the trained weights are attached to a model.',
+    description: 'Trains the current Synapse graph (runtime IR) on a dataset. The graph must validate; graphs with a data loader node need a dataset_id of the matching kind. If the builder page is open, training runs there with live charts. Uses GPU/CPU for a long time — the user confirms each start. Progress is reported by training_status (or synapse_train_status). Save the graph first (synapse_save) so the trained weights are attached to a model.',
     properties: {
       dataset_id: S.str('Dataset id (required when the graph has a loader node).'),
       epochs: S.int('Default 10.', { minimum: 1 }),
@@ -351,7 +351,7 @@ export const synapseTools: McpTool[] = [
       if (builder?.startTraining) {
         await builder.startTraining({ ...cfg, selectedDatasetId: ds?.id, selectedDatasetName: ds?.name });
         const current = await call<{ id: string } | null>('get_current_training').catch(() => null);
-        return ok(`Training started in the open Synapse Builder${current ? ` (job ${current.id})` : ''}. Poll training_status.`, { job_id: current?.id ?? null, runs_in: 'builder' });
+        return ok(`Training started in the open Synapse Builder${current ? ` (job ${current.id})` : ''}. Progress: training_status.`, { job_id: current?.id ?? null, runs_in: 'builder' });
       }
       const ir = buildCanvasGraphIR(snap.nodes, snap.edges, cfg);
       ir.training.gpuExplicit = true;
@@ -367,7 +367,7 @@ export const synapseTools: McpTool[] = [
       });
       registerVersionOnComplete(job.id, snap.modelName || 'Synapse Canvas Model', job.output_path ?? null);
       try { await call('enable_prevent_sleep'); } catch { /* optional */ }
-      return ok(`Training started (job ${job.id}). Poll training_status.${snap.modelId ? '' : ' Note: the graph is not saved as a model, so the weights will not be attached to one.'}`, { job_id: job.id, runs_in: 'background' });
+      return ok(`Training started (job ${job.id}). Progress: training_status.${snap.modelId ? '' : ' Note: the graph is not saved as a model, so the weights will not be attached to one.'}`, { job_id: job.id, runs_in: 'background' });
     },
   }),
   defineTool({

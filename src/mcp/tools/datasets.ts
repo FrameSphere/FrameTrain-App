@@ -110,7 +110,7 @@ export const datasetsTools: McpTool[] = [
   defineTool({
     name: 'datasets_download_hf',
     title: 'Download dataset',
-    description: 'Downloads a Hugging Face dataset and attaches it to a library model. Returns a job_id immediately; poll system_job_status (the result contains the new dataset id).',
+    description: 'Downloads a Hugging Face dataset and attaches it to a library model. Returns a job_id immediately; system_job_status reports progress and the new dataset id.',
     properties: {
       repo_id: S.str('Hugging Face dataset repo id, e.g. "imdb".'),
       model_id: S.str('Model the dataset belongs to.'),

@@ -144,7 +144,7 @@ export const studioTools: McpTool[] = [
   defineTool({
     name: 'studio_stats',
     title: 'Project statistics',
-    description: 'Returns counts per status, boxes per class, empty confirmed samples and model doubts for a Studio project. Use it to judge whether a project is ready for export.',
+    description: 'Returns counts per status, boxes per class, empty confirmed samples and model doubts for a Studio project. Shows whether a project is ready for export.',
     properties: { project_id: projectId },
     required: ['project_id'],
     async run(args) {
@@ -193,7 +193,7 @@ export const studioTools: McpTool[] = [
   defineTool({
     name: 'studio_add_image',
     title: 'Add image',
-    description: 'Adds one image (base64-encoded PNG/JPEG/WebP, max ~15 MB) to an image Studio project. To collect many images from the web use studio_fetch_web instead.',
+    description: 'Adds one image (base64-encoded PNG/JPEG/WebP, max ~15 MB) to an image Studio project. studio_fetch_web collects many images from the web at once.',
     properties: {
       project_id: projectId,
       image_base64: S.str('Image bytes as base64 or data: URL.'),

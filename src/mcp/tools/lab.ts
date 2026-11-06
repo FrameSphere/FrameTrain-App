@@ -43,7 +43,7 @@ export const labTools: McpTool[] = [
   defineTool({
     name: 'lab_infer',
     title: 'Single inference',
-    description: 'Runs one prediction on the loaded Laboratory model: text input for text models, or file_path (image/audio/video inside FrameTrain data folders) for media models; question for vision-language models; start/end seconds for video clips. Start the server first with lab_server_start.',
+    description: 'Runs one prediction on the loaded Laboratory model: text input for text models, or file_path (image/audio/video inside FrameTrain data folders) for media models; question for vision-language models; start/end seconds for video clips. Requires a model server started with lab_server_start.',
     properties: {
       text: S.str('Text input (text models, LLM prompt).'),
       file_path: S.str('Absolute path of an image/audio/video file, e.g. from datasets_files.'),

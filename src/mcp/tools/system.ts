@@ -43,7 +43,7 @@ export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_ping',
     title: 'Ping',
-    description: 'Checks that the FrameTrain desktop app is running and reachable. Returns the app version and whether a user is signed in. Use it first if other tools fail unexpectedly.',
+    description: 'Checks that the FrameTrain desktop app is running and reachable. Returns the app version and whether a user is signed in. Useful for checking the connection.',
     requiresUser: false,
     async run(_args, ctx) {
       const version = await appVersion();
@@ -54,7 +54,7 @@ export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_info',
     title: 'System info',
-    description: 'Returns app version, system RAM, Python interpreter and the ML stack status (PyTorch, CUDA/MPS GPU availability, transformers, peft). Call this before planning a training run to know what the machine can do.',
+    description: 'Returns app version, system RAM, Python interpreter and the ML stack status (PyTorch, CUDA/MPS GPU availability, transformers, peft). Shows what the machine can train.',
     requiresUser: false,
     async run(_args, ctx) {
       const [version, ram, pythonRaw, requirementsRaw] = await Promise.all([
@@ -80,7 +80,7 @@ export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_capabilities',
     title: 'Capabilities',
-    description: 'Describes what FrameTrain can do through these tools (one entry per domain) and lists the installed task plugins (model families/tasks the app can train). Use it to orient yourself before a multi-step workflow.',
+    description: 'Describes what FrameTrain can do through these tools (one entry per domain) and lists the installed task plugins (model families/tasks the app can train). Gives an overview of the available workflows.',
     requiresUser: false,
     async run() {
       const plugins = await safe(() => call<{ id: string; name: string; category: string; description: string }[]>('get_available_plugins'));

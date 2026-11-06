@@ -81,7 +81,7 @@ export const trainingTools: McpTool[] = [
   defineTool({
     name: 'training_estimate_resources',
     title: 'Estimate memory',
-    description: 'Estimates peak RAM/VRAM for training a model with a config (weights, gradients, optimizer, activations) and compares it with system RAM. Verdict: fits, tight, exceeds or unknown. Use before training_start to choose batch size, LoRA or precision.',
+    description: 'Estimates peak RAM/VRAM for training a model with a config (weights, gradients, optimizer, activations) and compares it with system RAM. Verdict: fits, tight, exceeds or unknown. Helps choose batch size, LoRA or precision.',
     properties: { model_id: S.str('Model id.'), config: TRAINING_CONFIG_SCHEMA },
     required: ['model_id'],
     async run(args) {
@@ -142,7 +142,7 @@ export const trainingTools: McpTool[] = [
         config: optObj(args, 'config') ?? {}, versionId: optStr(args, 'version_id') ?? null,
       });
       try { await call('enable_prevent_sleep'); } catch { /* optional */ }
-      return ok(`Training started (job ${job.id}): ${model.name} on ${ds.name}. Poll training_status.`, { job: jobBrief(job) });
+      return ok(`Training started (job ${job.id}): ${model.name} on ${ds.name}. Progress: training_status.`, { job: jobBrief(job) });
     },
   }),
   defineTool({

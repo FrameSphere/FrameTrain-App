@@ -50,7 +50,7 @@ export const modelsTools: McpTool[] = [
   defineTool({
     name: 'models_hf_files',
     title: 'Hugging Face files',
-    description: 'Lists the files of a Hugging Face model repo with sizes, so you can judge download size and format before calling models_download_hf.',
+    description: 'Lists the files of a Hugging Face model repo with sizes, to judge download size and format before a download.',
     properties: { repo_id: S.str('Repo id, e.g. "distilbert-base-uncased".') },
     required: ['repo_id'],
     annotations: { openWorldHint: true },
@@ -63,7 +63,7 @@ export const modelsTools: McpTool[] = [
   defineTool({
     name: 'models_download_hf',
     title: 'Download model',
-    description: 'Downloads a model from Hugging Face into the local library. Runs in the background and returns a job_id immediately; poll system_job_status (the finished result contains the new model id).',
+    description: 'Downloads a model from Hugging Face into the local library. Runs in the background and returns a job_id immediately; system_job_status reports progress and the new model id.',
     properties: {
       repo_id: S.str('Hugging Face repo id.'),
       model_name: S.str('Display name in the library. Default: the repo id.'),
