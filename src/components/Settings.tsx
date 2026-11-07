@@ -2473,7 +2473,7 @@ export default function Settings({ userData, onLogout }: SettingsProps) {
           {activeTab === 'ai-assistant'   && renderAIAssistantTab()}
           {activeTab === 'system'         && renderSystemTab()}
           {activeTab === 'quick'          && <QuickAccessSettings />}
-          {activeTab === 'ai-connections' && <AIConnectionsSettings />}
+          {activeTab === 'ai-connections' && <AIConnectionsSettings accountEmail={userData.email} />}
           {activeTab === 'updates'        && renderUpdatesTab()}
           {activeTab === 'docs'           && renderDocsTab()}
           {activeTab === 'support'        && renderSupportTab()}

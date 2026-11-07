@@ -4751,6 +4751,8 @@
         "connectorUrl": "Connector-URL für Claude.ai bzw. ChatGPT",
         "clients": "Verbundene Clients",
         "noClients": "Noch kein Client verbunden.",
+        "otherAccount": "Wenn du ChatGPT oder Claude schon verbunden hast und hier nichts steht, hast du dich dort vermutlich mit einem anderen FrameTrain-Konto angemeldet. Die App ist als {email} angemeldet. Verbinde den Assistenten mit diesem Konto neu oder melde dich hier mit dem anderen an.",
+        "otherAccountNoEmail": "Wenn du ChatGPT oder Claude schon verbunden hast und hier nichts steht, hast du dich dort vermutlich mit einem anderen FrameTrain-Konto angemeldet als hier in der App.",
         "refresh": "Aktualisieren",
         "lastUsed": "zuletzt {time}",
         "disconnect": "Trennen",

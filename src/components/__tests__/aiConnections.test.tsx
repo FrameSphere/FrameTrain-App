@@ -140,6 +140,18 @@ describe('Einstellungs-Tab KI-Verbindungen', { timeout: 15000 }, () => {
     expect(screen.queryByText(/läuft noch und würde den Eintrag/)).not.toBeInTheDocument();
   });
 
+  it('leere Verbindungsliste bei laufendem Fernzugriff: Hinweis auf anderes Konto', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'mcp_get_status') return Promise.resolve(status({
+        relay: { running: true, connected: true, lastHeartbeat: '2026-11-07T10:00:00Z', lastError: null, jobsHandled: 0 },
+      }, { remoteEnabled: true }));
+      if (cmd === 'mcp_remote_status') return Promise.resolve({ connections: [], recentJobs: [] });
+      return Promise.resolve(null);
+    });
+    wrap(<AIConnectionsSettings approvalsApi={null} accountEmail="test@beispiel.de" />);
+    expect(await screen.findByText(/anderen FrameTrain-Konto angemeldet. Die App ist als test@beispiel.de/)).toBeInTheDocument();
+  });
+
   it('Warten auf Claude Desktop laesst sich abbrechen', async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'mcp_get_status') return Promise.resolve(status());

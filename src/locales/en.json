@@ -4769,6 +4769,8 @@
         "connectorUrl": "Connector URL for Claude.ai or ChatGPT",
         "clients": "Connected clients",
         "noClients": "No client connected yet.",
+        "otherAccount": "If you already connected ChatGPT or Claude and nothing shows here, you probably signed in there with a different FrameTrain account. The app is signed in as {email}. Reconnect the assistant with this account, or sign in here with the other one.",
+        "otherAccountNoEmail": "If you already connected ChatGPT or Claude and nothing shows here, you probably signed in there with a different FrameTrain account than the one in this app.",
         "refresh": "Refresh",
         "lastUsed": "last {time}",
         "disconnect": "Disconnect",

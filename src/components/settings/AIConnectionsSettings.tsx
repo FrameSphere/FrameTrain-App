@@ -78,7 +78,7 @@ function Snippet({ title, text, shown, copyLabel }: { title: string; text: strin
   );
 }
 
-export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?: ApprovalsApi | null } = {}) {
+export default function AIConnectionsSettings({ approvalsApi, accountEmail }: { approvalsApi?: ApprovalsApi | null; accountEmail?: string } = {}) {
   const { t, language } = useLanguage();
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -338,7 +338,20 @@ export default function AIConnectionsSettings({ approvalsApi }: { approvalsApi?:
               </button>
             </div>
             {remoteError && <StatusLine ok={false} text={remoteError} />}
-            {remote && remote.connections.length === 0 && <p className="text-xs text-gray-500">{t('mcp.settings.remote.noClients')}</p>}
+            {remote && remote.connections.length === 0 && (
+              <div className="text-xs text-gray-500 space-y-1">
+                <p>{t('mcp.settings.remote.noClients')}</p>
+                {/* Haeufiger Fall: Assistent mit anderem Konto verbunden als die App */}
+                {status.relay.connected && (
+                  <p className="text-amber-300/90 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                    <span>{accountEmail
+                      ? t('mcp.settings.remote.otherAccount', { email: accountEmail })
+                      : t('mcp.settings.remote.otherAccountNoEmail')}</span>
+                  </p>
+                )}
+              </div>
+            )}
             {remote?.connections.map((c, i) => (
               <div key={c.id ?? `${c.clientName}-${i}`} className="flex items-center justify-between text-xs py-1">
                 <span className="text-white">{friendlyClientName(c.clientName)}</span>
