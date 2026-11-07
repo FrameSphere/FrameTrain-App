@@ -10,6 +10,7 @@ mod api_config;
 mod user_manager;
 mod model_manager;
 mod dataset_manager;
+mod dataset_fetch;
 mod training_manager;
 mod dev_trainer;
 mod version_manager;
@@ -203,6 +204,9 @@ fn main() {
             auth::set_diagnostics_consent,
             auth::accept_terms,
             auth::sync_support_tickets,
+            dataset_fetch::hf_dataset_files,
+            dataset_fetch::fetch_dataset,
+            dataset_fetch::inspect_dataset,
             user_manager::login_user,
             user_manager::logout_user,
             user_manager::is_user_logged_in,

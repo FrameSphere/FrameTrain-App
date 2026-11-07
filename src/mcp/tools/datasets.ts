@@ -1,14 +1,51 @@
 // Domaene datasets: Datensaetze der Modelle.
 
-import { call, clip, defineTool, ok, optNum, optStr, reqNum, reqStr, S, ToolFailure } from '../util';
+import { call, clip, defineTool, ok, optNum, optStr, reqNum, reqStr, S, strArr, ToolFailure } from '../util';
 import type { McpTool } from '../types';
 import { announceChange, runAsJob } from './common';
-import { datasetBrief, findDataset, findModel, listDatasets, type DatasetInfo } from './lookup';
+import { datasetBrief, findDataset, findModel, listDatasets, type DatasetInfo, type ModelInfo } from './lookup';
 
 interface DatasetFile { name: string; path: string; size: number; is_dir?: boolean; split?: string }
 
 async function datasetFiles(datasetId: string): Promise<DatasetFile[]> {
   return call<DatasetFile[]>('get_dataset_files', { datasetId });
+}
+
+
+interface FetchReport {
+  format: string; images: number; yolo_labels: number; classes: string[];
+  splits: Record<string, number>; problems: string[];
+}
+interface FetchResult { dataset: DatasetInfo; report: FetchReport; conversion?: { images: number; boxes: number; classes: string[] } | null }
+
+/** Objekterkennung (YOLO, DETR, ...): braucht Bilder plus Boxen. */
+export function isDetectionModel(m: Pick<ModelInfo, 'model_type' | 'plugin_override' | 'name'>): boolean {
+  const s = `${m.model_type ?? ''} ${m.plugin_override ?? ''} ${m.name}`.toLowerCase();
+  return /yolo|detr|rtdetr|detection|ssd|retinanet|faster.?rcnn/.test(s);
+}
+
+/** Bild-Modelle allgemein: ohne Bilder ist ein Dataset fuer sie nutzlos. */
+export function isVisionModel(m: Pick<ModelInfo, 'model_type' | 'plugin_override' | 'name'>): boolean {
+  const s = `${m.model_type ?? ''} ${m.plugin_override ?? ''}`.toLowerCase();
+  return isDetectionModel(m) || /resnet|vit|convnext|efficientnet|mobilenet|swin|deit|beit|image|vision|canvas|videomae|clip/.test(s);
+}
+
+/** Kurztext zum Pruefbericht, inklusive Warnung, wenn das Modell damit nicht trainieren kann. */
+export function describeReport(r: FetchReport, model?: Pick<ModelInfo, 'model_type' | 'plugin_override' | 'name'>): string {
+  const parts = [`format ${r.format}`, `${r.images} image(s)`];
+  if (r.yolo_labels) parts.push(`${r.yolo_labels} YOLO label file(s)`);
+  if (r.classes.length) parts.push(`classes: ${r.classes.slice(0, 12).join(', ')}${r.classes.length > 12 ? ', ...' : ''}`);
+  const splits = Object.entries(r.splits).map(([k, v]) => `${k} ${v}`).join(', ');
+  if (splits) parts.push(`splits: ${splits}`);
+  let text = parts.join('; ') + '.';
+  const problems = [...r.problems];
+  if (model && isVisionModel(model) && r.images === 0) {
+    problems.unshift(`Not usable for "${model.name}": it needs images. Delete it with datasets_delete and pick another source.`);
+  } else if (model && isDetectionModel(model) && r.format !== 'yolo' && r.format !== 'voc' && r.format !== 'coco') {
+    problems.unshift(`"${model.name}" needs bounding-box labels (YOLO, Pascal VOC or COCO); this dataset has none.`);
+  }
+  if (problems.length) text += ` Problems: ${problems.join(' ')}`;
+  return text;
 }
 
 export const datasetsTools: McpTool[] = [
@@ -108,26 +145,111 @@ export const datasetsTools: McpTool[] = [
     },
   }),
   defineTool({
+    name: 'datasets_hf_files',
+    title: 'Hugging Face dataset files',
+    description: 'Shows the folders, file types and sizes of a Hugging Face dataset repo before downloading: total size, the largest folders with their image counts, and whether the data is stored as parquet. Use the folder paths as include for datasets_download_hf.',
+    properties: { repo_id: S.str('Hugging Face dataset repo id, e.g. "rishitdagli/cppe-5".') },
+    required: ['repo_id'],
+    annotations: { openWorldHint: true },
+    async run(args) {
+      const info = await call<{ total_mb: number; files: number; folders: { path: string; mb: number; images: number }[]; has_parquet: boolean; image_files: number }>(
+        'hf_dataset_files', { repoId: reqStr(args, 'repo_id') });
+      const top = info.folders.slice(0, 6).map((f) => `${f.path} ${f.mb} MB${f.images ? ` (${f.images} images)` : ''}`).join(', ');
+      return ok(`${info.files} file(s), ${info.total_mb} MB total${info.has_parquet ? ', parquet data' : ''}${info.image_files ? `, ${info.image_files} image files` : ''}. Folders: ${top}.`, info);
+    },
+  }),
+  defineTool({
     name: 'datasets_download_hf',
     title: 'Download dataset',
-    description: 'Downloads a Hugging Face dataset and attaches it to a library model. Returns a job_id immediately; system_job_status reports progress and the new dataset id.',
+    description: 'Downloads a Hugging Face dataset and attaches it to a library model. include limits the download to folders, files or glob patterns (e.g. ["sample/"]); max_mb refuses larger selections. For object detection models (YOLO etc.) images and boxes stored in parquet are converted into YOLO folders with data.yaml; max_rows keeps only the first N images. The result includes a content check (images, labels, classes, problems). Returns a job_id; system_job_status reports progress and the new dataset id.',
     properties: {
       repo_id: S.str('Hugging Face dataset repo id, e.g. "imdb".'),
       model_id: S.str('Model the dataset belongs to.'),
       dataset_name: S.str('Display name. Default: the repo id.'),
+      include: S.strArr('Folders ("sample/"), files or glob patterns to download. Default: all data files.'),
+      max_mb: S.num('Refuse the download if the selection is larger. Default 2000, max 20000.', { minimum: 1, maximum: 20000 }),
+      max_rows: S.int('Detection datasets from parquet: keep at most this many images, e.g. 300 for a first run.', { minimum: 1 }),
+      bbox_format: S.enumOf('Box format in the source data. Default "coco" (x, y, width, height in pixels; Hugging Face standard).', ['coco', 'xyxy', 'yolo']),
     },
     required: ['repo_id', 'model_id'],
     approval: 'once',
     annotations: { openWorldHint: true },
     async run(args) {
       const repoId = reqStr(args, 'repo_id');
-      const modelId = (await findModel(reqStr(args, 'model_id'))).id;
+      const model = await findModel(reqStr(args, 'model_id'));
       const datasetName = optStr(args, 'dataset_name') ?? repoId;
+      const include = strArr(args, 'include');
+      const maxMb = optNum(args, 'max_mb');
+      const maxRows = optNum(args, 'max_rows');
+      const detection = isDetectionModel(model);
+      const targeted = detection || include.length > 0 || maxMb !== undefined || maxRows !== undefined;
+      if (targeted) {
+        return runAsJob('download', `Download dataset ${repoId}`, async () => {
+          const r = await call<FetchResult>('fetch_dataset', {
+            source: { kind: 'hf', repo_id: repoId, include, max_mb: maxMb, max_rows: maxRows, bbox_format: optStr(args, 'bbox_format'), yolo: detection },
+            datasetName, modelId: model.id,
+          });
+          announceChange('datasets', { datasetId: r.dataset.id });
+          return r;
+        }, {
+          waitMs: 0,
+          describe: (r) => `Downloaded ${r.dataset.name} (${r.dataset.id})${r.conversion ? `, converted ${r.conversion.images} images with ${r.conversion.boxes} boxes to YOLO` : ''}. Check: ${describeReport(r.report, model)}`,
+        });
+      }
       return runAsJob('download', `Download dataset ${repoId}`, async () => {
-        const d = await call<DatasetInfo>('download_huggingface_dataset', { repoId, datasetName, modelId });
+        const d = await call<DatasetInfo>('download_huggingface_dataset', { repoId, datasetName, modelId: model.id });
         announceChange('datasets', { datasetId: d.id });
-        return d;
-      }, { waitMs: 0, describe: (d) => `Downloaded ${d.name} (${d.id}).` });
+        const report = await call<FetchReport>('inspect_dataset', { datasetId: d.id }).catch(() => null);
+        return { dataset: d, report };
+      }, {
+        waitMs: 0,
+        describe: (r) => `Downloaded ${r.dataset.name} (${r.dataset.id}).${r.report ? ` Check: ${describeReport(r.report, model)}` : ''}`,
+      });
+    },
+  }),
+  defineTool({
+    name: 'datasets_import_url',
+    title: 'Import dataset from URL',
+    description: 'Downloads a dataset archive (ZIP or TAR) or a single data file from an https URL, unpacks it and attaches it to a library model, e.g. a Roboflow or GitHub release export. The user confirms the URL in FrameTrain. The result includes a content check (images, labels, classes, problems). Returns a job_id.',
+    properties: {
+      url: S.str('https URL of the archive or file.'),
+      model_id: S.str('Model the dataset belongs to.'),
+      dataset_name: S.str('Display name.'),
+      max_mb: S.num('Refuse larger downloads. Default 2000, max 20000.', { minimum: 1, maximum: 20000 }),
+    },
+    required: ['url', 'model_id', 'dataset_name'],
+    approval: 'always',
+    annotations: { openWorldHint: true },
+    async run(args) {
+      const url = reqStr(args, 'url');
+      if (!/^https:\/\//i.test(url)) throw new ToolFailure('Only https:// URLs are allowed.');
+      const model = await findModel(reqStr(args, 'model_id'));
+      const datasetName = reqStr(args, 'dataset_name');
+      return runAsJob('import', `Import ${datasetName} from URL`, async () => {
+        const r = await call<FetchResult>('fetch_dataset', {
+          source: { kind: 'url', url, max_mb: optNum(args, 'max_mb'), yolo: isDetectionModel(model) },
+          datasetName, modelId: model.id,
+        });
+        announceChange('datasets', { datasetId: r.dataset.id });
+        return r;
+      }, { waitMs: 0, describe: (r) => `Imported ${r.dataset.name} (${r.dataset.id}). Check: ${describeReport(r.report, model)}` });
+    },
+  }),
+  defineTool({
+    name: 'datasets_check',
+    title: 'Check dataset',
+    description: 'Checks what a dataset contains: format (yolo, voc, coco, images, parquet, table), image and label counts, classes, splits, and problems such as missing images or labels. With model_id it also says whether that model can train on it.',
+    properties: {
+      dataset_id: S.str('Dataset id from datasets_list.'),
+      model_id: S.str('Optional: model to check the dataset against.'),
+    },
+    required: ['dataset_id'],
+    async run(args) {
+      const d = await findDataset(reqStr(args, 'dataset_id'));
+      const modelId = optStr(args, 'model_id') ?? d.model_id;
+      const model = modelId ? await findModel(modelId).catch(() => undefined) : undefined;
+      const report = await call<FetchReport>('inspect_dataset', { datasetId: d.id });
+      return ok(`${d.name}: ${describeReport(report, model)}`, report);
     },
   }),
   defineTool({
