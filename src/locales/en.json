@@ -4684,6 +4684,7 @@
         "system_capabilities": "Capabilities",
         "system_info": "System info",
         "system_job_status": "Job status",
+        "system_job_cancel": "Cancel job",
         "system_jobs_list": "Jobs",
         "system_ping": "Ping",
         "tests_hard_examples_export": "Export hard examples",

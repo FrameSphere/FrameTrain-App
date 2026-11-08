@@ -13,11 +13,41 @@ use crate::dataset_manager::{get_dataset_path, import_local_dataset};
 use crate::AppState;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 use tauri::{Emitter, Manager, State};
 
 pub const PROGRESS_EVENT: &str = "dataset-fetch-progress";
+pub const CANCELLED_TEXT: &str = "Download cancelled.";
+
+// Laufende Python-Prozesse je fetch_id, damit ein Download abgebrochen werden kann.
+type Running = Mutex<HashMap<String, Arc<Mutex<Child>>>>;
+
+fn running() -> &'static Running {
+    static R: OnceLock<Running> = OnceLock::new();
+    R.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cancelled() -> &'static Mutex<HashSet<String>> {
+    static C: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Bricht einen laufenden Download ab. true = es lief einer.
+pub fn cancel(fetch_id: &str) -> bool {
+    let child = running().lock().unwrap().get(fetch_id).cloned();
+    match child {
+        Some(c) => {
+            cancelled().lock().unwrap().insert(fetch_id.to_string());
+            let _ = c.lock().unwrap().kill();
+            true
+        }
+        None => false,
+    }
+}
 
 /// Ergebnis aus den JSON-Zeilen von ft_data.fetch (letzte result- oder error-Zeile).
 pub fn parse_fetch_output(stdout: &str) -> Result<Value, String> {
@@ -41,11 +71,15 @@ pub fn parse_fetch_output(stdout: &str) -> Result<Value, String> {
     }
 }
 
-fn run_fetch(app: &tauri::AppHandle, request: Value) -> Result<Value, String> {
-    run_module(app, "ft_data.fetch", request)
+fn run_fetch(app: &tauri::AppHandle, request: Value, fetch_id: Option<String>) -> Result<Value, String> {
+    run_module_tracked(app, "ft_data.fetch", request, fetch_id)
 }
 
 fn run_module(app: &tauri::AppHandle, module: &str, request: Value) -> Result<Value, String> {
+    run_module_tracked(app, module, request, None)
+}
+
+fn run_module_tracked(app: &tauri::AppHandle, module: &str, request: Value, fetch_id: Option<String>) -> Result<Value, String> {
     let mut cmd = Command::new(crate::training_manager::resolve_python_path());
     cmd.no_window();
     cmd.python_utf8();
@@ -63,6 +97,10 @@ fn run_module(app: &tauri::AppHandle, module: &str, request: Value) -> Result<Va
     let mut child = cmd.spawn().map_err(|e| format!("Python konnte nicht gestartet werden: {}", e))?;
     let stdout = child.stdout.take().ok_or("stdout fehlt")?;
     let mut stderr = child.stderr.take().ok_or("stderr fehlt")?;
+    let child = Arc::new(Mutex::new(child));
+    if let Some(id) = &fetch_id {
+        running().lock().unwrap().insert(id.clone(), child.clone());
+    }
     let err_thread = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = stderr.read_to_string(&mut s);
@@ -78,8 +116,14 @@ fn run_module(app: &tauri::AppHandle, module: &str, request: Value) -> Result<Va
         collected.push_str(&line);
         collected.push('\n');
     }
-    let _ = child.wait();
+    let _ = child.lock().unwrap().wait();
     let err = err_thread.join().unwrap_or_default();
+    if let Some(id) = &fetch_id {
+        running().lock().unwrap().remove(id);
+        if cancelled().lock().unwrap().remove(id) {
+            return Err(CANCELLED_TEXT.to_string());
+        }
+    }
     parse_fetch_output(&collected).map_err(|e| {
         if e == "Keine Antwort vom Python-Helfer" {
             let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
@@ -91,7 +135,11 @@ fn run_module(app: &tauri::AppHandle, module: &str, request: Value) -> Result<Va
 }
 
 async fn run_fetch_async(app: tauri::AppHandle, request: Value) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || run_fetch(&app, request))
+    run_fetch_tracked(app, request, None).await
+}
+
+async fn run_fetch_tracked(app: tauri::AppHandle, request: Value, fetch_id: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || run_fetch(&app, request, fetch_id))
         .await
         .map_err(|e| format!("Abgebrochen: {}", e))?
 }
@@ -114,6 +162,7 @@ pub async fn fetch_dataset(
     source: Value,
     dataset_name: String,
     model_id: String,
+    fetch_id: Option<String>,
 ) -> Result<Value, String> {
     let kind = source.get("kind").and_then(|k| k.as_str()).unwrap_or("");
     match kind {
@@ -132,7 +181,7 @@ pub async fn fetch_dataset(
     if let Some(o) = req.as_object_mut() {
         o.insert("target".into(), json!(work.to_string_lossy()));
     }
-    let result = run_fetch_async(app_handle.clone(), req).await;
+    let result = run_fetch_tracked(app_handle.clone(), req, fetch_id).await;
     let outcome = match result {
         Ok(v) => {
             let root = v.get("root").and_then(|r| r.as_str()).unwrap_or("").to_string();
@@ -234,6 +283,68 @@ pub async fn preview_media(
         .map_err(|e| format!("Abgebrochen: {}", e))?
 }
 
+/// Stoppt einen laufenden fetch_dataset (gleiche fetch_id). Der halb geladene
+/// Ordner wird danach von fetch_dataset selbst geloescht.
+#[tauri::command]
+pub fn cancel_dataset_fetch(fetch_id: String) -> bool {
+    cancel(&fetch_id)
+}
+
+/// Juengste Aenderung in einem Ordnerbaum (fuer das Aufraeumen beim Start).
+fn newest_mtime(dir: &Path) -> Option<SystemTime> {
+    let mut newest = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for e in entries.flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if let Ok(m) = meta.modified() {
+                if newest.map(|n| m > n).unwrap_or(true) {
+                    newest = Some(m);
+                }
+            }
+            if meta.is_dir() {
+                stack.push(e.path());
+            }
+        }
+    }
+    newest
+}
+
+/// Loescht liegengebliebene Download-Ordner (App waehrend eines Downloads beendet).
+/// Nur Ordner ohne Aenderung seit `idle` – ein laufender Download schreibt staendig.
+pub fn cleanup_stale(base: &Path, idle: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(base) else { return 0 };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for e in entries.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let old = newest_mtime(&p)
+            .and_then(|m| now.duration_since(m).ok())
+            .map(|age| age >= idle)
+            .unwrap_or(false);
+        if old && std::fs::remove_dir_all(&p).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+pub fn cleanup_stale_on_start(app: &tauri::AppHandle) {
+    if let Ok(base) = app.path().app_cache_dir() {
+        let base = base.join("dataset-fetch");
+        std::thread::spawn(move || {
+            let n = cleanup_stale(&base, Duration::from_secs(30 * 60));
+            if n > 0 {
+                println!("[dataset-fetch] {} liegengebliebene Download-Ordner entfernt", n);
+            }
+        });
+    }
+}
+
 fn temp_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().app_cache_dir().map_err(|e| format!("Cache-Ordner: {}", e))?;
     let dir = base.join("dataset-fetch").join(uuid::Uuid::new_v4().to_string());
@@ -271,5 +382,44 @@ mod tests {
         assert!(!is_safe_repo_id("../etc"));
         assert!(!is_safe_repo_id("a/b/c"));
         assert!(!is_safe_repo_id("a b"));
+    }
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+
+    #[test]
+    fn raeumt_nur_alte_ordner() {
+        let base = std::env::temp_dir().join(format!("ft-cleanup-{}", uuid::Uuid::new_v4()));
+        let fresh = base.join("fresh");
+        std::fs::create_dir_all(fresh.join("raw")).unwrap();
+        std::fs::write(fresh.join("raw/a.jpg"), b"x").unwrap();
+        // idle 0: alles gilt als alt
+        assert_eq!(cleanup_stale(&base, Duration::from_secs(3600)), 0);
+        assert!(fresh.exists());
+        assert_eq!(cleanup_stale(&base, Duration::from_secs(0)), 1);
+        assert!(!fresh.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn abbruch_beendet_den_prozess() {
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let c = Arc::new(Mutex::new(child));
+        running().lock().unwrap().insert("t1".into(), c.clone());
+        let t = std::time::Instant::now();
+        assert!(cancel("t1"));
+        let status = c.lock().unwrap().wait().unwrap();
+        assert!(!status.success());
+        assert!(t.elapsed() < Duration::from_secs(5));
+        assert!(cancelled().lock().unwrap().remove("t1"));
+        running().lock().unwrap().remove("t1");
+    }
+
+    #[test]
+    fn abbruch_ohne_laufenden_download() {
+        assert!(!cancel("gibt-es-nicht"));
     }
 }

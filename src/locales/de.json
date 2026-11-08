@@ -4666,6 +4666,7 @@
         "system_capabilities": "Faehigkeiten",
         "system_info": "Systeminfo",
         "system_job_status": "Auftragsstatus",
+        "system_job_cancel": "Auftrag abbrechen",
         "system_jobs_list": "Auftraege",
         "system_ping": "Ping",
         "tests_hard_examples_export": "Schwere Beispiele exportieren",

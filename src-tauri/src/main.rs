@@ -177,6 +177,7 @@ fn main() {
         .manage(hosting_api::ApiState::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            dataset_fetch::cleanup_stale_on_start(app.handle());
             // Hosting: Einstellungen laden, Tray/Kuerzel/API anwenden, Modelle
             // mit "beim Start laden" hochfahren.
             let settings = hosting_manager::load_settings(app.handle());
@@ -211,6 +212,7 @@ fn main() {
             dataset_fetch::stage_dataset,
             dataset_fetch::discard_staged,
             dataset_fetch::preview_media,
+            dataset_fetch::cancel_dataset_fetch,
             user_manager::login_user,
             user_manager::logout_user,
             user_manager::is_user_logged_in,

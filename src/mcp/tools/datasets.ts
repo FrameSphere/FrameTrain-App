@@ -200,10 +200,11 @@ export const datasetsTools: McpTool[] = [
       const detection = isDetectionModel(model);
       const targeted = detection || include.length > 0 || maxMb !== undefined || maxRows !== undefined;
       if (targeted) {
-        return runAsJob('download', `Download dataset ${repoId}`, async () => {
+        return runAsJob('download', `Download dataset ${repoId}`, async (ctl) => {
+          ctl.onCancel(() => call('cancel_dataset_fetch', { fetchId: ctl.id }));
           const r = await call<FetchResult>('fetch_dataset', {
             source: { kind: 'hf', repo_id: repoId, include, max_mb: maxMb, max_rows: maxRows, bbox_format: optStr(args, 'bbox_format'), yolo: detection },
-            datasetName, modelId: model.id,
+            datasetName, modelId: model.id, fetchId: ctl.id,
           });
           announceChange('datasets', { datasetId: r.dataset.id });
           return r;
@@ -249,13 +250,14 @@ export const datasetsTools: McpTool[] = [
       for (const u of urls) if (!/^https:\/\//i.test(u)) throw new ToolFailure('Only https:// URLs are allowed.');
       const model = await findModel(reqStr(args, 'model_id'));
       const datasetName = reqStr(args, 'dataset_name');
-      return runAsJob('import', `Import ${datasetName} from URL`, async () => {
+      return runAsJob('import', `Import ${datasetName} from URL`, async (ctl) => {
+        ctl.onCancel(() => call('cancel_dataset_fetch', { fetchId: ctl.id }));
         const r = await call<FetchResult>('fetch_dataset', {
           source: {
             kind: 'url', urls, include: strArr(args, 'include'), max_files: optNum(args, 'max_files'),
             class_names: strArr(args, 'class_names'), max_mb: optNum(args, 'max_mb'), yolo: isDetectionModel(model),
           },
-          datasetName, modelId: model.id,
+          datasetName, modelId: model.id, fetchId: ctl.id,
         });
         announceChange('datasets', { datasetId: r.dataset.id });
         return r;

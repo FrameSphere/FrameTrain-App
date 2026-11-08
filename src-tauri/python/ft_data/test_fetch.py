@@ -234,6 +234,42 @@ class MehrFormateTest(unittest.TestCase):
         self.assertEqual(fetch._classlabel_names(feats), ["person", "bicycle", "car"])
         self.assertEqual(fetch._classlabel_names({"x": {"dtype": "int64"}}), [])
 
+    def test_paralleler_download_holt_alle_dateien_und_wiederholt_fehler(self):
+        import sys
+        import threading
+        import types
+        geholt, gleichzeitig, maximal, lock = [], [0], [0], threading.Lock()
+        fehler = {"b/2.jpg": 1}
+
+        def fake_download(repo, path, repo_type=None, revision=None, local_dir=None):
+            import time
+            with lock:
+                gleichzeitig[0] += 1
+                maximal[0] = max(maximal[0], gleichzeitig[0])
+            time.sleep(0.05)
+            with lock:
+                gleichzeitig[0] -= 1
+                if fehler.get(path):
+                    fehler[path] -= 1
+                    raise OSError("kurz weg")
+                geholt.append(path)
+            return str(Path(local_dir) / path)
+
+        mod = types.ModuleType("huggingface_hub")
+        mod.hf_hub_download = fake_download
+        alt = sys.modules.get("huggingface_hub")
+        sys.modules["huggingface_hub"] = mod
+        try:
+            files = [(f"b/{i}.jpg", 10) for i in range(20)]
+            fetch._download_parallel("x/y", files, None, self.root, 200)
+        finally:
+            if alt is not None:
+                sys.modules["huggingface_hub"] = alt
+            else:
+                del sys.modules["huggingface_hub"]
+        self.assertEqual(sorted(geholt), sorted(p for p, _ in files))
+        self.assertGreater(maximal[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

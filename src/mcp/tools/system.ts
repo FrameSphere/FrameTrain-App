@@ -1,6 +1,6 @@
 // Domaene system: Zustand der App, Hardware, Hintergrund-Auftraege.
 
-import { getJob, listJobs, waitForJob } from '../jobs';
+import { cancelJob, getJob, listJobs, waitForJob } from '../jobs';
 import { call, defineTool, errorText, fail, ok, optNum, reqStr, S } from '../util';
 import type { McpTool } from '../types';
 import { MCP_DOMAINS } from '../types';
@@ -124,6 +124,24 @@ export const systemTools: McpTool[] = [
         : job.state === 'done' ? `Job ${id} (${job.label}) finished.`
           : `Job ${id} (${job.label}) failed: ${job.error}`;
       return ok(text, { ...job });
+    },
+  }),
+  defineTool({
+    name: 'system_job_cancel',
+    title: 'Cancel job',
+    description: 'Stops a running background job by job_id, e.g. a dataset download that is too large or too slow. Partly downloaded files are deleted. Works for dataset downloads and URL imports; training and tests have their own *_stop tools.',
+    properties: { job_id: S.str('The job_id returned by the tool that started the job.') },
+    required: ['job_id'],
+    approval: 'once',
+    requiresUser: false,
+    async run(args) {
+      const id = reqStr(args, 'job_id');
+      const outcome = await cancelJob(id);
+      const job = getJob(id);
+      if (outcome === 'unknown') return fail(`Unknown job_id "${id}". Jobs are kept in memory until the app restarts.`);
+      if (outcome === 'finished') return ok(`Job ${id} is no longer running (state: ${job?.state}).`, { ...job });
+      if (outcome === 'not_cancellable') return fail(`Job ${id} (${job?.label}) cannot be cancelled; it will finish on its own.`, { ...job });
+      return ok(`Job ${id} (${job?.label}) was cancelled. Partly downloaded files were removed.`, { ...job });
     },
   }),
   defineTool({

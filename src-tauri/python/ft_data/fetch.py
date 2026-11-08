@@ -428,8 +428,49 @@ def hf_class_names(repo: str) -> List[str]:
     return []
 
 
-def hf_download(req: Dict[str, Any], target: Path) -> Path:
+HF_WORKERS = 8
+
+
+def _download_parallel(repo: str, files: List[Tuple[str, int]], revision: Optional[str], raw: Path,
+                       total: int) -> None:
+    """Dateien mit mehreren Verbindungen laden.
+
+    Einzeln nacheinander schaffte Hugging Face ~55 Dateien pro Minute – bei
+    YOLO-Ordnern mit tausenden kleinen Bildern und Labels dauerte das Stunden.
+    Mit 8 Verbindungen etwa sechsmal so schnell.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from huggingface_hub import hf_hub_download
+
+    def one(path: str) -> str:
+        last: Optional[Exception] = None
+        for _ in range(3):
+            try:
+                return hf_hub_download(repo, path, repo_type="dataset", revision=revision, local_dir=str(raw))
+            except Exception as e:  # noqa: BLE001 – kurze Netzstoerung: noch einmal
+                last = e
+        raise FetchError(f"Could not download {path}: {last}")
+
+    done_files = done_bytes = 0
+    step = max(1, len(files) // 100)
+    with ThreadPoolExecutor(max_workers=HF_WORKERS) as pool:
+        futures = {pool.submit(one, path): (path, size) for path, size in files}
+        try:
+            for fut in as_completed(futures):
+                fut.result()
+                path, size = futures[fut]
+                done_files += 1
+                done_bytes += size
+                if done_files % step == 0 or done_files == len(files):
+                    emit("progress", file_index=done_files, total_files=len(files), downloaded_bytes=done_bytes,
+                         total_bytes=total, message=f"{done_files}/{len(files)} files")
+        except BaseException:
+            for f in futures:
+                f.cancel()
+            raise
+
+
+def hf_download(req: Dict[str, Any], target: Path) -> Path:
     repo = req["repo_id"]
     max_mb = min(float(req.get("max_mb") or DEFAULT_MAX_MB), HARD_MAX_MB)
     files = hf_list(repo)
@@ -460,13 +501,7 @@ def hf_download(req: Dict[str, Any], target: Path) -> Path:
     if not chosen:
         raise FetchError(f"No data files found in {repo}.")
     raw = target / "raw"
-    done = 0
-    for i, (path, size) in enumerate(chosen):
-        hf_hub_download(repo, path, repo_type="dataset", revision=revision, local_dir=str(raw))
-        done += size
-        if i % 10 == 0 or i == len(chosen) - 1:
-            emit("progress", file_index=i + 1, total_files=len(chosen), downloaded_bytes=done, total_bytes=total,
-                 message=f"{i + 1}/{len(chosen)}: {path}")
+    _download_parallel(repo, chosen, revision, raw, total)
     root = raw
     if req.get("include") and len(req["include"]) == 1:
         sub = raw / req["include"][0].rstrip("/")
