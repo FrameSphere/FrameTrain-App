@@ -42,6 +42,10 @@ pub fn parse_fetch_output(stdout: &str) -> Result<Value, String> {
 }
 
 fn run_fetch(app: &tauri::AppHandle, request: Value) -> Result<Value, String> {
+    run_module(app, "ft_data.fetch", request)
+}
+
+fn run_module(app: &tauri::AppHandle, module: &str, request: Value) -> Result<Value, String> {
     let mut cmd = Command::new(crate::training_manager::resolve_python_path());
     cmd.no_window();
     cmd.python_utf8();
@@ -54,7 +58,7 @@ fn run_fetch(app: &tauri::AppHandle, request: Value) -> Result<Value, String> {
             cmd.env("PYTHONPATH", joined);
         }
     }
-    cmd.args(["-m", "ft_data.fetch", &request.to_string()]);
+    cmd.args(["-m", module, &request.to_string()]);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("Python konnte nicht gestartet werden: {}", e))?;
     let stdout = child.stdout.take().ok_or("stdout fehlt")?;
@@ -152,6 +156,82 @@ pub async fn inspect_dataset(
 ) -> Result<Value, String> {
     let path = get_dataset_path(app_handle.clone(), state, dataset_id).await?;
     run_fetch_async(app_handle, json!({ "kind": "inspect", "path": path })).await
+}
+
+/// Ein Dataset fuer den Dataset Builder vorbereiten (Klassen umbenennen/zusammenlegen/
+/// weglassen, Stichprobe). request: { project_kind, class_map?, keep_unmapped?, max_samples?,
+/// per_class?, keep_empty?, text_column?, label_column? }. Ergebnis enthaelt den Pfad und
+/// welcher Studio-Import ihn liest; danach discard_staged aufrufen.
+#[tauri::command]
+pub async fn stage_dataset(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    dataset_id: String,
+    request: Value,
+) -> Result<Value, String> {
+    let source = get_dataset_path(app_handle.clone(), state, dataset_id).await?;
+    let work = temp_dir(&app_handle)?;
+    let mut req = request;
+    if let Some(o) = req.as_object_mut() {
+        o.insert("source".into(), json!(source));
+        o.insert("target".into(), json!(work.to_string_lossy()));
+    }
+    let app = app_handle.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || run_module(&app, "ft_data.stage", req))
+        .await
+        .map_err(|e| format!("Abgebrochen: {}", e))?;
+    match res {
+        Ok(mut v) => {
+            if let Some(o) = v.as_object_mut() {
+                o.insert("work_dir".into(), json!(work.to_string_lossy()));
+            }
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            Err(e)
+        }
+    }
+}
+
+/// Raeumt einen Arbeitsordner von stage_dataset weg – nur innerhalb des eigenen Cache-Ordners.
+#[tauri::command]
+pub fn discard_staged(app_handle: tauri::AppHandle, work_dir: String) -> Result<(), String> {
+    let base = app_handle.path().app_cache_dir().map_err(|e| e.to_string())?.join("dataset-fetch");
+    let p = PathBuf::from(&work_dir);
+    let (Ok(base), Ok(p)) = (base.canonicalize(), p.canonicalize()) else { return Ok(()) };
+    if p.starts_with(&base) && p != base {
+        std::fs::remove_dir_all(&p).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Vorschaubild (Bild oder Video-Frame) mit eingezeichneten Boxen als base64-JPEG –
+/// damit KI-Assistenten Labels sehen und pruefen koennen. Nur Dateien unter den
+/// App-Daten (Datasets, Dataset-Builder-Projekte).
+#[tauri::command]
+pub async fn preview_media(
+    app_handle: tauri::AppHandle,
+    path: String,
+    boxes: Option<Value>,
+    classes: Option<Vec<String>>,
+    max_size: Option<u32>,
+    at: Option<f64>,
+) -> Result<Value, String> {
+    let data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let p = PathBuf::from(&path).canonicalize().map_err(|_| "Datei nicht gefunden".to_string())?;
+    let allowed = data.canonicalize().map(|d| p.starts_with(d)).unwrap_or(false);
+    if !allowed {
+        return Err("Vorschau nur fuer Dateien aus FrameTrain-Datasets und -Projekten".into());
+    }
+    let mut req = json!({ "path": p.to_string_lossy(), "max_size": max_size.unwrap_or(1024) });
+    if let Some(b) = boxes { req["boxes"] = b; }
+    if let Some(c) = classes { req["classes"] = json!(c); }
+    if let Some(a) = at { req["at"] = json!(a); }
+    let app = app_handle.clone();
+    tauri::async_runtime::spawn_blocking(move || run_module(&app, "ft_data.preview", req))
+        .await
+        .map_err(|e| format!("Abgebrochen: {}", e))?
 }
 
 fn temp_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {

@@ -54,3 +54,42 @@ describe('datasets_download_hf for a YOLO model', () => {
       .rejects.toThrow(/https/);
   });
 });
+
+describe('studio import from a dataset', () => {
+  it('stages with class_map and imports with the right studio command, then cleans up', async () => {
+    const calls: string[] = [];
+    mockInvoke.mockImplementation(async (cmd: string, a: Record<string, unknown>) => {
+      calls.push(cmd);
+      if (cmd === 'studio_list_projects') return [{ id: 'p1', name: 'Roads', modality: 'image', task: 'bbox', classes: [] }];
+      if (cmd === 'stage_dataset') {
+        expect(a.request).toMatchObject({ project_kind: 'image_boxes', class_map: { truck: 'vehicle' }, keep_unmapped: false, max_samples: 50 });
+        return { studio_source: 'folder', path: '/w/staged', work_dir: '/w', label_classes: ['person', 'vehicle'], samples: 50, per_class: { person: 30, vehicle: 20 } };
+      }
+      if (cmd === 'studio_import_folder') {
+        expect(a).toMatchObject({ sourcePath: '/w/staged', labelClasses: ['person', 'vehicle'] });
+        return { added: 50, duplicates: 0, unreadable: 0 };
+      }
+      return null;
+    });
+    const r = await registry.get('studio_import')!.run(
+      { project_id: 'p1', source: 'dataset', dataset_id: 'ds1', class_map: { truck: 'vehicle' }, keep_unmapped: false, max_samples: 50 }, ctx);
+    const text = r.content[0].text;
+    expect(text).toMatch(/Added 50 sample/);
+    expect(text).toMatch(/person 30, vehicle 20/);
+    expect(calls).toContain('discard_staged');
+  });
+});
+
+describe('studio_view_samples', () => {
+  it('returns images with box legend and text for text samples', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'studio_list_projects') return [{ id: 'p1', name: 'Roads', modality: 'image', task: 'bbox', classes: ['person', 'vehicle'] }];
+      if (cmd === 'studio_list_samples') return { total: 1, items: [{ id: 's1', status: 'suggested', mime: 'image/jpeg', abs_path: '/d/a.jpg', ann: { boxes: [{ cls: 1, x: 0.5, y: 0.5, w: 0.2, h: 0.2 }] } }] };
+      if (cmd === 'preview_media') return { data: 'QUJD', mime: 'image/jpeg' };
+      return null;
+    });
+    const r = await registry.get('studio_view_samples')!.run({ project_id: 'p1' }, ctx);
+    expect(r.content[1]).toEqual({ type: 'image', data: 'QUJD', mimeType: 'image/jpeg' });
+    expect(r.content[0].text).toMatch(/boxes 1:vehicle/);
+  });
+});

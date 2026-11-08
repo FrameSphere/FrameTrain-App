@@ -1,7 +1,7 @@
 // Domaene studio: Dataset Builder (Projekte, Samples, Annotation, Export).
 
 import {
-  call, defineTool, ok, optBool, optNum, optStr, reqStr, S, strArr, ToolArgError, ToolFailure,
+  call, defineTool, ok, optBool, optNum, optObj, optStr, reqStr, S, strArr, ToolArgError, ToolFailure, withImages,
 } from '../util';
 import type { JsonSchema, McpTool, ToolArgs } from '../types';
 import { announceChange, runAsJob } from './common';
@@ -21,6 +21,71 @@ export const STUDIO_KINDS = {
   audio_transcript: { modality: 'audio', task: 'transcript',   targetFormat: 'audio_transcript', classes: false, hint: 'Speech recognition: audio with transcript.' },
 } as const;
 type StudioKind = keyof typeof STUDIO_KINDS;
+
+
+interface ProjectBrief { id: string; name: string; modality: string; task: string; classes: string[] }
+
+/** Projektart aus modality + task (Gegenstueck zu STUDIO_KINDS). */
+export function kindOf(p: Pick<ProjectBrief, 'modality' | 'task'>): StudioKind | null {
+  const hit = Object.entries(STUDIO_KINDS).find(([, v]) => v.modality === p.modality && v.task === p.task);
+  return hit ? (hit[0] as StudioKind) : null;
+}
+
+async function findProject(pid: string): Promise<ProjectBrief> {
+  const list = await call<ProjectBrief[]>('studio_list_projects');
+  const p = list.find((x) => x.id === pid);
+  if (!p) throw new ToolFailure(`Studio project "${pid}" not found. Use studio_projects_list.`);
+  return p;
+}
+
+interface StagedResult {
+  studio_source: 'folder' | 'text' | 'audio' | 'videos'; path: string; work_dir: string;
+  label_classes?: string[]; text_column?: string; label_column?: string; paths?: string[];
+  samples: number; per_class?: Record<string, number>; dropped_classes?: Record<string, number>;
+}
+
+/** Dataset -> Studio: vorbereiten (Klassen, Stichprobe), mit dem passenden Import einlesen, aufraeumen. */
+async function importDataset(pid: string, args: ToolArgs): Promise<ImportReport & { staged: StagedResult }> {
+  const project = await findProject(pid);
+  const kind = kindOf(project);
+  if (!kind) throw new ToolFailure(`Unsupported project type ${project.modality}/${project.task}.`);
+  const classMap = optObj(args, 'class_map');
+  if (classMap) {
+    for (const [k, v] of Object.entries(classMap)) {
+      if (v !== null && typeof v !== 'string') throw new ToolArgError(`class_map["${k}"] must be a class name or null.`);
+    }
+  }
+  const staged = await call<StagedResult>('stage_dataset', {
+    datasetId: reqStr(args, 'dataset_id'),
+    request: {
+      project_kind: kind, class_map: classMap ?? {}, keep_unmapped: args.keep_unmapped !== false,
+      max_samples: optNum(args, 'max_samples'), per_class: optBool(args, 'per_class'), keep_empty: optBool(args, 'keep_empty'),
+      text_column: optStr(args, 'text_column'), label_column: optStr(args, 'label_column'),
+    },
+  });
+  try {
+    let report: ImportReport;
+    switch (staged.studio_source) {
+      case 'folder':
+        report = await call('studio_import_folder', { projectId: pid, sourcePath: staged.path, labelClasses: staged.label_classes ?? null, ignoreLabels: false });
+        break;
+      case 'text':
+        report = await call('studio_import_text', { projectId: pid, sourcePath: staged.path, textColumn: staged.text_column ?? null, labelColumn: staged.label_column ?? null, ignoreLabels: false });
+        break;
+      case 'audio':
+        report = await call('studio_import_audio', { projectId: pid, sourcePath: staged.path, ignoreLabels: false });
+        break;
+      case 'videos':
+        report = await call('studio_import_videos', { projectId: pid, paths: staged.paths ?? [], clipSeconds: null, ignoreLabels: false });
+        break;
+    }
+    return { ...report, staged };
+  } finally {
+    await call('discard_staged', { workDir: staged.work_dir }).catch(() => undefined);
+  }
+}
+
+function clipText(t: string, n: number): string { return t.length > n ? `${t.slice(0, n)} ...` : t; }
 
 const SAMPLE_STATUS = ['new', 'suggested', 'confirmed', 'skipped'] as const;
 
@@ -142,6 +207,60 @@ export const studioTools: McpTool[] = [
     },
   }),
   defineTool({
+    name: 'studio_view_samples',
+    title: 'View samples',
+    description: 'Shows samples of a Studio project as pictures so you can check them yourself: images (and video clips as a middle frame) with their boxes drawn in, numbered with class names. Text and audio samples are returned as text with their label or transcript. Use it to verify labels, find missing or wrong boxes, then fix them with studio_set_annotation; boxes are listed in the same order as the numbers in the picture.',
+    properties: {
+      project_id: projectId,
+      sample_ids: S.strArr('Samples to show (from studio_samples_list). Max 6.'),
+      status: S.enumOf('Without sample_ids: show samples with this status.', SAMPLE_STATUS),
+      count: S.int('Without sample_ids: how many (1-6). Default 4.', { minimum: 1, maximum: 6 }),
+      max_size: S.int('Longest image side in pixels (256-1280). Default 768.', { minimum: 256, maximum: 1280 }),
+    },
+    required: ['project_id'],
+    async run(args) {
+      const pid = reqStr(args, 'project_id');
+      const project = await findProject(pid);
+      const wanted = strArr(args, 'sample_ids').slice(0, 6);
+      type Sample = { id: string; status: string; content?: string | null; abs_path?: string; mime?: string;
+        ann?: { label?: string | null; target?: string | null; boxes?: { cls: number; x: number; y: number; w: number; h: number }[] } };
+      const picked: Sample[] = [];
+      for (let offset = 0; offset < 20000 && picked.length < (wanted.length || 6); offset += 200) {
+        const page = await call<{ total: number; items: Sample[] }>('studio_list_samples', {
+          projectId: pid, status: wanted.length ? null : optStr(args, 'status') ?? null, offset, limit: 200,
+        });
+        for (const it of page.items) {
+          if (wanted.length ? wanted.includes(it.id) : picked.length < optNum(args, 'count', 4)!) picked.push(it);
+        }
+        if (offset + 200 >= page.total) break;
+      }
+      if (picked.length === 0) throw new ToolFailure('No matching samples.');
+      const images: { data: string; mimeType: string }[] = [];
+      const lines: string[] = [];
+      for (const [i, sm] of picked.entries()) {
+        const boxes = sm.ann?.boxes ?? [];
+        const head = `${i + 1}. ${sm.id} (${sm.status})`;
+        if (sm.abs_path && /^(image|video)\//.test(sm.mime ?? '') ) {
+          try {
+            const r = await call<{ data: string; mime: string }>('preview_media', {
+              path: sm.abs_path, boxes, classes: project.classes, maxSize: optNum(args, 'max_size', 768),
+            });
+            images.push({ data: r.data, mimeType: r.mime });
+            const list = boxes.map((b, j) => `${j + 1}:${project.classes[b.cls] ?? b.cls}`).join(', ');
+            lines.push(`${head}: image ${images.length}${sm.ann?.label ? `, label ${sm.ann.label}` : ''}${list ? `, boxes ${list}` : ', no boxes'}`);
+            continue;
+          } catch (e) {
+            lines.push(`${head}: preview failed (${(e as Error).message ?? e})`);
+            continue;
+          }
+        }
+        const label = sm.ann?.label ?? sm.ann?.target ?? '(none)';
+        lines.push(`${head}: ${clipText(sm.content ?? sm.abs_path ?? '', 400)} -> ${label}`);
+      }
+      return withImages(ok(`${project.name} (${project.classes.join(', ') || 'no classes'}):\n${lines.join('\n')}`), images);
+    },
+  }),
+  defineTool({
     name: 'studio_stats',
     title: 'Project statistics',
     description: 'Returns counts per status, boxes per class, empty confirmed samples and model doubts for a Studio project. Shows whether a project is ready for export.',
@@ -248,10 +367,16 @@ export const studioTools: McpTool[] = [
   defineTool({
     name: 'studio_import',
     title: 'Import into project',
-    description: 'Imports local files into a Studio project. source: "folder" (images, class subfolders or YOLO labels), "text" (CSV/JSONL/TXT file), "audio" (folder), "videos" (list of video files as clips), "video_frames" (extract frames of one video into an image project). The user confirms the path. Large imports return a job_id.',
+    description: 'Imports data into a Studio project. source "dataset" takes a FrameTrain dataset (from datasets_list, e.g. after datasets_download_hf or datasets_import_url) of any kind: images with boxes, class folders of images/audio/video, audio with transcripts, text tables for classification or pairs. class_map renames, merges or drops classes so several sources end up with one class list (e.g. {"car": "vehicle", "truck": "vehicle", "dog": null}); keep_unmapped=false drops every class not in class_map; max_samples (optionally per_class) draws a sample. Other sources read local files: "folder" (images, class subfolders or YOLO labels), "text" (CSV/JSONL/TXT file), "audio" (folder), "videos" (list of video files as clips), "video_frames" (frames of one video). The user confirms the import. Large imports return a job_id.',
     properties: {
       project_id: projectId,
-      source: S.enumOf('Import type.', ['folder', 'text', 'audio', 'videos', 'video_frames']),
+      source: S.enumOf('Import type.', ['dataset', 'folder', 'text', 'audio', 'videos', 'video_frames']),
+      dataset_id: S.str('Dataset id (source "dataset").'),
+      class_map: S.obj('Source class name -> project class name, or null to drop (source "dataset"). Case-insensitive.'),
+      keep_unmapped: S.bool('Keep classes that are not in class_map under their own name. Default true.'),
+      max_samples: S.int('Take at most this many samples (source "dataset").', { minimum: 1 }),
+      per_class: S.bool('With max_samples: balance the sample across classes (rare classes first).'),
+      keep_empty: S.bool('Boxes: keep images whose boxes were all dropped by class_map (as background). Default false.'),
       source_path: S.str('Folder or file path (all sources except "videos").'),
       paths: S.strArr('Video file paths (source "videos").'),
       ignore_labels: S.bool('Do not take over existing labels. Default false.'),
@@ -270,6 +395,9 @@ export const studioTools: McpTool[] = [
       const source = reqStr(args, 'source');
       let work: () => Promise<ImportReport>;
       switch (source) {
+        case 'dataset':
+          work = () => importDataset(pid, args);
+          break;
         case 'folder':
           work = () => call('studio_import_folder', { projectId: pid, sourcePath: reqStr(args, 'source_path'), labelClasses: args.label_classes === undefined ? null : strArr(args, 'label_classes'), ignoreLabels });
           break;
@@ -292,7 +420,15 @@ export const studioTools: McpTool[] = [
         const r = await work();
         changed(pid);
         return r;
-      }, { describe: importText });
+      }, {
+        describe: (r) => {
+          const st = (r as ImportReport & { staged?: StagedResult }).staged;
+          if (!st) return importText(r);
+          const per = st.per_class ? ` Per class: ${Object.entries(st.per_class).map(([k, v]) => `${k} ${v}`).join(', ')}.` : '';
+          const dropped = st.dropped_classes ? ` Dropped classes: ${Object.keys(st.dropped_classes).slice(0, 10).join(', ')}.` : '';
+          return `${importText(r)}${per}${dropped}`;
+        },
+      });
     },
   }),
   defineTool({

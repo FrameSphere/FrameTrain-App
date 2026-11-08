@@ -4592,6 +4592,8 @@
         "datasets_hf_files": "Hugging-Face-Dateien eines Datensatzes",
         "datasets_import_url": "Datensatz von URL importieren",
         "datasets_check": "Datensatz prüfen",
+        "datasets_view": "Datensatz-Bilder ansehen",
+        "studio_view_samples": "Samples ansehen",
         "datasets_files": "Dateien eines Datensatzes",
         "datasets_import_local": "Lokalen Datensatz importieren",
         "datasets_info": "Datensatz-Details",

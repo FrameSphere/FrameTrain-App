@@ -33,6 +33,8 @@ from .detection import IMAGE_EXTS
 DEFAULT_MAX_MB = 2000
 HARD_MAX_MB = 20000
 LABEL_EXTS = {".txt", ".xml", ".json"}
+AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".opus"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 
 def emit(kind: str, **data: Any) -> None:
@@ -48,7 +50,8 @@ class FetchError(Exception):
 def inspect(path: Path) -> Dict[str, Any]:
     """Was liegt im Ordner? Bilder, YOLO-Labels, VOC, COCO, Parquet, Klassen, Splits."""
     path = Path(path)
-    images = yolo = voc = coco = parquet = csv = 0
+    images = yolo = voc = coco = parquet = csv = audio = video = transcripts = 0
+    class_dirs: Dict[str, int] = {}
     splits: Dict[str, int] = {}
     yaml_files: List[str] = []
     for f in path.rglob("*"):
@@ -58,11 +61,21 @@ def inspect(path: Path) -> Dict[str, Any]:
         rel_parts = [p.lower() for p in f.relative_to(path).parts]
         if ext in IMAGE_EXTS:
             images += 1
+            if "labels" not in rel_parts and "images" not in rel_parts:
+                class_dirs[f.parent.name] = class_dirs.get(f.parent.name, 0) + 1
             for s in ("train", "val", "valid", "validation", "test"):
                 if s in rel_parts:
                     key = "val" if s in ("valid", "validation") else s
                     splits[key] = splits.get(key, 0) + 1
                     break
+        elif ext in AUDIO_EXTS:
+            audio += 1
+            if f.with_suffix(".txt").exists():
+                transcripts += 1
+            class_dirs[f.parent.name] = class_dirs.get(f.parent.name, 0) + 1
+        elif ext in VIDEO_EXTS:
+            video += 1
+            class_dirs[f.parent.name] = class_dirs.get(f.parent.name, 0) + 1
         elif ext == ".txt" and "labels" in rel_parts:
             yolo += 1
         elif ext == ".xml":
@@ -76,6 +89,8 @@ def inspect(path: Path) -> Dict[str, Any]:
         elif ext in (".yaml", ".yml"):
             yaml_files.append(str(f.relative_to(path)))
     classes = _yaml_classes(path, yaml_files)
+    folder_classes = sorted(k for k in class_dirs if k.lower() not in
+                            ("train", "val", "valid", "validation", "test", "images", "audio", "clips", "videos", path.name.lower()))
     if images and yolo:
         fmt = "yolo"
     elif images and voc:
@@ -83,22 +98,30 @@ def inspect(path: Path) -> Dict[str, Any]:
     elif images and coco:
         fmt = "coco"
     elif images:
-        fmt = "images"
+        fmt = "image_folders" if len(folder_classes) > 1 else "images"
+    elif audio:
+        fmt = "audio_transcript" if transcripts else ("audio_folders" if len(folder_classes) > 1 else "audio")
+    elif video:
+        fmt = "video_folders" if len(folder_classes) > 1 else "video"
     elif parquet:
         fmt = "parquet"
     elif csv:
         fmt = "table"
     else:
         fmt = "unknown"
+    if not classes and fmt.endswith("_folders"):
+        classes = folder_classes
     problems: List[str] = []
-    if images == 0:
-        problems.append("No image files found. Image and detection models (YOLO, ResNet, ...) cannot train on this dataset.")
-    if images and fmt == "images":
-        problems.append("Images found but no labels (YOLO .txt, Pascal VOC .xml or COCO .json). Usable only for class folders, not for object detection.")
+    if fmt == "unknown":
+        problems.append("No recognizable data files (images, audio, video, parquet, CSV/JSONL) found.")
+    if fmt == "images":
+        problems.append("Images without labels or class folders. Usable for labeling in the Dataset Builder, not directly for supervised training.")
     if fmt == "yolo" and yolo < images * 0.5:
         problems.append(f"Only {yolo} label files for {images} images. Many images are unlabeled.")
+    if fmt == "audio" and not transcripts:
+        problems.append("Audio without transcripts or class folders.")
     return {
-        "format": fmt, "images": images, "yolo_labels": yolo, "voc_xml": voc, "coco_json": coco,
+        "format": fmt, "images": images, "audio": audio, "video": video, "transcripts": transcripts, "yolo_labels": yolo, "voc_xml": voc, "coco_json": coco,
         "parquet_files": parquet, "table_files": csv, "splits": splits, "classes": classes,
         "yaml_files": yaml_files[:5], "problems": problems,
     }
@@ -404,29 +427,161 @@ def needs_yolo_conversion(root: Path) -> bool:
 
 # ── URL / Archiv ────────────────────────────────────────────────────────────
 
+MEDIA_EXTS = IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS
+SIDECAR_MAX = 50 * 1024 * 1024  # Begleitdateien (yaml, json, csv) bis 50 MB immer mitnehmen
+
+
+class RangeFile(io.RawIOBase):
+    """Datei auf einem https-Server, gelesen per HTTP-Range – damit zipfile nur das
+    Inhaltsverzeichnis und die gewaehlten Eintraege laedt statt des ganzen Archivs."""
+
+    def __init__(self, url: str, size: int, session):
+        self.url, self.size, self.s, self.pos, self.fetched = url, size, session, 0, 0
+
+    def readable(self): return True
+    def seekable(self): return True
+    def tell(self): return self.pos
+
+    def seek(self, offset, whence=0):
+        self.pos = offset if whence == 0 else self.pos + offset if whence == 1 else self.size + offset
+        return self.pos
+
+    def read(self, n=-1):
+        if self.pos >= self.size:
+            return b""
+        end = self.size - 1 if n is None or n < 0 else min(self.size - 1, self.pos + n - 1)
+        r = self.s.get(self.url, headers={"Range": f"bytes={self.pos}-{end}", "User-Agent": "FrameTrain-Desktop"}, timeout=60)
+        if r.status_code != 206:
+            raise FetchError("The server does not support partial downloads.")
+        data = r.content
+        self.pos += len(data)
+        self.fetched += len(data)
+        return data
+
+    def readinto(self, b):
+        data = self.read(len(b))
+        b[:len(data)] = data
+        return len(data)
+
+
+def _head(session, url: str) -> Tuple[int, bool]:
+    r = session.head(url, allow_redirects=True, timeout=30, headers={"User-Agent": "FrameTrain-Desktop"})
+    size = int(r.headers.get("content-length") or 0)
+    ranges = r.headers.get("accept-ranges", "").lower() == "bytes"
+    return size, ranges
+
+
+def _matches(name: str, include: List[str]) -> bool:
+    if not include:
+        return True
+    return bool(select([(name, 0)], include))
+
+
+def partial_zip(url: str, out: Path, include: List[str], max_files: int, stems: Optional[set], session, max_mb: float) -> Dict[str, Any]:
+    """Nur ausgewaehlte Eintraege eines entfernten ZIPs entpacken."""
+    import requests  # noqa: F401 – session kommt von requests
+    size, _ = _head(session, url)
+    rf = RangeFile(url, size, session)
+    taken = media = 0
+    with zipfile.ZipFile(io.BufferedReader(rf, buffer_size=1 << 20)) as z:
+        entries = [m for m in z.infolist() if not m.is_dir() and "__MACOSX" not in m.filename
+                   and _matches(m.filename, include)]
+
+        def is_media(m) -> bool:
+            return Path(m.filename).suffix.lower() in MEDIA_EXTS
+
+        def is_sidecar(m) -> bool:
+            ext = Path(m.filename).suffix.lower()
+            return (not is_media(m) and m.file_size <= SIDECAR_MAX
+                    and (ext in (".yaml", ".yml", ".names", ".csv", ".tsv", ".jsonl", ".json")
+                         or Path(m.filename).name in ("classes.txt", "labels.txt", "obj.names")))
+
+        if stems is None and max_files:
+            # Erstes Archiv mit Limit: Medien waehlen, dann nur die dazu passenden Labels
+            chosen_media = [m for m in entries if is_media(m)][:max_files]
+            keep = {Path(m.filename).stem for m in chosen_media}
+            selected = chosen_media + [m for m in entries if not is_media(m)
+                                       and (Path(m.filename).stem in keep or is_sidecar(m))]
+        elif stems is not None:
+            # Weiteres Archiv (z. B. Labels): nur, was zu den gewaehlten Medien passt
+            selected = [m for m in entries if Path(m.filename).stem in stems or is_sidecar(m)]
+        else:
+            selected = entries
+        for m in selected:
+            if rf.fetched > max_mb * 1e6:
+                raise FetchError(f"Partial download exceeded {max_mb:.0f} MB.")
+            dest = _safe_target(out, m.filename)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(m) as src, open(dest, "wb") as fh:
+                shutil.copyfileobj(src, fh)
+            taken += 1
+            media += 1 if is_media(m) else 0
+            if taken % 25 == 0:
+                emit("progress", downloaded_bytes=rf.fetched, total_bytes=size, message=f"{taken} file(s) from {Path(url).name}")
+    return {"files": taken, "media": media, "downloaded_mb": round(rf.fetched / 1e6, 1), "archive_mb": round(size / 1e6, 1)}
+
+
 def url_download(req: Dict[str, Any], target: Path) -> Path:
+    """Eine oder mehrere https-Quellen in einen Ordner holen.
+
+    urls: Liste (oder url: einzeln). include: Muster fuer Archiv-Eintraege.
+    max_files: hoechstens so viele Medien-Dateien aus dem ersten Archiv; weitere
+    Archive (z. B. die Labels) liefern dann nur die passenden Dateinamen.
+    Grosse ZIPs werden – wenn der Server es kann – nur teilweise geladen.
+    """
     import requests
-    url = str(req["url"])
-    if not url.lower().startswith("https://"):
-        raise FetchError("Only https:// URLs are allowed.")
+    urls = [str(u) for u in (req.get("urls") or ([req["url"]] if req.get("url") else []))]
+    if not urls:
+        raise FetchError("No URL given.")
+    for u in urls:
+        if not u.lower().startswith("https://"):
+            raise FetchError("Only https:// URLs are allowed.")
     max_mb = min(float(req.get("max_mb") or DEFAULT_MAX_MB), HARD_MAX_MB)
-    target.mkdir(parents=True, exist_ok=True)
-    name = url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or "download"
-    dest = target / name
-    with requests.get(url, stream=True, timeout=60, headers={"User-Agent": "FrameTrain-Desktop"}) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("content-length") or 0)
-        if total and total > max_mb * 1e6:
-            raise FetchError(f"File is {total / 1e6:.0f} MB, above the limit of {max_mb:.0f} MB.")
-        done = 0
-        with open(dest, "wb") as fh:
-            for chunk in r.iter_content(1 << 20):
-                fh.write(chunk)
-                done += len(chunk)
-                if done > max_mb * 1e6:
-                    raise FetchError(f"Download exceeded the limit of {max_mb:.0f} MB.")
-                emit("progress", downloaded_bytes=done, total_bytes=total, message=name)
-    return extract_if_archive(dest, target / "extracted")
+    include = [p for p in (req.get("include") or []) if p]
+    max_files = int(req.get("max_files") or 0)
+    out = target / "extracted"
+    out.mkdir(parents=True, exist_ok=True)
+    session = requests.Session()
+    stems: Optional[set] = None
+    notes: List[str] = []
+    for u in urls:
+        size, ranges = _head(session, u)
+        name = u.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or "download"
+        is_zip = name.lower().endswith(".zip")
+        want_partial = is_zip and ranges and (include or max_files or stems is not None or size > max_mb * 1e6)
+        if want_partial:
+            emit("status", message=f"Reading the table of contents of {name} ({size / 1e6:.0f} MB)")
+            before = {p for p in out.rglob("*") if p.is_file()}
+            info = partial_zip(u, out, include, max_files, stems, session, max_mb)
+            notes.append(f"{name}: {info['files']} file(s), {info['downloaded_mb']} MB of {info['archive_mb']} MB loaded")
+            if stems is None and info["media"]:
+                stems = {p.stem for p in out.rglob("*") if p.is_file() and p not in before and p.suffix.lower() in MEDIA_EXTS}
+            continue
+        if size and size > max_mb * 1e6:
+            hint = " The server does not allow partial downloads." if is_zip and not ranges else ""
+            raise FetchError(f"{name} is {size / 1e6:.0f} MB, above the limit of {max_mb:.0f} MB.{hint}")
+        dest = target / name
+        with session.get(u, stream=True, timeout=60, headers={"User-Agent": "FrameTrain-Desktop"}) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length") or 0)
+            done = 0
+            with open(dest, "wb") as fh:
+                for chunk in r.iter_content(1 << 20):
+                    fh.write(chunk)
+                    done += len(chunk)
+                    if done > max_mb * 1e6:
+                        raise FetchError(f"Download exceeded the limit of {max_mb:.0f} MB.")
+                    emit("progress", downloaded_bytes=done, total_bytes=total, message=name)
+        sub = out / Path(name).stem.replace(".tar", "") if len(urls) > 1 else out
+        if zipfile.is_zipfile(dest) or tarfile.is_tarfile(dest):
+            extract_if_archive(dest, sub)
+        else:
+            sub.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(dest), sub / name)
+        notes.append(f"{name}: {total / 1e6:.1f} MB loaded")
+    if notes:
+        emit("status", message="; ".join(notes))
+    return _descend_single_folder(out)
 
 
 def extract_if_archive(path: Path, out: Path) -> Path:
@@ -468,6 +623,178 @@ def _descend_single_folder(root: Path) -> Path:
     return root
 
 
+# ── Formate angleichen ──────────────────────────────────────────────────────
+
+def _read_class_list(root: Path) -> List[str]:
+    for name in ("classes.txt", "obj.names", "labels.txt"):
+        for f in root.rglob(name):
+            names = [l.strip() for l in f.read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+            if names:
+                return names
+    for f in list(root.rglob("*.yaml")) + list(root.rglob("*.yml")):
+        names = _parse_names(f.read_text(encoding="utf-8", errors="ignore"))
+        if names:
+            return names
+    for f in root.rglob("notes.json"):  # Label-Studio-Export
+        try:
+            cats = json.loads(f.read_text()).get("categories", [])
+            if cats:
+                return [c["name"] for c in sorted(cats, key=lambda c: c["id"])]
+        except Exception:
+            pass
+    return []
+
+
+def pair_images_and_labels(root: Path) -> Optional[Path]:
+    """Bilder und YOLO-Labels liegen in getrennten Baeumen (z. B. aus zwei Archiven):
+    nach Dateinamen paaren und als images/ + labels/ ablegen."""
+    from .detection import label_path_for
+    images = {p.stem: p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTS}
+    if not images:
+        return None
+    if any(label_path_for(p).exists() for p in list(images.values())[:50]):
+        return None  # Ultralytics findet die Labels schon
+    labels = {p.stem: p for p in root.rglob("*.txt")
+              if p.stem in images and p.name not in ("classes.txt", "labels.txt", "README.txt")}
+    if not labels:
+        return None
+    out = root.parent / (root.name + "_paired")
+    for split in ("train", "val"):
+        (out / split / "images").mkdir(parents=True, exist_ok=True)
+        (out / split / "labels").mkdir(parents=True, exist_ok=True)
+    stems = sorted(set(images) & set(labels))
+    n_val = max(1, int(len(stems) * 0.15)) if len(stems) > 5 else 0
+    for i, stem in enumerate(stems):
+        split = "val" if i >= len(stems) - n_val else "train"
+        img = images[stem]
+        shutil.copy2(img, out / split / "images" / img.name)
+        shutil.copy2(labels[stem], out / split / "labels" / f"{stem}.txt")
+    names = _read_class_list(root)
+    _write_data_yaml(out, names or _names_from_labels(out))
+    return out
+
+
+def _names_from_labels(out: Path) -> List[str]:
+    top = -1
+    for lf in out.rglob("*.txt"):
+        for line in lf.read_text(errors="ignore").splitlines():
+            parts = line.split()
+            if parts and parts[0].isdigit():
+                top = max(top, int(parts[0]))
+    return [f"class_{i}" for i in range(top + 1)]
+
+
+def _write_data_yaml(out: Path, names: List[str]) -> None:
+    yaml = ["path: .", "train: train/images", "val: val/images", f"nc: {len(names)}", "names:"]
+    yaml += [f"  - '{n}'" for n in names]
+    (out / "data.yaml").write_text("\n".join(yaml) + "\n", encoding="utf-8")
+
+
+def _write_data_yaml_inplace(root: Path, names: List[str]) -> None:
+    """data.yaml fuer einen vorhandenen YOLO-Ordner (images/<split> oder <split>/images)."""
+    def rel(split: str) -> Optional[str]:
+        for cand in (f"images/{split}", f"{split}/images", "images" if split == "train" else ""):
+            if cand and (root / cand).is_dir():
+                return cand
+        return None
+    train = rel("train") or rel("") or "images"
+    val = rel("val") or rel("valid") or train
+    yaml = ["path: .", f"train: {train}", f"val: {val}", f"nc: {len(names)}", "names:"] + [f"  - '{n}'" for n in names]
+    (root / "data.yaml").write_text("\n".join(yaml) + "\n", encoding="utf-8")
+
+
+def coco_to_yolo(root: Path, max_rows: int = 0) -> Optional[Path]:
+    """COCO-JSON (images/annotations/categories) nach YOLO. Split aus dem Dateinamen."""
+    jsons = []
+    for f in root.rglob("*.json"):
+        if f.stat().st_size > 2_000_000_000:
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict) and {"images", "annotations", "categories"} <= set(data):
+            jsons.append((f, data))
+    if not jsons:
+        return None
+    by_name = {p.name: p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTS}
+    cats = sorted({c["id"]: c["name"] for _, d in jsons for c in d["categories"]}.items())
+    index = {cid: i for i, (cid, _) in enumerate(cats)}
+    out = root.parent / (root.name + "_yolo")
+    written = 0
+    for f, data in jsons:
+        low = f.as_posix().lower()
+        split = "val" if any(k in low for k in ("val", "valid", "test")) else "train"
+        anns: Dict[int, List[dict]] = {}
+        for a in data["annotations"]:
+            anns.setdefault(a["image_id"], []).append(a)
+        for im in data["images"]:
+            if max_rows and written >= max_rows:
+                break
+            src = by_name.get(Path(im["file_name"]).name)
+            if src is None:
+                continue
+            w, h = float(im.get("width") or 0), float(im.get("height") or 0)
+            if not (w and h):
+                from PIL import Image
+                with Image.open(src) as pi:
+                    w, h = pi.size
+            lines = []
+            for a in anns.get(im["id"], []):
+                yb = _bbox_to_yolo(a.get("bbox") or [], w, h, "coco")
+                if yb and a.get("category_id") in index:
+                    lines.append(f"{index[a['category_id']]} {yb[0]:.6f} {yb[1]:.6f} {yb[2]:.6f} {yb[3]:.6f}")
+            (out / split / "images").mkdir(parents=True, exist_ok=True)
+            (out / split / "labels").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, out / split / "images" / src.name)
+            (out / split / "labels" / f"{src.stem}.txt").write_text("\n".join(lines) + ("\n" if lines else ""))
+            written += 1
+    if not written:
+        return None
+    if not (out / "val" / "images").is_dir():
+        _move_share_to_val(out, 0.15)
+    _write_data_yaml(out, [n for _, n in cats])
+    return out
+
+
+def normalize(root: Path, target: Path, req: Dict[str, Any]) -> Tuple[Path, Optional[Dict[str, Any]]]:
+    """Quelle in eine Form bringen, die FrameTrain trainieren kann – nur wo noetig.
+
+    Detektion: Parquet mit Bildern -> YOLO, COCO-JSON -> YOLO, getrennte
+    Bilder/Labels -> gepaart. Alles andere (Text, Tabellen, Audio, Klassenordner,
+    Parquet fuer Klassifikation/ASR) lesen die Trainings-Plugins direkt.
+    """
+    if req.get("convert", "auto") == "none":
+        return root, None
+    rep = inspect(root)
+    names = [str(n) for n in (req.get("class_names") or []) if str(n).strip()]
+    if names and not rep["classes"] and (rep["yolo_labels"] or rep["coco_json"] == 0):
+        # Klassenliste vom Aufrufer (z. B. aus der Dataset-Beschreibung), wenn die Quelle keine mitbringt
+        (root / "classes.txt").write_text("\n".join(names) + "\n", encoding="utf-8")
+        if rep["yolo_labels"] and not list(root.glob("*.yaml")):
+            _write_data_yaml_inplace(root, names)
+        rep = inspect(root)
+    detection = bool(req.get("yolo"))
+    max_rows = int(req.get("max_rows") or 0)
+    if detection and rep["images"] == 0 and rep["parquet_files"] > 0:
+        emit("status", message="Converting parquet images and boxes to YOLO")
+        out = target / "yolo"
+        conv = parquet_to_yolo(root, out, max_rows, req.get("bbox_format") or "coco")
+        return out, {"kind": "parquet_to_yolo", **conv}
+    if rep["images"] and rep["coco_json"] and not rep["yolo_labels"]:
+        emit("status", message="Converting COCO annotations to YOLO")
+        out = coco_to_yolo(root, max_rows)
+        if out:
+            r2 = inspect(out)
+            return out, {"kind": "coco_to_yolo", "images": r2["images"], "classes": r2["classes"]}
+    if rep["images"]:
+        paired = pair_images_and_labels(root)
+        if paired:
+            r2 = inspect(paired)
+            return paired, {"kind": "paired_images_labels", "images": r2["images"], "classes": r2["classes"]}
+    return root, None
+
+
 # ── Einstieg ────────────────────────────────────────────────────────────────
 
 def run(req: Dict[str, Any]) -> Dict[str, Any]:
@@ -486,12 +813,7 @@ def run(req: Dict[str, Any]) -> Dict[str, Any]:
         root = url_download(req, target)
     else:
         raise FetchError(f"Unknown kind: {kind}")
-    conversion = None
-    if req.get("convert", "auto") != "none" and needs_yolo_conversion(root) and req.get("yolo"):
-        emit("status", message="Converting parquet images and boxes to YOLO")
-        yolo_dir = target / "yolo"
-        conversion = parquet_to_yolo(root, yolo_dir, int(req.get("max_rows") or 0), req.get("bbox_format") or "coco")
-        root = yolo_dir
+    root, conversion = normalize(root, target, req)
     report = inspect(root)
     return {"root": str(root), "report": report, "conversion": conversion}
 

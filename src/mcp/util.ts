@@ -26,6 +26,11 @@ export function ok(text: string, data?: unknown): CallToolResult {
   return result;
 }
 
+/** Antwort mit Bildern nach dem Text (Text bleibt content[0]). */
+export function withImages(result: CallToolResult, images: { data: string; mimeType: string }[]): CallToolResult {
+  return { ...result, content: [...result.content, ...images.map((i) => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType }))] };
+}
+
 export function fail(text: string, data?: unknown): CallToolResult {
   const result: CallToolResult = { content: [{ type: 'text', text }], isError: true };
   if (data !== undefined) result.structuredContent = toStructured(data);

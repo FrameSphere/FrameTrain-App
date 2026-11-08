@@ -68,7 +68,7 @@ class FetchTest(unittest.TestCase):
         (self.root / "a.parquet").write_bytes(b"x")
         rep = fetch.inspect(self.root)
         self.assertEqual(rep["images"], 0)
-        self.assertTrue(any("No image files" in p for p in rep["problems"]))
+        self.assertEqual(rep["format"], "parquet")
 
     def test_zip_wird_entpackt_und_ordner_abgestiegen(self):
         z = self.root / "d.zip"
@@ -95,6 +95,88 @@ class FetchTest(unittest.TestCase):
     def test_names_formate(self):
         self.assertEqual(fetch._parse_names("names: [a, 'b']\n"), ["a", "b"])
         self.assertEqual(fetch._parse_names("names:\n  0: person\n  1: car\nnc: 2\n"), ["person", "car"])
+
+class FakeResp:
+    def __init__(self, status, content=b"", headers=None):
+        self.status_code, self.content, self.headers = status, content, headers or {}
+
+
+class FakeSession:
+    """Range-faehiger Server im Speicher; zaehlt, wie viele Bytes geholt wurden."""
+    def __init__(self, files):
+        self.files, self.sent = files, 0
+
+    def head(self, url, **kw):
+        data = self.files[url]
+        return FakeResp(200, headers={"content-length": str(len(data)), "accept-ranges": "bytes"})
+
+    def get(self, url, headers=None, **kw):
+        data = self.files[url]
+        a, b = headers["Range"].split("=")[1].split("-")
+        chunk = data[int(a):int(b) + 1]
+        self.sent += len(chunk)
+        return FakeResp(206, chunk)
+
+
+class MehrFormateTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def _zip(self, entries):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+            for name, data in entries:
+                zf.writestr(name, data)
+        return buf.getvalue()
+
+    def test_teil_download_holt_nur_gewaehlte_bilder_und_passende_labels(self):
+        big = b"x" * 200_000
+        imgs = self._zip([(f"cam1/img_{i:03d}.jpg", big) for i in range(30)])
+        lbls = self._zip([(f"labels/img_{i:03d}.txt", "0 0.5 0.5 0.2 0.2\n") for i in range(30)] + [("labels/classes.txt", "person\ncar\n")])
+        sess = FakeSession({"https://z/img.zip": imgs, "https://z/lbl.zip": lbls})
+        out = self.root / "x"
+        info = fetch.partial_zip("https://z/img.zip", out, [], 5, None, sess, 100)
+        self.assertEqual(info["media"], 5)
+        self.assertLess(sess.sent, len(imgs) / 3)
+        stems = {p.stem for p in out.rglob("*.jpg")}
+        fetch.partial_zip("https://z/lbl.zip", out, [], 0, stems, sess, 100)
+        self.assertEqual(len(list(out.rglob("img_*.txt"))), 5)
+        paired = fetch.pair_images_and_labels(out)
+        rep = fetch.inspect(paired)
+        self.assertEqual((rep["format"], rep["images"], rep["classes"]), ("yolo", 5, ["person", "car"]))
+
+    def test_coco_json_wird_yolo(self):
+        (self.root / "imgs").mkdir()
+        for n in ("a.jpg", "b.jpg"):
+            (self.root / "imgs" / n).write_bytes(_png())
+        coco = {"images": [{"id": 1, "file_name": "a.jpg", "width": 40, "height": 20}, {"id": 2, "file_name": "b.jpg", "width": 40, "height": 20}],
+                "annotations": [{"image_id": 1, "category_id": 7, "bbox": [10, 5, 20, 10]}],
+                "categories": [{"id": 3, "name": "person"}, {"id": 7, "name": "car"}]}
+        (self.root / "train.json").write_text(json.dumps(coco))
+        out = fetch.coco_to_yolo(self.root)
+        rep = fetch.inspect(out)
+        self.assertEqual(rep["classes"], ["person", "car"])
+        self.assertEqual(rep["images"], 2)
+        txt = [p.read_text() for p in out.rglob("a.txt")][0]
+        self.assertTrue(txt.startswith("1 0.500000 0.500000 0.500000 0.500000"))
+
+    def test_audio_formate(self):
+        for cls in ("hund", "katze"):
+            (self.root / cls).mkdir()
+            (self.root / cls / "a.wav").write_bytes(b"RIFF")
+        rep = fetch.inspect(self.root)
+        self.assertEqual((rep["format"], rep["classes"]), ("audio_folders", ["hund", "katze"]))
+        t = self.root / "asr"
+        t.mkdir()
+        (t / "x.wav").write_bytes(b"RIFF")
+        (t / "x.txt").write_text("hallo")
+        self.assertEqual(fetch.inspect(t)["format"], "audio_transcript")
+
+    def test_text_tabelle(self):
+        (self.root / "train.csv").write_text("text,label\nhi,a\n")
+        self.assertEqual(fetch.inspect(self.root)["format"], "table")
 
 
 if __name__ == "__main__":

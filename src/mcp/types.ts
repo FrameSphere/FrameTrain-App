@@ -59,9 +59,16 @@ export interface TextContent {
   text: string;
 }
 
+/** Bild fuer den KI-Assistenten (z. B. Sample mit eingezeichneten Boxen). */
+export interface ImageContent {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
 /** MCP CallToolResult. `structuredContent` ist laut Spezifikation ein Objekt. */
 export interface CallToolResult {
-  content: TextContent[];
+  content: [TextContent, ...(TextContent | ImageContent)[]];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }

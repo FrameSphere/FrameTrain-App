@@ -50,7 +50,7 @@ pub fn initialize_result(version: &str, requested: Option<&str>) -> Value {
         "protocolVersion": negotiate_version(requested),
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": { "name": "frametrain", "title": "FrameTrain", "version": version },
-        "instructions": "FrameTrain trains AI models locally on this computer. The tools manage models and datasets, build datasets, start and monitor training, and test or host the results. Long-running work returns a job_id; the matching *_status tool reports its progress. Some actions ask the user for approval inside the FrameTrain app."
+        "instructions": "FrameTrain trains AI models locally on this computer. The tools manage models and datasets, build datasets, start and monitor training, and test or host the results. Long-running work returns a job_id; the matching *_status tool reports its progress. Some actions ask the user for approval inside the FrameTrain app. Datasets can come from Hugging Face (datasets_hf_files, datasets_download_hf), from https URLs including partial reads of large ZIP archives (datasets_import_url), or from local files. datasets_check and datasets_view show what a dataset contains. The Dataset Builder (studio_*) merges several datasets into one project with a common class list (studio_import with source dataset and class_map), shows samples as pictures (studio_view_samples), takes corrections (studio_set_annotation) and exports a training dataset (studio_export). This works for images with boxes, image, audio and video classification, audio with transcripts, and text classification or text pairs."
     })
 }
 

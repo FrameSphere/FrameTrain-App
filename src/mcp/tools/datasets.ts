@@ -1,6 +1,6 @@
 // Domaene datasets: Datensaetze der Modelle.
 
-import { call, clip, defineTool, ok, optNum, optStr, reqNum, reqStr, S, strArr, ToolFailure } from '../util';
+import { call, clip, defineTool, ok, optNum, optStr, reqNum, reqStr, S, strArr, ToolArgError, ToolFailure, withImages } from '../util';
 import type { McpTool } from '../types';
 import { announceChange, runAsJob } from './common';
 import { datasetBrief, findDataset, findModel, listDatasets, type DatasetInfo, type ModelInfo } from './lookup';
@@ -210,29 +210,76 @@ export const datasetsTools: McpTool[] = [
   defineTool({
     name: 'datasets_import_url',
     title: 'Import dataset from URL',
-    description: 'Downloads a dataset archive (ZIP or TAR) or a single data file from an https URL, unpacks it and attaches it to a library model, e.g. a Roboflow or GitHub release export. The user confirms the URL in FrameTrain. The result includes a content check (images, labels, classes, problems). Returns a job_id.',
+    description: 'Downloads data from one or more https URLs (ZIP/TAR archives or single files such as CSV, JSONL, parquet, images, audio) and attaches it to a library model, e.g. Zenodo, GitHub releases, Roboflow or university servers. Large ZIPs are read partially when the server allows it: max_files takes only that many media files, include filters archive entries by folder or pattern. With several URLs (e.g. an image archive and a label archive), later archives only contribute files whose names match the chosen media. COCO JSON is converted to YOLO, separate image and label trees are paired. The user confirms the URLs in FrameTrain. The result includes a content check.',
     properties: {
-      url: S.str('https URL of the archive or file.'),
+      urls: S.strArr('https URLs, e.g. [images.zip, labels.zip]. The first archive with media decides which files are taken.'),
+      url: S.str('Single https URL (alternative to urls).'),
       model_id: S.str('Model the dataset belongs to.'),
       dataset_name: S.str('Display name.'),
+      include: S.strArr('Only archive entries in these folders or matching these patterns, e.g. ["camera1/"] or ["*.jpg", "*.txt"].'),
+      max_files: S.int('Take at most this many media files (images, audio, video) from the first archive, e.g. 100 for a first run.', { minimum: 1 }),
+      class_names: S.strArr('Class names for YOLO label ids when the source has no class list (in id order).'),
       max_mb: S.num('Refuse larger downloads. Default 2000, max 20000.', { minimum: 1, maximum: 20000 }),
     },
-    required: ['url', 'model_id', 'dataset_name'],
+    required: ['model_id', 'dataset_name'],
     approval: 'always',
     annotations: { openWorldHint: true },
     async run(args) {
-      const url = reqStr(args, 'url');
-      if (!/^https:\/\//i.test(url)) throw new ToolFailure('Only https:// URLs are allowed.');
+      const urls = strArr(args, 'urls');
+      const single = optStr(args, 'url');
+      if (single) urls.push(single);
+      if (urls.length === 0) throw new ToolArgError('Give url or urls.');
+      if (urls.length > 10) throw new ToolArgError('At most 10 URLs per import.');
+      for (const u of urls) if (!/^https:\/\//i.test(u)) throw new ToolFailure('Only https:// URLs are allowed.');
       const model = await findModel(reqStr(args, 'model_id'));
       const datasetName = reqStr(args, 'dataset_name');
       return runAsJob('import', `Import ${datasetName} from URL`, async () => {
         const r = await call<FetchResult>('fetch_dataset', {
-          source: { kind: 'url', url, max_mb: optNum(args, 'max_mb'), yolo: isDetectionModel(model) },
+          source: {
+            kind: 'url', urls, include: strArr(args, 'include'), max_files: optNum(args, 'max_files'),
+            class_names: strArr(args, 'class_names'), max_mb: optNum(args, 'max_mb'), yolo: isDetectionModel(model),
+          },
           datasetName, modelId: model.id,
         });
         announceChange('datasets', { datasetId: r.dataset.id });
         return r;
-      }, { waitMs: 0, describe: (r) => `Imported ${r.dataset.name} (${r.dataset.id}). Check: ${describeReport(r.report, model)}` });
+      }, { waitMs: 0, describe: (r) => `Imported ${r.dataset.name} (${r.dataset.id})${r.conversion ? ` (${String((r.conversion as { kind?: string }).kind ?? 'converted')})` : ''}. Check: ${describeReport(r.report, model)}` });
+    },
+  }),
+  defineTool({
+    name: 'datasets_view',
+    title: 'View dataset images',
+    description: 'Returns images or video frames of a dataset as pictures, with its labels drawn in (numbered boxes with class names), so you can judge image quality and label correctness yourself. Pick files with file_paths (from datasets_files) or let it take count files from the start or at random.',
+    properties: {
+      dataset_id: S.str('Dataset id from datasets_list.'),
+      file_paths: S.strArr('Files to show (paths from datasets_files). Max 6.'),
+      count: S.int('Without file_paths: number of images to show (1-6). Default 3.', { minimum: 1, maximum: 6 }),
+      random: S.bool('Without file_paths: pick random images instead of the first ones.'),
+      max_size: S.int('Longest image side in pixels (256-1280). Default 768.', { minimum: 256, maximum: 1280 }),
+    },
+    required: ['dataset_id'],
+    async run(args) {
+      const d = await findDataset(reqStr(args, 'dataset_id'));
+      let paths = strArr(args, 'file_paths').slice(0, 6);
+      if (paths.length === 0) {
+        const files = (await datasetFiles(d.id)).filter((f) => !f.is_dir && /\.(jpe?g|png|bmp|webp|tiff?|mp4|mov|avi|mkv|webm)$/i.test(f.name));
+        if (files.length === 0) throw new ToolFailure(`${d.name} has no images or videos. Use datasets_preview for text and tables.`);
+        const n = Math.min(optNum(args, 'count', 3)!, 6);
+        const pool = args.random === true ? [...files].sort(() => Math.random() - 0.5) : files;
+        paths = pool.slice(0, n).map((f) => f.path);
+      }
+      const images: { data: string; mimeType: string }[] = [];
+      const lines: string[] = [];
+      for (const [i, path] of paths.entries()) {
+        try {
+          const r = await call<{ data: string; mime: string; boxes: number; classes: string[] }>('preview_media', { path, maxSize: optNum(args, 'max_size', 768) });
+          images.push({ data: r.data, mimeType: r.mime });
+          lines.push(`${i + 1}. ${path.split(/[\\/]/).pop()}: ${r.boxes} box(es)`);
+        } catch (e) {
+          lines.push(`${i + 1}. ${path}: ${(e as Error).message ?? String(e)}`);
+        }
+      }
+      return withImages(ok(`${d.name}: ${images.length} image(s).\n${lines.join('\n')}`), images);
     },
   }),
   defineTool({

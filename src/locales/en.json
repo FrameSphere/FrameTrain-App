@@ -4610,6 +4610,8 @@
         "datasets_hf_files": "Hugging Face dataset files",
         "datasets_import_url": "Import dataset from URL",
         "datasets_check": "Check dataset",
+        "datasets_view": "View dataset images",
+        "studio_view_samples": "View samples",
         "datasets_files": "Dataset files",
         "datasets_import_local": "Import local dataset",
         "datasets_info": "Dataset details",
