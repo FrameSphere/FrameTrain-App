@@ -333,6 +333,101 @@ def hf_files(req: Dict[str, Any]) -> Dict[str, Any]:
     return info
 
 
+def _parquet_order(files: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
+    """Train-Dateien zuerst, innerhalb eines Splits nach Name (Shard-Reihenfolge)."""
+    def rank(p: str) -> int:
+        low = p.lower()
+        if "train" in low:
+            return 0
+        if "val" in low or "valid" in low:
+            return 1
+        if "test" in low:
+            return 2
+        return 1
+    return sorted(files, key=lambda f: (rank(f[0]), f[0]))
+
+
+def _hf_parquet_rows(repo: str, chosen: List[Tuple[str, int]], revision: Optional[str], max_rows: int,
+                     max_mb: float, target: Path) -> Path:
+    """Nur so viele Parquet-Shards laden, wie fuer max_rows noetig sind.
+
+    Vorher wurde die Groesse aller Shards gegen max_mb geprueft – fuer
+    „100 Bilder aus COCO“ hiess das: mehrere GB, abgelehnt, obwohl ein
+    einziger Shard gereicht haette.
+    """
+    from huggingface_hub import hf_hub_download
+    import pyarrow.parquet as pq
+    raw = target / "raw"
+    ordered = _parquet_order(chosen)
+    if ordered[0][1] > max_mb * 1e6:
+        raise FetchError(
+            f"The smallest useful file ({ordered[0][0]}) is {ordered[0][1] / 1e6:.0f} MB, above the limit of "
+            f"{max_mb:.0f} MB. Raise max_mb.")
+    rows = done = 0
+    for i, (path, size) in enumerate(ordered):
+        if i and done + size > max_mb * 1e6:
+            break
+        local = hf_hub_download(repo, path, repo_type="dataset", revision=revision, local_dir=str(raw))
+        done += size
+        try:
+            rows += pq.ParquetFile(local).metadata.num_rows
+        except Exception:  # noqa: BLE001
+            rows += 1
+        emit("progress", file_index=i + 1, total_files=len(ordered), downloaded_bytes=done, total_bytes=done,
+             message=f"{path}: {rows} rows so far (need {max_rows})")
+        if rows >= max_rows:
+            break
+    return raw
+
+
+def _classlabel_names(features: Any) -> List[str]:
+    """Erste ClassLabel-Liste in einer HF-Feature-Beschreibung (Boxen-Kategorien zuerst)."""
+    found: List[Tuple[int, List[str]]] = []
+
+    def walk(node: Any, key: str, depth: int) -> None:
+        if isinstance(node, dict):
+            if node.get("_type") == "ClassLabel" and isinstance(node.get("names"), list):
+                prio = 0 if key in ("category", "categories", "label", "labels", "class", "classes") else 1
+                found.append((prio * 10 + depth, [str(n) for n in node["names"]]))
+                return
+            for k, v in node.items():
+                walk(v, k if k not in ("feature", "_type") else key, depth + 1)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, key, depth + 1)
+
+    walk(features, "", 0)
+    return min(found, key=lambda f: f[0])[1] if found else []
+
+
+def hf_class_names(repo: str) -> List[str]:
+    """Klassennamen aus der Datensatz-Info von Hugging Face.
+
+    Viele Parquet-Repos (z. B. detection-datasets/coco) speichern nur Zahlen;
+    die Namen stehen in dataset_infos.json bzw. in der Info des Dataset-Servers.
+    """
+    try:
+        import requests
+        r = requests.get("https://datasets-server.huggingface.co/info", params={"dataset": repo}, timeout=15)
+        if r.ok:
+            for cfg in (r.json().get("dataset_info") or {}).values():
+                names = _classlabel_names(cfg.get("features") or {})
+                if names:
+                    return names
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from huggingface_hub import hf_hub_download
+        p = hf_hub_download(repo, "dataset_infos.json", repo_type="dataset")
+        for cfg in json.loads(Path(p).read_text(encoding="utf-8")).values():
+            names = _classlabel_names(cfg.get("features") or {})
+            if names:
+                return names
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
 def hf_download(req: Dict[str, Any], target: Path) -> Path:
     from huggingface_hub import hf_hub_download
     repo = req["repo_id"]
@@ -351,6 +446,11 @@ def hf_download(req: Dict[str, Any], target: Path) -> Path:
         # Ohne Auswahl: README, Skripte, Videos weglassen – nur Daten
         keep = IMAGE_EXTS | LABEL_EXTS | {".parquet", ".csv", ".jsonl", ".tsv", ".yaml", ".yml"}
         chosen = [f for f in chosen if Path(f[0]).suffix.lower() in keep]
+    max_rows = int(req.get("max_rows") or 0)
+    parquet = [f for f in chosen if f[0].endswith(".parquet")]
+    if max_rows and parquet:
+        # Daten stecken in Parquet: nur so viele Shards wie fuer max_rows noetig (README/yaml egal)
+        return _hf_parquet_rows(repo, parquet, revision, max_rows, max_mb, target)
     total = sum(s for _, s in chosen)
     if total > max_mb * 1e6:
         summary = summarize(chosen)
@@ -432,7 +532,8 @@ def _find_object_columns(row: Dict[str, Any]) -> Tuple[Optional[List], Optional[
     return row.get("bbox") or row.get("bboxes"), row.get("category") or row.get("categories")
 
 
-def parquet_to_yolo(src: Path, out: Path, max_rows: int = 0, bbox_format: str = "coco") -> Dict[str, Any]:
+def parquet_to_yolo(src: Path, out: Path, max_rows: int = 0, bbox_format: str = "coco",
+                    fallback_names: Optional[List[str]] = None) -> Dict[str, Any]:
     """Bilder und Boxen aus Hugging-Face-Parquet als YOLO-Ordner ablegen."""
     import pyarrow.parquet as pq
     from PIL import Image
@@ -492,6 +593,8 @@ def parquet_to_yolo(src: Path, out: Path, max_rows: int = 0, bbox_format: str = 
         raise FetchError("The parquet files contain no images (no 'image' column with bytes). This dataset is not usable for detection.")
     if not names and seen_cats:
         names = [k for k, _ in sorted(seen_cats.items(), key=lambda kv: kv[1])]
+    if not names and fallback_names:
+        names = list(fallback_names)
     if not names:
         top = 0
         for lf in out.rglob("*.txt"):
@@ -878,7 +981,8 @@ def normalize(root: Path, target: Path, req: Dict[str, Any]) -> Tuple[Path, Opti
     if detection and rep["images"] == 0 and rep["parquet_files"] > 0:
         emit("status", message="Converting parquet images and boxes to YOLO")
         out = target / "yolo"
-        conv = parquet_to_yolo(root, out, max_rows, req.get("bbox_format") or "coco")
+        fallback = names or req.get("_hf_class_names") or []
+        conv = parquet_to_yolo(root, out, max_rows, req.get("bbox_format") or "coco", fallback)
         return out, {"kind": "parquet_to_yolo", **conv}
     if rep["images"] and rep["coco_json"] and not rep["yolo_labels"]:
         emit("status", message="Converting COCO annotations to YOLO")
@@ -907,6 +1011,8 @@ def run(req: Dict[str, Any]) -> Dict[str, Any]:
     if kind == "hf":
         emit("status", message=f"Listing {req['repo_id']}")
         root = hf_download(req, target)
+        if req.get("yolo") and not req.get("class_names"):
+            req = {**req, "_hf_class_names": hf_class_names(req["repo_id"])}
     elif kind == "url":
         emit("status", message="Downloading archive")
         root = url_download(req, target)

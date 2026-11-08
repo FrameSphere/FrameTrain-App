@@ -116,7 +116,11 @@ export const systemTools: McpTool[] = [
       const wait = Math.min(45, Math.max(0, optNum(args, 'wait_seconds', 0)!));
       const job = wait > 0 ? await waitForJob(id, wait * 1000) : getJob(id);
       if (!job) return fail(`Unknown job_id "${id}". Jobs are kept in memory until the app restarts.`);
-      const text = job.state === 'running' ? `Job ${id} (${job.label}) is still running.`
+      const secs = Math.round((Date.now() - Date.parse(job.startedAt)) / 1000);
+      const text = job.state === 'running'
+        ? `Job ${id} (${job.label}) is still running after ${secs} s${job.progress ? ` - last step: ${job.progress}` : ''}. `
+          + 'It has not failed. Call system_job_status again with wait_seconds 45 until state is done or error; '
+          + 'dataset downloads often take several minutes. Tell the user it is still in progress rather than giving up.'
         : job.state === 'done' ? `Job ${id} (${job.label}) finished.`
           : `Job ${id} (${job.label}) failed: ${job.error}`;
       return ok(text, { ...job });

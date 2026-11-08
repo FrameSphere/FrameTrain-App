@@ -29,7 +29,7 @@ export async function runAsJob<T>(
     return fail(`${label} failed: ${now.error}`, { job_id: job.id, state: 'error', error: now.error });
   }
   return ok(
-    `${label} started in the background (job_id ${job.id}). Call system_job_status with this job_id to get the result.`,
+    `${label} started in the background (job_id ${job.id}). This is not an error. Call system_job_status with this job_id and wait_seconds 45, repeatedly, until state is done or error; downloads can take several minutes.`,
     { job_id: job.id, state: 'running' },
   );
 }

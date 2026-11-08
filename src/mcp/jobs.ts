@@ -18,6 +18,8 @@ export interface McpJob {
   finishedAt?: string;
   result?: unknown;
   error?: string;
+  /** Letzte Fortschrittsmeldung (Downloads), damit die KI sieht, dass es weitergeht. */
+  progress?: string;
 }
 
 const MAX_JOBS = 100;
@@ -39,10 +41,30 @@ function prune() {
   }
 }
 
+const PROGRESS_KINDS = new Set(['download', 'import']);
+let progressListening = false;
+
+/** Haengt Fortschrittsmeldungen von fetch_dataset an laufende Download-Auftraege. */
+function trackFetchProgress() {
+  if (progressListening) return;
+  progressListening = true;
+  import('@tauri-apps/api/event')
+    .then(({ listen }) => listen<Record<string, unknown>>('dataset-fetch-progress', (e) => {
+      const p = e.payload ?? {};
+      const msg = typeof p.message === 'string' ? p.message : typeof p.type === 'string' ? p.type : '';
+      if (!msg) return;
+      for (const j of jobs.values()) {
+        if (j.state === 'running' && PROGRESS_KINDS.has(j.kind)) j.progress = msg.slice(0, 300);
+      }
+    }))
+    .catch(() => { progressListening = false; });
+}
+
 /** Startet einen Auftrag; das Promise laeuft unabhaengig vom Werkzeug-Aufruf. */
 export function startJob(kind: string, label: string, work: () => Promise<unknown>): McpJob {
   const job: McpJob = { id: newId(kind), kind, label, state: 'running', startedAt: new Date().toISOString() };
   jobs.set(job.id, job);
+  if (PROGRESS_KINDS.has(kind)) trackFetchProgress();
   const done = (async () => {
     try {
       job.result = await work();

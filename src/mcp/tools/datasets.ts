@@ -177,7 +177,7 @@ export const datasetsTools: McpTool[] = [
   defineTool({
     name: 'datasets_download_hf',
     title: 'Download dataset',
-    description: 'Downloads a Hugging Face dataset and attaches it to a library model. include limits the download to folders, files or glob patterns (e.g. ["sample/"]); max_mb refuses larger selections. For object detection models (YOLO etc.) images and boxes stored in parquet are converted into YOLO folders with data.yaml; max_rows keeps only the first N images. The result includes a content check (images, labels, classes, problems). Returns a job_id; system_job_status reports progress and the new dataset id.',
+    description: 'Downloads a Hugging Face dataset and attaches it to a library model. include limits the download to folders, files or glob patterns (e.g. ["sample/"]); max_mb refuses larger selections. For object detection models (YOLO etc.) images and boxes stored in parquet are converted into YOLO folders with data.yaml; max_rows keeps only the first N rows/images and downloads only as many parquet files as needed, so it works on very large repos like COCO. The result includes a content check (images, labels, classes, problems). Returns a job_id; system_job_status reports progress and the new dataset id.',
     properties: {
       repo_id: S.str('Hugging Face dataset repo id, e.g. "imdb".'),
       model_id: S.str('Model the dataset belongs to.'),

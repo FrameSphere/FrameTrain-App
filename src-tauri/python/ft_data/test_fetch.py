@@ -187,6 +187,53 @@ class MehrFormateTest(unittest.TestCase):
         t = fetch.inspect(self.root)["table"]
         self.assertEqual((t["task"], t["detected"]["llm_format"]), ("chat", "messages"))
 
+    def test_zeilengrenze_laedt_nur_noetige_shards(self):
+        """COCO-Fall: Repo viel groesser als max_mb, aber 100 Zeilen passen in einen Shard."""
+        import sys
+        import types
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        src = self.root / "src"
+        src.mkdir()
+        for name in ("data/train-00000.parquet", "data/train-00001.parquet", "data/val-00000.parquet"):
+            (src / name).parent.mkdir(parents=True, exist_ok=True)
+            pq.write_table(pa.table({"x": list(range(150))}), src / name)
+        files = [("data/val-00000.parquet", 400_000_000), ("data/train-00001.parquet", 400_000_000),
+                 ("data/train-00000.parquet", 400_000_000)]
+        geholt = []
+
+        def fake_download(repo, path, repo_type=None, revision=None, local_dir=None):
+            geholt.append(path)
+            dst = Path(local_dir) / path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes((src / path).read_bytes())
+            return str(dst)
+
+        mod = types.ModuleType("huggingface_hub")
+        mod.hf_hub_download = fake_download
+        alt_mod = sys.modules.get("huggingface_hub")
+        sys.modules["huggingface_hub"] = mod
+        alt_list = fetch.hf_list
+        fetch.hf_list = lambda repo, revision=None: files
+        try:
+            out = self.root / "out"
+            fetch.hf_download({"repo_id": "x/coco", "max_rows": 100, "max_mb": 500}, out)
+        finally:
+            fetch.hf_list = alt_list
+            if alt_mod is not None:
+                sys.modules["huggingface_hub"] = alt_mod
+            else:
+                del sys.modules["huggingface_hub"]
+        self.assertEqual(geholt, ["data/train-00000.parquet"])
+
+    def test_klassennamen_aus_hf_features(self):
+        feats = {"image": {"_type": "Image"}, "objects": {"feature": {
+            "category": {"names": ["person", "bicycle", "car"], "_type": "ClassLabel"},
+            "bbox": {"feature": {"dtype": "float64"}, "_type": "Sequence"}}, "_type": "Sequence"},
+            "source": {"names": ["a", "b"], "_type": "ClassLabel"}}
+        self.assertEqual(fetch._classlabel_names(feats), ["person", "bicycle", "car"])
+        self.assertEqual(fetch._classlabel_names({"x": {"dtype": "int64"}}), [])
+
 
 if __name__ == "__main__":
     unittest.main()
