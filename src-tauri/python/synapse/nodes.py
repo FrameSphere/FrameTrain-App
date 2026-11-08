@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .codenode import DEFAULT_CODE, build_code, compile_code, run_code  # noqa: F401
 from .spec import AUTO, Param, Port, node
 
 
@@ -186,34 +187,7 @@ node("reparameterize", "layer", inputs=("mu", "logvar"), outputs=("out", Port("k
      build=lambda p, s: _Mode(), run=_reparameterize, beta=1.0)
 
 
-def compile_code(source: str) -> Any:
-    """Eigener Code-Node: der Text definiert eine Klasse Node(nn.Module).
-
-    Laeuft lokal im selben Prozess wie Dev Train, ohne Sandbox.
-    """
-    scope: Dict[str, Any] = {"torch": torch, "nn": nn, "F": F}
-    exec(compile(source, "<code-node>", "exec"), scope)
-    cls = scope.get("Node")
-    if cls is None:
-        raise ValueError("Der Code muss eine Klasse Node(nn.Module) definieren")
-    return cls
-
-
-DEFAULT_CODE = """class Node(nn.Module):
-    def __init__(self, shape):
-        super().__init__()
-        self.scale = nn.Parameter(torch.ones(1))
-
-    def forward(self, x):
-        return x * self.scale
-"""
-
-
-def _code(p, s):
-    return compile_code(str(p.get("code") or DEFAULT_CODE))((s or {}).get("in"))
-
-
-node("code", "layer", build=_code, run=_plain, code=DEFAULT_CODE)
+node("code", "layer", build=build_code, run=run_code, code=DEFAULT_CODE)
 
 
 def _pretrained(p, s):

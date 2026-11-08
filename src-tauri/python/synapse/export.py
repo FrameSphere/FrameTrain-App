@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple
 import torch
 import torch.nn as nn
 
+from .codenode import code_kwargs, info_of
 from .graph import ENTRY
 from .runtime import SynapseModule
 
@@ -72,7 +73,8 @@ def _layer_source(nid: str, mod: nn.Module, node_type: str, params: Dict[str, An
     if type(mod).__name__ == "LearnedPosition":
         return f"LearnedPosition({mod.weight.size(1)}, {mod.weight.size(2)})"
     if node_type == "code":
-        return f"Code_{_ident(nid)}({params.get('_shape')!r})"
+        extra = "".join(f", {k}={v!r}" for k, v in code_kwargs(params, info_of(params)).items())
+        return f"Code_{_ident(nid)}({params.get('_shape')!r}{extra})"
     if type(mod).__module__.startswith("torch.nn"):
         return "nn." + " ".join(repr(mod).split())
     raise ValueError(f"Node {nid} ({node_type}) laesst sich nicht als Quelltext exportieren")
@@ -95,13 +97,13 @@ def _forward_lines(module: SynapseModule) -> Tuple[List[str], Dict[str, str]]:
             continue
         wired = module.incoming.get(nid, {})
         a: Dict[str, str] = {}
-        for port in node.spec.inputs:
+        for port in node.inputs:
             if port.id in wired:
                 a[port.id] = names[wired[port.id]]
             elif port.fallback and port.fallback in a:
                 a[port.id] = a[port.fallback]
         p, t = node.params, node.type
-        o = var(nid, node.spec.outputs[0].id) if node.spec.outputs else ""
+        o = var(nid, node.outputs[0].id) if node.outputs else ""
         layer = f'self.layers["{nid}"]'
         i = a.get("in", "")
         if t == "dense" and str(p.get("implicitPool")).lower() == "true":
@@ -140,6 +142,14 @@ def _forward_lines(module: SynapseModule) -> Tuple[List[str], Dict[str, str]]:
         elif t == "transformer_decoder":
             mask = f"torch.triu(torch.ones({i}.size(1), {i}.size(1), device={i}.device, dtype=torch.bool), diagonal=1)"
             lines.append(f"{o} = {layer}({i}, {a['memory']}, tgt_mask={mask})")
+        elif t == "code":
+            info = info_of(p)
+            call = ", ".join(f"{arg}={a[port.id]}" for port, arg in zip(info.inputs, info.args) if port.id in a)
+            res = f"{_ident(nid)}_res"
+            lines.append(f"{res} = {layer}({call})")
+            for k, port in enumerate(info.outputs):
+                pick = f'{res}["{port.id}"] if isinstance({res}, dict) else '
+                lines.append(f"{var(nid, port.id)} = {pick}{res if len(info.outputs) == 1 else f'{res}[{k}]'}")
         elif nid in module.layers and t != "reparameterize":
             lines.append(f"{o} = {layer}({i})")
         elif t == "add_node":
@@ -231,7 +241,7 @@ def _class_source(module: SynapseModule, name: str, extra: List[str], head_impor
 
 def model_source(module: SynapseModule) -> str:
     codes = [(nid, module.node_map[nid].params.get("code")) for nid in module.order if module.node_map[nid].type == "code"]
-    head = HELPERS
+    head = HELPERS + ("\nfrom typing import Literal, Optional\n" if codes else "")
     for nid, code in codes:
         head += "\n\n" + re.sub(r"class\s+Node\b", f"class Code_{_ident(nid)}", str(code or ""))
     extra: List[str] = []

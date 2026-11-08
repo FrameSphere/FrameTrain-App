@@ -8,7 +8,17 @@ interface PropertyPanelProps {
   selectedNode: Node | null;
   definition: NodeDefinition | null;
   onParamChange: (nodeId: string, paramKey: string, value: unknown) => void;
+  /** Code-Node oder Block in die eigene Bibliothek legen. */
+  onSaveToLibrary?: (node: Node) => void;
+  /** Neuere Bibliotheks-Version in diesen Node uebernehmen. */
+  onApplyUpdate?: (node: Node) => void;
+  updateAvailable?: boolean;
 }
+
+const actionBtn: React.CSSProperties = {
+  width: "100%", padding: "6px 9px", marginBottom: 8, background: "transparent", border: "1px solid #334155",
+  borderRadius: 5, color: "#cbd5e1", fontSize: 11, cursor: "pointer", textAlign: "center",
+};
 
 const categoryColors: Record<string, string> = {
   Data:        "#38bdf8",
@@ -186,9 +196,18 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
   selectedNode,
   definition,
   onParamChange,
+  onSaveToLibrary,
+  onApplyUpdate,
+  updateAvailable,
 }) => {
   const { t, language } = useLanguage();
-  const accent = categoryColors[definition?.category ?? ""] ?? "#64748b";
+  const data = (selectedNode?.data ?? {}) as Record<string, any>;
+  const own = data.params?.color as string | undefined;
+  const accent = own ?? categoryColors[definition?.category ?? ""] ?? "#64748b";
+  // Code-Nodes lesen ihre Einstellungen aus dem Code, eigene Nodes bringen sie mit.
+  const dynamic = definition?.type === "code" || Boolean(data.params?.libraryId);
+  const paramList: ParamDefinition[] = dynamic && Array.isArray(data.paramDefs) ? data.paramDefs : definition?.params ?? [];
+  const canSave = definition?.type === "code" || definition?.type === "block";
 
   const handleChange = useCallback(
     (key: string, val: unknown) => {
@@ -272,7 +291,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                   fontFamily: "'JetBrains Mono', monospace", marginBottom: 5,
                 }}
               >
-                {definition.label}
+                {own ? data.label : definition.label}
               </div>
               <div
                 style={{
@@ -284,14 +303,14 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
               >
                 {nodeText(definition.category, language)}
               </div>
-              {definition.description && (
+              {(own ? data.params?.description : definition.description) && (
                 <div
                   style={{
                     marginTop: 8, fontSize: 11, color: "#475569",
                     fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6,
                   }}
                 >
-                  {nodeText(definition.description, language)}
+                  {own ? String(data.params.description) : nodeText(definition.description, language)}
                 </div>
               )}
             </div>
@@ -325,8 +344,31 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
 
             <div style={{ height: 1, background: "#1e293b", marginBottom: 14 }} />
 
+            {(updateAvailable || canSave) && (
+              <div style={{ marginBottom: 6 }}>
+                {updateAvailable && onApplyUpdate && (
+                  <button style={{ ...actionBtn, borderColor: "#f59e0b88", color: "#fbbf24" }} onClick={() => onApplyUpdate(selectedNode)}>
+                    {t('synapseBuilder.custom.applyUpdate')}
+                  </button>
+                )}
+                {canSave && onSaveToLibrary && (
+                  <button style={actionBtn} onClick={() => onSaveToLibrary(selectedNode)}>
+                    {data.params?.libraryId ? t('synapseBuilder.custom.saveVersion') : t('synapseBuilder.custom.saveToLibrary')}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {data.codeError && (
+              <div role="alert" style={{ marginBottom: 12, padding: "6px 8px", fontSize: 11, lineHeight: 1.5, color: "#fca5a5",
+                background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5,
+                fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-word" }}>
+                {String(data.codeError)}
+              </div>
+            )}
+
             {/* Params */}
-            {definition.params.length === 0 ? (
+            {paramList.length === 0 ? (
               <div
                 style={{
                   fontSize: 11, color: "#334155",
@@ -337,7 +379,7 @@ export const PropertyPanel: React.FC<PropertyPanelProps> = ({
                 {t('synapse.propertyPanel.noParams')}
               </div>
             ) : (
-              definition.params.map((param) => {
+              paramList.map((param) => {
                 const paramsMap = ((selectedNode.data as Record<string, unknown>)['params'] as Record<string, unknown>) ?? {};
                 const value = paramsMap[param.key] ?? param.default;
                 return (

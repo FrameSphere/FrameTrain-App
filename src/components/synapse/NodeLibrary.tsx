@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Download, Pencil, PanelLeftClose, PanelLeftOpen, Plus, Trash2, Upload } from "lucide-react";
+import { CUSTOM_ICONS, matchesSearch, type CustomNodeRecord } from "./customNodes";
 import { NODE_CATEGORIES, NodeDefinition } from "./nodeTypes";
 import { dragState } from "./dragState";
 import { useLanguage } from "../../contexts/LanguageContext";
@@ -28,7 +29,68 @@ const categoryColors: Record<string, string> = {
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface NodeLibraryProps {
   onAddNode: (definition: NodeDefinition, position?: { x: number; y: number }) => void;
+  customNodes?: CustomNodeRecord[];
+  onAddCustom?: (rec: CustomNodeRecord) => void;
+  onNewCustom?: () => void;
+  onImportCustom?: () => void;
+  onEditCustom?: (rec: CustomNodeRecord) => void;
+  onExportCustom?: (rec: CustomNodeRecord) => void;
+  onDeleteCustom?: (rec: CustomNodeRecord) => void;
 }
+
+// ─── Eigene Nodes ─────────────────────────────────────────────────────────────
+const iconBtn: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20,
+  background: "transparent", border: "none", borderRadius: 4, color: "#64748b", cursor: "pointer", padding: 0,
+};
+
+const CustomCard: React.FC<{
+  rec: CustomNodeRecord;
+  onAdd: () => void;
+  onEdit: () => void;
+  onExport: () => void;
+  onDelete: () => void;
+}> = ({ rec, onAdd, onEdit, onExport, onDelete }) => {
+  const { t } = useLanguage();
+  const [hovered, setHovered] = useState(false);
+  const color = rec.definition.color || "#a78bfa";
+  const Icon = CUSTOM_ICONS[rec.definition.icon] ?? CUSTOM_ICONS.sparkles;
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        dragState.nodeType = `custom:${rec.id}`;
+        e.dataTransfer.setData("text/plain", `custom:${rec.id}`);
+        e.dataTransfer.effectAllowed = "copy";
+        e.currentTarget.addEventListener("dragend", () => { dragState.nodeType = null; }, { once: true });
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onAdd}
+      title={rec.definition.description || rec.name}
+      style={{
+        display: "flex", alignItems: "center", gap: 8, padding: "6px 6px 6px 10px", borderRadius: 6, cursor: "grab",
+        background: hovered ? `${color}18` : "transparent", border: `1px solid ${hovered ? color + "55" : "transparent"}`,
+        userSelect: "none",
+      }}
+    >
+      <Icon size={13} color={color} style={{ flexShrink: 0 }} />
+      <span style={{ fontSize: 12, color: hovered ? "#e2e8f0" : "#94a3b8", fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+        flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {rec.name}
+      </span>
+      {hovered ? (
+        <span style={{ display: "flex", gap: 1 }} onClick={(e) => e.stopPropagation()}>
+          <button style={iconBtn} onClick={onEdit} title={t("synapseBuilder.custom.edit")} aria-label={t("synapseBuilder.custom.edit")}><Pencil size={12} /></button>
+          <button style={iconBtn} onClick={onExport} title={t("synapseBuilder.custom.export")} aria-label={t("synapseBuilder.custom.export")}><Download size={12} /></button>
+          <button style={iconBtn} onClick={onDelete} title={t("synapseBuilder.custom.delete")} aria-label={t("synapseBuilder.custom.delete")}><Trash2 size={12} /></button>
+        </span>
+      ) : (
+        <span style={{ fontSize: 9.5, color: "#475569" }}>{rec.kind === "block" ? "Block" : `v${rec.version}`}</span>
+      )}
+    </div>
+  );
+};
 
 // ─── NodeCard ─────────────────────────────────────────────────────────────────
 const NodeCard: React.FC<{
@@ -200,7 +262,9 @@ const CategorySection: React.FC<{
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
+export const NodeLibrary: React.FC<NodeLibraryProps> = ({
+  onAddNode, customNodes = [], onAddCustom, onNewCustom, onImportCustom, onEditCustom, onExportCustom, onDeleteCustom,
+}) => {
   const { t } = useLanguage();
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -397,6 +461,34 @@ export const NodeLibrary: React.FC<NodeLibraryProps> = ({ onAddNode }) => {
           .synapse-library::-webkit-scrollbar-track { background: transparent; }
           .synapse-library::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
         `}</style>
+
+        {onNewCustom && (
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", padding: "7px 10px 5px" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.09em", textTransform: "uppercase",
+                flex: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+                {t("synapseBuilder.custom.section")}
+              </span>
+              <button style={iconBtn} onClick={onImportCustom} title={t("synapseBuilder.custom.import")} aria-label={t("synapseBuilder.custom.import")}>
+                <Upload size={12} />
+              </button>
+              <button style={iconBtn} onClick={onNewCustom} title={t("synapseBuilder.custom.new")} aria-label={t("synapseBuilder.custom.new")}>
+                <Plus size={13} />
+              </button>
+            </div>
+            {customNodes.filter((r) => matchesSearch(r, search)).map((rec) => (
+              <CustomCard key={rec.id} rec={rec}
+                onAdd={() => onAddCustom?.(rec)} onEdit={() => onEditCustom?.(rec)}
+                onExport={() => onExportCustom?.(rec)} onDelete={() => onDeleteCustom?.(rec)} />
+            ))}
+            {customNodes.length === 0 && !search.trim() && (
+              <button onClick={onNewCustom} style={{ width: "100%", textAlign: "left", padding: "6px 10px", background: "transparent",
+                border: "1px dashed #1e293b", borderRadius: 6, color: "#64748b", fontSize: 11, cursor: "pointer", lineHeight: 1.5 }}>
+                {t("synapseBuilder.custom.empty")}
+              </button>
+            )}
+          </div>
+        )}
 
         {Object.keys(filtered).length === 0 ? (
           <div

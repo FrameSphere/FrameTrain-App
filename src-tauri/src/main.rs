@@ -21,6 +21,7 @@ mod plugin_commands;
 mod power_manager;
 mod model_host;
 mod synapse_service;
+mod custom_nodes;
 mod hosting_manager;
 mod hosting_desktop;
 mod hosting_api;
@@ -274,6 +275,7 @@ fn main() {
             synapse_service::synapse_export,
             synapse_service::synapse_infer,
             synapse_service::synapse_step,
+            synapse_service::synapse_describe_code,
             training_manager::get_current_training,
             training_manager::get_training_history,
             training_manager::delete_training_job,
@@ -340,6 +342,11 @@ fn main() {
             db_commands::save_canvas_model_design,
             db_commands::load_canvas_model_design,
             db_commands::delete_canvas_model_design,
+            custom_nodes::list_custom_nodes,
+            custom_nodes::save_custom_node,
+            custom_nodes::delete_custom_node,
+            custom_nodes::export_custom_node,
+            custom_nodes::read_custom_node_file,
             secret_store::secret_set,
             secret_store::secret_get,
             secret_store::secret_exists,

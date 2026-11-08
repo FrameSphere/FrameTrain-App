@@ -252,7 +252,18 @@ OUTPUT: ONLY a valid JSON array. No prose, no markdown fences.
 - Size params stay "auto" unless the user names a value: inputSize, inChannels, embedDim, normalizedShape, numFeatures, dim. Never set them by hand when building new graphs.
 - dense needs a flat or sequence input: put pool, pool1d, pool3d or flatten between conv layers and dense.
 - output_node.taskType: classification, regression, language_model (dense per token, transformer_block causal=true), segmentation (conv2d with numClasses channels), autoencoder (reparameterize for a VAE), seq2seq (seq2seq_loader, decoder_input, transformer_decoder), diffusion (timestep as second input, model predicts noise), detection (detection_loader, conv2d head with 5 + classes channels), gan (two block nodes with role generator and discriminator).
-- A missing building block goes into a code node: class Node(nn.Module) with __init__(self, shape).
+- A missing building block goes into a code node: add_node code, then set_param(code) with the full Python source.
+
+## USER'S OWN NODES AND CODE NODES
+- CustomNodes in the Canvas section are the user's own nodes. Prefer them when they fit the request, and when the user names one. Add with add_node(nodeType="custom:<id>").
+- Their ports and settings are listed as (inputs→outputs){settings}. "in=x" means port id "in" (argument x). Use these exact port ids in add_edge; a "?" input is optional.
+- Change a setting with set_param(nodeId, key, value). Never set_param code on a custom node unless asked; that changes the user's node.
+- Writing a code node: class Node(nn.Module) with __init__(self, shape, <settings with defaults>) and forward(self, x, <more inputs>). torch, nn, F and Literal are available.
+  * The first forward argument is port "in"; further arguments are ports with their own name; an argument with a default is optional.
+  * shape is the input shape (tuple) with one input, or a dict by argument name with several.
+  * outputs = ("a", "b") as class attribute gives several outputs; forward then returns a dict.
+  * Put set_param(code) BEFORE any add_edge to that node; its result lists the real ports.
+- save_custom_node only when the user asks to keep a node in their library.
 
 ## CRITICAL RULES FOR PROBLEM-HUNTING (prüfen mode):
 Scan graph for violations (highest priority):
@@ -268,7 +279,7 @@ For each violation found:
 - Use remove_edge/remove_node/set_param tools to fix
 - Apply fixes FIRST, only report what couldn't be auto-fixed
 
-CRITICAL: Only use nodeTypes from the Types list in Canvas section. Do NOT invent types.
+CRITICAL: Only use nodeTypes from the Types list in Canvas section, or custom:<id> from CustomNodes. Do NOT invent types.
 ## If a needed type doesn't exist, use the closest available one and explain in the done summary.
 
 ## CANVAS IS GROUND TRUTH — read it carefully before acting:
@@ -293,6 +304,7 @@ ${PLAN_TOOLS}
 # Layers:      dense(in→out)  conv2d(in→out)  embedding(tokens→out)
 #              lstm(in→out,hidden)  layernorm(in→out)  batchnorm(in→out)  dropout(in→out)
 #              attention(query,key,value→out)  transformer_block(in→out)
+#              code and custom nodes: ports as listed in the Nodes/CustomNodes lines
 # Activation:  relu/gelu/sigmoid/softmax/tanh/leaky_relu/silu (in→out)
 # Training:    optimizer(→optimizer) [NO inputs — standalone node]
 #              loss(pred,targets→loss)
@@ -590,9 +602,12 @@ export async function runSynapseAgent(opts: AgentRunOptions): Promise<AgentRunRe
   // This prevents "Target not found" errors when the model emits an add_edge
   // before the add_node for the target node (common with weaker models).
   const rawActionSteps = plan.filter((c) => c.tool !== 'done');
+  // Code setzen direkt nach dem Anlegen: erst danach kennt der Code-Node seine Ports.
+  const isCode = (c: { tool: string; args: Record<string, unknown> }) => c.tool === 'set_param' && c.args?.key === 'code';
   const actionSteps = [
     ...rawActionSteps.filter((c) => c.tool === 'add_node'),
-    ...rawActionSteps.filter((c) => c.tool !== 'add_node'),
+    ...rawActionSteps.filter(isCode),
+    ...rawActionSteps.filter((c) => c.tool !== 'add_node' && !isCode(c)),
   ];
 
   // ============================================================

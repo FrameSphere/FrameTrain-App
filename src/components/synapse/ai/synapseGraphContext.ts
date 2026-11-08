@@ -1,5 +1,29 @@
 import type { Node, Edge } from '@xyflow/react';
 import type { NodeDefinition } from '../nodeTypes';
+import type { CustomNodeRecord } from '../customNodes';
+
+const LOOK_KEYS = new Set(['code', 'label', 'icon', 'color', 'description', 'libraryId', 'libraryVersion']);
+
+/** Ports und Einstellungen eines Code-/eigenen Nodes, z. B. "(in=x,skip?→out,gate){hidden=32,act=gelu}". */
+function ownNodeSummary(d: any): string {
+  const ins = (d?.inputs ?? []).map((p: any) => (p.label && p.label.replace('?', '') !== p.id ? `${p.id}=${p.label}` : p.label ?? p.id)).join(',');
+  const outs = (d?.outputs ?? []).map((p: any) => p.id).join(',');
+  const settings = (d?.paramDefs ?? [])
+    .filter((p: any) => !LOOK_KEYS.has(p.key))
+    .map((p: any) => `${p.key}=${d?.params?.[p.key] ?? p.default}${p.options ? `(${p.options.join('|')})` : ''}`);
+  return `(${ins}→${outs})${settings.length ? `{${settings.join(',')}}` : ''}`;
+}
+
+/** Bibliothek fuer den Prompt: eine Zeile je eigenem Node. */
+export function customNodesContext(records: CustomNodeRecord[]): string {
+  if (!records.length) return '';
+  return `CustomNodes(${records.length}): ` + records.map((r) => {
+    const d = r.definition;
+    if (r.kind === 'block') return `custom:${r.id} "${r.name}" block(in→out, repeat=${d.repeat ?? 1})${d.description ? ` — ${d.description}` : ''}`;
+    const summary = ownNodeSummary({ inputs: d.inputs, outputs: d.outputs, paramDefs: d.params, params: d.values });
+    return `custom:${r.id} "${r.name}" ${summary}${d.description ? ` — ${d.description}` : ''}`;
+  }).join('; ');
+}
 
 function nodeType(node: Node): string {
   const data: any = node.data || {};
@@ -197,6 +221,7 @@ export function buildSynapseGraphContext(
   edges: Edge[],
   selectedNodeId: string | null,
   nodeDefs: NodeDefinition[],
+  customNodes: CustomNodeRecord[] = [],
 ): string {
   // ── Node list — show non-default params inline ────────────────────────────
   const nodeList = nodes.length === 0
@@ -223,6 +248,11 @@ export function buildSynapseGraphContext(
           }
         }
 
+        // Code- und eigene Nodes: Ports und Einstellungen kommen aus dem Node selbst.
+        if (type === 'code' || params.libraryId) {
+          const own = params.libraryId ? ` custom:${params.libraryId} v${params.libraryVersion ?? '?'}` : '';
+          return `${n.id}[${type === 'code' && !params.libraryId ? 'code' : label}${own}]${ownNodeSummary(d)}${d.codeError ? ` CODE ERROR: ${String(d.codeError).slice(0, 120)}` : ''}`;
+        }
         const labelPart = label !== def?.label ? `[${label}]` : `[${type}]`;
         const paramPart = changedParams.length > 0 ? `{${changedParams.join(',')}}` : '';
         return `${n.id}${labelPart}${paramPart}`;
@@ -288,5 +318,6 @@ export function buildSynapseGraphContext(
     attentionShapeContext,
     `Selected: ${selectedStr}`,
     `Types(${nodeDefs.length}): ${typeNames}`,
+    customNodesContext(customNodes),
   ].filter(Boolean).join('\n');
 }

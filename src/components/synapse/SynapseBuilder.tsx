@@ -24,6 +24,11 @@ import { useContextMenuActions } from "../../ui/contextMenuRegistry";
 import { NodeLibrary } from "./NodeLibrary";
 import { decorateEdges, decorateNodes, formatBytes, formatParams, memoryBudget, structureKey, type LiveCheckResult, type StepResult } from "./liveCheck";
 import { groupToBlock } from "./blockGroup";
+import {
+  applyDescription, customNodeApi, draftFromNode, instanceFromRecord, isOutdated, pruneEdges, updateFromRecord,
+  type CustomNodeInput, type CustomNodeRecord,
+} from "./customNodes";
+import { NodeWorkshop } from "./NodeWorkshop";
 import { BlueprintPicker, type Blueprint } from "./BlueprintPicker";
 import { emptyHistory, record, redo, undo, type HistoryState } from "./graphHistory";
 import { PropertyPanel } from "./PropertyPanel";
@@ -359,6 +364,133 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
     unlistenersRef.current = [];
   }, []);
 
+  // ── Eigene Nodes (Bibliothek) ─────────────────────────────────────────
+  const [customNodes, setCustomNodes] = useState<CustomNodeRecord[]>([]);
+  const [workshop, setWorkshop] = useState<{ draft: CustomNodeInput; foreign?: boolean; nodeId?: string } | null>(null);
+  const reloadCustomNodes = useCallback(() => {
+    customNodeApi.list().then(setCustomNodes).catch(() => setCustomNodes([]));
+  }, []);
+  useEffect(() => { reloadCustomNodes(); }, [reloadCustomNodes]);
+
+  const baseDef = useCallback((kind: string) => NODE_DEFINITIONS.find((d) => d.type === kind), []);
+
+  const addCustomNode = useCallback((rec: CustomNodeRecord, position?: { x: number; y: number }) => {
+    const base = baseDef(rec.kind);
+    if (!base) return;
+    let pos = position ?? { x: 300, y: 200 };
+    if (rfRef.current && !position) {
+      const { x, y, zoom } = rfRef.current.getViewport();
+      pos = { x: (-x + window.innerWidth / 2) / zoom, y: (-y + window.innerHeight / 2) / zoom };
+    }
+    setNodes((nds) => [...nds, instanceFromRecord(rec, base, `${rec.kind}-${Date.now()}`, pos)]);
+  }, [baseDef, setNodes]);
+
+  // Code-Nodes: Ports und Einstellungen folgen dem Code (kurz nach dem Tippen).
+  // Auch Nodes aus gespeicherten Modellen oder von KI-Werkzeugen ohne
+  // _describedCode werden so einmal beschrieben.
+  const describingRef = useRef<Map<string, string>>(new Map());
+  const codeKey = nodes
+    .filter((n) => ((n.data as any)?._def?.type ?? (n.data as any)?.nodeType) === "code"
+      && (n.data as any)?._describedCode !== ((n.data as any)?.params?.code ?? ""))
+    .map((n) => `${n.id}\u0000${(n.data as any)?.params?.code ?? ""}`)
+    .join("\u0001");
+  useEffect(() => {
+    const todo = codeKey ? codeKey.split("\u0001").map((x) => x.split("\u0000") as [string, string])
+      .filter(([id, code]) => describingRef.current.get(id) !== code) : [];
+    if (todo.length === 0) return;
+    const timer = setTimeout(() => {
+      for (const [id, code] of todo) {
+        describingRef.current.set(id, code);
+        customNodeApi.describe(code, {}, [1, 16]).then((desc) => {
+          setNodes((nds) => {
+            const next = nds.map((n) => (n.id === id && (n.data as any)?.params?.code === code ? applyDescription(n, desc) : n));
+            setEdges((eds) => pruneEdges(eds, next));
+            return next;
+          });
+        }).catch(() => undefined).finally(() => describingRef.current.delete(id));
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [codeKey, setNodes, setEdges]);
+
+  // Neuere Bibliotheks-Version: Kennzeichen am Node.
+  useEffect(() => {
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((n) => {
+        const flag = isOutdated(n, customNodes);
+        if (Boolean((n.data as any)._libraryUpdate) === flag) return n;
+        changed = true;
+        return { ...n, data: { ...n.data, _libraryUpdate: flag } };
+      });
+      return changed ? next : nds;
+    });
+  }, [customNodes, nodes.length, setNodes]);
+
+  const applyLibraryUpdate = useCallback((node: Node) => {
+    const id = (node.data as any)?.params?.libraryId;
+    const rec = customNodes.find((r) => r.id === id);
+    const base = rec && baseDef(rec.kind);
+    if (!rec || !base) return;
+    setNodes((nds) => {
+      const next = nds.map((n) => (n.id === node.id ? updateFromRecord(n, rec, base) : n));
+      setEdges((eds) => pruneEdges(eds, next));
+      return next;
+    });
+  }, [customNodes, baseDef, setNodes, setEdges]);
+
+  const saveWorkshop = useCallback(async (input: CustomNodeInput) => {
+    const rec = await customNodeApi.save(input);
+    const nodeId = workshop?.nodeId;
+    const base = baseDef(rec.kind);
+    if (nodeId && base) {
+      setNodes((nds) => nds.map((n) => (n.id === nodeId ? updateFromRecord(n, rec, base) : n)));
+    }
+    setWorkshop(null);
+    reloadCustomNodes();
+    setLogLines((p) => [...p, `[Synapse] ${t('synapseBuilder.custom.saved', { name: rec.name, version: rec.version })}`]);
+  }, [workshop, baseDef, setNodes, reloadCustomNodes, t]);
+
+  const exportCustomNode = useCallback(async (rec: CustomNodeRecord) => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const path = await save({ defaultPath: `${rec.name.replace(/[^\w\- ]+/g, "")}.ftnode`, filters: [{ name: "FrameTrain Node", extensions: ["ftnode"] }] });
+      if (!path) return;
+      await customNodeApi.exportFile(rec.id, path);
+      setLogLines((p) => [...p, `[Synapse] ${t('synapseBuilder.custom.exported', { path })}`]);
+    } catch (e) {
+      setLogLines((p) => [...p, `[Synapse] ${String(e)}`]);
+    }
+  }, [t]);
+
+  const importCustomNode = useCallback(async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const path = await open({ multiple: false, filters: [{ name: "FrameTrain Node", extensions: ["ftnode"] }] });
+      if (!path || Array.isArray(path)) return;
+      setWorkshop({ draft: await customNodeApi.readFile(path), foreign: true });
+    } catch (e) {
+      setLogLines((p) => [...p, `[Synapse] ${String(e)}`]);
+    }
+  }, []);
+
+  const deleteCustomNode = useCallback(async (rec: CustomNodeRecord) => {
+    try {
+      const { ask } = await import("@tauri-apps/plugin-dialog");
+      const ok = await ask(t('synapseBuilder.custom.deleteConfirm', { name: rec.name }), { kind: "warning" });
+      if (!ok) return;
+      await customNodeApi.remove(rec.id);
+      reloadCustomNodes();
+    } catch (e) {
+      setLogLines((p) => [...p, `[Synapse] ${String(e)}`]);
+    }
+  }, [t, reloadCustomNodes]);
+
+  const saveNodeToLibrary = useCallback((node: Node) => {
+    const draft = draftFromNode(node);
+    if (draft) setWorkshop({ draft, nodeId: node.id });
+  }, []);
+
   // ── Derived ───────────────────────────────────────────────────────────
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedDef  = selectedNode
@@ -461,12 +593,17 @@ const SynapseBuilderInner: React.FC<SynapseBuilderProps> = ({ userId }) => {
       const nodeType = dragState.nodeType ?? e.dataTransfer.getData("text/plain");
       dragState.nodeType = null;
       if (!nodeType) return;
+      if (nodeType.startsWith("custom:")) {
+        const rec = customNodes.find((r) => `custom:${r.id}` === nodeType);
+        if (rec && rfRef.current) addCustomNode(rec, rfRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+        return;
+      }
       const def = NODE_DEFINITIONS.find((d) => d.type === nodeType);
       if (!def || !rfRef.current) return;
       const position = rfRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       setNodes((nds) => [...nds, makeNode(def, position)]);
     },
-    [setNodes]
+    [setNodes, customNodes, addCustomNode]
   );
 
   // ── Select ────────────────────────────────────────────────────────────
@@ -1232,7 +1369,7 @@ Keine Floskeln, nur Fakten.`;
       ? `${text}\n\n${shapeDiagnostic}`
       : (text || 'Resume');
 
-    const graphCtx = buildSynapseGraphContext(nodes, edges, selectedNodeId, NODE_DEFINITIONS);
+    const graphCtx = buildSynapseGraphContext(nodes, edges, selectedNodeId, NODE_DEFINITIONS, customNodes);
     const executor = createToolExecutor({
       nodes,
       edges,
@@ -1240,6 +1377,13 @@ Keine Floskeln, nur Fakten.`;
       setEdges,
       nodeDefinitions: NODE_DEFINITIONS,
       onGraphMutation: handleGraphMutation,
+      customNodes,
+      describeCode: (code) => customNodeApi.describe(code, {}, [1, 16]),
+      saveCustomNode: async (input) => {
+        const rec = await customNodeApi.save(input);
+        reloadCustomNodes();
+        return rec;
+      },
     });
 
     try {
@@ -1251,7 +1395,7 @@ Keine Floskeln, nur Fakten.`;
         graphContextStr: graphCtx,
         executorHandle: executor,
         getGraphContext: () => buildSynapseGraphContext(
-          executor.getState().nodes, executor.getState().edges, selectedNodeId, NODE_DEFINITIONS
+          executor.getState().nodes, executor.getState().edges, selectedNodeId, NODE_DEFINITIONS, customNodes
         ),
         onStepsUpdate: setAiSteps,
         signal: aiAbortRef.current.signal,
@@ -1328,6 +1472,8 @@ Keine Floskeln, nur Fakten.`;
     aiMessages,
     nodes,
     edges,
+    customNodes,
+    reloadCustomNodes,
     selectedNodeId,
     aiSettings,
     setNodes,
@@ -1541,7 +1687,16 @@ Keine Floskeln, nur Fakten.`;
 
       {/* ── Main layout ── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
-        <NodeLibrary onAddNode={handleAddNode} />
+        <NodeLibrary
+          onAddNode={handleAddNode}
+          customNodes={customNodes}
+          onAddCustom={addCustomNode}
+          onNewCustom={() => setWorkshop({ draft: { id: null, name: "", kind: "code", definition: { icon: "sparkles", color: "#a78bfa", description: "" } } })}
+          onImportCustom={importCustomNode}
+          onEditCustom={(rec) => setWorkshop({ draft: { id: rec.id, name: rec.name, kind: rec.kind, definition: rec.definition } })}
+          onExportCustom={exportCustomNode}
+          onDeleteCustom={deleteCustomNode}
+        />
 
         {/* Canvas — onDrop/onDragOver on <ReactFlow> directly (v12 requirement) */}
         <div ref={canvasWrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
@@ -1620,9 +1775,11 @@ Keine Floskeln, nur Fakten.`;
                         <tbody>
                           {stepResult.order.map((id) => {
                             const n = stepResult.nodes[id];
+                            // Eigene Nodes heissen wie in der Bibliothek, nicht wie ihre ID.
+                            const own = nodes.find((x) => x.id === id && (x.data as any)?.params?.libraryId);
                             return (
                               <tr key={id} style={{ color: "#c3cad8" }}>
-                                <td style={{ paddingRight: 6 }}>{id}</td>
+                                <td style={{ paddingRight: 6 }} title={id}>{own ? String((own.data as any).label) : id}</td>
                                 <td style={{ paddingRight: 6 }}>{n.mean !== undefined ? `${n.mean} ± ${n.std}` : "–"}</td>
                                 <td style={{ paddingRight: 6 }}>{n.grad !== undefined ? n.grad.toExponential(1) : "–"}</td>
                                 <td>{n.update !== undefined ? n.update.toExponential(1) : "–"}</td>
@@ -1671,6 +1828,9 @@ Keine Floskeln, nur Fakten.`;
           selectedNode={selectedNode}
           definition={selectedDef}
           onParamChange={onParamChange}
+          onSaveToLibrary={saveNodeToLibrary}
+          onApplyUpdate={applyLibraryUpdate}
+          updateAvailable={Boolean(selectedNode && (selectedNode.data as any)._libraryUpdate)}
         />
       </div>
 
@@ -1686,6 +1846,15 @@ Keine Floskeln, nur Fakten.`;
         userId={userId}
         activeCanvasModelId={activeCanvasModelId}
       />
+
+      {workshop && (
+        <NodeWorkshop
+          draft={workshop.draft}
+          foreign={workshop.foreign}
+          onSave={saveWorkshop}
+          onClose={() => setWorkshop(null)}
+        />
+      )}
 
       {showLibrary && (
         <ModelLibrary
