@@ -64,8 +64,15 @@ export function clientKey(client: McpClientInfo | string): string {
   return friendlyClientName(name).trim().toLowerCase();
 }
 
+/**
+ * Unwiderruflich (Loeschen): jedes Mal fragen, nichts merken, Warnung zeigen.
+ * Nicht dasselbe wie destructiveHint – das sagt Claude/ChatGPT nur, dass Daten
+ * ueberschrieben werden koennen (z. B. Annotation setzen).
+ */
 export function isDestructive(tool: Tool): boolean {
-  return tool.annotations.destructiveHint === true;
+  const flag = tool._meta['frametrain/irreversible'];
+  if (flag !== undefined) return flag === true;
+  return tool.annotations.destructiveHint === true && tool._meta['frametrain/approval'] === 'always';
 }
 
 /** Muss der Nutzer diesen Aufruf bestaetigen? */

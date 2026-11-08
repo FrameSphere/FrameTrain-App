@@ -58,6 +58,7 @@ export const testsTools: McpTool[] = [
     title: 'Stop test',
     description: 'Stops the running evaluation job started with tests_start.',
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run() {
       await call('stop_test');
       return ok('Stop requested.', { stopped: true });

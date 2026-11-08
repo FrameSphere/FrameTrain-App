@@ -175,6 +175,8 @@ export const trainingTools: McpTool[] = [
     title: 'Stop training',
     description: 'Stops the currently running (regular) training. The user confirms. Dev Train runs are stopped with devtrain_stop.',
     approval: 'always',
+    annotations: { destructiveHint: true },
+    irreversible: false,
     async run() {
       await call('stop_training');
       try { await call('disable_prevent_sleep'); } catch { /* optional */ }

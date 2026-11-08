@@ -114,6 +114,7 @@ export const devtrainTools: McpTool[] = [
     },
     required: ['script'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const script = reqStr(args, 'script');
@@ -177,6 +178,8 @@ export const devtrainTools: McpTool[] = [
     title: 'Stop Dev Train',
     description: 'Stops the running Dev Train script; output written so far stays in devtrain_status.',
     approval: 'always',
+    annotations: { destructiveHint: true },
+    irreversible: false,
     async run() {
       await call('stop_dev_training');
       try { await call('disable_prevent_sleep'); } catch { /* optional */ }
@@ -229,6 +232,7 @@ export const devtrainTools: McpTool[] = [
     title: 'Stop Dev Test',
     description: 'Stops the running Dev Test script started with devtrain_test_start.',
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run() {
       await call('stop_dev_test');
       return ok('Stop requested.', { stopped: true });

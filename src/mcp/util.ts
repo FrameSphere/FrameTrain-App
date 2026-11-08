@@ -71,6 +71,12 @@ export interface ToolSpec {
   required?: string[];
   approval?: ApprovalLevel;
   annotations?: ToolAnnotations;
+  /**
+   * Unwiderruflich (Loeschen). Standard: destruktiv und Freigabe 'always'.
+   * destructiveHint allein ist nur die Angabe fuer Claude/ChatGPT
+   * (Daten werden ueberschrieben); die App merkt sich dann weiter die Freigabe.
+   */
+  irreversible?: boolean;
   requiresUser?: boolean;
   run: (args: ToolArgs, ctx: McpCallContext) => Promise<CallToolResult>;
 }
@@ -91,6 +97,7 @@ export function defineTool(spec: ToolSpec): McpTool {
   const domain = domainOf(spec.name);
   const approval = spec.approval ?? 'none';
   const readOnly = approval === 'none';
+  const irreversible = spec.irreversible ?? (spec.annotations?.destructiveHint === true && approval === 'always');
   return {
     name: spec.name,
     title: spec.title,
@@ -107,7 +114,7 @@ export function defineTool(spec: ToolSpec): McpTool {
       openWorldHint: false,
       ...spec.annotations,
     },
-    _meta: { 'frametrain/domain': domain, 'frametrain/approval': approval },
+    _meta: { 'frametrain/domain': domain, 'frametrain/approval': approval, ...(irreversible ? { 'frametrain/irreversible': true } : {}) },
     requiresUser: spec.requiresUser ?? domain !== 'system',
     run: spec.run,
   };

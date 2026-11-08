@@ -164,6 +164,7 @@ export const studioTools: McpTool[] = [
     properties: { project_id: projectId, name: S.str('New name.'), classes: S.strArr('Full new class list.') },
     required: ['project_id'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args) {
       const pid = reqStr(args, 'project_id');
       const project = await call('studio_update_project', {
@@ -303,6 +304,7 @@ export const studioTools: McpTool[] = [
     properties: { project_id: projectId, sample_id: S.str('Sample id.'), content: S.str('New text.') },
     required: ['project_id', 'sample_id', 'content'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args) {
       const pid = reqStr(args, 'project_id');
       await call('studio_edit_text', { projectId: pid, sampleId: reqStr(args, 'sample_id'), content: reqStr(args, 'content') });
@@ -495,6 +497,7 @@ export const studioTools: McpTool[] = [
     },
     required: ['project_id', 'sample_id', 'status'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args) {
       const pid = reqStr(args, 'project_id');
       await call('studio_set_annotation', {

@@ -133,6 +133,7 @@ export const systemTools: McpTool[] = [
     properties: { job_id: S.str('The job_id returned by the tool that started the job.') },
     required: ['job_id'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     requiresUser: false,
     async run(args) {
       const id = reqStr(args, 'job_id');

@@ -69,10 +69,25 @@ describe('MCP-Manifest', () => {
     }
   });
 
+  it('ueberschreibende Werkzeuge sind fuer Claude/ChatGPT destruktiv, nur Loeschen ist unwiderruflich', () => {
+    const overwriting = ['studio_project_update', 'studio_edit_text', 'studio_set_annotation', 'synapse_graph_set',
+      'synapse_graph_edit', 'synapse_open_model', 'synapse_save', 'devtrain_script_set', 'devtrain_test_stop',
+      'devtrain_stop', 'tests_stop', 'training_stop', 'system_job_cancel'];
+    for (const n of overwriting) {
+      const t = manifest.find((x) => x.name === n);
+      expect(t?.annotations.destructiveHint, n).toBe(true);
+      expect(t?._meta['frametrain/irreversible'], n).toBeUndefined();
+    }
+    for (const t of manifest) {
+      if (t._meta['frametrain/irreversible']) expect(t.name).toMatch(/_delete/);
+    }
+  });
+
   it('loeschende Werkzeuge fragen immer und sind als destruktiv markiert', () => {
     for (const t of manifest.filter((x) => /_delete/.test(x.name))) {
       expect(t._meta['frametrain/approval']).toBe('always');
       expect(t.annotations.destructiveHint).toBe(true);
+      expect(t._meta['frametrain/irreversible']).toBe(true);
     }
   });
 

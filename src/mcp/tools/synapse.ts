@@ -186,6 +186,7 @@ export const synapseTools: McpTool[] = [
     },
     required: ['nodes', 'edges'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const nodesIn = args.nodes as CompactNode[];
@@ -216,6 +217,7 @@ export const synapseTools: McpTool[] = [
     },
     required: ['ops'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const snap = readSynapseGraph(userId);
@@ -303,6 +305,7 @@ export const synapseTools: McpTool[] = [
     properties: { model_id: S.str('Canvas model id from synapse_models_list.') },
     required: ['model_id'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const modelId = reqStr(args, 'model_id');
@@ -323,6 +326,7 @@ export const synapseTools: McpTool[] = [
     description: 'Saves the current Synapse graph as a model in the library (graph, generated PyTorch code and IR). If the graph belongs to a saved model it is overwritten, unless name is given — then a new model is created. The model id can be used for synapse_train and the inference tab.',
     properties: { name: S.str('Create a new model with this name (instead of updating the loaded one).') },
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const snap = readSynapseGraph(userId);
