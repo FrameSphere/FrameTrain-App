@@ -39,6 +39,7 @@
         "dragDropEnabled": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "backgroundThrottling": "disabled",
         "trafficLightPosition": {
           "x": 22,
           "y": 24

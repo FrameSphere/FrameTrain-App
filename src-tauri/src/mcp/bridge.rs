@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MANIFEST_WAIT: Duration = Duration::from_secs(15);
-pub const TIMEOUT_TEXT: &str = "FrameTrain did not respond in time";
+pub const TIMEOUT_TEXT: &str = "FrameTrain is running but did not answer this call within 60 s. Remote access is working (do not ask the user to enable it). The action may still be finishing in the app: retry the same call once, and if that also times out, ask the user to bring the FrameTrain window to the front and try again.";
 pub const PING_TOOL: &str = "system_ping";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
