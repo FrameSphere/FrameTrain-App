@@ -45,13 +45,17 @@ pub fn next_backoff(current: u64) -> u64 {
     if current == 0 { BACKOFF_MIN } else { (current * 2).min(BACKOFF_MAX) }
 }
 
-/// API-Key des angemeldeten Nutzers – dieselbe Quelle wie beim Auto-Login (config.json).
+/// API-Key des angemeldeten Nutzers – aus der laufenden Sitzung. Abgemeldet
+/// heisst: kein Key, die Relay wartet. (Vorher las sie config.json, in der
+/// Passwort und Key im Klartext standen.)
 pub fn read_api_key(app: &tauri::AppHandle) -> Option<String> {
-    let dir = app.path().app_config_dir().ok()?;
-    let raw = std::fs::read_to_string(dir.join("config.json")).ok()?;
-    api_key_from_config(&raw)
+    let uid = crate::database::session_user_id().ok();
+    let bound = app.state::<super::McpState>().config.lock().ok()?.remote_active_for(uid.as_deref());
+    if !bound { return None; }
+    crate::secret_store::session_api_key().filter(|k| k.starts_with("ft_"))
 }
 
+#[cfg(test)]
 pub fn api_key_from_config(raw: &str) -> Option<String> {
     let v: Value = serde_json::from_str(raw).ok()?;
     v.get("api_key").and_then(|k| k.as_str()).filter(|k| k.starts_with("ft_")).map(str::to_string)
@@ -146,7 +150,7 @@ async fn heartbeat_loop(app: tauri::AppHandle, gen: u64) {
     while alive(&app, gen) {
         let wait = match read_api_key(&app) {
             None => {
-                set_status(&app, |s| { s.connected = false; s.last_error = Some("Nicht angemeldet (kein API-Key)".into()); });
+                set_status(&app, |s| { s.connected = false; s.last_error = Some("Nicht angemeldet oder Fernzugriff gehoert zu einem anderen Account".into()); });
                 BACKOFF_MAX
             }
             Some(key) => {

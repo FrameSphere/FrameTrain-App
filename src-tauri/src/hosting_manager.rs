@@ -161,6 +161,12 @@ pub fn save_settings_file(app: &tauri::AppHandle, s: &HostingSettings) -> Result
     // Erst schreiben, dann umbenennen: ein Absturz mittendrin laesst die alte Datei stehen.
     let tmp = p.with_extension("json.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("hosting.json: {}", e))?;
+    // Enthaelt den API-Token der Hosting-Schnittstelle — nur fuer den Nutzer lesbar
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
     std::fs::rename(&tmp, &p).map_err(|e| format!("hosting.json: {}", e))
 }
 

@@ -154,9 +154,10 @@ pub(crate) fn get_version_info(app_handle: &tauri::AppHandle, version_id: &str) 
         .join("frametrain.db");
     let conn = rusqlite::Connection::open(&db_path)
         .map_err(|e| format!("DB: {}", e))?;
+    let user_id = crate::database::session_user_id()?;
     conn.query_row(
-        "SELECT path, model_id FROM model_versions_new WHERE id = ?1",
-        [version_id],
+        "SELECT path, model_id FROM model_versions_new WHERE id = ?1 AND user_id = ?2",
+        [version_id, user_id.as_str()],
         |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
     ).map_err(|e| format!("Version nicht gefunden: {}", e))
 }

@@ -56,14 +56,14 @@ describe('AISettings – Key pro Anbieter', () => {
   });
 
   it('laedt den Key aus dem Konto des gewaehlten Anbieters', async () => {
-    keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude', 'ft_ai_key_u1_groq': 'gsk_groq' });
+    keychain({ 'ai_key:anthropic': 'sk-ant-claude', 'ai_key:groq': 'gsk_groq' });
     storedSettings('anthropic');
     const { result } = await mounted();
     expect(result.current.settings.apiKey).toBe('sk-ant-claude');
   });
 
   it('holt beim Anbieterwechsel den Key des neuen Anbieters und behaelt den alten', async () => {
-    const store = keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude', 'ft_ai_key_u1_groq': 'gsk_groq' });
+    const store = keychain({ 'ai_key:anthropic': 'sk-ant-claude', 'ai_key:groq': 'gsk_groq' });
     storedSettings('anthropic');
     const { result } = await mounted();
 
@@ -72,8 +72,8 @@ describe('AISettings – Key pro Anbieter', () => {
 
     await act(async () => { await result.current.saveSettings(); });
     // Groq wurde geschrieben, Claude blieb unangetastet.
-    expect(store['ft_ai_key_u1_groq']).toBe('gsk_groq');
-    expect(store['ft_ai_key_u1_anthropic']).toBe('sk-ant-claude');
+    expect(store['ai_key:groq']).toBe('gsk_groq');
+    expect(store['ai_key:anthropic']).toBe('sk-ant-claude');
 
     // Zurueck auf Claude: der Key ist noch da.
     act(() => { result.current.updateDraft({ provider: 'anthropic' }); });
@@ -81,7 +81,7 @@ describe('AISettings – Key pro Anbieter', () => {
   });
 
   it('loescht beim Speichern keinen Key, wenn nie einer geladen war', async () => {
-    const store = keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude' });
+    const store = keychain({ 'ai_key:anthropic': 'sk-ant-claude' });
     storedSettings('ollama');
     const { result } = await mounted();
 
@@ -89,29 +89,29 @@ describe('AISettings – Key pro Anbieter', () => {
     act(() => { result.current.updateDraft({ provider: 'openai' }); });
     await act(async () => { await result.current.saveSettings(); });
 
-    expect(store['ft_ai_key_u1_anthropic']).toBe('sk-ant-claude');
-    expect(store['ft_ai_key_u1_openai']).toBeUndefined();
+    expect(store['ai_key:anthropic']).toBe('sk-ant-claude');
+    expect(store['ai_key:openai']).toBeUndefined();
   });
 
   it('loescht den Key, wenn ein geladener Key bewusst geleert wird', async () => {
-    const store = keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude' });
+    const store = keychain({ 'ai_key:anthropic': 'sk-ant-claude' });
     storedSettings('anthropic');
     const { result } = await mounted();
 
     act(() => { result.current.updateDraft({ apiKey: '' }); });
     await act(async () => { await result.current.saveSettings(); });
 
-    expect(store['ft_ai_key_u1_anthropic']).toBeUndefined();
+    expect(store['ai_key:anthropic']).toBeUndefined();
   });
 
   // Wer die App vorher genutzt hat, hat seinen Key im alten gemeinsamen Konto.
   it('uebernimmt den Key aus dem frueheren gemeinsamen Konto', async () => {
-    const store = keychain({ 'ft_ai_key_u1': 'sk-ant-alt' });
+    const store = keychain({ 'ai_key': 'sk-ant-alt' });
     storedSettings('anthropic');
     const { result } = await mounted();
 
     expect(result.current.settings.apiKey).toBe('sk-ant-alt');
-    expect(store['ft_ai_key_u1_anthropic']).toBe('sk-ant-alt');
+    expect(store['ai_key:anthropic']).toBe('sk-ant-alt');
   });
 
   // Die Anzeige meldete "API-Key noetig" fuer Anbieter, deren Key laengst im
@@ -119,7 +119,7 @@ describe('AISettings – Key pro Anbieter', () => {
   // Beruhigung, die die Anzeige geben soll, fehlte damit.
   it('meldet ALLE Anbieter mit hinterlegtem Key, ohne dass man umschalten muss', async () => {
     const calls: string[] = [];
-    keychain({ 'ft_ai_key_u1_anthropic': 'sk-ant-claude', 'ft_ai_key_u1_groq': 'gsk_groq' }, calls);
+    keychain({ 'ai_key:anthropic': 'sk-ant-claude', 'ai_key:groq': 'gsk_groq' }, calls);
     storedSettings('anthropic');
     const { result } = await mounted();
 
@@ -131,7 +131,7 @@ describe('AISettings – Key pro Anbieter', () => {
     await waitFor(() => expect(result.current.providersWithKey).toEqual(['anthropic', 'groq']));
     // Beim Oeffnen nur nachsehen, OB ein Key da ist — Auslesen fragte unter
     // macOS nach dem Schluesselbund-Passwort.
-    expect(calls).not.toContain('secret_get:ft_ai_key_u1_groq');
+    expect(calls).not.toContain('secret_get:ai_key:groq');
 
     // Umschalten aendert daran nichts und verliert keinen Key.
     act(() => { result.current.updateDraft({ provider: 'groq' }); });

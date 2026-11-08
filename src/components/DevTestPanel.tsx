@@ -2,6 +2,7 @@
 // KI-Assistent kann den Code direkt bearbeiten (EDIT-Protokoll)
 
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { userScopedKey } from '../utils/currentUser';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -183,10 +184,10 @@ const MAX_SESSION_MESSAGES = 30;
 const SESSION_MAX_AGE_MS   = 12 * 60 * 60 * 1000;
 
 function loadChatSessions(): ChatSession[] {
-  try { return JSON.parse(localStorage.getItem(DEVTEST_SESSIONS_KEY) ?? '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(userScopedKey(DEVTEST_SESSIONS_KEY)) ?? '[]'); } catch { return []; }
 }
 function saveChatSessions(sessions: ChatSession[]) {
-  localStorage.setItem(DEVTEST_SESSIONS_KEY, JSON.stringify(sessions.slice(0, MAX_DEVTEST_SESSIONS)));
+  localStorage.setItem(userScopedKey(DEVTEST_SESSIONS_KEY), JSON.stringify(sessions.slice(0, MAX_DEVTEST_SESSIONS)));
 }
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

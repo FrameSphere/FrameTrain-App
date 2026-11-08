@@ -36,6 +36,7 @@ import { useLanguage, type Language } from '../contexts/LanguageContext';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { dateLocale } from '../utils/dateLocale';
 import ModalPortal from './ui/ModalPortal';
+import { userScopedKey } from '../utils/currentUser';
 
 // ============ Types ============
 
@@ -127,7 +128,8 @@ function getFileIcon(name: string, isDir: boolean) {
 // Der Token ist ein Geheimnis und liegt im OS-Schluesselbund (secret_*), genau wie
 // der KI-API-Key — dasselbe Konto wie in den Einstellungen. Der Namensraum (nicht
 // geheim) bleibt im localStorage, damit der Repo-Vorschlag vorbelegt werden kann.
-const HF_TOKEN_ACCOUNT = 'ft_hf_token';
+// Logischer Name; das Backend legt den Token im Konto des angemeldeten Nutzers ab.
+const HF_TOKEN_ACCOUNT = 'hf_token';
 const HF_OWNER_KEY = 'frametrain.hf.owner';
 
 async function loadHfToken(): Promise<string> {
@@ -139,10 +141,10 @@ async function saveHfToken(token: string): Promise<void> {
   catch { /* Schluesselbund nicht verfuegbar — Upload klappte trotzdem */ }
 }
 function loadHfOwner(): string {
-  try { return localStorage.getItem(HF_OWNER_KEY) || ''; } catch { return ''; }
+  try { return localStorage.getItem(userScopedKey(HF_OWNER_KEY)) || ''; } catch { return ''; }
 }
 function saveHfOwner(owner: string) {
-  try { localStorage.setItem(HF_OWNER_KEY, owner); } catch { /* Privatmodus o.ae. */ }
+  try { localStorage.setItem(userScopedKey(HF_OWNER_KEY), owner); } catch { /* Privatmodus o.ae. */ }
 }
 
 export interface HfProgress {

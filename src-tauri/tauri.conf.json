@@ -50,9 +50,32 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; media-src 'self' blob: data: asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost https: http://localhost:*",
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "**"
-        ]
+        "scope": {
+          "allow": ["**"],
+          "deny": [
+            "$APPDATA/*.json",
+            "$APPDATA/*.db",
+            "$APPDATA/*.db-*",
+            "$APPCONFIG/*.json",
+            "$APPLOG/**",
+            "$HOME/Library/Keychains/**",
+            "$HOME/Library/Cookies/**",
+            "$HOME/Library/Mail/**",
+            "$HOME/Library/Messages/**",
+            "$HOME/Library/Application Support/Google/**",
+            "$HOME/Library/Application Support/Firefox/**",
+            "$HOME/Library/Application Support/BraveSoftware/**",
+            "$HOME/Library/Application Support/Microsoft Edge/**",
+            "$HOME/Library/Application Support/Claude/**",
+            "$HOME/Library/Safari/**",
+            "$HOME/AppData/Local/Google/**",
+            "$HOME/AppData/Local/Microsoft/Edge/**",
+            "$HOME/AppData/Roaming/Mozilla/**",
+            "$HOME/AppData/Roaming/Microsoft/Credentials/**",
+            "$HOME/AppData/Roaming/Claude/**"
+          ],
+          "requireLiteralLeadingDot": true
+        }
       }
     }
   },

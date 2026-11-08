@@ -197,6 +197,11 @@ pub fn mcp_get_status(app: tauri::AppHandle) -> Value {
         .map(|raw| claude_config_has_entry(&raw, &exe))
         .unwrap_or(false);
     let relay = st.relay.status.lock().unwrap().clone();
+    // Fernzugriff eines anderen Accounts wird hier als "aus" gezeigt.
+    let mut cfg = cfg;
+    let uid = crate::database::session_user_id().ok();
+    cfg.remote_enabled = cfg.remote_active_for(uid.as_deref());
+    cfg.remote_user_id = String::new();
     json!({
         "config": cfg,
         "server": st.server.status(),
@@ -223,14 +228,25 @@ pub fn mcp_save_settings(app: tauri::AppHandle, enabled: bool, port: u16, remote
         return Err("Port muss zwischen 1024 und 65535 liegen".into());
     }
     let mut cfg = app.state::<McpState>().config.lock().unwrap().clone();
-    let remote_changed = cfg.remote_enabled != remote_enabled;
+    let uid = crate::database::session_user_id().ok();
+    let was_active = cfg.remote_active_for(uid.as_deref());
+    let remote_changed = was_active != remote_enabled;
     cfg.enabled = enabled;
     cfg.port = port;
-    cfg.remote_enabled = remote_enabled;
+    if remote_enabled {
+        // Einschalten bindet den Fernzugriff an den angemeldeten Account
+        cfg.remote_user_id = uid.clone().ok_or("Nicht angemeldet")?;
+        cfg.remote_enabled = true;
+    } else if was_active || cfg.remote_user_id.is_empty() {
+        // Nur der eigene Fernzugriff wird hier ausgeschaltet; der eines
+        // anderen Accounts bleibt fuer dessen naechste Anmeldung bestehen.
+        cfg.remote_enabled = false;
+        cfg.remote_user_id = String::new();
+    }
     save(&app, &cfg)?;
     apply_server(&app, &cfg);
     if remote_changed {
-        relay::apply(&app, remote_enabled);
+        relay::apply(&app, cfg.remote_enabled);
     }
     Ok(mcp_get_status(app))
 }

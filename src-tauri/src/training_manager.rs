@@ -616,8 +616,9 @@ pub async fn start_training(
         // 2. SQLite file_path (Legacy-Fallback für ältere Einträge)
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             if let Ok(conn) = rusqlite::Connection::open(app_data.join("frametrain.db")) {
+                let uid = crate::database::session_user_id().unwrap_or_default();
                 let res: Result<String, _> = conn.query_row(
-                    "SELECT file_path FROM datasets WHERE id = ?1", [&dataset_id], |r| r.get(0),
+                    "SELECT file_path FROM datasets WHERE id = ?1 AND user_id = ?2", [dataset_id.as_str(), uid.as_str()], |r| r.get(0),
                 );
                 if let Ok(p) = res {
                     if !p.is_empty() {
@@ -660,9 +661,10 @@ pub async fn start_training(
             .map(|p| p.join("frametrain.db"));
         if let Ok(db_path_val) = db_path_val {
             if let Ok(conn) = rusqlite::Connection::open(&db_path_val) {
+                let uid = crate::database::session_user_id().unwrap_or_default();
                 let res: Result<String, _> = conn.query_row(
-                    "SELECT path FROM model_versions_new WHERE model_id=?1 AND is_root=0 ORDER BY version_number DESC LIMIT 1",
-                    [&model_id], |r| r.get(0),
+                    "SELECT path FROM model_versions_new WHERE model_id=?1 AND user_id=?2 AND is_root=0 ORDER BY version_number DESC LIMIT 1",
+                    [model_id.as_str(), uid.as_str()], |r| r.get(0),
                 );
                 if let Ok(ver_path) = res {
                     let pt = PathBuf::from(&ver_path).join("model.pt");
@@ -718,8 +720,9 @@ pub async fn start_training(
             let db_path = app_handle.path().app_data_dir()
                 .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
             let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
+            let uid = crate::database::session_user_id()?;
             let vpath: String = conn.query_row(
-                "SELECT path FROM model_versions_new WHERE id = ?1", [vid], |r| r.get(0),
+                "SELECT path FROM model_versions_new WHERE id = ?1 AND user_id = ?2", [vid.as_str(), uid.as_str()], |r| r.get(0),
             ).map_err(|e| format!("Version nicht gefunden: {}", e))?;
             PathBuf::from(vpath)
         } else {
@@ -1375,12 +1378,20 @@ pub fn get_training_history(
     let mut jobs = load_jobs(&app_handle)?;
     match current_user_id {
         Some(uid) => {
-            // Migration: alte Jobs ohne user_id beim ersten Zugriff dem aktuellen User zuweisen
+            // Migration: alte Jobs ohne user_id dem Besitzer des Modells
+            // zuweisen. Frueher bekam sie der erste Account, der den Verlauf
+            // oeffnete — auch wenn das Training von einem anderen stammte.
             let mut changed = false;
-            for job in jobs.iter_mut() {
-                if job.user_id.is_empty() {
-                    job.user_id = uid.clone();
-                    changed = true;
+            {
+                let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+                for job in jobs.iter_mut().filter(|j| j.user_id.is_empty()) {
+                    let owner: Option<String> = db.conn.query_row(
+                        "SELECT user_id FROM models WHERE id = ?1", [&job.model_id], |r| r.get(0),
+                    ).ok();
+                    if let Some(o) = owner.filter(|o| o != "default_user") {
+                        job.user_id = o;
+                        changed = true;
+                    }
                 }
             }
             if changed {

@@ -141,6 +141,7 @@ import ModalPortal from './ui/ModalPortal';
 import PackageCheckBanner from './PackageCheckBanner';
 import { pluginName, pluginDescription } from '../plugins/pluginText';
 import { templateName, templateDescription } from '../utils/templateText';
+import { userScopedKey } from '../utils/currentUser';
 
 /**
  * Gemeinsamer Einstieg fuer Training, Labor und die Dev-Panels.
@@ -220,12 +221,12 @@ const LAST_SELECTION_KEY = 'ft_training_last_selection';
 interface LastSelection { modelId?: string; datasetId?: string }
 
 function loadLastSelection(): LastSelection {
-  try { return JSON.parse(localStorage.getItem(LAST_SELECTION_KEY) ?? '{}'); }
+  try { return JSON.parse(localStorage.getItem(userScopedKey(LAST_SELECTION_KEY)) ?? '{}'); }
   catch { return {}; }
 }
 
 function saveLastSelection(sel: LastSelection) {
-  try { localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify(sel)); } catch { /* Storage voll o.ä. */ }
+  try { localStorage.setItem(userScopedKey(LAST_SELECTION_KEY), JSON.stringify(sel)); } catch { /* Storage voll o.ä. */ }
 }
 
 function getBuiltinTemplates(t: (key: string) => string): MetricsTemplate[] {

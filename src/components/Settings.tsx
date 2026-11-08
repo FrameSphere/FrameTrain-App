@@ -65,7 +65,8 @@ interface SettingsProps {
 type SettingsTab = 'account' | 'appearance' | 'language' | 'notifications' | 'updates' | 'docs' | 'support' | 'ai-assistant' | 'about' | 'system' | 'quick' | 'ai-connections';
 
 // Schluesselbund-Konto fuer den HuggingFace-Token — identisch im Versionen-Export.
-const HF_TOKEN_ACCOUNT = 'ft_hf_token';
+// Logischer Name; das Backend legt den Token im Konto des angemeldeten Nutzers ab.
+const HF_TOKEN_ACCOUNT = 'hf_token';
 
 const STATUS_COLOR: Record<string, string> = {
   open: 'text-blue-400 bg-blue-500/10 border-blue-500/20',

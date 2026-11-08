@@ -279,11 +279,13 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
     
     /// Setzt die aktuelle User-ID für alle Datenbankoperationen
     pub fn set_current_user(&mut self, user_id: String) {
+        if let Ok(mut g) = SESSION_USER.write() { *g = Some(user_id.clone()); }
         self.current_user_id = Some(user_id);
     }
     
     /// Entfernt die aktuelle User-ID (Logout)
     pub fn clear_current_user(&mut self) {
+        if let Ok(mut g) = SESSION_USER.write() { *g = None; }
         self.current_user_id = None;
     }
     
@@ -748,6 +750,18 @@ CREATE INDEX IF NOT EXISTS idx_test_results_user_id ON test_results(user_id);
 pub fn get_database_path() -> PathBuf {
     let data_dir = get_data_directory();
     data_dir.join("frametrain.db")
+}
+
+/// Angemeldeter Nutzer, ohne den DB-Mutex lesbar. Etliche Stellen oeffnen
+/// eine eigene SQLite-Verbindung und laufen teils, waehrend der Aufrufer den
+/// Mutex haelt — ein Sperren dort waere ein Deadlock. Wird nur ueber
+/// set_current_user/clear_current_user geschrieben.
+static SESSION_USER: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// User-ID der laufenden Anmeldung, oder Fehler wenn niemand angemeldet ist.
+pub fn session_user_id() -> std::result::Result<String, String> {
+    SESSION_USER.read().ok().and_then(|g| g.clone())
+        .ok_or_else(|| "Kein Benutzer angemeldet".to_string())
 }
 
 /// App-Identifier dieses Builds. Standard ist die Produktions-App; ein lokaler

@@ -18,6 +18,7 @@ import TermsGate from './components/TermsGate';
 import { applyAccountDiagnosticsConsent } from './utils/diagnosticsConsent';
 import ApprovalDialog from './mcp/ApprovalDialog';
 import { setMcpUser, startMcpBridge } from './mcp/bridge';
+import { setCurrentUser } from './utils/currentUser';
 import './App.css';
 
 interface ApiKeyValidation {
@@ -247,6 +248,7 @@ function App() {
           password: config.password
         });
         
+        setCurrentUser(session.user_id);
         setUserData({
           apiKey: config.api_key,
           password: config.password,
@@ -290,6 +292,7 @@ function App() {
         config: JSON.stringify(config)
       });
 
+      setCurrentUser(session.user_id);
       setUserData({
         apiKey,
         password,
@@ -328,6 +331,7 @@ function App() {
       console.error('Logout error:', error);
     } finally {
       setIsAuthenticated(false);
+      setCurrentUser(null);
       setUserData(null);
     }
   };

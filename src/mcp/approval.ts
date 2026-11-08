@@ -10,6 +10,7 @@
 // "KI-Verbindungen" (Strang B) gedacht.
 
 import { friendlyClientName } from './clientNames';
+import { userScopedKey } from '../utils/currentUser';
 import type { ApprovalDecision, ApprovalRequest, McpClientInfo, Tool, ToolArgs, McpCallSource } from './types';
 
 export const GRANTS_KEY = 'ft_mcp_grants_v1';
@@ -31,7 +32,7 @@ const listeners = new Set<() => void>();
 
 function readStore(): Store {
   try {
-    const raw = localStorage.getItem(GRANTS_KEY);
+    const raw = localStorage.getItem(userScopedKey(GRANTS_KEY));
     const parsed = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? migrateNames(parsed as Store) : {};
   } catch {
@@ -54,7 +55,7 @@ function migrateNames(store: Store): Store {
 }
 
 function writeStore(store: Store) {
-  try { localStorage.setItem(GRANTS_KEY, JSON.stringify(store)); } catch { /* Speicher voll */ }
+  try { localStorage.setItem(userScopedKey(GRANTS_KEY), JSON.stringify(store)); } catch { /* Speicher voll */ }
   listeners.forEach((l) => { try { l(); } catch { /* Abonnent defekt */ } });
 }
 

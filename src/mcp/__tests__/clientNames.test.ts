@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { friendlyClientName, UNKNOWN_CLIENT } from '../clientNames';
 import { clientKey, GRANTS_KEY, listGrants, needsApproval } from '../approval';
+import { userScopedKey } from '../../utils/currentUser';
 import type { Tool } from '../types';
 
 describe('friendlyClientName', () => {
@@ -26,7 +27,7 @@ describe('Freigaben unter alter Kennung', () => {
   beforeEach(() => localStorage.clear());
 
   it('werden beim Lesen auf den Produktnamen umgezogen', () => {
-    localStorage.setItem(GRANTS_KEY, JSON.stringify({
+    localStorage.setItem(userScopedKey(GRANTS_KEY), JSON.stringify({
       'local-agent-mode-frametrain': { training_start: { kind: 'always', grantedAt: '2026-11-05T10:00:00Z', clientName: 'local-agent-mode-frametrain' } },
     }));
     const grants = listGrants();
