@@ -77,6 +77,34 @@ class StageTest(unittest.TestCase):
         self.assertEqual(res["samples"], 2)
         self.assertEqual(len(list(Path(res["path"]).glob("*.txt"))), 2)
 
+    def test_llm_formate_alpaca_chat_praeferenz(self):
+        src = self.root / "llm"
+        src.mkdir()
+        (src / "a.jsonl").write_text(
+            '{"instruction": "Uebersetze ins Englische", "input": "Guten Morgen", "output": "Good morning"}\n'
+            '{"instruction": "Sag hallo", "input": "", "output": "Hallo"}\n')
+        res = stage.stage({"source": str(src), "target": str(self.root / "w"), "project_kind": "text_pairs"})
+        rows = [json.loads(l) for l in Path(res["path"]).read_text().splitlines()]
+        self.assertIn({"text": "Uebersetze ins Englische\n\nGuten Morgen", "target": "Good morning"}, rows)
+        self.assertEqual(res["source_columns"]["format"], "pair")
+
+        chat = self.root / "chat"
+        chat.mkdir()
+        (chat / "c.jsonl").write_text(json.dumps({"messages": [
+            {"role": "system", "content": "Kurz antworten."}, {"role": "user", "content": "Hallo?"},
+            {"role": "assistant", "content": "Hi!"}]}) + "\n" + json.dumps({"conversations": [
+            {"from": "human", "value": "2+2?"}, {"from": "gpt", "value": "4"}]}) + "\n")
+        res = stage.stage({"source": str(chat), "target": str(self.root / "w2"), "project_kind": "text_pairs"})
+        rows = [json.loads(l) for l in Path(res["path"]).read_text().splitlines()]
+        self.assertIn({"text": "System: Kurz antworten.\n\nUser: Hallo?", "target": "Hi!"}, rows)
+
+        pref = self.root / "pref"
+        pref.mkdir()
+        (pref / "p.jsonl").write_text('{"prompt": "Witz?", "chosen": "Gut", "rejected": "Schlecht"}\n')
+        res = stage.stage({"source": str(pref), "target": str(self.root / "w3"), "project_kind": "text_pairs"})
+        self.assertEqual(json.loads(Path(res["path"]).read_text()), {"text": "Witz?", "target": "Gut"})
+        self.assertTrue(res["notes"])
+
 
 if __name__ == "__main__":
     unittest.main()

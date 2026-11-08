@@ -120,10 +120,109 @@ def inspect(path: Path) -> Dict[str, Any]:
         problems.append(f"Only {yolo} label files for {images} images. Many images are unlabeled.")
     if fmt == "audio" and not transcripts:
         problems.append("Audio without transcripts or class folders.")
+    table = table_summary(path) if fmt in ("table", "parquet") else None
+    if table and table.get("problems"):
+        problems.extend(table["problems"])
     return {
+        "table": table,
         "format": fmt, "images": images, "audio": audio, "video": video, "transcripts": transcripts, "yolo_labels": yolo, "voc_xml": voc, "coco_json": coco,
         "parquet_files": parquet, "table_files": csv, "splits": splits, "classes": classes,
         "yaml_files": yaml_files[:5], "problems": problems,
+    }
+
+
+TABLE_SUFFIXES = (".parquet", ".csv", ".tsv", ".jsonl", ".json")
+LABEL_CANDIDATES = ("label", "labels", "class", "category", "sentiment", "intent", "topic", "target_label")
+TEXT_CANDIDATES = ("text", "sentence", "content", "review", "document", "question", "prompt", "instruction", "input")
+
+
+def _clip(v: Any, n: int = 200) -> Any:
+    if isinstance(v, (bytes, bytearray)):
+        return f"<{len(v)} bytes>"
+    if isinstance(v, dict) and "bytes" in v:
+        return "<media>"
+    t = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+    return t if len(t) <= n else t[:n] + " ..."
+
+
+def table_summary(root: Path, max_rows: int = 50_000) -> Optional[Dict[str, Any]]:
+    """Spalten, Zeilen, erkannte Aufgabe, Label-Verteilung und Beispielzeilen einer Tabelle."""
+    files = [f for f in sorted(root.rglob("*")) if f.is_file() and f.suffix.lower() in TABLE_SUFFIXES
+             and not f.name.startswith(".")]
+    if not files:
+        return None
+    total_rows = 0
+    rows: List[Dict[str, Any]] = []
+    columns: List[str] = []
+    for f in files[:50]:
+        try:
+            if f.suffix.lower() == ".parquet":
+                import pyarrow.parquet as pq
+                pf = pq.ParquetFile(f)
+                total_rows += pf.metadata.num_rows
+                if not columns:
+                    columns = pf.schema_arrow.names
+                if len(rows) < max_rows:
+                    for b in pf.iter_batches(batch_size=2048, columns=[c for c in pf.schema_arrow.names]):
+                        rows.extend(b.to_pylist())
+                        if len(rows) >= max_rows:
+                            break
+                    names = {}
+                    meta = json.loads((pf.schema_arrow.metadata or {}).get(b"huggingface", b"{}") or b"{}")
+                    for col, feat in (meta.get("info", {}).get("features", {}) or {}).items():
+                        if isinstance(feat, dict) and feat.get("names"):
+                            names[col] = feat["names"]
+                    for r in rows:
+                        for col, nm in names.items():
+                            if isinstance(r.get(col), int) and 0 <= r[col] < len(nm):
+                                r[col] = nm[r[col]]
+            else:
+                from .stage import _read_rows
+                part = _read_rows(f, limit=max_rows)
+                total_rows += len(part)
+                if not columns and part:
+                    columns = list(part[0].keys())
+                rows.extend(part[: max(0, max_rows - len(rows))])
+        except Exception as e:  # noqa: BLE001 – eine kaputte Datei soll den Bericht nicht kippen
+            return {"files": len(files), "problems": [f"Could not read {f.name}: {e}"]}
+    low = {c.lower(): c for c in columns}
+    task = "unknown"
+    detected: Dict[str, Any] = {}
+    try:
+        from . import llm
+        fmt, cols = llm.detect_format(columns)
+        if fmt in ("messages", "pair", "preference"):
+            task = {"messages": "chat", "pair": "pairs", "preference": "preference"}[fmt]
+            detected = {"llm_format": fmt, "columns": [c for c in cols if c]}
+    except Exception:
+        pass
+    label_col = next((low[c] for c in LABEL_CANDIDATES if c in low), None)
+    text_col = next((low[c] for c in TEXT_CANDIDATES if c in low), None)
+    labels: Dict[str, int] = {}
+    if task == "unknown" and label_col and text_col:
+        task = "classification"
+        detected = {"text_column": text_col, "label_column": label_col}
+        for r in rows:
+            v = r.get(label_col)
+            if v is not None:
+                labels[str(v)] = labels.get(str(v), 0) + 1
+    elif task == "unknown" and text_col:
+        task = "text"
+        detected = {"text_column": text_col}
+    problems: List[str] = []
+    if labels:
+        counts = sorted(labels.values())
+        if len(counts) > 1 and counts[-1] > 10 * max(1, counts[0]):
+            problems.append(f"Labels are very unbalanced ({counts[-1]} vs {counts[0]} rows).")
+    empty = sum(1 for r in rows[:5000] if text_col and not str(r.get(text_col) or "").strip())
+    if empty:
+        problems.append(f"{empty} of the first {min(len(rows), 5000)} rows have an empty {text_col}.")
+    return {
+        "files": len(files), "rows": total_rows, "columns": columns[:40], "task": task, "detected": detected,
+        "labels": dict(sorted(labels.items(), key=lambda kv: -kv[1])[:30]),
+        "label_count": len(labels), "counted_rows": len(rows),
+        "examples": [{k: _clip(v) for k, v in list(r.items())[:8]} for r in rows[:3]],
+        "problems": problems,
     }
 
 

@@ -25,6 +25,14 @@ describe('dataset check helpers', () => {
     expect(isVisionModel(bert)).toBe(false);
   });
 
+  it('describes tables with task, columns and labels', () => {
+    const text = describeReport(report({ format: 'parquet', problems: [], table: { rows: 16000, columns: ['text', 'label'], task: 'classification',
+      detected: { text_column: 'text', label_column: 'label' }, labels: { joy: 5362, sadness: 4666 }, label_count: 2, examples: [] } }), bert);
+    expect(text).toMatch(/16000 row\(s\), task classification/);
+    expect(text).toMatch(/labels joy 5362, sadness 4666/);
+    expect(text).not.toMatch(/image/);
+  });
+
   it('warns when a vision model gets a dataset without images', () => {
     expect(describeReport(report(), yolo)).toMatch(/Not usable for "yolo8n"/);
     expect(describeReport(report({ format: 'yolo', images: 120, yolo_labels: 120, classes: ['person'], problems: [] }), yolo)).not.toMatch(/Problems/);

@@ -175,8 +175,17 @@ class MehrFormateTest(unittest.TestCase):
         self.assertEqual(fetch.inspect(t)["format"], "audio_transcript")
 
     def test_text_tabelle(self):
-        (self.root / "train.csv").write_text("text,label\nhi,a\n")
-        self.assertEqual(fetch.inspect(self.root)["format"], "table")
+        (self.root / "train.csv").write_text("text,label\nhi,a\nho,a\nhu,b\n")
+        rep = fetch.inspect(self.root)
+        self.assertEqual(rep["format"], "table")
+        t = rep["table"]
+        self.assertEqual((t["rows"], t["task"], t["labels"]), (3, "classification", {"a": 2, "b": 1}))
+        self.assertEqual(len(t["examples"]), 3)
+
+    def test_llm_tabelle_wird_erkannt(self):
+        (self.root / "chat.jsonl").write_text(json.dumps({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ho"}]}) + "\n")
+        t = fetch.inspect(self.root)["table"]
+        self.assertEqual((t["task"], t["detected"]["llm_format"]), ("chat", "messages"))
 
 
 if __name__ == "__main__":

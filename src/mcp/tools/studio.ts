@@ -42,6 +42,7 @@ interface StagedResult {
   studio_source: 'folder' | 'text' | 'audio' | 'videos'; path: string; work_dir: string;
   label_classes?: string[]; text_column?: string; label_column?: string; paths?: string[];
   samples: number; per_class?: Record<string, number>; dropped_classes?: Record<string, number>;
+  source_columns?: Record<string, unknown>; notes?: string[];
 }
 
 /** Dataset -> Studio: vorbereiten (Klassen, Stichprobe), mit dem passenden Import einlesen, aufraeumen. */
@@ -426,7 +427,9 @@ export const studioTools: McpTool[] = [
           if (!st) return importText(r);
           const per = st.per_class ? ` Per class: ${Object.entries(st.per_class).map(([k, v]) => `${k} ${v}`).join(', ')}.` : '';
           const dropped = st.dropped_classes ? ` Dropped classes: ${Object.keys(st.dropped_classes).slice(0, 10).join(', ')}.` : '';
-          return `${importText(r)}${per}${dropped}`;
+          const fmt = st.source_columns?.format ? ` Read as ${String(st.source_columns.format)} (${(st.source_columns.columns as string[] | undefined)?.join(' + ') ?? ''}).` : '';
+          const notes = st.notes?.length ? ` ${st.notes.join(' ')}` : '';
+          return `${importText(r)}${per}${dropped}${fmt}${notes}`;
         },
       });
     },

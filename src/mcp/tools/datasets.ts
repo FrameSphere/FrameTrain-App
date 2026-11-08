@@ -12,9 +12,14 @@ async function datasetFiles(datasetId: string): Promise<DatasetFile[]> {
 }
 
 
+interface TableSummary {
+  rows: number; columns: string[]; task: string; detected: Record<string, unknown>;
+  labels: Record<string, number>; label_count: number; examples: Record<string, unknown>[];
+}
 interface FetchReport {
   format: string; images: number; yolo_labels: number; classes: string[];
   splits: Record<string, number>; problems: string[];
+  audio?: number; video?: number; transcripts?: number; table?: TableSummary | null;
 }
 interface FetchResult { dataset: DatasetInfo; report: FetchReport; conversion?: { images: number; boxes: number; classes: string[] } | null }
 
@@ -32,7 +37,18 @@ export function isVisionModel(m: Pick<ModelInfo, 'model_type' | 'plugin_override
 
 /** Kurztext zum Pruefbericht, inklusive Warnung, wenn das Modell damit nicht trainieren kann. */
 export function describeReport(r: FetchReport, model?: Pick<ModelInfo, 'model_type' | 'plugin_override' | 'name'>): string {
-  const parts = [`format ${r.format}`, `${r.images} image(s)`];
+  const parts = [`format ${r.format}`];
+  if (r.images) parts.push(`${r.images} image(s)`);
+  if (r.audio) parts.push(`${r.audio} audio file(s)${r.transcripts ? `, ${r.transcripts} with transcript` : ''}`);
+  if (r.video) parts.push(`${r.video} video(s)`);
+  if (r.table) {
+    const t = r.table;
+    parts.push(`${t.rows} row(s), task ${t.task}, columns ${t.columns.slice(0, 8).join(', ')}`);
+    const det = Object.entries(t.detected ?? {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('+') : String(v)}`).join(', ');
+    if (det) parts.push(`detected ${det}`);
+    const labels = Object.entries(t.labels ?? {});
+    if (labels.length) parts.push(`labels ${labels.slice(0, 10).map(([k, v]) => `${k} ${v}`).join(', ')}${t.label_count > 10 ? ', ...' : ''}`);
+  }
   if (r.yolo_labels) parts.push(`${r.yolo_labels} YOLO label file(s)`);
   if (r.classes.length) parts.push(`classes: ${r.classes.slice(0, 12).join(', ')}${r.classes.length > 12 ? ', ...' : ''}`);
   const splits = Object.entries(r.splits).map(([k, v]) => `${k} ${v}`).join(', ');

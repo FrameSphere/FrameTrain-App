@@ -324,22 +324,50 @@ def stage_text(src: Path, out: Path, pairs: bool, cmap: ClassMap, max_samples: i
     if not rows:
         raise FetchError("No table rows found (parquet, CSV, TSV, JSON or JSONL).")
     cols = list(rows[0].keys())
-    tcol = _pick(cols, TEXT_COLS, text_col)
-    lcol = _pick(cols, TARGET_COLS if pairs else LABEL_COLS, label_col)
-    if not tcol or not lcol:
-        raise FetchError(f"Could not find the {'input/target' if pairs else 'text/label'} columns. Columns: {cols[:20]}. "
-                         "Pass text_column and label_column.")
     items = []
-    for r in rows:
-        text, lab = r.get(tcol), r.get(lcol)
-        if text is None or lab is None or str(text).strip() == "":
-            continue
-        if pairs:
-            items.append(((str(text), str(lab)), []))
-        else:
-            dst = cmap(str(lab))
-            if dst is not None:
-                items.append(((str(text), dst), [dst]))
+    notes: List[str] = []
+    source_columns: Dict[str, Any] = {}
+    if pairs and not (text_col and label_col):
+        # LLM- und Seq2Seq-Formate wie beim Training lesen (ft_data.llm): Chat/ShareGPT,
+        # Alpaca (Anweisung + Eingabe), prompt/completion, Frage/Antwort, Praeferenzen.
+        from . import llm
+        try:
+            fmt, fcols = llm.detect_format(cols)
+        except ValueError as e:
+            raise FetchError(str(e))
+        if fmt == "text":
+            raise FetchError(f"Rows only have a text column ({fcols[0]}) and no answer. Use a text classification "
+                             "project with a label column, or train the LLM on this dataset directly (continued pretraining).")
+        source_columns = {"format": fmt, "columns": list(c for c in fcols if c)}
+        if fmt == "preference":
+            notes.append("Preference data: the chosen answer becomes the target, the rejected answer is not kept.")
+        for r in rows:
+            ex = llm.row_to_example(r, fmt, fcols)
+            if ex is None or not ex.messages:
+                continue
+            prompt = _render_prompt(ex.prompt_messages())
+            answer = ex.reference()
+            if prompt and answer:
+                items.append(((prompt, answer), []))
+    else:
+        tcol = _pick(cols, TEXT_COLS, text_col)
+        lcol = _pick(cols, TARGET_COLS if pairs else LABEL_COLS, label_col)
+        if not tcol or not lcol:
+            raise FetchError(f"Could not find the {'input/target' if pairs else 'text/label'} columns. Columns: {cols[:20]}. "
+                             "Pass text_column and label_column.")
+        source_columns = {"text": tcol, ("target" if pairs else "label"): lcol}
+        for r in rows:
+            text, lab = r.get(tcol), r.get(lcol)
+            if text is None or lab is None or str(text).strip() == "":
+                continue
+            if pairs:
+                items.append(((str(text), str(lab)), []))
+            else:
+                dst = cmap(str(lab))
+                if dst is not None:
+                    items.append(((str(text), dst), [dst]))
+    if not items:
+        raise FetchError("No usable rows after reading the table.")
     picked = _sample(items, max_samples, per_class and not pairs)
     out.mkdir(parents=True, exist_ok=True)
     key = "target" if pairs else "label"
@@ -347,10 +375,20 @@ def stage_text(src: Path, out: Path, pairs: bool, cmap: ClassMap, max_samples: i
         for (text, lab), _ in picked:
             fh.write(json.dumps({"text": text, key: lab}, ensure_ascii=False) + "\n")
     res = {"studio_source": "text", "path": str(out / "data.jsonl"), "text_column": "text", "label_column": key,
-           "samples": len(picked), "source_columns": {"text": tcol, key: lcol}}
+           "samples": len(picked), "source_columns": source_columns}
+    if notes:
+        res["notes"] = notes
     if not pairs:
         res["per_class"] = _counts(picked)
     return res
+
+
+def _render_prompt(msgs: List[Dict[str, str]]) -> str:
+    """Prompt-Verlauf als Text. Eine einzelne Nutzer-Nachricht bleibt, wie sie ist."""
+    if len(msgs) == 1 and msgs[0]["role"] == "user":
+        return msgs[0]["content"]
+    names = {"system": "System", "user": "User", "assistant": "Assistant"}
+    return "\n\n".join(f"{names.get(m['role'], m['role'])}: {m['content']}" for m in msgs)
 
 
 # ── Einstieg ────────────────────────────────────────────────────────────────
