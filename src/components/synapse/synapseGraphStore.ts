@@ -211,8 +211,10 @@ export function fromCompactGraph(
     if (!src || !tgt) { errors.push(`Edge ${ce.source} -> ${ce.target}: node missing.`); return; }
     const outs = ((src.data as Record<string, unknown>).outputs as { id: string }[]) ?? [];
     const ins = ((tgt.data as Record<string, unknown>).inputs as { id: string }[]) ?? [];
-    const sh = ce.sourceHandle && outs.some((p) => p.id === ce.sourceHandle) ? ce.sourceHandle : outs[0]?.id;
-    const th = ce.targetHandle && ins.some((p) => p.id === ce.targetHandle) ? ce.targetHandle : ins[0]?.id;
+    // Code-Nodes bekommen ihre Ports erst aus dem Code (Builder), Namen bleiben daher stehen.
+    const code = (n: Node) => getSynapseNodeType(n) === "code";
+    const sh = ce.sourceHandle && (code(src) || outs.some((p) => p.id === ce.sourceHandle)) ? ce.sourceHandle : outs[0]?.id;
+    const th = ce.targetHandle && (code(tgt) || ins.some((p) => p.id === ce.targetHandle)) ? ce.targetHandle : ins[0]?.id;
     if (ce.sourceHandle && sh !== ce.sourceHandle) warnings.push(`Edge ${ce.source} -> ${ce.target}: unknown sourceHandle "${ce.sourceHandle}", using "${sh}".`);
     if (ce.targetHandle && th !== ce.targetHandle) warnings.push(`Edge ${ce.source} -> ${ce.target}: unknown targetHandle "${ce.targetHandle}", using "${th}".`);
     edges.push({

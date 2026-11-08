@@ -87,6 +87,7 @@ impl Database {
         
         // Run user isolation migration
         Self::run_user_isolation_migration(&conn)?;
+        crate::custom_nodes::ensure_table(&conn)?;
         
         Ok(Database { 
             conn,

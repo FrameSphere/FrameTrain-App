@@ -7,6 +7,8 @@ import {
   calcOutputHandleTop,
   NodeDef,
 } from '../nodeTypes';
+import { CUSTOM_ICONS, colorMeta } from '../customNodes';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data shape that lives inside each React-Flow node's `data` field
@@ -52,12 +54,20 @@ export const SynapseNodeComponent = memo(function SynapseNodeComponent({
     _shapeErrorRole?: "source" | "target" | "both";
     liveError?: string;
     liveParams?: number;
+    codeError?: string;
+    _libraryUpdate?: boolean;
   };
-  const meta = CATEGORY_META[d.category as keyof typeof CATEGORY_META];
+  const { t } = useLanguage();
+  // Eigene Nodes tragen Farbe und Icon in den Parametern (siehe customNodes.ts).
+  const own = d.params?.color ? String(d.params.color) : null;
+  const meta = own
+    ? colorMeta(own, t('synapseBuilder.custom.badge'))
+    : CATEGORY_META[d.category as keyof typeof CATEGORY_META];
   if (!meta) return null;
+  const OwnIcon = own ? CUSTOM_ICONS[String(d.params?.icon)] : undefined;
 
   const sparkleActive = Boolean(d._sparkle && Date.now() - d._sparkle < 1500);
-  const shapeRole = d._shapeErrorRole ?? (d.liveError ? "both" : undefined);
+  const shapeRole = d._shapeErrorRole ?? (d.liveError || d.codeError ? "both" : undefined);
   const shapeClass = shapeRole
     ? `synapse-node-shape-error-${shapeRole}`
     : undefined;
@@ -165,7 +175,9 @@ export const SynapseNodeComponent = memo(function SynapseNodeComponent({
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div style={headerStyle}>
-        <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>{d.icon}</span>
+        {OwnIcon
+          ? <OwnIcon size={14} color={meta.color} style={{ flexShrink: 0 }} />
+          : <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>{d.icon}</span>}
         <span style={{
           color: '#f1f5f9',
           fontSize: 12,
@@ -190,7 +202,7 @@ export const SynapseNodeComponent = memo(function SynapseNodeComponent({
           flexShrink: 0,
           border: `1px solid ${meta.color}44`,
         }}>
-          {meta.label}
+          {d._libraryUpdate ? t('synapseBuilder.custom.updateBadge') : meta.label}
         </span>
       </div>
 

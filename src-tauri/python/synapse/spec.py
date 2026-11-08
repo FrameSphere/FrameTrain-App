@@ -23,6 +23,8 @@ class Port:
     label: str = ""
     # Optionale Eingaenge fallen auf einen anderen Port zurueck (z. B. key -> query).
     fallback: Optional[str] = None
+    # Optional ohne Ersatz: bleibt unverbunden einfach weg (Code-Node mit skip=None).
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,7 @@ def catalog() -> Dict[str, Any]:
         "nodes": [
             {
                 "type": s.type, "family": s.family, "structural": s.structural,
-                "inputs": [{"id": p.id, "type": p.type, "optional": p.fallback is not None} for p in s.inputs],
+                "inputs": [{"id": p.id, "type": p.type, "optional": p.fallback is not None or p.optional} for p in s.inputs],
                 "outputs": [{"id": p.id, "type": p.type} for p in s.outputs],
                 "params": [{"key": p.key, "default": p.default, "planned": p.planned} for p in s.params],
             }
