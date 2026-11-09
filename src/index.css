@@ -461,7 +461,19 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
    Status = Zeichen und Wort, nie klickbar. Der Stand liest sich an den Spalten. */
 .ft-sw { container-type: inline-size; --ft-band: color-mix(in srgb, var(--ft-ink) 8%, transparent); --ft-bar: color-mix(in srgb, var(--ft-ink) 30%, transparent); --ft-warn-soft: color-mix(in srgb, var(--ft-warn) 14%, transparent); }
 .ft-sw-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 28px; }
-.ft-sw-top h1 { flex: 1; min-width: 240px; margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.02em; color: var(--ft-ink); }
+.ft-sw-top-gap { flex: 1; }
+/* Statuskapsel neben dem Titel, solange ein Training laeuft (wie der Live-Status der Website). */
+.ft-capsule { position: relative; display: inline-flex; align-items: center; gap: 10px; height: 32px; max-width: 520px; margin-left: 6px; padding: 0 14px 0 12px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--ft-out) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ft-out) 28%, transparent); font-size: 12.5px; color: var(--ft-ink); white-space: nowrap; transition: background-color 150ms ease-out; }
+.ft-capsule:hover { background: color-mix(in srgb, var(--ft-out) 18%, transparent); }
+.ft-capsule b { font-weight: 600; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.ft-capsule-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ft-out); flex: none; animation: ft-signal 1.6s ease-in-out infinite; }
+@keyframes ft-signal { 50% { opacity: 0.35; } }
+.ft-capsule-data { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: var(--ft-muted); font-variant-numeric: tabular-nums; }
+.ft-capsule-loss { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; font-weight: 500; color: var(--ft-out-text); font-variant-numeric: tabular-nums; }
+.ft-capsule-curve { width: 56px; height: 18px; flex: none; }
+.ft-capsule-curve polyline { fill: none; stroke: var(--ft-out); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.ft-capsule-bar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--ft-out); transition: width 600ms var(--ft-ease-out); }
+.ft-sw-top h1 { flex: none; margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.02em; color: var(--ft-ink); }
 .ft-r { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(120px, 1fr)) 104px; column-gap: 16px; align-items: center; margin: 0 -8px; padding: 0 8px; }
 .ft-heads { height: 32px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ft-faint); border-bottom: 1px solid var(--ft-line); }
 .ft-sw-list > .ft-heads { position: sticky; top: 0; z-index: 2; background: var(--ft-panel); }
@@ -497,7 +509,7 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 .ft-dot.is-on { background: var(--ft-ok); box-shadow: none; }
 /* Gruppen */
 .ft-gh { display: flex; align-items: baseline; gap: 8px; margin: 40px 0 6px; font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; color: var(--ft-ink); }
-.ft-sw-list > .ft-heads + .ft-gh, .ft-sw-list > .ft-heads + div > .ft-gh:first-child, .ft-sw-list > .ft-heads + .ft-pipe > div:first-child > .ft-gh, .ft-sw-list > .ft-heads + .ft-run { margin-top: 20px; }
+.ft-sw-list > .ft-heads + .ft-gh, .ft-sw-list > .ft-heads + div > .ft-gh:first-child, .ft-sw-list > .ft-heads + .ft-pipe > div:first-child > .ft-gh { margin-top: 20px; }
 .ft-gh b { font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--ft-faint); font-variant-numeric: tabular-nums; }
 .ft-gh small { margin-left: 8px; font-size: 12.5px; font-weight: 400; letter-spacing: 0; color: var(--ft-faint); }
 .ft-gh-fold { display: flex; align-items: center; gap: 8px; margin-top: 40px; font-size: 15px; line-height: 22px; font-weight: 500; letter-spacing: -0.01em; color: var(--ft-muted); }
@@ -517,18 +529,7 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 .ft-pl span:first-child { color: var(--ft-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ft-pl.is-head span { color: var(--ft-faint); font-size: 12px; }
 .ft-intro { max-width: 620px; font-size: 14px; line-height: 22px; color: var(--ft-muted); margin: 0 0 18px; }
-.ft-run { display: grid; grid-template-columns: minmax(220px, 1.5fr) minmax(0, 4.2fr); column-gap: 16px; align-items: stretch; min-height: 64px; margin-bottom: 10px; }
-.ft-run-who { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding-right: 12px; min-width: 0; }
-.ft-run-who b { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ft-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ft-run-who span { font-size: 12.5px; color: var(--ft-out-text); }
-.ft-track { position: relative; display: flex; align-items: center; gap: 24px; min-width: 0; padding: 0 12px; background: var(--ft-band); border-radius: 4px; overflow: hidden; text-align: left; }
-.ft-track > i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--ft-out); transition: width 600ms var(--ft-ease-out); }
-.ft-kv { position: relative; display: flex; flex-direction: column; gap: 1px; font-size: 12px; color: var(--ft-muted); white-space: nowrap; }
-.ft-kv b { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13.5px; line-height: 20px; font-weight: 500; color: var(--ft-ink); font-variant-numeric: tabular-nums; }
-.ft-kv.is-out b { color: var(--ft-out-text); }
-.ft-track-curve { position: relative; margin-left: auto; flex: 0 1 170px; min-width: 60px; height: 40px; }
-.ft-track-curve polyline { fill: none; stroke: var(--ft-out); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.ft-strip { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 8px; margin: -4px 0 10px; border-radius: 4px; background: var(--ft-warn-soft); color: var(--ft-warn); font-size: 13px; font-weight: 500; }
+.ft-strip { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 8px; margin: 14px 0 0; border-radius: 8px; background: var(--ft-warn-soft); color: var(--ft-warn); font-size: 13px; font-weight: 500; }
 .ft-strip .ft-go { margin-left: auto; }
 .ft-steps { display: grid; grid-template-columns: minmax(150px, 1.4fr) repeat(4, minmax(112px, 1fr)); column-gap: 2px; align-items: center; }
 .ft-step { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 64px; padding: 8px; border: 1px dashed var(--ft-line-strong); font-size: 12.5px; line-height: 17px; color: var(--ft-muted); }
@@ -598,17 +599,18 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 @keyframes ft-pop { from { opacity: 0; transform: scale(0.4); } }
 .ft-fade-late { animation: ft-fade 240ms ease-out 360ms both; }
 @keyframes ft-fade { from { opacity: 0; } }
-.ft-track-curve .ft-curve-new { fill: none; stroke: var(--ft-out); stroke-width: 1.8; stroke-linecap: round; vector-effect: non-scaling-stroke; stroke-dasharray: 1; stroke-dashoffset: 0; animation: ft-draw 600ms ease-out both; }
+.ft-capsule-curve .ft-curve-new { fill: none; stroke: var(--ft-out); stroke-width: 1.8; stroke-linecap: round; vector-effect: non-scaling-stroke; stroke-dasharray: 1; stroke-dashoffset: 0; animation: ft-draw 600ms ease-out both; }
 @keyframes ft-draw { from { stroke-dashoffset: 1; } }
-.ft-track-curve .ft-curve-dot { fill: var(--ft-out); animation: ft-fade 200ms ease-out 400ms both; }
+.ft-capsule-curve .ft-curve-dot { fill: var(--ft-out); animation: ft-fade 200ms ease-out 400ms both; }
 @media (prefers-reduced-motion: reduce) {
-  .ft-unit.is-open, .ft-unit.is-moved, .ft-chart-bar, .ft-bar i, .ft-pop, .ft-fade-late, .ft-track-curve .ft-curve-new, .ft-track-curve .ft-curve-dot { animation: none; }
-  .ft-track > i { transition: none; }
+  .ft-unit.is-open, .ft-unit.is-moved, .ft-chart-bar, .ft-bar i, .ft-pop, .ft-fade-late, .ft-capsule-curve .ft-curve-new, .ft-capsule-curve .ft-curve-dot { animation: none; }
+  .ft-capsule-bar { transition: none; }
+  .ft-capsule-dot { animation: none; }
 }
 
 /* Kleinstes Fenster: engeres Raster, Statuswort weicht dem Zeichen, wenn ein Knopf daneben steht. */
 @container (max-width: 960px) {
   .ft-r { grid-template-columns: minmax(180px, 1.3fr) repeat(4, minmax(112px, 1fr)) 88px; column-gap: 12px; }
   .ft-cell:has(> .ft-go) .ft-st-word { display: none; }
-  .ft-kv:nth-of-type(4) { display: none; }
+  .ft-capsule-curve { display: none; }
 }

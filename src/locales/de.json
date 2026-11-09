@@ -36,12 +36,7 @@
       "sleepRisk": "Dieser Mac könnte während des Laufs einschlafen",
       "keepAwake": "Wach halten",
       "title": {
-        "attention": "{n} Modelle brauchen dich",
-        "attention_one": "1 Modell braucht dich",
-        "training": "{model} trainiert",
-        "clear": "Alles auf Stand",
-        "empty": "Starte mit einem Modell",
-        "noData": "Gib deinen Modellen Daten"
+        "empty": "Starte mit einem Modell"
       },
       "cols": {
         "model": "Modell",

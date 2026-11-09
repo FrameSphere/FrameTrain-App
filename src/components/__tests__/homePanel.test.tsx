@@ -89,11 +89,12 @@ describe('HomePanel', () => {
     expect(screen.queryByText(de.home.pipeline.title.empty)).toBeNull();
   });
 
-  it('nennt im Titel, wie viele Modelle warten', async () => {
+  it('heisst wie in der Seitenleiste und zeigt den Fehler in der Gruppe', async () => {
     mockBackend({ list_models: [MODEL], get_training_history: [training({ status: 'failed', error: 'CUDA out of memory' })] });
     render(<HomePanel userId="u1" />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('1 Modell braucht dich'));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(de.sidebar.home));
+    expect(screen.getByRole('heading', { level: 2, name: new RegExp(de.home.pipeline.group.attention) })).toBeTruthy();
     expect(screen.getByText(/CUDA out of memory/)).toBeTruthy();
   });
 
@@ -181,9 +182,11 @@ describe('HomePanel', () => {
     });
     render(<HomePanel userId="u1" />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('xlm-roberta trainiert'));
-    expect(screen.getByText('20 / 60')).toBeTruthy();
-    expect(screen.getByText('Training, 33 %')).toBeTruthy();
+    // Statuskapsel neben dem Titel statt eines eigenen Blocks
+    const capsule = await screen.findByRole('button', { name: /xlm-roberta/ });
+    expect(capsule.textContent).toContain('1/3');
+    expect(capsule.textContent).toContain('33%');
+    expect(capsule.textContent).toContain('0,5000');
   });
 
   it('vergleicht getestete Modelle je Aufgabe', async () => {

@@ -362,18 +362,3 @@ export function buildCompare(rows: ModelRow[], taskKey: (modelId: string) => str
     withoutResult,
   };
 }
-
-export type HomeHeadline =
-  | { kind: 'empty' }
-  | { kind: 'training'; model: string }
-  | { kind: 'attention'; count: number }
-  | { kind: 'noData' }
-  | { kind: 'clear' };
-
-export function homeHeadline(rows: ModelRow[], runningModel: string | null, isRunning: boolean): HomeHeadline {
-  if (rows.length === 0 && !isRunning) return { kind: 'empty' };
-  if (isRunning && runningModel) return { kind: 'training', model: runningModel };
-  const count = rows.filter(r => r.group === 'attention').length;
-  if (count > 0) return { kind: 'attention', count };
-  return rows.every(r => r.next === 'addDataset' && !r.last) ? { kind: 'noData' } : { kind: 'clear' };
-}

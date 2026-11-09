@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCompare, buildPipeline, homeHeadline, testMetric, type PipelineInput, type PipelineTest, type PipelineTraining } from '../homePipeline';
+import { buildCompare, buildPipeline, testMetric, type PipelineInput, type PipelineTest, type PipelineTraining } from '../homePipeline';
 
 const iso = (minAgo: number) => new Date(Date.now() - minAgo * 60000).toISOString();
 
@@ -175,16 +175,5 @@ describe('buildCompare', () => {
   it('fuehrt Modelle ohne Test getrennt', () => {
     const { withoutResult } = buildCompare(rowsFor([test_({ model_id: 'a', model_name: 'a' })]), () => 'text');
     expect(withoutResult.map(r => r.name)).toEqual(['b', 'c']);
-  });
-});
-
-describe('homeHeadline', () => {
-  it('nennt erst laufendes Training, dann offene Punkte', () => {
-    const rows = buildPipeline(input({ trainings: [train({ status: 'failed', progress: {} })] }));
-    expect(homeHeadline(rows, 'bert', true)).toEqual({ kind: 'training', model: 'bert' });
-    expect(homeHeadline(rows, null, false)).toEqual({ kind: 'attention', count: 1 });
-    expect(homeHeadline([], null, false)).toEqual({ kind: 'empty' });
-    expect(homeHeadline(buildPipeline(input()), null, false)).toEqual({ kind: 'noData' });
-    expect(homeHeadline(buildPipeline(input({ trainings: [train()] })), null, false)).toEqual({ kind: 'clear' });
   });
 });

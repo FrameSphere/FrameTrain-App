@@ -36,12 +36,7 @@
       "sleepRisk": "This computer may go to sleep during the run",
       "keepAwake": "Keep awake",
       "title": {
-        "attention": "{n} models need you",
-        "attention_one": "1 model needs you",
-        "training": "{model} is training",
-        "clear": "Everything is up to date",
-        "empty": "Start with a model",
-        "noData": "Add data to your models"
+        "empty": "Start with a model"
       },
       "cols": {
         "model": "Model",

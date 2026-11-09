@@ -22,7 +22,7 @@ import { FirstRunSteps, PipelineHead, PipelineList } from './HomeStellwerk';
 import { BenchmarkView } from './BenchmarkView';
 import { buildBenchmarks } from './homeBenchmarks';
 import { buildInsights, buildBriefingFacts, factsHash, type InsightInput } from './homeInsights';
-import { buildCompare, buildPipeline, homeHeadline } from './homePipeline';
+import { buildCompare, buildPipeline } from './homePipeline';
 import { buildHomeCoachContext } from './homeCoachContext';
 import type { HostInfo } from './hosting/hostingModel';
 
@@ -204,17 +204,12 @@ export default function HomePanel({ userId }: HomePanelProps) {
   const runningName = trainings.find(j => j.status === 'running')?.model_name
     ?? (isRunning ? trainingState.modelName || null : null);
   const rows = isRunning && runningName ? allRows.filter(r => r.name !== runningName) : allRows;
-  const headline = homeHeadline(allRows, runningName, isRunning);
   const isFirstRun = models.length === 0 && datasets.length === 0 && trainings.length === 0 && tests.length === 0;
   const hasData = !isFirstRun;
 
-  const attentionCount = rows.filter(r => r.group === 'attention').length;
-  const needsYou = t(attentionCount === 1 ? 'home.pipeline.title.attention_one' : 'home.pipeline.title.attention', { n: String(attentionCount) });
-  const title = headline.kind === 'training' ? t('home.pipeline.title.training', { model: headline.model })
-    : headline.kind === 'attention' ? t(headline.count === 1 ? 'home.pipeline.title.attention_one' : 'home.pipeline.title.attention', { n: String(headline.count) })
-      : headline.kind === 'clear' ? t('home.pipeline.title.clear')
-        : headline.kind === 'noData' ? t('home.pipeline.title.noData')
-          : t('home.pipeline.title.empty');
+  // Ruhiger Seitentitel wie in der Seitenleiste. Was zu tun ist, sagen die Gruppen;
+  // ein laufendes Training zeigt die Statuskapsel daneben.
+  const title = hasData ? t('sidebar.home') : t('home.pipeline.title.empty');
 
   // Aufgabe je Modell: dieselbe Erkennung wie im Training, nicht der Modellname.
   // Gruppiert wird nach Aufgabe, nicht nach Plugin: BERT und XLM-RoBERTa sind beide
@@ -307,6 +302,23 @@ export default function HomePanel({ userId }: HomePanelProps) {
     <div className="ft-sw">
       <header className="ft-sw-top">
         <h1>{title}</h1>
+        {job && (
+          <button
+            className="ft-capsule"
+            onClick={openTraining}
+            title={`${runningName ?? t('home.running.title')} · ${t('home.pipeline.run.epoch')} ${job.current_epoch}/${job.total_epochs} · ${t('home.pipeline.run.loss')} ${format.number(job.train_loss, 4)} · ${formatDuration(job.elapsed_time_seconds)}`}
+          >
+            <i className="ft-capsule-dot" aria-hidden="true" />
+            <b>{runningName ?? t('home.running.title')}</b>
+            <span className="ft-capsule-data">
+              {`${t('home.pipeline.run.epoch')} ${job.current_epoch}/${job.total_epochs} · ${Math.round(job.progress_percentage)}%`}
+            </span>
+            <span className="ft-capsule-loss">{format.number(job.train_loss, 4)}</span>
+            {liveLoss.length > 1 && <LiveCurve values={liveLoss} />}
+            <i className="ft-capsule-bar" style={{ width: `${Math.min(100, Math.max(0, job.progress_percentage))}%` }} aria-hidden="true" />
+          </button>
+        )}
+        <span className="ft-sw-top-gap" aria-hidden="true" />
         {hasData ? (
           <>
             <div className="ft-seg" role="group" aria-label={t('home.pipeline.view')}>
@@ -347,30 +359,12 @@ export default function HomePanel({ userId }: HomePanelProps) {
       {hasData && view === 'pipeline' && (
         <div className="ft-sw-list">
           <PipelineHead />
-          {job && (
-            <>
-              <div className="ft-run">
-                <div className="ft-run-who">
-                  <b title={runningName ?? undefined}>{runningName ?? t('home.running.title')}</b>
-                  <span>{t('home.pipeline.running', { pct: String(Math.round(job.progress_percentage)) })}</span>
-                </div>
-                <button className="ft-track" onClick={openTraining}>
-                  <i style={{ width: `${Math.min(100, Math.max(0, job.progress_percentage))}%` }} aria-hidden="true" />
-                  <div className="ft-kv"><span>{t('home.pipeline.run.epoch')}</span><b>{job.current_epoch} / {job.total_epochs}</b></div>
-                  <div className="ft-kv"><span>{t('home.pipeline.run.step')}</span><b>{job.current_step.toLocaleString(locale)} / {job.total_steps.toLocaleString(locale)}</b></div>
-                  <div className="ft-kv is-out"><span>{t('home.pipeline.run.loss')}</span><b>{format.number(job.train_loss, 4)}</b></div>
-                  <div className="ft-kv"><span>{t('home.pipeline.run.elapsed')}</span><b>{formatDuration(job.elapsed_time_seconds)}</b></div>
-                  {liveLoss.length > 1 && <LiveCurve values={liveLoss} />}
-                </button>
-              </div>
-              {sleepRisk && (
-                <div className="ft-strip">
-                  <span aria-hidden="true">▲</span>
-                  {t('home.pipeline.sleepRisk')}
-                  <button className="ft-go" onClick={() => { void invoke('enable_prevent_sleep').then(() => setSleepPrevented(true)).catch(() => {}); }}>{t('home.pipeline.keepAwake')}</button>
-                </div>
-              )}
-            </>
+          {job && sleepRisk && (
+            <div className="ft-strip">
+              <span aria-hidden="true">▲</span>
+              {t('home.pipeline.sleepRisk')}
+              <button className="ft-go" onClick={() => { void invoke('enable_prevent_sleep').then(() => setSleepPrevented(true)).catch(() => {}); }}>{t('home.pipeline.keepAwake')}</button>
+            </div>
           )}
           <PipelineList
             rows={rows}
@@ -398,7 +392,7 @@ function LiveCurve({ values }: { values: number[] }) {
   const [px, py] = pts[pts.length - 2];
   // Der neueste Abschnitt zeichnet sich nach; der Rest steht schon.
   return (
-    <svg viewBox="0 0 170 40" className="ft-track-curve" aria-hidden="true">
+    <svg viewBox="0 0 170 40" preserveAspectRatio="none" className="ft-capsule-curve" aria-hidden="true">
       <polyline points={pts.slice(0, -1).map(p => p.join(',')).join(' ')} />
       <line key={values.length} x1={px} y1={py} x2={lx} y2={ly} pathLength={1} className="ft-curve-new" />
       <circle key={`d${values.length}`} cx={lx} cy={ly} r={2.4} className="ft-curve-dot" />
