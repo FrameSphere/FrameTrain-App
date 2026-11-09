@@ -5,6 +5,18 @@ import type { McpTool } from '../types';
 import { runAsJob } from './common';
 import { findModel, listModels, listVersions, modelBrief, type ModelInfo } from './lookup';
 
+/**
+ * Ohne erkennbare Architektur lehnen Training und Test das Modell spaeter ab.
+ * Die App ergaenzt den Typ beim Download, wo es eindeutig geht; bleibt er
+ * unbekannt, erfaehrt der Assistent es jetzt statt erst beim Training.
+ */
+export function withTypeWarning(m: ModelInfo): ModelInfo & { warning?: string } {
+  const generic = !m.model_type || m.model_type === 'transformer' || m.model_type === 'pytorch';
+  return generic
+    ? { ...m, warning: 'The model config names no architecture (model_type), so guided training and tests will likely reject this model. Prefer a model whose config.json sets model_type, or use Dev Train.' }
+    : m;
+}
+
 export const modelsTools: McpTool[] = [
   defineTool({
     name: 'models_list',
@@ -74,7 +86,7 @@ export const modelsTools: McpTool[] = [
     async run(args) {
       const repoId = reqStr(args, 'repo_id');
       const modelName = typeof args.model_name === 'string' && args.model_name.trim() ? args.model_name : repoId;
-      return runAsJob('download', `Download ${repoId}`, () => call<ModelInfo>('download_huggingface_model', { repoId, modelName }), {
+      return runAsJob('download', `Download ${repoId}`, () => call<ModelInfo>('download_huggingface_model', { repoId, modelName }).then(withTypeWarning), {
         waitMs: 0,
         describe: (m) => `Downloaded ${m.name} (${m.id}).`,
       });

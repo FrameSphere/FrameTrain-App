@@ -213,23 +213,48 @@ fn get_datasets_dir(app_handle: &tauri::AppHandle, user_id: &str) -> Result<Path
 fn meta_path(datasets_dir: &Path) -> PathBuf { datasets_dir.join("datasets_metadata.json") }
 
 fn load_metadata(datasets_dir: &Path) -> Vec<DatasetInfo> {
-    let path = meta_path(datasets_dir);
-    if !path.exists() { return vec![]; }
-    serde_json::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default()
+    try_load_metadata(datasets_dir).unwrap_or_default()
 }
 
+/// Wie load_metadata, aber eine unlesbare Datei ist ein Fehler statt einer leeren
+/// Liste. Wer danach schreibt, wuerde sonst alle Eintraege loeschen.
+fn try_load_metadata(datasets_dir: &Path) -> Result<Vec<DatasetInfo>, String> {
+    let path = meta_path(datasets_dir);
+    if !path.exists() { return Ok(vec![]); }
+    let text = fs::read_to_string(&path).map_err(|e| format!("Metadaten lesen: {}", e))?;
+    serde_json::from_str(&text).map_err(|e| format!("Metadaten unlesbar: {}", e))
+}
+
+/// Schreibt erst in eine Nachbardatei und benennt sie dann um: Leser sehen nie
+/// eine halb geschriebene Datei.
 fn save_metadata(datasets_dir: &Path, datasets: &[DatasetInfo]) -> Result<(), String> {
     let path = meta_path(datasets_dir);
-    fs::write(&path, serde_json::to_string_pretty(datasets)
+    let tmp = datasets_dir.join(format!("datasets_metadata.json.{}.tmp", std::process::id()));
+    fs::write(&tmp, serde_json::to_string_pretty(datasets)
         .map_err(|e| format!("JSON: {}", e))?)
-        .map_err(|e| format!("Metadaten schreiben: {}", e))
+        .map_err(|e| format!("Metadaten schreiben: {}", e))?;
+    fs::rename(&tmp, &path).map_err(|e| format!("Metadaten schreiben: {}", e))
+}
+
+/// Ein Schreiber zur Zeit. Zwei Downloads, die gleichzeitig fertig wurden, lasen
+/// vorher beide dieselbe Liste und schrieben sie zurueck: der zweite Eintrag
+/// verschwand, der Ordner blieb verwaist auf der Platte (Benchmark-Lauf 09.11.).
+static METADATA_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Lesen, aendern, schreiben unter der Sperre.
+fn update_metadata<T>(datasets_dir: &Path, change: impl FnOnce(&mut Vec<DatasetInfo>) -> T) -> Result<T, String> {
+    let _guard = METADATA_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = try_load_metadata(datasets_dir)?;
+    let out = change(&mut all);
+    save_metadata(datasets_dir, &all)?;
+    Ok(out)
 }
 
 fn upsert_metadata(datasets_dir: &Path, info: &DatasetInfo) -> Result<(), String> {
-    let mut all = load_metadata(datasets_dir);
-    all.retain(|d| d.id != info.id);
-    all.push(info.clone());
-    save_metadata(datasets_dir, &all)
+    update_metadata(datasets_dir, |all| {
+        all.retain(|d| d.id != info.id);
+        all.push(info.clone());
+    })
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1791,9 +1816,7 @@ pub async fn delete_dataset(
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let target       = datasets_dir.join(&dataset_id);
     if target.exists() { fs::remove_dir_all(&target).map_err(|e| format!("Delete: {}", e))?; }
-    let mut all = load_metadata(&datasets_dir);
-    all.retain(|d| !(d.id == dataset_id && d.model_id == model_id));
-    save_metadata(&datasets_dir, &all)?;
+    update_metadata(&datasets_dir, |all| all.retain(|d| !(d.id == dataset_id && d.model_id == model_id)))?;
     if let Ok(db_path) = app_handle.path().app_data_dir().map(|p| p.join("frametrain.db")) {
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
             conn.execute("DELETE FROM datasets WHERE id=?1 AND user_id=?2",
@@ -1817,7 +1840,7 @@ pub async fn split_dataset(
     let user_id      = get_user_id(&state)?;
     let datasets_dir = get_datasets_dir(&app_handle, &user_id)?;
     let base         = datasets_dir.join(&dataset_id);
-    let mut all      = load_metadata(&datasets_dir);
+    let all          = load_metadata(&datasets_dir);
     let ds           = all.iter().find(|d| d.id == dataset_id && d.model_id == model_id)
         .ok_or("Dataset nicht gefunden")?.clone();
 
@@ -1849,9 +1872,11 @@ pub async fn split_dataset(
     let updated = DatasetInfo { status: "split".to_string(), split_info: Some(split_info),
         storage_path: base.to_string_lossy().to_string(),
         extensions: collect_extensions(&base), size_bytes: size, file_count: fc, ..ds };
-    all.retain(|d| d.id != dataset_id);
-    all.push(updated.clone());
-    save_metadata(&datasets_dir, &all)?;
+    // Neu lesen: waehrend des Splits koennen andere Datasets dazugekommen sein.
+    update_metadata(&datasets_dir, |all| {
+        all.retain(|d| d.id != dataset_id);
+        all.push(updated.clone());
+    })?;
     Ok(updated)
 }
 
@@ -2152,10 +2177,10 @@ pub async fn split_dataset_in_half(
         if inherited_b { Some(count_split_info(&dir_b)) } else { None },
         ds.dataset_type, None, vec![]);
 
-    let mut all = load_metadata(&datasets_dir);
-    all.push(ds_a.clone());
-    all.push(ds_b.clone());
-    save_metadata(&datasets_dir, &all)?;
+    update_metadata(&datasets_dir, |all| {
+        all.push(ds_a.clone());
+        all.push(ds_b.clone());
+    })?;
     Ok(serde_json::json!({ "dataset_a": ds_a, "dataset_b": ds_b }))
 }
 
@@ -3814,5 +3839,41 @@ mod split_overlap_tests {
         }
         let a = detect_dataset_type(d.path());
         assert!(a.hints.iter().any(|h| h.code == "split_overlap" && h.params["count"] == 1), "{:?}", a.hints);
+    }
+}
+
+#[cfg(test)]
+mod metadata_lock_tests {
+    use super::*;
+
+    fn info(id: &str, dir: &Path) -> DatasetInfo {
+        make_info(id, id, "m", "huggingface", None, &dir.join(id), 0, 0, "unused", None, DatasetType::Unknown, None, vec![])
+    }
+
+    #[test]
+    fn gleichzeitige_eintraege_gehen_nicht_verloren() {
+        let dir = std::env::temp_dir().join(format!("ft_meta_lock_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let threads: Vec<_> = (0..16).map(|i| {
+            let dir = dir.clone();
+            std::thread::spawn(move || upsert_metadata(&dir, &info(&format!("ds_{}", i), &dir)).unwrap())
+        }).collect();
+        for t in threads { t.join().unwrap(); }
+        let mut ids: Vec<String> = load_metadata(&dir).into_iter().map(|d| d.id).collect();
+        ids.sort();
+        assert_eq!(ids.len(), 16, "alle 16 Datasets muessen in den Metadaten stehen: {:?}", ids);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unlesbare_datei_wird_nicht_ueberschrieben() {
+        let dir = std::env::temp_dir().join(format!("ft_meta_bad_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(meta_path(&dir), "[{ kaputt").unwrap();
+        assert!(upsert_metadata(&dir, &info("ds_x", &dir)).is_err());
+        assert_eq!(fs::read_to_string(meta_path(&dir)).unwrap(), "[{ kaputt");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

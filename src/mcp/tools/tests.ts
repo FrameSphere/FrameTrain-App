@@ -4,10 +4,33 @@ import { call, defineTool, fail, ok, optNum, optObj, optStr, reqStr, S } from '.
 import type { McpTool } from '../types';
 import { findDataset, findVersion } from './lookup';
 
-interface TestJob { id: string; status?: unknown; progress?: unknown; results?: unknown; error?: string | null; version_id?: string }
+interface TestJob {
+  id: string; status?: unknown; progress?: unknown; results?: TestResults | null; error?: string | null; version_id?: string;
+  created_at?: string; completed_at?: string | null;
+}
 
 interface Prediction { is_correct: boolean; [k: string]: unknown }
 interface TestResults { total_samples: number; accuracy?: number | null; predictions?: Prediction[]; [k: string]: unknown }
+
+/** Kennzahlen eines fertigen Laufs ohne die einzelnen Vorhersagen. */
+function resultSummary(r: TestResults | null | undefined) {
+  if (!r) return null;
+  const sec = typeof r.average_inference_time === 'number' ? r.average_inference_time : null;
+  return {
+    total_samples: r.total_samples,
+    accuracy: r.accuracy ?? null,
+    average_loss: (r.average_loss as number | null | undefined) ?? null,
+    ms_per_sample: sec !== null && sec > 0 ? Math.round(sec * 10000) / 10 : null,
+    metrics: r.metrics ?? null,
+  };
+}
+
+const endedAt = (j: TestJob) => Date.parse(j.completed_at ?? j.created_at ?? '') || 0;
+
+/** Verlauf neueste zuerst. Die App fuehrt ihn in Startreihenfolge (aelteste zuerst). */
+export function newestFirst(jobs: TestJob[]): TestJob[] {
+  return [...jobs].sort((a, b) => endedAt(b) - endedAt(a));
+}
 
 function resultsBrief(r: TestResults) {
   const { predictions, ...rest } = r;
@@ -48,9 +71,16 @@ export const testsTools: McpTool[] = [
     description: 'Returns the running or most recent test job with progress and, when finished, a summary of the results.',
     async run() {
       const active = await call<TestJob | null>('get_active_test_job').catch(() => null);
-      const job = active ?? await call<TestJob | null>('get_current_test').catch(() => null);
-      if (!job) return ok('No test is running.', { job: null });
-      return ok(`Test ${job.id}: ${String(job.status ?? 'unknown')}.`, { job, running: !!active });
+      if (active) return ok(`Test ${active.id}: ${String(active.status ?? 'unknown')}.`, { job: active, running: true });
+      // Nach dem Ende ist kein Job mehr "aktuell": dann der zuletzt beendete aus dem Verlauf,
+      // damit der Assistent sein Ergebnis sieht statt { job: null }.
+      const current = await call<TestJob | null>('get_current_test').catch(() => null);
+      const last = current ?? newestFirst(await call<TestJob[]>('get_test_history').catch(() => []))[0];
+      if (!last) return ok('No test has run yet.', { job: null, running: false });
+      const { results, ...job } = last;
+      return ok(`No test is running. Latest test ${last.id}: ${String(last.status ?? 'unknown')}.`, {
+        job, running: false, result: resultSummary(results),
+      });
     },
   }),
   defineTool({
@@ -79,12 +109,12 @@ export const testsTools: McpTool[] = [
   defineTool({
     name: 'tests_history',
     title: 'Test history',
-    description: 'Lists past test jobs (newest first) with model, version, dataset and status.',
+    description: 'Lists past test jobs (newest first) with model, version, dataset, status and the result summary (accuracy, samples, ms per sample).',
     properties: { limit: S.int('Default 20.', { minimum: 1, maximum: 100 }) },
     async run(args) {
-      const history = await call<TestJob[]>('get_test_history');
-      const items = history.slice(0, optNum(args, 'limit', 20)).map((j) => ({ ...j, results: undefined }));
-      return ok(`${history.length} test job(s).`, items);
+      const history = newestFirst(await call<TestJob[]>('get_test_history'));
+      const items = history.slice(0, optNum(args, 'limit', 20)).map(({ results, ...j }) => ({ ...j, result: resultSummary(results) }));
+      return ok(`${history.length} test job(s), newest first.`, items);
     },
   }),
   defineTool({

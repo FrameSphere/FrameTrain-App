@@ -253,6 +253,82 @@ fn detect_model_type(path: &Path) -> Option<String> {
     torch_fallback
 }
 
+/// Familien, die sich am Namen der Architekturklasse oder des Repos erkennen
+/// lassen. Reihenfolge zaehlt: "xlm-roberta" und "distilbert" vor "roberta"/"bert".
+const MODEL_TYPE_HINTS: [(&str, &str); 9] = [
+    ("xlmroberta", "xlm-roberta"), ("distilbert", "distilbert"), ("roberta", "roberta"),
+    ("electra", "electra"), ("albert", "albert"), ("debertav2", "deberta-v2"),
+    ("deberta", "deberta"), ("minilm", "bert"), ("bert", "bert"),
+];
+
+/// Ergaenzt `model_type` in config.json, wenn er fehlt und die Familie eindeutig
+/// ist: aus `architectures`, sonst aus dem Repo-Namen, aber nur bei einer
+/// Encoder-Config (hidden_size und num_attention_heads). Liefert den ergaenzten Typ.
+pub fn fill_missing_model_type(dir: &Path, repo_id: &str) -> Option<String> {
+    let cfg_path = dir.join("config.json");
+    let mut cfg: serde_json::Value = serde_json::from_str(&fs::read_to_string(&cfg_path).ok()?).ok()?;
+    let obj = cfg.as_object_mut()?;
+    if obj.get("model_type").and_then(|v| v.as_str()).map_or(false, |s| !s.is_empty()) { return None; }
+    let squash = |s: &str| s.to_lowercase().replace(['-', '_'], "");
+    let from_arch = obj.get("architectures").and_then(|a| a.as_array()).and_then(|a| a.first())
+        .and_then(|v| v.as_str()).map(squash)
+        .and_then(|arch| MODEL_TYPE_HINTS.iter().find(|(k, _)| arch.starts_with(k)).map(|(_, t)| t.to_string()));
+    let encoder_like = obj.contains_key("hidden_size") && obj.contains_key("num_attention_heads");
+    let name = squash(repo_id.rsplit('/').next().unwrap_or(repo_id));
+    let from_repo = if encoder_like {
+        MODEL_TYPE_HINTS.iter().find(|(k, _)| name.contains(k)).map(|(_, t)| t.to_string())
+    } else { None };
+    let model_type = from_arch.or(from_repo)?;
+    obj.insert("model_type".to_string(), serde_json::Value::String(model_type.clone()));
+    fs::write(&cfg_path, serde_json::to_string_pretty(&cfg).ok()?).ok()?;
+    Some(model_type)
+}
+
+#[cfg(test)]
+mod fill_model_type_tests {
+    use super::*;
+
+    fn dir_with(name: &str, cfg: serde_json::Value) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ft_mt_{}_{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("config.json"), cfg.to_string()).unwrap();
+        dir
+    }
+    fn model_type_of(dir: &Path) -> Option<String> {
+        let cfg: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
+        cfg.get("model_type").and_then(|v| v.as_str()).map(|s| s.to_string())
+    }
+
+    #[test]
+    fn alte_bert_config_bekommt_bert() {
+        // config.json von prajjwal1/bert-tiny: weder model_type noch architectures.
+        let dir = dir_with("tiny", serde_json::json!({ "hidden_size": 128, "num_attention_heads": 2, "num_hidden_layers": 2, "vocab_size": 30522 }));
+        assert_eq!(fill_missing_model_type(&dir, "prajjwal1/bert-tiny").as_deref(), Some("bert"));
+        assert_eq!(model_type_of(&dir).as_deref(), Some("bert"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn architektur_geht_vor_dem_repo_namen() {
+        let dir = dir_with("arch", serde_json::json!({ "architectures": ["DistilBertForMaskedLM"], "dim": 768 }));
+        assert_eq!(fill_missing_model_type(&dir, "someone/bert-like").as_deref(), Some("distilbert"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vorhandener_typ_und_fremde_configs_bleiben_unveraendert() {
+        let dir = dir_with("set", serde_json::json!({ "model_type": "electra", "hidden_size": 256, "num_attention_heads": 4 }));
+        assert_eq!(fill_missing_model_type(&dir, "x/bert-anything"), None);
+        assert_eq!(model_type_of(&dir).as_deref(), Some("electra"));
+        let dir2 = dir_with("gpt", serde_json::json!({ "n_embd": 768, "n_head": 12 }));
+        assert_eq!(fill_missing_model_type(&dir2, "x/bert-gpt-mix"), None);
+        assert_eq!(model_type_of(&dir2), None);
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir2);
+    }
+}
+
 /// `_class_name` aus model_index.json (diffusers-Pipeline), sonst None.
 pub fn read_pipeline_class(dir: &Path) -> Option<String> {
     let content = fs::read_to_string(dir.join("model_index.json")).ok()?;
@@ -1095,6 +1171,11 @@ pub async fn download_huggingface_model(
         });
     }
 
+    // Aeltere BERT-Configs (prajjwal1/bert-tiny u. a.) nennen keinen model_type;
+    // Training und Test lehnten sie dann als Architektur '' ab (Benchmark-Lauf 09.11.).
+    if let Some(mt) = fill_missing_model_type(&target, &repo_id) {
+        println!("[HF Download] model_type '{}' ergaenzt fuer {}", mt, repo_id);
+    }
     let mtype = detect_model_type(&target);
     let info = ModelInfo {
         id: model_id.clone(), name: model_name.clone(), source: "huggingface".to_string(),

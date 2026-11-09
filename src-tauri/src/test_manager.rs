@@ -358,6 +358,15 @@ fn run_test(
         thread::spawn(move || { for l in BufReader::new(stderr).lines().flatten() { eprintln!("[Test STDERR] {}", l); } });
     }
 
+    // Der Job blieb bis zum Ende "pending" ohne Start und Fortschritt; tests_status
+    // meldete dem Assistenten so die ganze Laufzeit 0 % (Benchmark-Lauf 09.11.).
+    if !is_single {
+        update_current_job(&state, &test_id, |job| {
+            if job.status == TestStatus::Pending { job.status = TestStatus::Running; }
+            job.started_at.get_or_insert_with(|| chrono::Utc::now().to_rfc3339());
+        });
+    }
+
     // Ergebnis des Laufs fuer den Verlauf (Startseite "Letzte Tests").
     let mut final_results: Option<TestResults> = None;
 
@@ -375,7 +384,14 @@ fn run_test(
             let typ = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
             match typ {
-                "progress" => { let _ = ah.emit("test-progress", serde_json::json!({"test_id":tid,"data":msg.get("data")})); }
+                "progress" => {
+                    if !is_single {
+                        if let Some(p) = msg.get("data").and_then(|d| serde_json::from_value::<TestProgress>(d.clone()).ok()) {
+                            update_current_job(&state, &tid, |job| job.progress = p);
+                        }
+                    }
+                    let _ = ah.emit("test-progress", serde_json::json!({"test_id":tid,"data":msg.get("data")}));
+                }
                 "status"   => { let _ = ah.emit("test-status",   serde_json::json!({"test_id":tid,"data":msg.get("data")})); }
                 "complete" => {
                     let data = msg.get("data");
@@ -435,6 +451,12 @@ fn run_test(
                     job.status = if final_results.is_some() { TestStatus::Completed } else { TestStatus::Failed };
                 }
                 job.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                if let Some(r) = &final_results {
+                    // Fortschritt kam nicht bei jedem Plugin an; der fertige Lauf zeigt den Endstand.
+                    job.progress.total_samples = r.total_samples;
+                    job.progress.current_sample = r.total_samples;
+                    job.progress.progress_percent = 100.0;
+                }
                 job.results = final_results.map(|mut r| { r.predictions.clear(); r });
                 remember_test(&app_handle, &mut s.jobs_history, job);
             }
@@ -443,6 +465,13 @@ fn run_test(
     }
     let _ = app_handle.emit("test-finished", serde_json::json!({"test_id":test_id,"is_single":is_single,"success":status.map(|s| s.success()).unwrap_or(false)}));
     let _ = app_handle.emit("test-done", serde_json::json!({"test_id":test_id}));
+}
+
+/// Aendert den laufenden Job, wenn er noch zu diesem Test gehoert.
+fn update_current_job(state: &Arc<Mutex<TestState>>, test_id: &str, change: impl FnOnce(&mut TestJob)) {
+    if let Ok(mut s) = state.lock() {
+        if let Some(job) = s.current_job.as_mut().filter(|j| j.id == test_id) { change(job); }
+    }
 }
 
 // ============ Weitere Commands ============
