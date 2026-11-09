@@ -553,7 +553,13 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 .ft-chart-axis { font-size: 12px; fill: var(--ft-muted); }
 .ft-chart-label { font-size: 11.5px; font-weight: 600; fill: var(--ft-ink); font-family: "JetBrains Mono", ui-monospace, monospace; }
 .ft-chart-free { fill: none; stroke: var(--ft-line-strong); stroke-width: 1; stroke-dasharray: 4 3; }
-.ft-chart-dot { stroke: var(--ft-panel); stroke-width: 2; }
+.ft-lens { fill: var(--ft-panel-2); stroke: var(--ft-line); stroke-width: 1; }
+.ft-lens-frame { fill: none; stroke: var(--ft-line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.ft-lens-title { font-family: inherit; }
+.ft-lens-label { font-weight: 500; fill: var(--ft-ink); }
+.ft-bench.ft-row.is-hover { background: var(--ft-hover); }
+.ft-bench.ft-row.is-dim { opacity: 0.55; }
+.ft-chart-dot { transition: r 120ms ease, opacity 120ms ease; stroke: var(--ft-panel); stroke-width: 2; }
 .ft-chart-h { margin: 22px 0 2px; font-size: 13px; font-weight: 600; color: var(--ft-ink); }
 .ft-chart-note { margin: 0 0 8px; font-size: 12.5px; line-height: 18px; color: var(--ft-faint); max-width: 720px; }
 .ft-bench-intro { margin-bottom: 0; }

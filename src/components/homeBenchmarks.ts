@@ -83,6 +83,18 @@ const samplesOf = (test: PipelineTest): number | null => {
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
 
+/**
+ * Versionsname ohne den Modellnamen davor: "bench-electra-small v1" wird "v1".
+ * Die App benennt Versionen nach dem Modell; neben dem Modellnamen stand er sonst doppelt.
+ */
+export function versionLabel(model: string, version: string | null | undefined): string | null {
+  const v = version?.trim();
+  if (!v) return null;
+  if (!v.toLowerCase().startsWith(model.trim().toLowerCase())) return v;
+  const rest = v.slice(model.trim().length).replace(/^[\s·:_\-–]+/, '');
+  return rest || v;
+}
+
 const versionKey = (job: PipelineTest) => job.version_id ?? job.version_name ?? 'latest';
 
 export function buildBenchmarks(
@@ -127,7 +139,7 @@ export function buildBenchmarks(
         modelId: row.id,
         model: row.name,
         versionId: latest.version_id ?? null,
-        version: latest.version_name ?? null,
+        version: versionLabel(row.name, latest.version_name),
         metric: testMetric(latest)!,
         samples,
         msPerSample: ms,

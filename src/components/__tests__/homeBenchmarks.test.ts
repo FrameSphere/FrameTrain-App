@@ -77,3 +77,47 @@ describe('buildBenchmarks', () => {
     expect(set.steps[0].points).toBeCloseTo(3, 5);
   });
 });
+
+describe('Beschriftungen', () => {
+  it('kuerzt den Modellnamen aus dem Versionsnamen', async () => {
+    const { versionLabel } = await import('../homeBenchmarks');
+    expect(versionLabel('bench-electra-small', 'bench-electra-small v1')).toBe('v1');
+    expect(versionLabel('t1', 'v2')).toBe('v2');
+    expect(versionLabel('ner-distilbert', 'Original')).toBe('Original');
+    expect(versionLabel('myFirstTextclassifier', 'myFirstTextclassifier')).toBe('myFirstTextclassifier');
+    expect(versionLabel('x', null)).toBeNull();
+  });
+
+  it('fasst deckungsgleiche Punkte im Streudiagramm zusammen und vermeidet Ueberlappung', async () => {
+    const { placeScatterLabels } = await import('../BenchmarkView');
+    const labels = placeScatterLabels([
+      { x: 650, y: 60, model: 'bench-electra-small', version: 'v1' },
+      { x: 653, y: 62, model: 'bench-electra-small', version: 'v2' },
+      { x: 300, y: 64, model: 'bench-distilbert', version: null },
+    ], 720);
+    expect(labels.map(l => l.text).sort()).toEqual(['bench-distilbert', 'bench-electra-small · v1, v2']);
+    const electra = labels.find(l => l.text.startsWith('bench-electra'))!;
+    expect(electra.anchor).toBe('end');
+    const ys = labels.map(l => l.y);
+    expect(new Set(ys).size).toBe(2);
+  });
+});
+
+describe('Lupe im Streudiagramm', () => {
+  it('findet die Gruppe zu dicht liegender Punkte, verkettet', async () => {
+    const { findTightCluster } = await import('../BenchmarkView');
+    expect(findTightCluster([
+      { key: 'd', x: 319, y: 54 }, { key: 'e1', x: 370, y: 49 }, { key: 'e2', x: 381, y: 49 }, { key: 'e3', x: 391, y: 50 },
+    ]).sort()).toEqual(['e1', 'e2', 'e3']);
+    expect(findTightCluster([{ key: 'a', x: 0, y: 0 }, { key: 'b', x: 50, y: 0 }])).toEqual([]);
+  });
+});
+
+describe('Beschriftung neben der Lupe', () => {
+  it('weicht dem Lupen-Rahmen aus', async () => {
+    const { placeScatterLabels } = await import('../BenchmarkView');
+    const [label] = placeScatterLabels([{ x: 319, y: 54, model: 'bench-distilbert', version: null }], 480,
+      [{ left: 359, right: 392, top: 38, bottom: 60 }]);
+    expect(label.anchor).not.toBe('start');
+  });
+});
