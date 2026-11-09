@@ -462,8 +462,6 @@ button[class*="from-[var(--ft-accent)]"]:hover:not(:disabled) { opacity: 1; back
 .ft-sw { container-type: inline-size; --ft-band: color-mix(in srgb, var(--ft-ink) 8%, transparent); --ft-bar: color-mix(in srgb, var(--ft-ink) 30%, transparent); --ft-warn-soft: color-mix(in srgb, var(--ft-warn) 14%, transparent); }
 .ft-sw-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 28px; }
 .ft-sw-top h1 { flex: 1; min-width: 240px; margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.02em; color: var(--ft-ink); }
-/* Zweiter Satz der Headline gedaempft, wie im Website-Hero. */
-.ft-h1-sub { color: var(--ft-muted); }
 .ft-r { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(120px, 1fr)) 104px; column-gap: 16px; align-items: center; margin: 0 -8px; padding: 0 8px; }
 .ft-heads { height: 32px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ft-faint); border-bottom: 1px solid var(--ft-line); }
 .ft-sw-list > .ft-heads { position: sticky; top: 0; z-index: 2; background: var(--ft-panel); }

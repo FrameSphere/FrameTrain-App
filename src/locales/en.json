@@ -41,15 +41,7 @@
         "training": "{model} is training",
         "clear": "Everything is up to date",
         "empty": "Start with a model",
-        "noData": "Add data to your models",
-        "then": {
-          "ready": "{n} are ready to host.",
-          "ready_one": "{n} is ready to host.",
-          "test": "{n} are ready to test.",
-          "test_one": "{n} is ready to test.",
-          "hosted": "{n} are hosted.",
-          "hosted_one": "{n} is hosted."
-        }
+        "noData": "Add data to your models"
       },
       "cols": {
         "model": "Model",
