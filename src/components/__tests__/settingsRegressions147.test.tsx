@@ -60,7 +60,7 @@ describe('Einstellungen', { timeout: 15000 }, () => {
 
   it('liest beim Oeffnen keinen Token aus dem Schluesselbund', async () => {
     render(<LanguageProvider><Settings userData={USER as never} onLogout={vi.fn()} /></LanguageProvider>);
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('secret_exists', { key: 'ft_hf_token' }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('secret_exists', { key: 'hf_token' }));
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'secret_get')).toEqual([]);
     // Ein gespeicherter Token wird angezeigt, ohne ihn zu kennen.
     expect(await screen.findByPlaceholderText('Gespeichert – zum Ersetzen neuen Token eingeben')).toBeInTheDocument();

@@ -36,6 +36,12 @@ export type ToolExecutorContext = {
   onGraphMutation?: (event: GraphMutationEvent) => void;
   /** Pause nach jeder Aenderung fuer die Animation; 0 fuer Werkzeuge ohne Leinwand. Standard 320 ms. */
   visualDelayMs?: number;
+  /** Eigene Nodes aus der Bibliothek: add_node(nodeType "custom:<id>"). */
+  customNodes?: CustomNodeRecord[];
+  /** Liest Ports und Einstellungen aus dem Code eines Code-Nodes (Formen-Dienst). */
+  describeCode?: (code: string) => Promise<CodeDescription>;
+  /** Legt einen Code-Node oder Block in die Bibliothek (save_custom_node). */
+  saveCustomNode?: (input: CustomNodeInput) => Promise<CustomNodeRecord>;
 };
 
 export type ToolExecutorHandle = {
@@ -44,16 +50,22 @@ export type ToolExecutorHandle = {
   getState: () => { nodes: any[]; edges: any[] };
 };
 
+import {
+  applyDescription, draftFromNode, instanceFromRecord, pruneEdges, updateFromRecord,
+  type CodeDescription, type CustomNodeInput, type CustomNodeRecord,
+} from '../customNodes';
+
 // --- Tool list for system prompt (plan phase only needs action tools) ---------
 
 export const PLAN_TOOLS = `
-add_node(nodeType*, id, position): Add node. nodeType must be exact string from the types list.
+add_node(nodeType*, id, position): Add node. nodeType must be exact string from the types list, or "custom:<id>" for one of the user's own nodes.
 add_edge(source*, target*, sourceHandle, targetHandle): Connect nodes by ID. Use exact port IDs from the port reference.
 remove_node(nodeId*): Remove a node and all its edges.
 remove_edge(edgeId | source+target): Remove a connection.
 set_param(nodeId*, key*, value*): Set a node parameter by exact key name.
 set_label(nodeId*, label*): Rename a node.
 move_node(nodeId*, position*): Move node to {x,y} position.
+save_custom_node(nodeId*, name, description): Save a code or block node into the user's node library (only when the user asks).
 done(summary*): Signal task complete. MUST be last item.
 `.trim();
 
@@ -93,6 +105,12 @@ export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle
   // Mutable internal copies — updates are visible within the same batch
   let _nodes: any[] = [...ctx.nodes];
   let _edges: any[] = [...ctx.edges];
+  let _custom: CustomNodeRecord[] = [...(ctx.customNodes ?? [])];
+  const typeOf = (n: any): string => n?.data?._def?.type ?? n?.data?.nodeType ?? '';
+  const findCustom = (key: string): CustomNodeRecord | undefined => {
+    const k = key.replace(/^custom:/, '').trim().toLowerCase();
+    return _custom.find((r) => r.id.toLowerCase() === k) ?? _custom.find((r) => r.name.toLowerCase() === k);
+  };
 
   // Sync to React (called after each tool execution)
   const sync = () => {
@@ -112,6 +130,24 @@ export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle
           const rawPos = args.position
             ?? (args.x != null && args.y != null ? { x: args.x, y: args.y } : null)
             ?? null;
+
+          // Eigener Node aus der Bibliothek: Kopie mit Ports, Einstellungen und Aussehen.
+          if (String(nodeType ?? '').startsWith('custom:')) {
+            const rec = findCustom(nodeType);
+            if (!rec) return { success: false, error: `Unknown custom node: ${nodeType}. Available: ${_custom.map((r) => `custom:${r.id} (${r.name})`).join(', ') || 'none'}` };
+            const base = ctx.nodeDefinitions.find((d: any) => d.type === rec.kind);
+            if (!base) return { success: false, error: `Missing base type ${rec.kind}` };
+            const nodeId = customId ?? `${rec.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            if (_nodes.find((n: any) => n.id === nodeId)) return { success: true, data: { nodeId, skipped: true } };
+            const pos = parsePosition(rawPos) ?? { x: 160 + (_nodes.length % 4) * 300, y: 120 + Math.floor(_nodes.length / 4) * 220 };
+            const node = instanceFromRecord(rec, base, nodeId, pos);
+            _nodes = [..._nodes, { ...node, data: { ...node.data, _sparkle: Date.now() } }];
+            sync();
+            ctx.onGraphMutation?.({ type: 'node', nodeId });
+            await waitForVisualMutation();
+            const d: any = node.data;
+            return { success: true, data: { nodeId, inputs: d.inputs.map((p: any) => p.id), outputs: d.outputs.map((p: any) => p.id) } };
+          }
 
           const def = ctx.nodeDefinitions.find((d: any) => d.type === nodeType);
           if (!def) return { success: false, error: `Unknown nodeType: ${nodeType}. Valid: ${ctx.nodeDefinitions.map((d:any)=>d.type).join(',')}` };
@@ -175,6 +211,21 @@ export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle
           _nodes = _nodes.map((n: any) =>
             n.id === nodeId ? { ...n, data: { ...n.data, params: { ...n.data.params, [key as string]: value } } } : n
           );
+          // Neuer Code: Ports und Einstellungen sofort aus dem Code lesen, damit
+          // folgende add_edge-Aufrufe die richtigen Ports finden.
+          if (key === 'code' && typeOf(node) === 'code' && ctx.describeCode) {
+            const desc = await ctx.describeCode(String(value ?? ''));
+            _nodes = _nodes.map((n: any) => (n.id === nodeId ? applyDescription(n, desc) : n));
+            _edges = pruneEdges(_edges, _nodes);
+            sync();
+            await waitForVisualMutation();
+            if (!desc.ok) return { success: false, error: `Code error: ${desc.error}` };
+            const d: any = _nodes.find((n: any) => n.id === nodeId).data;
+            return { success: true, data: {
+              inputs: d.inputs.map((p: any) => p.id), outputs: d.outputs.map((p: any) => p.id),
+              settings: (desc.params ?? []).map((p) => p.key),
+            } };
+          }
           sync();
           await waitForVisualMutation();
           return { success: true, data: {} };
@@ -220,6 +271,16 @@ export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle
 
           // Validate sourceHandle — fall back to first output if invalid/missing
           const srcOutputs: any[] = srcNode.data?.outputs ?? srcNode.data?._def?.outputs ?? [];
+          const tgtPorts: any[] = tgtNode.data?.inputs ?? tgtNode.data?._def?.inputs ?? [];
+          // Code-/eigene Nodes mit mehreren Ports: falscher Port ist ein Fehler, kein stiller Ersatz.
+          const strict = (n: any, ports: any[], h: string | undefined) =>
+            (typeOf(n) === 'code' || n?.data?.params?.libraryId) && ports.length > 1 && h && !ports.find((p: any) => p.id === h);
+          if (strict(srcNode, srcOutputs, sourceHandle)) {
+            return { success: false, error: `${source} has no output "${sourceHandle}". Outputs: ${srcOutputs.map((p: any) => p.id).join(', ')}` };
+          }
+          if (strict(tgtNode, tgtPorts, targetHandle)) {
+            return { success: false, error: `${target} has no input "${targetHandle}". Inputs: ${tgtPorts.map((p: any) => p.id).join(', ')}` };
+          }
           if (srcOutputs.length > 0) {
             const validSrc = sourceHandle && srcOutputs.find((p: any) => p.id === sourceHandle);
             if (!validSrc) sourceHandle = srcOutputs[0].id;
@@ -301,6 +362,24 @@ export function createToolExecutor(ctx: ToolExecutorContext): ToolExecutorHandle
           sync();
           await waitForVisualMutation();
           return { success: true, data: {} };
+        }
+
+        case 'save_custom_node': {
+          const nodeId = args.nodeId as string;
+          const node = _nodes.find((n: any) => n.id === nodeId);
+          if (!node) return { success: false, error: `Node not found: ${nodeId}` };
+          if (!ctx.saveCustomNode) return { success: false, error: 'Node library not available here' };
+          const draft = draftFromNode(node);
+          if (!draft) return { success: false, error: `${nodeId} is not a code or block node` };
+          const name = String(args.name ?? draft.name ?? '').trim() || (node.data?.label ?? 'Custom node');
+          if (args.description != null) draft.definition.description = String(args.description);
+          const rec = await ctx.saveCustomNode({ ...draft, name });
+          _custom = [..._custom.filter((r) => r.id !== rec.id), rec];
+          const base = ctx.nodeDefinitions.find((d: any) => d.type === rec.kind);
+          if (base) _nodes = _nodes.map((n: any) => (n.id === nodeId ? updateFromRecord(n, rec, base) : n));
+          sync();
+          await waitForVisualMutation();
+          return { success: true, data: { nodeType: `custom:${rec.id}`, name: rec.name, version: rec.version } };
         }
 
         default:

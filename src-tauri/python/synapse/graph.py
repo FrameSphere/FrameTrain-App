@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import nodes  # noqa: F401  (fuellt REGISTRY)
-from .spec import REGISTRY, NodeSpec
+from .codenode import ports_of
+from .spec import REGISTRY, NodeSpec, Port
 
 ENTRY = "__input__"  # Quelle aller Kanten, die aus den Daten kommen
 
@@ -20,6 +21,15 @@ class GNode:
     @property
     def spec(self) -> NodeSpec:
         return REGISTRY[self.type]
+
+    # Ports je Node: beim Code-Node bestimmt der Code sie, sonst der Typ.
+    @property
+    def inputs(self) -> List[Port]:
+        return list(ports_of(self.params)[0]) if self.type == "code" else self.spec.inputs
+
+    @property
+    def outputs(self) -> List[Port]:
+        return list(ports_of(self.params)[1]) if self.type == "code" else self.spec.outputs
 
 
 @dataclass(frozen=True)
@@ -104,11 +114,11 @@ def migrate_v1(nodes_raw: List[Any], edges_raw: List[Any], order: Optional[List[
             continue  # Daten- und Lern-Nodes haben im forward keinen Eingang
         sh = _attr(raw, "source_handle") if not isinstance(raw, dict) else raw.get("sourceHandle")
         th = _attr(raw, "target_handle") if not isinstance(raw, dict) else raw.get("targetHandle")
-        out_port = sh if sh in [p.id for p in s.spec.outputs] else (s.spec.outputs[0].id if s.spec.outputs else "out")
+        out_port = sh if sh in [p.id for p in s.outputs] else (s.outputs[0].id if s.outputs else "out")
         if t.type == "output_node":
             outputs.setdefault("out", (ENTRY, "out") if is_source_of_data(src) else (src, out_port))
             continue
-        names = [p.id for p in t.spec.inputs]
+        names = [p.id for p in t.inputs]
         used = taken.setdefault(tgt, set())
         port = th if th in names and th not in used else next((n for n in names if n not in used), None)
         if port is None:
@@ -121,13 +131,13 @@ def migrate_v1(nodes_raw: List[Any], edges_raw: List[Any], order: Optional[List[
     for g in gnodes:
         if g.spec.structural:
             continue
-        if not taken.get(g.id) and g.spec.inputs:
-            edges.append(GEdge(ENTRY, "out", g.id, g.spec.inputs[0].id))
+        if not taken.get(g.id) and g.inputs:
+            edges.append(GEdge(ENTRY, "out", g.id, g.inputs[0].id))
 
     if "out" not in outputs:
         last = next((g for g in reversed(gnodes) if not g.spec.structural), None)
         if last is not None:
-            outputs["out"] = (last.id, last.spec.outputs[0].id)
+            outputs["out"] = (last.id, last.outputs[0].id)
     return Graph(gnodes, edges, outputs)
 
 

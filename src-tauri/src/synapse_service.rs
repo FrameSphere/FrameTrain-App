@@ -121,6 +121,23 @@ pub async fn synapse_check(
     .map_err(|e| e.to_string())?
 }
 
+/// Liest Ports und Einstellungen aus dem Code eines eigenen Nodes und macht einen Probelauf.
+#[tauri::command]
+pub async fn synapse_describe_code(
+    app_handle: tauri::AppHandle,
+    code: String,
+    values: serde_json::Value,
+    shape: Vec<i64>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        request(&app_handle, serde_json::json!({
+            "cmd": "describe_code", "code": code, "values": values, "shape": shape,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Ein Lernschritt mit Zufallsdaten: Ausgabe, Gradient und Update je Node.
 #[tauri::command]
 pub async fn synapse_step(

@@ -3,10 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  answerApproval, listGrants, needsApproval, recordDecision, requestApprovalViaDialog, resetApprovalQueue,
+  answerApproval, isDestructive, listGrants, needsApproval, recordDecision, requestApprovalViaDialog, resetApprovalQueue,
   revokeAllGrants, revokeClient, revokeGrant, subscribeApprovals, subscribeGrants,
 } from '../approval';
 import { defineTool, ok } from '../util';
+import { userScopedKey } from '../../utils/currentUser';
 
 const noop = async () => ok('ok');
 const readTool = defineTool({ name: 'models_list', title: 'L', description: 'x'.repeat(50), run: noop });
@@ -74,9 +75,24 @@ describe('Freigabe-Regeln', () => {
   });
 
   it('defekter Speicher gilt als leer', () => {
-    localStorage.setItem('ft_mcp_grants_v1', '{kaputt');
+    localStorage.setItem(userScopedKey('ft_mcp_grants_v1'), '{kaputt');
     expect(needsApproval(onceTool, claude)).toBe(true);
     expect(listGrants()).toEqual([]);
+  });
+});
+
+describe('Ueberschreibend ist nicht unwiderruflich', () => {
+  it('destructiveHint mit Freigabe once: einmal fragen, dann merken, keine Loesch-Warnung', () => {
+    const overwrite = defineTool({ name: 'studio_set_annotation', title: 'A', description: 'x'.repeat(50), approval: 'once', annotations: { destructiveHint: true }, run: noop });
+    expect(overwrite.annotations.destructiveHint).toBe(true);
+    expect(isDestructive(overwrite)).toBe(false);
+    expect(needsApproval(overwrite, gpt)).toBe(true);
+    recordDecision(overwrite, gpt, 'allow');
+    expect(needsApproval(overwrite, gpt)).toBe(false);
+  });
+
+  it('Loeschen bleibt unwiderruflich', () => {
+    expect(isDestructive(deleteTool)).toBe(true);
   });
 });
 

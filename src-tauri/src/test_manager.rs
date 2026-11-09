@@ -31,6 +31,8 @@ pub struct TestJob {
     pub error: Option<String>,
     #[serde(default = "default_task_type")] pub task_type: String,
     #[serde(default = "default_mode")]      pub mode: String,
+    /// Account, der den Test gestartet hat. Leer bei Eintraegen vor 1.6.24.
+    #[serde(default)] pub user_id: String,
 }
 fn default_task_type() -> String { "seq_classification".to_string() }
 fn default_mode()      -> String { "dataset".to_string() }
@@ -140,7 +142,8 @@ pub(crate) fn get_version_path(app_handle: &tauri::AppHandle, version_id: &str) 
     let db_path = app_handle.path().app_data_dir().map_err(|e| format!("AppDataDir: {}", e))?
         .join("frametrain.db");
     let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
-    conn.query_row("SELECT path FROM model_versions_new WHERE id = ?1", [version_id], |r| r.get(0))
+    let user_id = crate::database::session_user_id()?;
+    conn.query_row("SELECT path FROM model_versions_new WHERE id = ?1 AND user_id = ?2", [version_id, user_id.as_str()], |r| r.get(0))
         .map_err(|e| format!("Version nicht gefunden: {}", e))
 }
 
@@ -210,7 +213,8 @@ pub async fn start_test(
             let db_path = app_handle.path().app_data_dir()
                 .map_err(|e| format!("AppDataDir: {}", e))?.join("frametrain.db");
             let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("DB: {}", e))?;
-            let res: Result<String,_> = conn.query_row("SELECT file_path FROM datasets WHERE id = ?1", [&dataset_id], |r| r.get(0));
+            let uid = crate::database::session_user_id()?;
+            let res: Result<String,_> = conn.query_row("SELECT file_path FROM datasets WHERE id = ?1 AND user_id = ?2", [dataset_id.as_str(), uid.as_str()], |r| r.get(0));
             match res {
                 Ok(p) if !p.is_empty() => PathBuf::from(p),
                 _ => fallback(),
@@ -254,6 +258,7 @@ pub async fn start_test(
         started_at: None, completed_at: None, progress: TestProgress::default(),
         results: None, error: None,
         task_type: final_task_type, mode: "dataset".to_string(),
+        user_id: crate::database::session_user_id()?,
     };
 
     sl.current_job = Some(job.clone());
@@ -464,16 +469,30 @@ pub fn get_active_test_job(state: tauri::State<'_, Arc<Mutex<TestState>>>) -> Re
 
 #[tauri::command]
 pub fn get_current_test(state: tauri::State<'_, Arc<Mutex<TestState>>>) -> Result<Option<TestJob>, String> {
-    Ok(state.lock().map_err(|e| format!("Lock: {}", e))?.current_job.clone())
+    let user_id = crate::database::session_user_id().unwrap_or_default();
+    Ok(state.lock().map_err(|e| format!("Lock: {}", e))?.current_job.clone()
+        .filter(|j| j.user_id.is_empty() || j.user_id == user_id))
 }
 
 #[tauri::command]
 pub fn get_test_history(app_handle: tauri::AppHandle, state: tauri::State<'_, Arc<Mutex<TestState>>>) -> Result<Vec<TestJob>, String> {
+    let user_id = crate::database::session_user_id()?;
     let mut s = state.lock().map_err(|e| format!("Lock: {}", e))?;
     if s.jobs_history.is_empty() {
         s.jobs_history = load_test_history(&app_handle);
     }
-    Ok(s.jobs_history.clone())
+    // Der Verlauf liegt in einer Datei fuer alle Accounts. Gezeigt wird nur
+    // der eigene; alte Eintraege ohne Account nur, wenn die getestete Version
+    // dem angemeldeten Nutzer gehoert.
+    let history = s.jobs_history.clone();
+    drop(s);
+    Ok(history.into_iter()
+        .filter(|j| owned_by(j, &user_id, |vid| get_version_path(&app_handle, vid).is_ok()))
+        .collect())
+}
+
+fn owned_by(job: &TestJob, user_id: &str, version_owned: impl Fn(&str) -> bool) -> bool {
+    if job.user_id.is_empty() { version_owned(&job.version_id) } else { job.user_id == user_id }
 }
 
 /// Verlauf der Dataset-Tests, ueber App-Neustarts hinweg (ohne Einzel-
@@ -614,8 +633,18 @@ mod history_tests {
             version_id: "v".into(), version_name: "V".into(), dataset_id: "d".into(), dataset_name: "D".into(),
             status: TestStatus::Completed, created_at: String::new(), started_at: None, completed_at: None,
             progress: TestProgress::default(), results: None, error: None,
-            task_type: "causal_lm".into(), mode: "dataset".into(),
+            task_type: "causal_lm".into(), mode: "dataset".into(), user_id: "u1".into(),
         }
+    }
+
+    #[test]
+    fn verlauf_nur_vom_eigenen_account() {
+        let mut fremd = job(1); fremd.user_id = "u2".into();
+        assert!(owned_by(&job(1), "u1", |_| false));
+        assert!(!owned_by(&fremd, "u1", |_| true));
+        let mut alt = job(2); alt.user_id = String::new();
+        assert!(owned_by(&alt, "u1", |_| true));
+        assert!(!owned_by(&alt, "u1", |_| false));
     }
 
     #[test]

@@ -75,7 +75,7 @@ export const analysisTools: McpTool[] = [
   defineTool({
     name: 'analysis_runs_compare',
     title: 'Compare runs',
-    description: 'Compares 2-10 trained versions side by side: final/best losses, epochs, duration and key hyperparameters. Use it to pick the best run or to explain what changed.',
+    description: 'Compares 2-10 trained versions side by side: final/best losses, epochs, duration and key hyperparameters. Shows which run performed best and what changed between them.',
     properties: { version_ids: S.strArr('Version ids to compare.', { minItems: 2, maxItems: 10 }) },
     required: ['version_ids'],
     async run(args) {

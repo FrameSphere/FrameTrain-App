@@ -60,6 +60,9 @@ def main() -> None:
             elif cmd == "noisy":  # fuer Tests: Ausgaben einer Bibliothek
                 print("Fortschritt einer Bibliothek")
                 emit({"id": rid, "result": "ok"})
+            elif cmd == "describe_code":
+                from synapse.codenode import probe
+                emit({"id": rid, "result": probe(req["code"], req.get("values") or {}, req.get("shape"))})
             elif cmd == "catalog":
                 emit({"id": rid, "result": catalog()})
             else:

@@ -22,11 +22,26 @@ pub struct McpConfig {
     pub device_id: String,
     /// Fernzugriff ueber frame-train.com (Standard aus)
     pub remote_enabled: bool,
+    /// Account, der den Fernzugriff eingeschaltet hat. Die Relay arbeitet nur,
+    /// solange genau dieser Account angemeldet ist — sonst haette ein anderer
+    /// Account auf demselben Rechner das Geraet ungefragt in seinem Konto
+    /// freigegeben. Leer bei Einstellungen von vor 1.6.24: dann ist der
+    /// Fernzugriff aus, bis ihn jemand neu einschaltet.
+    pub remote_user_id: String,
+}
+
+impl McpConfig {
+    /// Fernzugriff aktiv fuer diesen Account?
+    pub fn remote_active_for(&self, user_id: Option<&str>) -> bool {
+        self.remote_enabled
+            && !self.remote_user_id.is_empty()
+            && user_id == Some(self.remote_user_id.as_str())
+    }
 }
 
 impl Default for McpConfig {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_PORT, token: String::new(), device_id: String::new(), remote_enabled: false }
+        Self { enabled: false, port: DEFAULT_PORT, token: String::new(), device_id: String::new(), remote_enabled: false, remote_user_id: String::new() }
     }
 }
 
@@ -105,6 +120,20 @@ pub fn load_or_init(path: &Path) -> McpConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fernzugriff_nur_fuer_den_einschaltenden_account() {
+        let mut c = McpConfig { remote_enabled: true, remote_user_id: "a".into(), ..Default::default() };
+        assert!(c.remote_active_for(Some("a")));
+        assert!(!c.remote_active_for(Some("b")));
+        assert!(!c.remote_active_for(None));
+        // Alte Einstellung ohne Account: aus, bis jemand neu einschaltet
+        c.remote_user_id.clear();
+        assert!(!c.remote_active_for(Some("a")));
+        // Alte mcp.json ohne das Feld laesst sich weiter lesen
+        let alt: McpConfig = serde_json::from_str(r#"{"enabled":true,"remoteEnabled":true}"#).unwrap();
+        assert!(alt.remote_enabled && alt.remote_user_id.is_empty());
+    }
 
     fn tmpdir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("ft-mcp-test-{}-{}", name, uuid::Uuid::new_v4()));

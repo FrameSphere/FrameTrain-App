@@ -3024,9 +3024,10 @@ pub async fn get_dataset_path(
         .join("frametrain.db");
     if db_path.exists() {
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            let uid = crate::database::session_user_id().unwrap_or_default();
             let res: Result<String, _> = conn.query_row(
-                "SELECT file_path FROM datasets WHERE id = ?1",
-                [&dataset_id],
+                "SELECT file_path FROM datasets WHERE id = ?1 AND user_id = ?2",
+                [dataset_id.as_str(), uid.as_str()],
                 |r| r.get(0),
             );
             if let Ok(p) = res {

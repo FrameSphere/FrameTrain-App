@@ -1,6 +1,7 @@
 // API Configuration for FrameTrain Desktop App
 // This file contains the API endpoints for communicating with the cloud backend
 
+#[cfg(debug_assertions)]
 use std::sync::OnceLock;
 
 /// Production API base URL
@@ -23,16 +24,11 @@ pub fn get_api_base_url() -> &'static str {
         return url.as_str();
     }
 
+    // Release: immer der feste Server. Ueber eine Umgebungsvariable liessen
+    // sich sonst API-Key und Passwort beim Login an einen fremden Server lenken.
     #[cfg(not(debug_assertions))]
     {
-        static RELEASE_API_URL: OnceLock<String> = OnceLock::new();
-        let url = RELEASE_API_URL.get_or_init(|| {
-            std::env::var("FRAMETRAIN_API_URL")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| PRODUCTION_API_URL.to_string())
-        });
-        return url.as_str();
+        return PRODUCTION_API_URL;
     }
 }
 
@@ -59,6 +55,11 @@ pub mod endpoints {
     /// Zustimmung zu AGB & Datenschutz nachholen
     pub fn accept_terms() -> String {
         format!("{}/desktop/accept-terms", get_api_base_url())
+    }
+
+    /// Support-Tickets dem Konto zuordnen und die Konto-Liste holen
+    pub fn support_tickets() -> String {
+        format!("{}/desktop/support-tickets", get_api_base_url())
     }
 }
 

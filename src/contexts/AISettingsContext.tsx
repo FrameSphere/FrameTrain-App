@@ -130,11 +130,14 @@ const DEFAULT_SETTINGS: AISettings = {
  * verloren und musste ihn beim Zurueckwechseln neu eintippen. Jetzt behaelt
  * jeder Anbieter seinen eigenen Key, und das Umschalten holt ihn zurueck.
  */
-const secretAccount = (userId: string | undefined, provider: AIProvider) =>
-  `ft_ai_key_${userId || 'anon'}_${provider}`;
+// Den Nutzer setzt das Backend selbst ein (aus der laufenden Anmeldung); die
+// Webview nennt nur noch den logischen Namen. userId bleibt im Signatur-
+// Abdruck, damit ein Nutzerwechsel die Effekte neu ausloest.
+const secretAccount = (_userId: string | undefined, provider: AIProvider) =>
+  `ai_key:${provider}`;
 
 /** Altes gemeinsames Konto — wird beim ersten Start auf den Anbieter umgezogen. */
-const legacyAccount = (userId?: string) => `ft_ai_key_${userId || 'anon'}`;
+const legacyAccount = (_userId?: string) => 'ai_key';
 
 /** Anbieter, fuer die ueberhaupt ein Key im Schluesselbund liegt. */
 export type KeyProvider = Exclude<AIProvider, 'ollama'>;

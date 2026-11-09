@@ -1,6 +1,6 @@
 // Domaene system: Zustand der App, Hardware, Hintergrund-Auftraege.
 
-import { getJob, listJobs, waitForJob } from '../jobs';
+import { cancelJob, getJob, listJobs, waitForJob } from '../jobs';
 import { call, defineTool, errorText, fail, ok, optNum, reqStr, S } from '../util';
 import type { McpTool } from '../types';
 import { MCP_DOMAINS } from '../types';
@@ -43,7 +43,7 @@ export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_ping',
     title: 'Ping',
-    description: 'Checks that the FrameTrain desktop app is running and reachable. Returns the app version and whether a user is signed in. Use it first if other tools fail unexpectedly.',
+    description: 'Checks that the FrameTrain desktop app is running and reachable. Returns the app version and whether a user is signed in. Useful for checking the connection.',
     requiresUser: false,
     async run(_args, ctx) {
       const version = await appVersion();
@@ -54,7 +54,7 @@ export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_info',
     title: 'System info',
-    description: 'Returns app version, system RAM, Python interpreter and the ML stack status (PyTorch, CUDA/MPS GPU availability, transformers, peft). Call this before planning a training run to know what the machine can do.',
+    description: 'Returns app version, system RAM, Python interpreter and the ML stack status (PyTorch, CUDA/MPS GPU availability, transformers, peft). Shows what the machine can train.',
     requiresUser: false,
     async run(_args, ctx) {
       const [version, ram, pythonRaw, requirementsRaw] = await Promise.all([
@@ -80,7 +80,7 @@ export const systemTools: McpTool[] = [
   defineTool({
     name: 'system_capabilities',
     title: 'Capabilities',
-    description: 'Describes what FrameTrain can do through these tools (one entry per domain) and lists the installed task plugins (model families/tasks the app can train). Use it to orient yourself before a multi-step workflow.',
+    description: 'Describes what FrameTrain can do through these tools (one entry per domain) and lists the installed task plugins (model families/tasks the app can train). Gives an overview of the available workflows.',
     requiresUser: false,
     async run() {
       const plugins = await safe(() => call<{ id: string; name: string; category: string; description: string }[]>('get_available_plugins'));
@@ -116,10 +116,33 @@ export const systemTools: McpTool[] = [
       const wait = Math.min(45, Math.max(0, optNum(args, 'wait_seconds', 0)!));
       const job = wait > 0 ? await waitForJob(id, wait * 1000) : getJob(id);
       if (!job) return fail(`Unknown job_id "${id}". Jobs are kept in memory until the app restarts.`);
-      const text = job.state === 'running' ? `Job ${id} (${job.label}) is still running.`
+      const secs = Math.round((Date.now() - Date.parse(job.startedAt)) / 1000);
+      const text = job.state === 'running'
+        ? `Job ${id} (${job.label}) is still running after ${secs} s${job.progress ? ` - last step: ${job.progress}` : ''}. `
+          + 'It has not failed. Call system_job_status again with wait_seconds 45 until state is done or error; '
+          + 'dataset downloads often take several minutes. Tell the user it is still in progress rather than giving up.'
         : job.state === 'done' ? `Job ${id} (${job.label}) finished.`
           : `Job ${id} (${job.label}) failed: ${job.error}`;
       return ok(text, { ...job });
+    },
+  }),
+  defineTool({
+    name: 'system_job_cancel',
+    title: 'Cancel job',
+    description: 'Stops a running background job by job_id, e.g. a dataset download that is too large or too slow. Partly downloaded files are deleted. Works for dataset downloads and URL imports; training and tests have their own *_stop tools.',
+    properties: { job_id: S.str('The job_id returned by the tool that started the job.') },
+    required: ['job_id'],
+    approval: 'once',
+    annotations: { destructiveHint: true },
+    requiresUser: false,
+    async run(args) {
+      const id = reqStr(args, 'job_id');
+      const outcome = await cancelJob(id);
+      const job = getJob(id);
+      if (outcome === 'unknown') return fail(`Unknown job_id "${id}". Jobs are kept in memory until the app restarts.`);
+      if (outcome === 'finished') return ok(`Job ${id} is no longer running (state: ${job?.state}).`, { ...job });
+      if (outcome === 'not_cancellable') return fail(`Job ${id} (${job?.label}) cannot be cancelled; it will finish on its own.`, { ...job });
+      return ok(`Job ${id} (${job?.label}) was cancelled. Partly downloaded files were removed.`, { ...job });
     },
   }),
   defineTool({

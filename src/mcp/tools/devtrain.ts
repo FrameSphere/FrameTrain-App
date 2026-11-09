@@ -61,7 +61,7 @@ export const devtrainTools: McpTool[] = [
   defineTool({
     name: 'devtrain_context',
     title: 'Dev Train context',
-    description: `Describes what a Dev Train script will see for a model (and dataset): the environment variables with concrete paths, a description of the model files, dataset layout and installed Python packages, and the stdout protocol. Read this before writing a script. Protocol: ${DEVTRAIN_PROTOCOL}`,
+    description: `Describes what a Dev Train script will see for a model (and dataset): the environment variables with concrete paths, a description of the model files, dataset layout and installed Python packages, and the stdout protocol. This is the context a script is written against. Protocol: ${DEVTRAIN_PROTOCOL}`,
     properties: {
       model_id: S.str('Model id. Default: model selected in the Dev Train panel.'),
       dataset_id: S.str('Dataset id of that model. Default: selected/first dataset.'),
@@ -114,6 +114,7 @@ export const devtrainTools: McpTool[] = [
     },
     required: ['script'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const script = reqStr(args, 'script');
@@ -153,13 +154,13 @@ export const devtrainTools: McpTool[] = [
         refs: r.refs, versionId: r.versionId ?? null,
       });
       try { await call('enable_prevent_sleep'); } catch { /* optional */ }
-      return ok(`Dev Train started (job ${job.id}). Poll devtrain_status.`, { job_id: job.id, env: r.refs });
+      return ok(`Dev Train started (job ${job.id}). Progress: devtrain_status.`, { job_id: job.id, env: r.refs });
     },
   }),
   defineTool({
     name: 'devtrain_status',
     title: 'Dev Train status',
-    description: 'Status, progress events and the last stdout/stderr lines of a Dev Train run (default: the current one). Use the log lines to debug a failing script, then fix it with devtrain_script_set and start again.',
+    description: 'Status, progress events and the last stdout/stderr lines of a Dev Train run (default: the current one). The log lines show why a script failed; devtrain_script_set updates the script.',
     properties: {
       job_id: S.str('Job id from devtrain_start. Default: current training.'),
       log_lines: S.int('Recent lines (0-200). Default 60.', { minimum: 0, maximum: 200 }),
@@ -177,6 +178,8 @@ export const devtrainTools: McpTool[] = [
     title: 'Stop Dev Train',
     description: 'Stops the running Dev Train script; output written so far stays in devtrain_status.',
     approval: 'always',
+    annotations: { destructiveHint: true },
+    irreversible: false,
     async run() {
       await call('stop_dev_training');
       try { await call('disable_prevent_sleep'); } catch { /* optional */ }
@@ -186,7 +189,7 @@ export const devtrainTools: McpTool[] = [
   defineTool({
     name: 'devtrain_test_start',
     title: 'Start Dev Test',
-    description: 'Runs a Dev Test script (evaluation/inference script, same environment variables as Dev Train) against a model or version and dataset. Returns immediately; poll devtrain_test_status for output.',
+    description: 'Runs a Dev Test script (evaluation/inference script, same environment variables as Dev Train) against a model or version and dataset. Returns immediately; devtrain_test_status reports the output.',
     properties: {
       script: S.str('Python test script.'),
       model_id: S.str('Model id. Default: panel selection.'),
@@ -209,7 +212,7 @@ export const devtrainTools: McpTool[] = [
         script: reqStr(args, 'script'), modelId: model.id, modelName: model.name,
         datasetId: selected?.id ?? '', datasetName: selected?.name ?? '', refs,
       });
-      return ok(`Dev Test started (${jobId}). Poll devtrain_test_status.`, { job_id: jobId });
+      return ok(`Dev Test started (${jobId}). Progress: devtrain_test_status.`, { job_id: jobId });
     },
   }),
   defineTool({
@@ -229,6 +232,7 @@ export const devtrainTools: McpTool[] = [
     title: 'Stop Dev Test',
     description: 'Stops the running Dev Test script started with devtrain_test_start.',
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run() {
       await call('stop_dev_test');
       return ok('Stop requested.', { stopped: true });

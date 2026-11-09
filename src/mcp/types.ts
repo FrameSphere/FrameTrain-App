@@ -42,6 +42,8 @@ export interface ToolAnnotations {
 export interface ToolMeta {
   'frametrain/domain': McpDomain;
   'frametrain/approval': ApprovalLevel;
+  /** Unwiderruflich (Loeschen): App fragt jedes Mal und warnt. Unabhaengig von destructiveHint. */
+  'frametrain/irreversible'?: boolean;
 }
 
 /** Definition, wie sie im Manifest an Rust geht (ohne `run`). */
@@ -59,9 +61,16 @@ export interface TextContent {
   text: string;
 }
 
+/** Bild fuer den KI-Assistenten (z. B. Sample mit eingezeichneten Boxen). */
+export interface ImageContent {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
 /** MCP CallToolResult. `structuredContent` ist laut Spezifikation ein Objekt. */
 export interface CallToolResult {
-  content: TextContent[];
+  content: [TextContent, ...(TextContent | ImageContent)[]];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }

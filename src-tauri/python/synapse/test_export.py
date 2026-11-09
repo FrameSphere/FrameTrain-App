@@ -29,6 +29,23 @@ def run_export(module, shape, dtype=torch.float32):
     return exported.eval(), module.eval()
 
 
+FUSION = """class Node(nn.Module):
+    outputs = ("out", "gate")
+
+    def __init__(self, shape, hidden: int = 8, act: Literal["gelu", "relu"] = "gelu", scale=1.0, bias: bool = True):
+        super().__init__()
+        d = shape["x"][-1]
+        self.inner = nn.Linear(d, hidden, bias=bias)
+        self.back = nn.Linear(hidden, d)
+        self.act, self.scale = act, scale
+
+    def forward(self, x, skip=None):
+        h = self.back(F.relu(self.inner(x)) if self.act == "relu" else F.gelu(self.inner(x)))
+        out = h * self.scale + (x if skip is None else skip)
+        return {"out": out, "gate": torch.sigmoid(out)}
+"""
+
+
 CHAINS = {
     "bild": ((1, 3, 16, 16), [("conv2d", {"outChannels": 4, "padding": "1"}), ("batchnorm", {}), ("relu", {}),
                               ("pool", {"type": "max_2d"}), ("conv_transpose2d", {"outChannels": 4}), ("upsample", {}),
@@ -65,6 +82,42 @@ class CodeAndBlocks(unittest.TestCase):
     def test_fehler_im_code_steht_am_node(self):
         r = check_graph(chain(("code", {"code": "class Falsch: pass"})), (1, 4))
         self.assertIn("Node(nn.Module)", r["errors"][0]["message"])
+
+    def test_code_beschreibt_ports_und_einstellungen(self):
+        from synapse.codenode import describe
+        d = describe(FUSION)
+        self.assertTrue(d["ok"], d)
+        self.assertEqual([(p["id"], p["optional"]) for p in d["inputs"]], [("in", False), ("skip", True)])
+        self.assertEqual([p["id"] for p in d["outputs"]], ["out", "gate"])
+        self.assertEqual([(p["key"], p["kind"], p["default"]) for p in d["params"]],
+                         [("hidden", "int", 8), ("act", "select", "gelu"), ("scale", "float", 1.0), ("bias", "boolean", True)])
+        self.assertEqual(d["params"][1]["options"], ["gelu", "relu"])
+        self.assertIn("Zeile 2", describe("class Node(nn.Module):\n  def (")["error"])
+        self.assertIn("Standardwert", describe(FUSION.replace("hidden: int = 8", "hidden"))["error"])
+        self.assertIn("reserviert", describe(FUSION.replace("bias: bool", "code: bool"))["error"])
+
+    def test_code_mit_zwei_eingaengen_und_ausgaengen(self):
+        nodes = [{"id": "a", "type": "dense", "params": {"outputSize": 6, "implicitPool": False}},
+                 {"id": "b", "type": "dense", "params": {"outputSize": 6, "implicitPool": False}},
+                 {"id": "c", "type": "code", "params": {"code": FUSION, "hidden": "4", "act": "relu", "bias": "false"}},
+                 {"id": "d", "type": "add_node", "params": {}}]
+        edges = [{"source": "a", "target": "c", "targetHandle": "in"}, {"source": "b", "target": "c", "targetHandle": "skip"},
+                 {"source": "c", "target": "d", "sourceHandle": "out", "targetHandle": "a"},
+                 {"source": "c", "target": "d", "sourceHandle": "gate", "targetHandle": "b"}]
+        g = migrate_v1(nodes, edges)
+        m = SynapseModule(g, input_shape=(1, 3))
+        self.assertEqual(m.layers["c"].inner.out_features, 4)
+        self.assertIsNone(m.layers["c"].inner.bias)
+        self.assertEqual(m.input_shapes["c"], {"x": (1, 6), "skip": (1, 6)})
+        self.assertEqual(check_graph(g, (1, 3))["errors"], [])
+        exported, runtime = run_export(m, (1, 3))
+        x = torch.randn(2, 3)
+        self.assertLess((exported(x) - runtime(x)).abs().max().item(), 1e-5)
+
+    def test_optionaler_eingang_darf_fehlen(self):
+        m = SynapseModule(chain(("code", {"code": FUSION})), input_shape=(1, 5))
+        self.assertEqual(m.input_shapes["n0"], {"x": (1, 5)})
+        self.assertEqual(tuple(m(torch.randn(2, 5)).shape), (2, 5))
 
     def test_neuron_ebene_mit_eigener_formel(self):
         code = """class Node(nn.Module):

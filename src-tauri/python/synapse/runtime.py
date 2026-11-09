@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 
+from .codenode import code_shape, info_of
 from .graph import ENTRY, Graph
 
 Key = Tuple[str, str]
@@ -49,6 +50,8 @@ class SynapseModule(nn.Module):
                 self.input_shapes[nid] = shapes.get("in")
                 try:
                     layers[nid] = spec.build(node.params, shapes)
+                    if node.type == "code":
+                        self.input_shapes[nid] = code_shape(info_of(node.params), shapes)
                 except Exception as e:
                     if on_node:
                         on_node(nid, None, e)
@@ -75,12 +78,12 @@ class SynapseModule(nn.Module):
         node = self.node_map[nid]
         wired = self.incoming.get(nid, {})
         got: Dict[str, torch.Tensor] = {}
-        for port in node.spec.inputs:
+        for port in node.inputs:
             if port.id in wired:
                 got[port.id] = values[wired[port.id]]
             elif port.fallback and port.fallback in got:
                 got[port.id] = got[port.fallback]
-            elif port.fallback is None:
+            elif port.fallback is None and not port.optional:
                 raise ValueError(f"Eingang '{port.id}' von Node {nid} ({node.type}) ist nicht verbunden")
         return got
 

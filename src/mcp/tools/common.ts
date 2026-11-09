@@ -1,6 +1,6 @@
 // Werkzeug-Helfer, die mehrere Domaenen brauchen.
 
-import { startJob, waitForJob } from '../jobs';
+import { startJob, waitForJob, type JobControl } from '../jobs';
 import { fail, ok } from '../util';
 import type { CallToolResult } from '../types';
 
@@ -15,7 +15,7 @@ export const INLINE_WAIT_MS = 20_000;
 export async function runAsJob<T>(
   kind: string,
   label: string,
-  work: () => Promise<T>,
+  work: (ctl: JobControl) => Promise<T>,
   opts: { waitMs?: number; describe: (result: T) => string; shape?: (result: T) => unknown },
 ): Promise<CallToolResult> {
   const job = startJob(kind, label, work);
@@ -29,8 +29,8 @@ export async function runAsJob<T>(
     return fail(`${label} failed: ${now.error}`, { job_id: job.id, state: 'error', error: now.error });
   }
   return ok(
-    `${label} started in the background (job_id ${job.id}). Call system_job_status with this job_id to get the result.`,
-    { job_id: job.id, state: 'running' },
+    `${label} started in the background (job_id ${job.id}). This is not an error. Call system_job_status with this job_id and wait_seconds 45, repeatedly, until state is done or error; downloads can take several minutes.${job.cancellable ? " If it is too large or too slow, stop it with system_job_cancel." : ""}`,
+    { job_id: job.id, state: 'running', cancellable: job.cancellable === true },
   );
 }
 

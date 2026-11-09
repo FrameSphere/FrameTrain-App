@@ -10,6 +10,7 @@ mod api_config;
 mod user_manager;
 mod model_manager;
 mod dataset_manager;
+mod dataset_fetch;
 mod training_manager;
 mod dev_trainer;
 mod version_manager;
@@ -20,6 +21,7 @@ mod plugin_commands;
 mod power_manager;
 mod model_host;
 mod synapse_service;
+mod custom_nodes;
 mod hosting_manager;
 mod hosting_desktop;
 mod hosting_api;
@@ -50,28 +52,44 @@ fn verify_api_key(api_key: String) -> Result<bool, String> {
     }
 }
 
+/// Alte Klartext-Ablage der Anmeldung (bis 1.6.x). Wird beim ersten Laden in
+/// den Schluesselbund uebernommen und danach geloescht.
+fn legacy_config_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app_handle.path().app_config_dir()
+        .map(|d| d.join("config.json"))
+        .map_err(|e| format!("Konnte Config-Verzeichnis nicht finden: {}", e))
+}
+
+/// Anmeldung (API-Key + Passwort) im Schluesselbund ablegen — nicht mehr im
+/// Klartext in config.json, wo jedes Programm des Nutzers sie lesen konnte.
 #[tauri::command]
 fn save_config(app_handle: tauri::AppHandle, _api_key: String, config: String) -> Result<(), String> {
-    let config_dir = app_handle.path().app_config_dir()
-        .map_err(|e| format!("Konnte Config-Verzeichnis nicht finden: {}", e))?;
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Konnte Config-Verzeichnis nicht erstellen: {}", e))?;
-    let config_path = config_dir.join("config.json");
-    fs::write(config_path, config)
-        .map_err(|e| format!("Konnte Config nicht speichern: {}", e))?;
+    secret_store::login_save(&config)?;
+    // Eine noch liegende Klartext-Datei sofort entfernen
+    if let Ok(p) = legacy_config_path(&app_handle) {
+        if p.exists() { let _ = fs::remove_file(p); }
+    }
     Ok(())
 }
 
 #[tauri::command]
 fn load_config(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let config_dir = app_handle.path().app_config_dir()
-        .map_err(|e| format!("Konnte Config-Verzeichnis nicht finden: {}", e))?;
-    let config_path = config_dir.join("config.json");
-    if !config_path.exists() {
+    if let Some(cfg) = secret_store::login_load()? {
+        return Ok(cfg);
+    }
+    // Umzug: alte config.json einmalig in den Schluesselbund heben
+    let legacy = legacy_config_path(&app_handle)?;
+    if !legacy.exists() {
         return Err("Keine Konfiguration gefunden".to_string());
     }
-    fs::read_to_string(config_path)
-        .map_err(|e| format!("Konnte Config nicht lesen: {}", e))
+    let raw = fs::read_to_string(&legacy)
+        .map_err(|e| format!("Konnte Config nicht lesen: {}", e))?;
+    // Nur loeschen, wenn der Schluesselbund sie sicher hat — sonst bliebe
+    // der Nutzer nach dem Update abgemeldet.
+    if secret_store::login_save(&raw).is_ok() {
+        let _ = fs::remove_file(&legacy);
+    }
+    Ok(raw)
 }
 
 #[tauri::command]
@@ -83,14 +101,14 @@ fn get_app_data_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn clear_config(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config_dir = app_handle.path().app_config_dir()
-        .map_err(|e| format!("Konnte Config-Verzeichnis nicht finden: {}", e))?;
-    let config_path = config_dir.join("config.json");
-    if config_path.exists() {
-        fs::remove_file(config_path)
+    secret_store::set_session_api_key(None);
+    let keychain = secret_store::login_clear();
+    let legacy = legacy_config_path(&app_handle)?;
+    if legacy.exists() {
+        fs::remove_file(legacy)
             .map_err(|e| format!("Konnte Config nicht löschen: {}", e))?;
     }
-    Ok(())
+    keychain
 }
 
 /// Liest die config.json eines lokalen Modell-Ordners (für Plugin-Auto-Erkennung im Frontend).
@@ -175,6 +193,7 @@ fn main() {
         .manage(hosting_api::ApiState::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            dataset_fetch::cleanup_stale_on_start(app.handle());
             // Hosting: Einstellungen laden, Tray/Kuerzel/API anwenden, Modelle
             // mit "beim Start laden" hochfahren.
             let settings = hosting_manager::load_settings(app.handle());
@@ -202,6 +221,14 @@ fn main() {
             auth::validate_credentials,
             auth::set_diagnostics_consent,
             auth::accept_terms,
+            auth::sync_support_tickets,
+            dataset_fetch::hf_dataset_files,
+            dataset_fetch::fetch_dataset,
+            dataset_fetch::inspect_dataset,
+            dataset_fetch::stage_dataset,
+            dataset_fetch::discard_staged,
+            dataset_fetch::preview_media,
+            dataset_fetch::cancel_dataset_fetch,
             user_manager::login_user,
             user_manager::logout_user,
             user_manager::is_user_logged_in,
@@ -266,6 +293,7 @@ fn main() {
             synapse_service::synapse_export,
             synapse_service::synapse_infer,
             synapse_service::synapse_step,
+            synapse_service::synapse_describe_code,
             training_manager::get_current_training,
             training_manager::get_training_history,
             training_manager::delete_training_job,
@@ -332,6 +360,11 @@ fn main() {
             db_commands::save_canvas_model_design,
             db_commands::load_canvas_model_design,
             db_commands::delete_canvas_model_design,
+            custom_nodes::list_custom_nodes,
+            custom_nodes::save_custom_node,
+            custom_nodes::delete_custom_node,
+            custom_nodes::export_custom_node,
+            custom_nodes::read_custom_node_file,
             secret_store::secret_set,
             secret_store::secret_get,
             secret_store::secret_exists,

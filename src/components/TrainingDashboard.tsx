@@ -18,6 +18,7 @@ import { sendAppErrorReport, type AppErrorReport } from '../utils/errorReport';
 import ReportPreview from './ReportPreview';
 import { firstUsableLoss, lossImprovementPct } from './lossStats';
 import { dateLocale } from '../utils/dateLocale';
+import { userScopedKey } from '../utils/currentUser';
 
 // ── Session Storage ───────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export interface TrainingSession {
 }
 
 export function loadSessions(): TrainingSession[] {
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) ?? '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(userScopedKey(SESSION_KEY)) ?? '[]'); } catch { return []; }
 }
 
 export function saveSession(session: TrainingSession) {
@@ -58,7 +59,7 @@ export function saveSession(session: TrainingSession) {
   const idx = all.findIndex(s => s.id === session.id);
   if (idx >= 0) all[idx] = session;
   else all.unshift(session);
-  localStorage.setItem(SESSION_KEY, JSON.stringify(all.slice(0, 100)));
+  localStorage.setItem(userScopedKey(SESSION_KEY), JSON.stringify(all.slice(0, 100)));
 }
 
 export function getSession(id: string): TrainingSession | undefined {

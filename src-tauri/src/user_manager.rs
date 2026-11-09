@@ -35,6 +35,7 @@ pub async fn login_user(
         
         db.set_current_user(validation.user_id.clone());
     }
+    crate::secret_store::set_session_api_key(Some(api_key));
     
     // 3. Create session
     let session = UserSession {
@@ -58,6 +59,8 @@ pub fn logout_user(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| format!("Database lock error: {}", e))?;
     
     db.clear_current_user();
+    drop(db);
+    crate::secret_store::set_session_api_key(None);
     
     println!("✅ User logged out");
     

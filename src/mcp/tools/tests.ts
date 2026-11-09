@@ -18,7 +18,7 @@ export const testsTools: McpTool[] = [
   defineTool({
     name: 'tests_start',
     title: 'Start test',
-    description: 'Evaluates a trained model version on a dataset (accuracy, loss, per-sample predictions). Runs in the background; returns the test job immediately — poll tests_status, then read tests_results.',
+    description: 'Evaluates a trained model version on a dataset (accuracy, loss, per-sample predictions). Runs in the background; returns the test job immediately. tests_status reports progress, tests_results the outcome.',
     properties: {
       version_id: S.str('Trained version id.'),
       dataset_id: S.str('Dataset id (usually its test split is used).'),
@@ -39,7 +39,7 @@ export const testsTools: McpTool[] = [
         maxSamples: optNum(args, 'max_samples') ?? null, taskType: optStr(args, 'task_type') ?? null,
         pluginConfig: optObj(args, 'plugin_config') ?? null,
       });
-      return ok(`Test started (job ${job.id}). Poll tests_status.`, { job });
+      return ok(`Test started (job ${job.id}). Progress: tests_status.`, { job });
     },
   }),
   defineTool({
@@ -58,6 +58,7 @@ export const testsTools: McpTool[] = [
     title: 'Stop test',
     description: 'Stops the running evaluation job started with tests_start.',
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run() {
       await call('stop_test');
       return ok('Stop requested.', { stopped: true });

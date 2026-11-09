@@ -4,6 +4,7 @@
 // die Leinwand, sonst in den Autosave, den der Builder beim Oeffnen laedt.
 // Graph-Edits nutzen denselben Executor wie der eingebaute Synapse-Agent.
 
+import { instanceFromRecord, type CodeDescription, type CustomNodeRecord } from '../../components/synapse/customNodes';
 import type { Edge, Node } from '@xyflow/react';
 import { NODE_DEFINITIONS, type NodeCategory } from '../../components/synapse/nodeTypes';
 import blueprints from '../../components/synapse/blueprints.json';
@@ -68,7 +69,7 @@ const COMPACT_EDGE: JsonSchema = S.obj('Edge from source node output port to tar
   targetHandle: S.str('Input port id of the target (default: first input).'),
 }, { required: ['source', 'target'] });
 
-const EDIT_OP: JsonSchema = S.obj('One edit operation. op is one of add_node(nodeType, id?, position?), remove_node(nodeId), set_param(nodeId, key, value), set_label(nodeId, label), move_node(nodeId, position), add_edge(source, target, sourceHandle?, targetHandle?), remove_edge(edgeId | source+target).', {
+const EDIT_OP: JsonSchema = S.obj('One edit operation. op is one of add_node(nodeType, id?, position?) — nodeType may be custom:<id> for custom nodes of the user, remove_node(nodeId), set_param(nodeId, key, value), set_label(nodeId, label), move_node(nodeId, position), add_edge(source, target, sourceHandle?, targetHandle?), remove_edge(edgeId | source+target).', {
   op: S.enumOf('Operation.', ['add_node', 'remove_node', 'set_param', 'set_label', 'move_node', 'add_edge', 'remove_edge']),
   nodeType: S.str('add_node: node type.'),
   id: S.str('add_node: id for the new node.'),
@@ -108,7 +109,7 @@ export const synapseTools: McpTool[] = [
   defineTool({
     name: 'synapse_node_catalog',
     title: 'Node catalog',
-    description: 'Lists the node types available in the Synapse Builder with category, description, input/output port ids and parameters (key, type, default, options, range). Filter by category (data, layer, activation, training, math, logic) or by types to keep the answer small. Read this before building or editing a graph.',
+    description: 'Lists the node types available in the Synapse Builder (plus the user\'s own custom nodes with a ready node_template) with category, description, input/output port ids and parameters (key, type, default, options, range). Filter by category (data, layer, activation, training, math, logic) or by types to keep the answer small. Lists the building blocks for a graph.',
     properties: {
       category: S.enumOf('Only this category.', ['data', 'layer', 'activation', 'training', 'math', 'logic']),
       types: S.strArr('Only these node types.'),
@@ -125,7 +126,19 @@ export const synapseTools: McpTool[] = [
         outputs: d.outputs.map((p) => ({ id: p.id, kind: p.portType })),
         ...(withParams ? { params: d.params.map((p) => ({ key: p.key, type: p.type, default: p.default, ...(p.options ? { options: p.options } : {}), ...(p.min !== undefined ? { min: p.min } : {}), ...(p.max !== undefined ? { max: p.max } : {}), ...(p.description ? { description: p.description } : {}) })) } : {}),
       }));
-      return ok(`${items.length} node type(s).`, items);
+      // Eigene Nodes des Nutzers: als fertige Vorlage fuer add_node / synapse_graph_set.
+      const own = (!cat || cat === 'layer' || cat === 'logic') && !types
+        ? await call<CustomNodeRecord[]>('list_custom_nodes').catch(() => [] as CustomNodeRecord[])
+        : [];
+      const custom = own.map((r) => ({
+        node_type: `custom:${r.id}`, name: r.name, kind: r.kind, version: r.version, description: r.definition.description,
+        inputs: (r.definition.inputs ?? []).map((p) => p.id), outputs: (r.definition.outputs ?? []).map((p) => p.id),
+        settings: (r.definition.params ?? []).map((p) => ({ key: p.key, type: p.type, default: p.default, ...(p.options ? { options: p.options } : {}) })),
+        node_template: { type: r.kind, label: r.name, params: (instanceFromRecord(r, NODE_DEFINITIONS.find((d) => d.type === r.kind)!, 'x', { x: 0, y: 0 }).data as { params: unknown }).params },
+      }));
+      if (custom.length === 0) return ok(`${items.length} node type(s).`, items);
+      return ok(`${items.length} node type(s), ${custom.length} custom node(s) of the user. Add a custom node with synapse_graph_edit add_node(nodeType=node_type), or put its node_template (type, label, params) into synapse_graph_set; edge handles are its input/output ids.`,
+        { node_types: items, custom_nodes: custom });
     },
   }),
   defineTool({
@@ -173,6 +186,7 @@ export const synapseTools: McpTool[] = [
     },
     required: ['nodes', 'edges'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const nodesIn = args.nodes as CompactNode[];
@@ -203,12 +217,15 @@ export const synapseTools: McpTool[] = [
     },
     required: ['ops'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const snap = readSynapseGraph(userId);
       const exec = createToolExecutor({
         nodes: snap.nodes, edges: snap.edges, setNodes: () => {}, setEdges: () => {},
         nodeDefinitions: NODE_DEFINITIONS, visualDelayMs: 0,
+        customNodes: await call<CustomNodeRecord[]>('list_custom_nodes').catch(() => [] as CustomNodeRecord[]),
+        describeCode: (code) => call<CodeDescription>('synapse_describe_code', { code, values: {}, shape: [1, 16] }),
       });
       const ops = args.ops as ToolArgs[];
       const results: { op: string; success: boolean; data?: unknown; error?: string }[] = [];
@@ -288,6 +305,7 @@ export const synapseTools: McpTool[] = [
     properties: { model_id: S.str('Canvas model id from synapse_models_list.') },
     required: ['model_id'],
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const modelId = reqStr(args, 'model_id');
@@ -308,6 +326,7 @@ export const synapseTools: McpTool[] = [
     description: 'Saves the current Synapse graph as a model in the library (graph, generated PyTorch code and IR). If the graph belongs to a saved model it is overwritten, unless name is given — then a new model is created. The model id can be used for synapse_train and the inference tab.',
     properties: { name: S.str('Create a new model with this name (instead of updating the loaded one).') },
     approval: 'once',
+    annotations: { destructiveHint: true },
     async run(args, ctx) {
       const userId = userOf(ctx);
       const snap = readSynapseGraph(userId);
@@ -321,7 +340,7 @@ export const synapseTools: McpTool[] = [
   defineTool({
     name: 'synapse_train',
     title: 'Train Synapse graph',
-    description: 'Trains the current Synapse graph (runtime IR) on a dataset. The graph must validate; graphs with a data loader node need a dataset_id of the matching kind. If the builder page is open, training runs there with live charts. Uses GPU/CPU for a long time — the user confirms each start. Follow progress with training_status (or synapse_train_status). Save the graph first (synapse_save) so the trained weights are attached to a model.',
+    description: 'Trains the current Synapse graph (runtime IR) on a dataset. The graph must validate; graphs with a data loader node need a dataset_id of the matching kind. If the builder page is open, training runs there with live charts. Uses GPU/CPU for a long time — the user confirms each start. Progress is reported by training_status (or synapse_train_status). Save the graph first (synapse_save) so the trained weights are attached to a model.',
     properties: {
       dataset_id: S.str('Dataset id (required when the graph has a loader node).'),
       epochs: S.int('Default 10.', { minimum: 1 }),
@@ -351,7 +370,7 @@ export const synapseTools: McpTool[] = [
       if (builder?.startTraining) {
         await builder.startTraining({ ...cfg, selectedDatasetId: ds?.id, selectedDatasetName: ds?.name });
         const current = await call<{ id: string } | null>('get_current_training').catch(() => null);
-        return ok(`Training started in the open Synapse Builder${current ? ` (job ${current.id})` : ''}. Poll training_status.`, { job_id: current?.id ?? null, runs_in: 'builder' });
+        return ok(`Training started in the open Synapse Builder${current ? ` (job ${current.id})` : ''}. Progress: training_status.`, { job_id: current?.id ?? null, runs_in: 'builder' });
       }
       const ir = buildCanvasGraphIR(snap.nodes, snap.edges, cfg);
       ir.training.gpuExplicit = true;
@@ -367,7 +386,7 @@ export const synapseTools: McpTool[] = [
       });
       registerVersionOnComplete(job.id, snap.modelName || 'Synapse Canvas Model', job.output_path ?? null);
       try { await call('enable_prevent_sleep'); } catch { /* optional */ }
-      return ok(`Training started (job ${job.id}). Poll training_status.${snap.modelId ? '' : ' Note: the graph is not saved as a model, so the weights will not be attached to one.'}`, { job_id: job.id, runs_in: 'background' });
+      return ok(`Training started (job ${job.id}). Progress: training_status.${snap.modelId ? '' : ' Note: the graph is not saved as a model, so the weights will not be attached to one.'}`, { job_id: job.id, runs_in: 'background' });
     },
   }),
   defineTool({

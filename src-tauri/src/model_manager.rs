@@ -544,6 +544,19 @@ pub fn list_plugin_requests(app_handle: tauri::AppHandle) -> Result<Vec<PluginRe
     Ok(serde_json::from_str(&fs::read_to_string(&file).unwrap_or_default()).unwrap_or_default())
 }
 
+/// Gehoert das Modell dem angemeldeten Nutzer? Umbenennen und Loeschen
+/// pruefen das vorher — sonst konnte ein Account per ID (App oder MCP) die
+/// Modelle eines anderen Accounts auf demselben Rechner veraendern.
+fn ensure_model_owned(db: &crate::database::Database, model_id: &str) -> Result<(), String> {
+    let user_id = db.require_user_id()?;
+    let n: i64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM models WHERE id = ?1 AND user_id = ?2",
+        [model_id, user_id.as_str()], |r| r.get(0),
+    ).map_err(|e| format!("DB: {}", e))?;
+    if n == 0 { return Err("Modell nicht gefunden".to_string()); }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn rename_model(
     app_handle: tauri::AppHandle,
@@ -557,6 +570,7 @@ pub fn rename_model(
 
     {
         let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+        ensure_model_owned(&db, &model_id)?;
         db.conn.execute("UPDATE models SET name = ?1 WHERE id = ?2", [name, model_id.as_str()])
             .map_err(|e| format!("Umbenennen: {}", e))?;
     }
@@ -584,6 +598,11 @@ pub fn delete_model(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
     if !is_safe_id(&model_id) { return Err("Ungültige Modell-ID".to_string()); }
+    // Besitz pruefen, BEVOR irgendetwas auf der Platte geloescht wird
+    {
+        let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+        ensure_model_owned(&db, &model_id)?;
+    }
     let models_dir = get_models_dir(&app_handle)?;
     let model_path = models_dir.join(&model_id);
     if model_path.exists() {
