@@ -33,3 +33,41 @@ export function takeRequestedSettingsTab(): string | null {
   requestedSettingsTab = null;
   return t;
 }
+
+// Welches Modell die Zielseite vorauswaehlen soll (Aktionen der Startseite).
+// Gilt nur fuer genau diese Seite und wird beim Lesen geleert.
+export interface ModelFocus { modelId: string; versionId?: string | null; datasetId?: string | null }
+
+let requestedFocus: { view: AppView; focus: ModelFocus } | null = null;
+
+export function navigateToModel(view: AppView, focus: ModelFocus) {
+  requestedFocus = { view, focus };
+  navigateTo(view);
+}
+
+export function takeModelFocus(view: AppView): ModelFocus | null {
+  if (requestedFocus?.view !== view) return null;
+  const { focus } = requestedFocus;
+  // Erst nach dem Render leeren: StrictMode ruft Effekte im Dev-Modus doppelt auf.
+  setTimeout(() => { requestedFocus = null; }, 0);
+  return focus;
+}
+
+// Modelle, die der Coach per Name ansteuern darf ("[[go:tests:t5-small]]"). Die
+// Startseite meldet sie mit denselben Fokus-Daten wie ihre eigenen Knoepfe.
+let modelTargets = new Map<string, ModelFocus>();
+
+export function setModelTargets(targets: Map<string, ModelFocus>) {
+  modelTargets = targets;
+}
+
+export function hasModelTarget(name: string): boolean {
+  return modelTargets.has(name.trim().toLowerCase());
+}
+
+/** Springt mit Modell, wenn der Name bekannt ist, sonst nur zur Seite. */
+export function navigateToModelByName(view: AppView, name: string) {
+  const focus = modelTargets.get(name.trim().toLowerCase());
+  if (focus) navigateToModel(view, focus);
+  else navigateTo(view);
+}

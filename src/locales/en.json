@@ -23,58 +23,159 @@
     "home": "Home"
   },
   "home": {
+    "pipeline": {
+      "view": "View",
+      "pipeline": "Pipeline",
+      "briefing": "Briefing",
+      "new": "New",
+      "original": "Pretrained",
+      "showAll": "Show all",
+      "more": "{n} more models",
+      "more_one": "1 more model",
+      "running": "Training, {pct}%",
+      "sleepRisk": "This computer may go to sleep during the run",
+      "keepAwake": "Keep awake",
+      "title": {
+        "empty": "Start with a model"
+      },
+      "cols": {
+        "model": "Model",
+        "data": "Data",
+        "training": "Training",
+        "test": "Test",
+        "hosting": "Hosting",
+        "duration": "Duration",
+        "last": "Last activity"
+      },
+      "group": {
+        "attention": "Needs attention",
+        "ready": "Ready to host",
+        "test": "Ready to test",
+        "next": "Next step",
+        "hosted": "Hosted",
+        "unused": "Without a run"
+      },
+      "state": {
+        "failed": "Failed",
+        "stopped": "Stopped",
+        "running": "Running",
+        "done": "Done",
+        "notTested": "Not tested"
+      },
+      "hosting": {
+        "ready": "Ready",
+        "loading": "Loading",
+        "idle": "Not loaded"
+      },
+      "next": {
+        "addDataset": "Add dataset",
+        "train": "Train",
+        "retryTrain": "Retry",
+        "startTest": "Start test",
+        "retryTest": "Retry",
+        "host": "Host model"
+      },
+      "note": {
+        "trainingFailed": "The last training failed.",
+        "trainingStopped": "Stopped, no new attempt since.",
+        "testFailed": "The last test did not finish.",
+        "testStopped": "The last test was stopped.",
+        "regression": "Best comparable run: {best}, latest run: {last}. Same data, same settings.",
+        "overfitting": "Validation loss {val} is well above train loss {train}. Possible overfitting.",
+        "weakResult": "Only {value}% in the last test."
+      },
+      "panel": {
+        "lossPerRun": "Final loss per run",
+        "openAnalysis": "Open in Analysis",
+        "oneRun": "Only one run so far, so there is no trend yet.",
+        "noRuns": "No finished training yet.",
+        "runs": "Runs",
+        "tests": "Tests",
+        "noTests": "No test yet.",
+        "finished": "Finished",
+        "loss": "Loss"
+      },
+      "run": {
+        "epoch": "Epoch",
+        "step": "Step",
+        "loss": "Train loss",
+        "elapsed": "Elapsed"
+      },
+      "compare": {
+        "title": "Compare",
+        "scale": "Accuracy, full bar = 100%",
+        "dataset": "Test dataset",
+        "lastTest": "Last test",
+        "best": "Best",
+        "sameDataset": "Same test dataset",
+        "mixedDatasets": "Different test datasets, not directly comparable",
+        "sameData": "Tested on the data it was trained on, so this result may be too high.",
+        "empty": "No test result yet. Run a test and the model appears here.",
+        "noResult": "Without a test result"
+      },
+      "first": {
+        "intro": "Each model gets one line here. It shows how far the model has come and what to do next.",
+        "model": "Your first model",
+        "data": "Add a dataset",
+        "dataHint": "From disk or Hugging Face",
+        "train": "Train",
+        "trainHint": "On this machine",
+        "test": "Test",
+        "testHint": "See how good it is",
+        "host": "Host",
+        "hostHint": "Use it in your apps"
+      },
+      "task": {
+        "seq_classification": "Text classification",
+        "token_classification": "Entities (NER/POS)",
+        "seq2seq": "Seq2Seq",
+        "causal_lm": "Language models",
+        "canvas": "Custom networks (Canvas)",
+        "audio_classification": "Audio classification",
+        "speech_recognition": "Speech recognition",
+        "sentence_embedding": "Embeddings",
+        "hf_image_classification": "Image classification",
+        "image_classification": "Image classification",
+        "video_classification": "Video classification",
+        "detect": "Object detection",
+        "text_to_image_lora": "Text to image",
+        "vision_language": "Vision and language",
+        "time_series": "Time series",
+        "other": "Other models"
+      },
+      "open": {
+        "training": "Open training",
+        "tests": "Open test",
+        "analysis": "Open in Analysis"
+      },
+      "bench": {
+        "chartTitle": "Result per test dataset",
+        "chartNote": "Each group is one test dataset, each colour one model. The axis starts at 0, and only results on the same test dataset stand side by side.",
+        "scatterTitle": "Accuracy vs speed · {dataset}",
+        "scatterNote": "Top left is best: accurate and fast. Helps choose what to host.",
+        "faster": "faster",
+        "noComparisonHint": "The dashed slot is for a second model. Test another model on {dataset}, then the results stand side by side. Best with data the models were not trained on.",
+        "fewSamples": "Only {n} samples, so this result says little. Aim for 50 or more.",
+        "speedChange": "Speed changed from {before} to {after} per sample since the previous test.",
+        "testDataset": "Test dataset",
+        "ranked": "ranked",
+        "model": "Model · version",
+        "result": "Result",
+        "samples": "Samples",
+        "speed": "Speed",
+        "perSample": "per sample",
+        "notOnDataset": "{model} has no result on this test dataset yet",
+        "freeSlot": "Room for a second model: test another model on this dataset",
+        "stepBetter": "{model}: {newer} is {points} points better than {older} on this dataset.",
+        "stepWorse": "{model}: {newer} is {points} points worse than {older} on this dataset.",
+        "stepSame": "{model}: {newer} scores the same as {older} on this dataset.",
+        "closeTogether": "Close together, enlarged",
+        "eyebrowBars": "Accuracy · per test dataset"
+      }
+    },
     "newTraining": "New training",
-    "summary": {
-      "models": "{n} models",
-      "models_one": "1 model",
-      "datasets": "{n} datasets",
-      "datasets_one": "1 dataset",
-      "runs": "{n} runs",
-      "runs_one": "1 run",
-      "running": "{n} trainings are running.",
-      "running_one": "One training is running.",
-      "idle": "Nothing is running right now."
-    },
-    "worth": "Worth a look",
-    "cols": {
-      "model": "Model",
-      "loss": "Final loss",
-      "accuracy": "Accuracy",
-      "when": "When"
-    },
-    "status": {
-      "completed": "Done",
-      "failed": "Failed",
-      "stopped": "Stopped",
-      "running": "Running",
-      "pending": "Waiting"
-    },
-    "greeting": {
-      "morning": "Good morning",
-      "day": "Good afternoon",
-      "evening": "Good evening"
-    },
-    "lastVisit": "last here {when}",
-    "relative": {
-      "now": "just now",
-      "minutes": "{n} min ago",
-      "hours": "{n} h ago",
-      "days": "{n} days ago"
-    },
     "running": {
-      "title": "Currently running",
-      "step": "Step {step}/{total}",
-      "epoch": "Epoch {epoch}/{total}",
-      "loss": "Loss {loss}"
-    },
-    "since": {
-      "title": "Since your last visit",
-      "trainingDone": "Training finished: {model}",
-      "trainingFailed": "Training failed: {model}",
-      "trainingStopped": "Training stopped: {model}",
-      "finalLoss": "final loss {loss}",
-      "testDone": "Test finished: {model} ({version})",
-      "accuracy": "accuracy {value}%"
+      "title": "Currently running"
     },
     "firstRun": {
       "title": "Welcome to FrameTrain",
@@ -94,31 +195,6 @@
       "unusedDatasets_one": "{count} dataset has never been used for training ({first})",
       "trainingStopped": "The last run of {model} was stopped — no new attempt since"
     },
-    "stats": {
-      "models": "Models",
-      "versions": "Versions",
-      "datasets": "Datasets",
-      "trainings": "Trainings"
-    },
-    "recentTrainings": {
-      "title": "Recent trainings",
-      "empty": "No training run yet"
-    },
-    "recentTests": {
-      "title": "Recent tests",
-      "empty": "No test run yet"
-    },
-    "trend": {
-      "title": "Loss trend",
-      "subtitle": "Final loss of the last {count} completed trainings",
-      "subtitle_one": "Final loss of the last completed training",
-      "subtitleModel": "{model}: final loss of the last {count} completed trainings",
-      "subtitleModel_one": "{model}: final loss of the last completed training"
-    },
-    "ranking": {
-      "title": "Best results"
-    },
-    "viewAll": "View all",
     "briefing": {
       "title": "AI briefing",
       "create": "Create briefing",
@@ -3189,10 +3265,64 @@
   },
   "synapseBuilder": {
     "budget": "Weights {weights} · training from ~{training}",
-    "step": {"loss_cross_entropy": "cross entropy with random targets", "loss_mean_square": "mean square of the output", "button": "Show one learning step", "summary": "Loss {loss} ({name}), learning rate {lr}", "node": "Node", "output": "Output", "grad": "Gradient", "update": "Change"},
-    "blueprints": {"title": "Start from a blueprint or drag nodes from the library", "all": "All", "image": "Image", "text": "Text", "audio": "Audio", "video": "Video", "table": "Table"},
-    "custom": {"section": "Your nodes", "new": "New node", "import": "Import .ftnode", "edit": "Edit", "export": "Export as .ftnode", "delete": "Delete from library", "empty": "Build your first own node: code or block, then use it in any model.", "workshopTitle": "Node workshop", "editTitle": "Edit your node", "name": "Name", "icon": "Icon", "color": "Color", "description": "Description", "preview": "Preview", "badge": "own", "updateBadge": "Update", "probeShape": "Test run with shape", "badShape": "Shape as comma-separated numbers, e.g. 1, 64", "checking": "Checking…", "paramCount": "{count} parameters", "codeHint": "forward arguments become inputs (optional with a default). __init__ arguments after shape become settings. outputs = (\"a\", \"b\") gives several outputs. The code runs locally without a sandbox.", "blockContent": "Block content", "blockSummary": "{count} nodes, repeated {repeat}×", "foreignWarning": "This node comes from a file. Its code runs locally without a sandbox when checking and training. Read it before you save it.", "needName": "Give the node a name", "saveToLibrary": "Save to library", "saveVersion": "Save new version", "applyUpdate": "Use new version", "saved": "Saved “{name}” (version {version})", "exported": "Exported to {path}", "deleteConfirm": "Delete “{name}” from the library? Models that already use it keep their copy."},
-    "block": { "button": "Block", "tooltip": "Group selected nodes into a block (Shift + drag to select)", "needTwo": "Select at least two nodes.", "oneEdge": "A block needs exactly one edge in and one edge out." },
+    "step": {
+      "loss_cross_entropy": "cross entropy with random targets",
+      "loss_mean_square": "mean square of the output",
+      "button": "Show one learning step",
+      "summary": "Loss {loss} ({name}), learning rate {lr}",
+      "node": "Node",
+      "output": "Output",
+      "grad": "Gradient",
+      "update": "Change"
+    },
+    "blueprints": {
+      "title": "Start from a blueprint or drag nodes from the library",
+      "all": "All",
+      "image": "Image",
+      "text": "Text",
+      "audio": "Audio",
+      "video": "Video",
+      "table": "Table"
+    },
+    "custom": {
+      "section": "Your nodes",
+      "new": "New node",
+      "import": "Import .ftnode",
+      "edit": "Edit",
+      "export": "Export as .ftnode",
+      "delete": "Delete from library",
+      "empty": "Build your first own node: code or block, then use it in any model.",
+      "workshopTitle": "Node workshop",
+      "editTitle": "Edit your node",
+      "name": "Name",
+      "icon": "Icon",
+      "color": "Color",
+      "description": "Description",
+      "preview": "Preview",
+      "badge": "own",
+      "updateBadge": "Update",
+      "probeShape": "Test run with shape",
+      "badShape": "Shape as comma-separated numbers, e.g. 1, 64",
+      "checking": "Checking…",
+      "paramCount": "{count} parameters",
+      "codeHint": "forward arguments become inputs (optional with a default). __init__ arguments after shape become settings. outputs = (\"a\", \"b\") gives several outputs. The code runs locally without a sandbox.",
+      "blockContent": "Block content",
+      "blockSummary": "{count} nodes, repeated {repeat}×",
+      "foreignWarning": "This node comes from a file. Its code runs locally without a sandbox when checking and training. Read it before you save it.",
+      "needName": "Give the node a name",
+      "saveToLibrary": "Save to library",
+      "saveVersion": "Save new version",
+      "applyUpdate": "Use new version",
+      "saved": "Saved “{name}” (version {version})",
+      "exported": "Exported to {path}",
+      "deleteConfirm": "Delete “{name}” from the library? Models that already use it keep their copy."
+    },
+    "block": {
+      "button": "Block",
+      "tooltip": "Group selected nodes into a block (Shift + drag to select)",
+      "needTwo": "Select at least two nodes.",
+      "oneEdge": "A block needs exactly one edge in and one edge out."
+    },
     "auto": "auto",
     "liveOk": "✓ Check passed · {params} parameters",
     "title": "Synapse Builder",

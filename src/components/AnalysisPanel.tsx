@@ -29,6 +29,7 @@ import { dateLocale } from '../utils/dateLocale';
 import { unwrapBoldHeading } from './ui/MarkdownText';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { templateName as tplName, templateDescription as tplDescription } from '../utils/templateText';
+import { takeModelFocus } from '../ui/navigationEvents';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1495,6 +1496,8 @@ export default function AnalysisPanel({ initialVersionId }: AnalysisPanelProps) 
         ? list.find(m => m.versions.some(v => v.id === initialVersionId))
         : undefined;
       if (wanted) { setSelectedModelId(wanted.id); return; }
+      const focus = takeModelFocus('analysis');
+      if (focus && list.some(m => m.id === focus.modelId)) { setSelectedModelId(focus.modelId); return; }
       // Vorwahl: das zuletzt erfolgreich trainierte Modell. Vorher war es das
       // erste mit irgendeiner Version — die Root-Version eines nie trainierten
       // Modells (z.B. yolo-obb) zeigte dann nur "No Training Data".
