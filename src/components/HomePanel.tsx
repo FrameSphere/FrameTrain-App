@@ -22,7 +22,7 @@ import { FirstRunSteps, PipelineHead, PipelineList } from './HomeStellwerk';
 import { BenchmarkView } from './BenchmarkView';
 import { buildBenchmarks } from './homeBenchmarks';
 import { buildInsights, buildBriefingFacts, factsHash, type InsightInput } from './homeInsights';
-import { buildCompare, buildPipeline, homeHeadline } from './homePipeline';
+import { buildCompare, buildPipeline, homeHeadline, pipelineSections } from './homePipeline';
 import { buildHomeCoachContext } from './homeCoachContext';
 import type { HostInfo } from './hosting/hostingModel';
 
@@ -215,6 +215,17 @@ export default function HomePanel({ userId }: HomePanelProps) {
       : headline.kind === 'clear' ? t('home.pipeline.title.clear')
         : headline.kind === 'noData' ? t('home.pipeline.title.noData')
           : t('home.pipeline.title.empty');
+  // Zweiter Satz in gedaempfter Farbe wie im Website-Hero ("Your data. Your GPU. Your model."):
+  // was nach den offenen Punkten als Naechstes geht.
+  const subline = (() => {
+    if (headline.kind !== 'attention' && headline.kind !== 'clear' && headline.kind !== 'training') return null;
+    const counts = Object.fromEntries(pipelineSections(rows).sections.map(s => [s.key, s.rows.length]));
+    for (const key of ['ready', 'test', 'hosted'] as const) {
+      const n = counts[key] ?? 0;
+      if (n > 0) return t(`home.pipeline.title.then.${key}${n === 1 ? '_one' : ''}`, { n: String(n) });
+    }
+    return null;
+  })();
 
   // Aufgabe je Modell: dieselbe Erkennung wie im Training, nicht der Modellname.
   // Gruppiert wird nach Aufgabe, nicht nach Plugin: BERT und XLM-RoBERTa sind beide
@@ -306,7 +317,7 @@ export default function HomePanel({ userId }: HomePanelProps) {
   return (
     <div className="ft-sw">
       <header className="ft-sw-top">
-        <h1>{title}</h1>
+        <h1>{title}{subline && <>.<span className="ft-h1-sub"> {subline}</span></>}</h1>
         {hasData ? (
           <>
             <div className="ft-seg" role="group" aria-label={t('home.pipeline.view')}>

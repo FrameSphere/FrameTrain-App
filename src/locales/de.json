@@ -41,7 +41,15 @@
         "training": "{model} trainiert",
         "clear": "Alles auf Stand",
         "empty": "Starte mit einem Modell",
-        "noData": "Gib deinen Modellen Daten"
+        "noData": "Gib deinen Modellen Daten",
+        "then": {
+          "ready": "{n} sind bereit zum Hosten.",
+          "ready_one": "{n} ist bereit zum Hosten.",
+          "test": "{n} sind bereit zum Testen.",
+          "test_one": "{n} ist bereit zum Testen.",
+          "hosted": "{n} sind gehostet.",
+          "hosted_one": "{n} ist gehostet."
+        }
       },
       "cols": {
         "model": "Modell",
@@ -156,7 +164,7 @@
       "bench": {
         "chartTitle": "Ergebnis je Test-Dataset",
         "chartNote": "Jede Gruppe ist ein Test-Dataset, jede Farbe ein Modell. Die Achse beginnt bei 0, und nebeneinander steht nur, was auf demselben Test-Dataset gemessen wurde.",
-        "scatterTitle": "Genauigkeit gegen Geschwindigkeit auf {dataset}",
+        "scatterTitle": "Genauigkeit gegen Tempo · {dataset}",
         "scatterNote": "Oben links ist am besten: genau und schnell. Hilft bei der Wahl, was du hostest.",
         "faster": "schneller",
         "noComparisonHint": "Der gestrichelte Platz ist für ein zweites Modell. Teste ein weiteres Modell auf {dataset}, dann stehen die Ergebnisse nebeneinander. Am besten mit Daten, auf denen die Modelle nicht trainiert wurden.",
@@ -174,7 +182,8 @@
         "stepBetter": "{model}: {newer} ist auf diesem Dataset {points} Punkte besser als {older}.",
         "stepWorse": "{model}: {newer} ist auf diesem Dataset {points} Punkte schlechter als {older}.",
         "stepSame": "{model}: {newer} liegt auf diesem Dataset gleichauf mit {older}.",
-        "closeTogether": "Dicht beieinander, vergrößert"
+        "closeTogether": "Dicht beieinander, vergrößert",
+        "eyebrowBars": "Genauigkeit · je Test-Dataset"
       }
     },
     "newTraining": "Neues Training",

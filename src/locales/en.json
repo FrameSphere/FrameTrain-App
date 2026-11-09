@@ -41,7 +41,15 @@
         "training": "{model} is training",
         "clear": "Everything is up to date",
         "empty": "Start with a model",
-        "noData": "Add data to your models"
+        "noData": "Add data to your models",
+        "then": {
+          "ready": "{n} are ready to host.",
+          "ready_one": "{n} is ready to host.",
+          "test": "{n} are ready to test.",
+          "test_one": "{n} is ready to test.",
+          "hosted": "{n} are hosted.",
+          "hosted_one": "{n} is hosted."
+        }
       },
       "cols": {
         "model": "Model",
@@ -156,7 +164,7 @@
       "bench": {
         "chartTitle": "Result per test dataset",
         "chartNote": "Each group is one test dataset, each colour one model. The axis starts at 0, and only results on the same test dataset stand side by side.",
-        "scatterTitle": "Accuracy vs speed on {dataset}",
+        "scatterTitle": "Accuracy vs speed · {dataset}",
         "scatterNote": "Top left is best: accurate and fast. Helps choose what to host.",
         "faster": "faster",
         "noComparisonHint": "The dashed slot is for a second model. Test another model on {dataset}, then the results stand side by side. Best with data the models were not trained on.",
@@ -174,7 +182,8 @@
         "stepBetter": "{model}: {newer} is {points} points better than {older} on this dataset.",
         "stepWorse": "{model}: {newer} is {points} points worse than {older} on this dataset.",
         "stepSame": "{model}: {newer} scores the same as {older} on this dataset.",
-        "closeTogether": "Close together, enlarged"
+        "closeTogether": "Close together, enlarged",
+        "eyebrowBars": "Accuracy · per test dataset"
       }
     },
     "newTraining": "New training",

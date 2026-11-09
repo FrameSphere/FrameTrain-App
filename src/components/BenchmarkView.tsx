@@ -386,6 +386,8 @@ export function BenchmarkView({ tasks, withoutResult, taskLabel, f }: {
             <h2 className="ft-gh">{taskLabel(task.key)}<b>{task.modelCount + task.pending.length}</b></h2>
             {task.datasets.some(d => d.results.some(r => r.metric.fraction !== null)) && (
               <>
+                <div className="ft-chart-card">
+                <p className="ft-eyebrow">{t('home.pipeline.bench.eyebrowBars')}</p>
                 <div className="ft-legend">
                   {task.series.map(m => (
                     <span key={m.key}><i className="ft-swatch" style={{ background: seriesFill(m) }} aria-hidden="true" />{seriesName(m)}</span>
@@ -395,12 +397,13 @@ export function BenchmarkView({ tasks, withoutResult, taskLabel, f }: {
                 {ranked.length === 0 && (
                   <p className="ft-chart-note">{t('home.pipeline.bench.noComparisonHint', { dataset: task.datasets[0].name })}</p>
                 )}
+                </div>
                 {scatterSet && (
-                  <>
-                    <h3 className="ft-chart-h">{t('home.pipeline.bench.scatterTitle', { dataset: scatterSet.name })}</h3>
+                  <div className="ft-chart-card">
+                    <p className="ft-eyebrow">{t('home.pipeline.bench.scatterTitle', { dataset: scatterSet.name })}</p>
                     <p className="ft-chart-note">{t('home.pipeline.bench.scatterNote')}</p>
                     <BenchScatter task={task} set={scatterSet} f={f} hover={hover} onHover={setHover} />
-                  </>
+                  </div>
                 )}
               </>
             )}
