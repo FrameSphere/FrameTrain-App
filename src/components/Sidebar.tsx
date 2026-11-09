@@ -66,7 +66,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
   const initial = (userEmail.trim()[0] ?? '?').toUpperCase();
 
   return (
-    <aside className="ft-glass ft-sidebar flex-none w-[244px] rounded-[18px] flex flex-col min-h-0">
+    <aside className="ft-glass ft-sidebar flex-none w-[244px] rounded-[12px] flex flex-col min-h-0">
       {/* Kopf: Ampel-Platz (macOS) und Marke. Ziehbar wie eine Titelleiste. */}
       <div data-tauri-drag-region className={`flex items-center gap-2.5 px-4 ${IS_MAC ? 'pt-[50px]' : 'pt-4'} pb-3`}>
         <BrandMark size={26} />
@@ -97,7 +97,7 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
                       {livePct}%
                     </span>
                   ) : item.beta ? (
-                    <span className="ml-auto font-mono text-[9.5px] tracking-[0.08em] text-gray-500">BETA</span>
+                    <span className="ml-auto text-[12px] font-normal text-gray-500">Beta</span>
                   ) : null}
                 </button>
               );

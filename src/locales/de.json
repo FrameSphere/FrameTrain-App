@@ -23,58 +23,159 @@
     "home": "Start"
   },
   "home": {
+    "pipeline": {
+      "view": "Ansicht",
+      "pipeline": "Pipeline",
+      "briefing": "Briefing",
+      "new": "Neu",
+      "original": "Vortrainiert",
+      "showAll": "Alle zeigen",
+      "more": "{n} weitere Modelle",
+      "more_one": "1 weiteres Modell",
+      "running": "Training, {pct} %",
+      "sleepRisk": "Dieser Mac könnte während des Laufs einschlafen",
+      "keepAwake": "Wach halten",
+      "title": {
+        "empty": "Starte mit einem Modell"
+      },
+      "cols": {
+        "model": "Modell",
+        "data": "Daten",
+        "training": "Training",
+        "test": "Test",
+        "hosting": "Hosting",
+        "duration": "Dauer",
+        "last": "Zuletzt"
+      },
+      "group": {
+        "attention": "Braucht dich",
+        "ready": "Bereit zum Hosten",
+        "test": "Bereit zum Testen",
+        "next": "Nächster Schritt",
+        "hosted": "Gehostet",
+        "unused": "Ohne Lauf"
+      },
+      "state": {
+        "failed": "Fehler",
+        "stopped": "Gestoppt",
+        "running": "Läuft",
+        "done": "Fertig",
+        "notTested": "Nicht getestet"
+      },
+      "hosting": {
+        "ready": "Bereit",
+        "loading": "Lädt",
+        "idle": "Nicht geladen"
+      },
+      "next": {
+        "addDataset": "Dataset hinzufügen",
+        "train": "Trainieren",
+        "retryTrain": "Erneut",
+        "startTest": "Test starten",
+        "retryTest": "Erneut",
+        "host": "Hosten"
+      },
+      "note": {
+        "trainingFailed": "Das letzte Training ist fehlgeschlagen.",
+        "trainingStopped": "Gestoppt, seitdem kein neuer Versuch.",
+        "testFailed": "Der letzte Test ist nicht durchgelaufen.",
+        "testStopped": "Der letzte Test wurde gestoppt.",
+        "regression": "Bester vergleichbarer Lauf: {best}, letzter Lauf: {last}. Gleiche Daten, gleiche Einstellungen.",
+        "overfitting": "Validation-Loss {val} liegt deutlich über Train-Loss {train}. Verdacht auf Overfitting.",
+        "weakResult": "Nur {value} % im letzten Test."
+      },
+      "panel": {
+        "lossPerRun": "Final-Loss je Lauf",
+        "openAnalysis": "In Analyse öffnen",
+        "oneRun": "Erst ein Lauf, daher noch kein Verlauf.",
+        "noRuns": "Noch kein abgeschlossenes Training.",
+        "runs": "Läufe",
+        "tests": "Tests",
+        "noTests": "Noch kein Test.",
+        "finished": "Beendet",
+        "loss": "Loss"
+      },
+      "run": {
+        "epoch": "Epoche",
+        "step": "Schritt",
+        "loss": "Train-Loss",
+        "elapsed": "Laufzeit"
+      },
+      "compare": {
+        "title": "Vergleich",
+        "scale": "Accuracy, voller Balken = 100 %",
+        "dataset": "Test-Dataset",
+        "lastTest": "Letzter Test",
+        "best": "Bestes",
+        "sameDataset": "Gleiches Test-Dataset",
+        "mixedDatasets": "Verschiedene Test-Datasets, nicht direkt vergleichbar",
+        "sameData": "Auf den Trainingsdaten getestet, das Ergebnis kann zu hoch sein.",
+        "empty": "Noch kein Testergebnis. Starte einen Test, dann erscheint das Modell hier.",
+        "noResult": "Ohne Testergebnis"
+      },
+      "first": {
+        "intro": "Jedes Modell bekommt hier eine Zeile. Sie zeigt, wie weit es ist und was als Nächstes ansteht.",
+        "model": "Dein erstes Modell",
+        "data": "Dataset hinzufügen",
+        "dataHint": "Von der Platte oder Hugging Face",
+        "train": "Trainieren",
+        "trainHint": "Auf diesem Rechner",
+        "test": "Testen",
+        "testHint": "Sehen, wie gut es ist",
+        "host": "Hosten",
+        "hostHint": "In deinen Apps nutzen"
+      },
+      "task": {
+        "seq_classification": "Textklassifikation",
+        "token_classification": "Entitäten (NER/POS)",
+        "seq2seq": "Seq2Seq",
+        "causal_lm": "Sprachmodelle",
+        "canvas": "Eigene Netze (Canvas)",
+        "audio_classification": "Audioklassifikation",
+        "speech_recognition": "Spracherkennung",
+        "sentence_embedding": "Embeddings",
+        "hf_image_classification": "Bildklassifikation",
+        "image_classification": "Bildklassifikation",
+        "video_classification": "Videoklassifikation",
+        "detect": "Objekterkennung",
+        "text_to_image_lora": "Text zu Bild",
+        "vision_language": "Bild und Sprache",
+        "time_series": "Zeitreihen",
+        "other": "Weitere Modelle"
+      },
+      "open": {
+        "training": "Training öffnen",
+        "tests": "Test öffnen",
+        "analysis": "In Analyse öffnen"
+      },
+      "bench": {
+        "chartTitle": "Ergebnis je Test-Dataset",
+        "chartNote": "Jede Gruppe ist ein Test-Dataset, jede Farbe ein Modell. Die Achse beginnt bei 0, und nebeneinander steht nur, was auf demselben Test-Dataset gemessen wurde.",
+        "scatterTitle": "Genauigkeit gegen Tempo · {dataset}",
+        "scatterNote": "Oben links ist am besten: genau und schnell. Hilft bei der Wahl, was du hostest.",
+        "faster": "schneller",
+        "noComparisonHint": "Der gestrichelte Platz ist für ein zweites Modell. Teste ein weiteres Modell auf {dataset}, dann stehen die Ergebnisse nebeneinander. Am besten mit Daten, auf denen die Modelle nicht trainiert wurden.",
+        "fewSamples": "Nur {n} Testbeispiele, das Ergebnis sagt wenig aus. Besser 50 oder mehr.",
+        "speedChange": "Geschwindigkeit seit dem vorherigen Test von {before} auf {after} pro Beispiel.",
+        "testDataset": "Test-Dataset",
+        "ranked": "gerankt",
+        "model": "Modell · Version",
+        "result": "Ergebnis",
+        "samples": "Beispiele",
+        "speed": "Tempo",
+        "perSample": "pro Beispiel",
+        "notOnDataset": "{model} hat auf diesem Test-Dataset noch kein Ergebnis",
+        "freeSlot": "Platz für ein zweites Modell: teste ein weiteres Modell auf diesem Dataset",
+        "stepBetter": "{model}: {newer} ist auf diesem Dataset {points} Punkte besser als {older}.",
+        "stepWorse": "{model}: {newer} ist auf diesem Dataset {points} Punkte schlechter als {older}.",
+        "stepSame": "{model}: {newer} liegt auf diesem Dataset gleichauf mit {older}.",
+        "closeTogether": "Dicht beieinander, vergrößert",
+        "eyebrowBars": "Genauigkeit · je Test-Dataset"
+      }
+    },
     "newTraining": "Neues Training",
-    "summary": {
-      "models": "{n} Modelle",
-      "models_one": "1 Modell",
-      "datasets": "{n} Datasets",
-      "datasets_one": "1 Dataset",
-      "runs": "{n} Läufe",
-      "runs_one": "1 Lauf",
-      "running": "{n} Trainings laufen.",
-      "running_one": "Ein Training läuft.",
-      "idle": "Gerade läuft nichts."
-    },
-    "worth": "Lohnt einen Blick",
-    "cols": {
-      "model": "Modell",
-      "loss": "Final-Loss",
-      "accuracy": "Genauigkeit",
-      "when": "Wann"
-    },
-    "status": {
-      "completed": "Fertig",
-      "failed": "Fehler",
-      "stopped": "Abgebrochen",
-      "running": "Läuft",
-      "pending": "Wartet"
-    },
-    "greeting": {
-      "morning": "Guten Morgen",
-      "day": "Guten Tag",
-      "evening": "Guten Abend"
-    },
-    "lastVisit": "zuletzt hier {when}",
-    "relative": {
-      "now": "gerade eben",
-      "minutes": "vor {n} Min.",
-      "hours": "vor {n} Std.",
-      "days": "vor {n} Tagen"
-    },
     "running": {
-      "title": "Läuft gerade",
-      "step": "Schritt {step}/{total}",
-      "epoch": "Epoche {epoch}/{total}",
-      "loss": "Loss {loss}"
-    },
-    "since": {
-      "title": "Seit deinem letzten Besuch",
-      "trainingDone": "Training abgeschlossen: {model}",
-      "trainingFailed": "Training fehlgeschlagen: {model}",
-      "trainingStopped": "Training gestoppt: {model}",
-      "finalLoss": "Final-Loss {loss}",
-      "testDone": "Test abgeschlossen: {model} ({version})",
-      "accuracy": "Genauigkeit {value}%"
+      "title": "Läuft gerade"
     },
     "firstRun": {
       "title": "Willkommen bei FrameTrain",
@@ -94,31 +195,6 @@
       "unusedDatasets_one": "{count} Dataset wurde noch nie für ein Training benutzt ({first})",
       "trainingStopped": "Letzter Lauf von {model} wurde abgebrochen — seitdem kein neuer Versuch"
     },
-    "stats": {
-      "models": "Modelle",
-      "versions": "Versionen",
-      "datasets": "Datasets",
-      "trainings": "Trainings"
-    },
-    "recentTrainings": {
-      "title": "Letzte Trainings",
-      "empty": "Noch kein Training gelaufen"
-    },
-    "recentTests": {
-      "title": "Letzte Tests",
-      "empty": "Noch kein Test gelaufen"
-    },
-    "trend": {
-      "title": "Loss-Trend",
-      "subtitle": "Final-Loss der letzten {count} abgeschlossenen Trainings",
-      "subtitle_one": "Final-Loss des letzten abgeschlossenen Trainings",
-      "subtitleModel": "{model}: Final-Loss der letzten {count} abgeschlossenen Trainings",
-      "subtitleModel_one": "{model}: Final-Loss des letzten abgeschlossenen Trainings"
-    },
-    "ranking": {
-      "title": "Beste Ergebnisse"
-    },
-    "viewAll": "Alle ansehen",
     "briefing": {
       "title": "KI-Briefing",
       "create": "Briefing erstellen",
@@ -3186,10 +3262,64 @@
   },
   "synapseBuilder": {
     "budget": "Gewichte {weights} · Training ab ~{training}",
-    "step": {"loss_cross_entropy": "Cross Entropy mit Zufallszielen", "loss_mean_square": "mittleres Quadrat der Ausgabe", "button": "Einen Lernschritt zeigen", "summary": "Loss {loss} ({name}), Lernrate {lr}", "node": "Node", "output": "Ausgabe", "grad": "Gradient", "update": "Änderung"},
-    "blueprints": {"title": "Mit einer Vorlage starten oder Nodes aus der Bibliothek ziehen", "all": "Alle", "image": "Bild", "text": "Text", "audio": "Audio", "video": "Video", "table": "Tabelle"},
-    "custom": {"section": "Eigene Nodes", "new": "Neuer Node", "import": ".ftnode importieren", "edit": "Bearbeiten", "export": "Als .ftnode exportieren", "delete": "Aus Bibliothek löschen", "empty": "Bau deinen ersten eigenen Node: Code oder Block, danach in jedem Modell nutzbar.", "workshopTitle": "Node-Werkstatt", "editTitle": "Eigenen Node bearbeiten", "name": "Name", "icon": "Icon", "color": "Farbe", "description": "Beschreibung", "preview": "So sieht er aus", "badge": "eigen", "updateBadge": "Update", "probeShape": "Probelauf mit Form", "badShape": "Form als Zahlen mit Komma, z. B. 1, 64", "checking": "Prüfe …", "paramCount": "{count} Parameter", "codeHint": "forward-Argumente werden Eingänge (mit Standardwert optional). __init__-Argumente nach shape werden Einstellungen. outputs = (\"a\", \"b\") ergibt mehrere Ausgänge. Der Code läuft lokal ohne Sandbox.", "blockContent": "Inhalt des Blocks", "blockSummary": "{count} Nodes, {repeat}× wiederholt", "foreignWarning": "Dieser Node stammt aus einer Datei. Sein Code läuft beim Prüfen und Trainieren lokal ohne Sandbox. Lies ihn, bevor du ihn speicherst.", "needName": "Gib dem Node einen Namen", "saveToLibrary": "In Bibliothek speichern", "saveVersion": "Neue Version speichern", "applyUpdate": "Neue Version übernehmen", "saved": "„{name}“ gespeichert (Version {version})", "exported": "Exportiert nach {path}", "deleteConfirm": "„{name}“ aus der Bibliothek löschen? Modelle, die ihn schon nutzen, behalten ihre Kopie."},
-    "block": { "button": "Block", "tooltip": "Markierte Nodes zu einem Block zusammenfassen (Umschalt + Ziehen zum Markieren)", "needTwo": "Markiere mindestens zwei Nodes.", "oneEdge": "Ein Block braucht genau eine Kante hinein und eine hinaus." },
+    "step": {
+      "loss_cross_entropy": "Cross Entropy mit Zufallszielen",
+      "loss_mean_square": "mittleres Quadrat der Ausgabe",
+      "button": "Einen Lernschritt zeigen",
+      "summary": "Loss {loss} ({name}), Lernrate {lr}",
+      "node": "Node",
+      "output": "Ausgabe",
+      "grad": "Gradient",
+      "update": "Änderung"
+    },
+    "blueprints": {
+      "title": "Mit einer Vorlage starten oder Nodes aus der Bibliothek ziehen",
+      "all": "Alle",
+      "image": "Bild",
+      "text": "Text",
+      "audio": "Audio",
+      "video": "Video",
+      "table": "Tabelle"
+    },
+    "custom": {
+      "section": "Eigene Nodes",
+      "new": "Neuer Node",
+      "import": ".ftnode importieren",
+      "edit": "Bearbeiten",
+      "export": "Als .ftnode exportieren",
+      "delete": "Aus Bibliothek löschen",
+      "empty": "Bau deinen ersten eigenen Node: Code oder Block, danach in jedem Modell nutzbar.",
+      "workshopTitle": "Node-Werkstatt",
+      "editTitle": "Eigenen Node bearbeiten",
+      "name": "Name",
+      "icon": "Icon",
+      "color": "Farbe",
+      "description": "Beschreibung",
+      "preview": "So sieht er aus",
+      "badge": "eigen",
+      "updateBadge": "Update",
+      "probeShape": "Probelauf mit Form",
+      "badShape": "Form als Zahlen mit Komma, z. B. 1, 64",
+      "checking": "Prüfe …",
+      "paramCount": "{count} Parameter",
+      "codeHint": "forward-Argumente werden Eingänge (mit Standardwert optional). __init__-Argumente nach shape werden Einstellungen. outputs = (\"a\", \"b\") ergibt mehrere Ausgänge. Der Code läuft lokal ohne Sandbox.",
+      "blockContent": "Inhalt des Blocks",
+      "blockSummary": "{count} Nodes, {repeat}× wiederholt",
+      "foreignWarning": "Dieser Node stammt aus einer Datei. Sein Code läuft beim Prüfen und Trainieren lokal ohne Sandbox. Lies ihn, bevor du ihn speicherst.",
+      "needName": "Gib dem Node einen Namen",
+      "saveToLibrary": "In Bibliothek speichern",
+      "saveVersion": "Neue Version speichern",
+      "applyUpdate": "Neue Version übernehmen",
+      "saved": "„{name}“ gespeichert (Version {version})",
+      "exported": "Exportiert nach {path}",
+      "deleteConfirm": "„{name}“ aus der Bibliothek löschen? Modelle, die ihn schon nutzen, behalten ihre Kopie."
+    },
+    "block": {
+      "button": "Block",
+      "tooltip": "Markierte Nodes zu einem Block zusammenfassen (Umschalt + Ziehen zum Markieren)",
+      "needTwo": "Markiere mindestens zwei Nodes.",
+      "oneEdge": "Ein Block braucht genau eine Kante hinein und eine hinaus."
+    },
     "auto": "auto",
     "liveOk": "✓ Prüfung ok · {params} Parameter",
     "title": "Synapse Builder",

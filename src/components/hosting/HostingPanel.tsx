@@ -11,7 +11,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import HostModelDialog from './HostModelDialog';
 import { quickSummary } from './QuickAccessSettings';
-import { navigateTo, requestSettingsTab } from '../../ui/navigationEvents';
+import { navigateTo, requestSettingsTab, takeModelFocus } from '../../ui/navigationEvents';
 import { Composer, MessageList, useHostChat } from './HostChat';
 import { useHosting, useHostingSettings } from './useHosting';
 import { taskKey, type HostInfo, type HostStatus } from './hostingModel';
@@ -140,7 +140,9 @@ export default function HostingPanel() {
   const { hosts, loaded } = useHosting();
   const { settings, status, reloadStatus } = useHostingSettings();
   const [selected, setSelected] = useState<string | null>(null);
-  const [dialog, setDialog] = useState(false);
+  // Von der Startseite: Dialog gleich mit diesem Modell oeffnen.
+  const [focusModel] = useState(() => takeModelFocus('hosting')?.modelId ?? null);
+  const [dialog, setDialog] = useState(focusModel !== null);
   const openSettings = () => { requestSettingsTab('quick'); navigateTo('settings'); };
 
   // Ein gerade gehostetes Modell steht oft noch nicht in der Liste, wenn
@@ -234,7 +236,7 @@ export default function HostingPanel() {
         </div>
       )}
 
-      {dialog && <HostModelDialog hosts={hosts} onClose={() => setDialog(false)} onHosted={hostNew} />}
+      {dialog && <HostModelDialog hosts={hosts} initialModelId={focusModel} onClose={() => setDialog(false)} onHosted={hostNew} />}
     </div>
   );
 }
