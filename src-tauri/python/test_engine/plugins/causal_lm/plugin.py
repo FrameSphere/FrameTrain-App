@@ -164,10 +164,21 @@ class Plugin:
         if chat and results:
             TestProtocol.status("running", f"ROUGE-L im Mittel: {sum(r['rougeL'] for r in results)/len(results):.3f}")
         elapsed = max(time.time() - started, 1e-6)
+        # Exakte Uebereinstimmung ist fuer freie Antworten fast immer 0 und erschien
+        # bisher als "Accuracy 3 %". Kennzahl ist jetzt ROUGE-L (0..1), Exact Match
+        # bleibt als Zusatzwert erhalten.
+        metrics = None
+        if chat and results:
+            metrics = {
+                "rouge_l": round(sum(r["rougeL"] for r in results) / len(results), 4),
+                "exact_match": round(exact / len(results), 4),
+            }
+        elif losses:
+            avg = sum(losses) / len(losses)
+            metrics = {"perplexity": round(math.exp(min(avg, 50)), 3)}
         TestProtocol.complete_dataset(
             results_file=str(results_file), total_samples=len(results),
-            # "Accuracy" heisst hier: Antwort (normalisiert) identisch zur Referenz.
-            accuracy=(exact / len(results)) if chat and results else None,
+            accuracy=None, metrics=metrics,
             correct=exact if chat else None,
             average_loss=(sum(losses) / len(losses)) if losses else None,
             average_inference_time=total_time / max(len(results), 1),

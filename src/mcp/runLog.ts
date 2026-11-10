@@ -136,7 +136,8 @@ export function summarizeRun(r: RunRecord | undefined, lines = 40) {
     status: r.status,
     last_progress: r.lastProgress ?? null,
     metric_points: r.metrics.length,
-    recent_lines: r.lines.slice(-lines),
+    // slice(-0) waere die ganze Liste: log_lines 0 lieferte alle Zeilen.
+    recent_lines: lines > 0 ? r.lines.slice(-lines) : [],
     error: r.error ?? null,
     updated_at: r.updatedAt,
   };

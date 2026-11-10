@@ -291,6 +291,39 @@ pub async fn delete_ai_analysis_report(
 // Interne Funktion: Full-Data nach Training speichern (wird von training_manager aufgerufen)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Entfernt Wiederholungen desselben Schritts (Abschlusszeilen) und uebernimmt
+/// dabei einen Val-Loss, falls die erste Zeile keinen hatte.
+pub(crate) fn clean_step_logs(step_logs: &[Value]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::with_capacity(step_logs.len());
+    for log in step_logs {
+        if let Some(prev) = out.last_mut() {
+            if prev["step"].as_i64().is_some() && prev["step"].as_i64() == log["step"].as_i64() {
+                if prev["val_loss"].is_null() && !log["val_loss"].is_null() {
+                    prev["val_loss"] = log["val_loss"].clone();
+                }
+                continue;
+            }
+        }
+        out.push(log.clone());
+    }
+    out
+}
+
+/// Schritte je Epoche aus dem Verlauf (letzter Schritt / letzte Epoche).
+fn steps_per_epoch(step_logs: &[Value]) -> Option<f64> {
+    let max_step = step_logs.iter().filter_map(|l| l["step"].as_i64()).max()?;
+    let max_epoch = step_logs.iter().filter_map(|l| l["epoch"].as_i64()).max()?;
+    if max_step <= 0 || max_epoch <= 0 { return None; }
+    Some(max_step as f64 / max_epoch as f64)
+}
+
+fn val_epoch(step: Option<i64>, logged_epoch: i64, spe: Option<f64>) -> i64 {
+    match (step, spe) {
+        (Some(st), Some(spe)) if st > 0 && spe > 0.0 => ((st as f64 / spe) - 1e-9).ceil().max(1.0) as i64,
+        _ => logged_epoch,
+    }
+}
+
 pub fn save_full_analysis_data(
     app_handle: &tauri::AppHandle,
     version_id: &str,
@@ -315,24 +348,39 @@ pub fn save_full_analysis_data(
         .filter(|d| *d > 0)
         .unwrap_or(wall_clock_secs);
 
+    // Abschlusszeilen der Engine (gleicher Schritt, Start-LR, Durchschnitts-Loss)
+    // entfernen; sie erschienen als Spitze am Ende des Verlaufs (Benchmark 09.11.).
+    let cleaned = clean_step_logs(step_logs);
+    let step_logs: &[Value] = &cleaned;
+
     // ── Epoch Summaries aus Step-Logs berechnen ──────────────────────────────
     let mut epoch_losses: std::collections::BTreeMap<i64, Vec<f64>> = std::collections::BTreeMap::new();
     let mut epoch_val:    std::collections::BTreeMap<i64, Vec<f64>> = std::collections::BTreeMap::new();
+    let steps_per_epoch = steps_per_epoch(step_logs);
 
     for log in step_logs {
         if let (Some(ep), Some(loss)) = (log["epoch"].as_i64(), log["train_loss"].as_f64()) {
+            // Auch der Train-Loss am Epochenende traegt schon die naechste Epoche
+            // (kurze Laeufe: Epoche 1 fehlte in der Uebersicht ganz).
+            let ep = val_epoch(log["step"].as_i64(), ep, steps_per_epoch);
             epoch_losses.entry(ep).or_default().push(loss);
         }
         if let (Some(ep), Some(val)) = (log["epoch"].as_i64(), log["val_loss"].as_f64()) {
+            // Die Auswertung am Epochenende traegt schon die naechste Epoche:
+            // nach dem Schritt zuordnen, sonst stand jeder Val-Loss eine Epoche zu spaet.
+            let ep = val_epoch(log["step"].as_i64(), ep, steps_per_epoch);
             epoch_val.entry(ep).or_default().push(val);
         }
     }
 
+    // Epochen mit nur einem Val-Loss sollen trotzdem erscheinen.
+    for ep in epoch_val.keys() { epoch_losses.entry(*ep).or_default(); }
     let epoch_summaries: Vec<Value> = epoch_losses.iter().map(|(ep, losses)| {
         let steps = losses.len();
-        let avg   = losses.iter().sum::<f64>() / steps as f64;
-        let min   = losses.iter().cloned().fold(f64::MAX, f64::min);
-        let max   = losses.iter().cloned().fold(f64::MIN, f64::max);
+        let has = steps > 0;
+        let avg   = has.then(|| losses.iter().sum::<f64>() / steps as f64);
+        let min   = has.then(|| losses.iter().cloned().fold(f64::MAX, f64::min));
+        let max   = has.then(|| losses.iter().cloned().fold(f64::MIN, f64::max));
         let val_l = epoch_val.get(ep).and_then(|v| {
             let s: f64 = v.iter().sum();
             Some(s / v.len() as f64)
@@ -560,5 +608,36 @@ mod task_metrics_tests {
         assert_eq!(keys.len(), 4, "{:?}", keys);
         assert_eq!(tm["perplexity"], 1.09);
         assert!(tm.get("backend").is_none() && tm.get("lora").is_none() && tm.get("accuracy").is_none());
+    }
+}
+
+#[cfg(test)]
+mod step_log_tests {
+    use super::*;
+
+    #[test]
+    fn abschlusszeilen_fallen_weg_und_val_loss_bleibt() {
+        let logs = vec![
+            json!({"epoch": 1, "step": 260, "train_loss": 0.42, "val_loss": null, "learning_rate": 0.00007}),
+            json!({"epoch": 2, "step": 267, "train_loss": 0.42, "val_loss": 0.43, "learning_rate": 0.00007}),
+            json!({"epoch": 3, "step": 801, "train_loss": 0.21, "val_loss": null, "learning_rate": 0.0000002}),
+            json!({"epoch": 3, "step": 801, "train_loss": 0.33, "val_loss": null, "learning_rate": 0.0001}),
+            json!({"epoch": 3, "step": 801, "train_loss": 0.33, "val_loss": 0.46, "learning_rate": 0.0001}),
+        ];
+        let c = clean_step_logs(&logs);
+        assert_eq!(c.len(), 3);
+        assert_eq!(c[2]["train_loss"], 0.21);
+        assert_eq!(c[2]["val_loss"], 0.46);
+        assert_eq!(c[2]["learning_rate"], 0.0000002);
+    }
+
+    #[test]
+    fn val_loss_gehoert_zur_abgeschlossenen_epoche() {
+        // 801 Schritte in 3 Epochen: die Auswertung bei Schritt 267 traegt schon epoch=2.
+        let spe = Some(267.0);
+        assert_eq!(val_epoch(Some(267), 2, spe), 1);
+        assert_eq!(val_epoch(Some(534), 3, spe), 2);
+        assert_eq!(val_epoch(Some(801), 3, spe), 3);
+        assert_eq!(val_epoch(None, 2, spe), 2);
     }
 }

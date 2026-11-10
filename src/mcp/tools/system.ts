@@ -4,6 +4,22 @@ import { cancelJob, getJob, listJobs, waitForJob } from '../jobs';
 import { call, defineTool, errorText, fail, ok, optNum, reqStr, S } from '../util';
 import type { McpTool } from '../types';
 import { MCP_DOMAINS } from '../types';
+import en from '../../locales/en.json';
+
+/**
+ * Plugin-Namen kommen als Uebersetzungsschluessel ("firstLaunch.pluginRegistry.yolo.name").
+ * Fuer den Assistenten werden sie mit den englischen Texten aufgeloest; vorher
+ * standen die rohen Schluessel in der Antwort (Benchmark 09.11.).
+ */
+export function resolveI18n(text: string): string {
+  if (!/^[A-Za-z][\w]*(\.[\w-]+)+$/.test(text)) return text;
+  let node: unknown = en;
+  for (const part of text.split('.')) {
+    if (node && typeof node === 'object' && part in (node as Record<string, unknown>)) node = (node as Record<string, unknown>)[part];
+    else return text;
+  }
+  return typeof node === 'string' ? node : text;
+}
 
 async function appVersion(): Promise<string | null> {
   try {
@@ -97,7 +113,7 @@ export const systemTools: McpTool[] = [
         hosting: 'Local model hosting: load/unload versions and run inference against hosted models.',
         system: 'App status, hardware, background jobs started by other tools.',
       };
-      const plist = Array.isArray(plugins) ? plugins.map((p) => ({ id: p.id, name: p.name, category: p.category, description: p.description })) : plugins;
+      const plist = Array.isArray(plugins) ? plugins.map((p) => ({ id: p.id, name: resolveI18n(p.name), category: p.category, description: resolveI18n(p.description) })) : plugins;
       return ok(`Domains: ${MCP_DOMAINS.join(', ')}.`, { domains, plugins: plist });
     },
   }),
@@ -115,6 +131,8 @@ export const systemTools: McpTool[] = [
       const id = reqStr(args, 'job_id');
       const wait = Math.min(45, Math.max(0, optNum(args, 'wait_seconds', 0)!));
       const job = wait > 0 ? await waitForJob(id, wait * 1000) : getJob(id);
+      if (!job && /^train_/.test(id)) return fail(`"${id}" is a training run. Use training_status with job_id "${id}" (wait_seconds lets it wait).`);
+      if (!job && /^test_/.test(id)) return fail(`"${id}" is a test run. Use tests_status (or tests_history) for it.`);
       if (!job) return fail(`Unknown job_id "${id}". Jobs are kept in memory until the app restarts.`);
       const secs = Math.round((Date.now() - Date.parse(job.startedAt)) / 1000);
       const text = job.state === 'running'

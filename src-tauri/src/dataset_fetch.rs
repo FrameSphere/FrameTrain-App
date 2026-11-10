@@ -171,8 +171,13 @@ pub async fn fetch_dataset(
             if !is_safe_repo_id(repo) { return Err("Ungültige Repo-ID".into()); }
         }
         "url" => {
-            let url = source.get("url").and_then(|u| u.as_str()).unwrap_or("");
-            if !url.to_ascii_lowercase().starts_with("https://") { return Err("Nur https://-Adressen sind erlaubt".into()); }
+            // Der MCP-Import schickt "urls" (Liste), der Dialog "url". Vorher wurde nur
+            // "url" geprueft: jede MCP-Anfrage scheiterte mit "Nur https://".
+            let urls = source_urls(&source);
+            if urls.is_empty() { return Err("Keine Adresse angegeben".into()); }
+            if let Some(bad) = urls.iter().find(|u| !u.to_ascii_lowercase().starts_with("https://")) {
+                return Err(format!("Nur https://-Adressen sind erlaubt: {}", bad));
+            }
         }
         _ => return Err("source.kind muss \"hf\" oder \"url\" sein".into()),
     }
@@ -352,6 +357,17 @@ fn temp_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Adressen eines URL-Imports: "urls" (Liste, MCP) und/oder "url" (einzeln, Dialog).
+pub fn source_urls(source: &Value) -> Vec<String> {
+    let mut out: Vec<String> = source.get("urls").and_then(|u| u.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    if let Some(u) = source.get("url").and_then(|u| u.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+        if !out.iter().any(|x| x == u) { out.push(u.to_string()); }
+    }
+    out
+}
+
 pub fn is_safe_repo_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 200
@@ -373,6 +389,15 @@ mod tests {
         let err = "{\"type\":\"progress\"}\n{\"type\":\"error\",\"message\":\"too big\"}\n";
         assert_eq!(parse_fetch_output(err).unwrap_err(), "too big");
         assert!(parse_fetch_output("Traceback ...").is_err());
+    }
+
+    #[test]
+    fn url_liste_und_einzeladresse() {
+        let mcp = serde_json::json!({"kind": "url", "urls": ["https://a/x.zip", " https://b/y.zip "]});
+        assert_eq!(source_urls(&mcp), vec!["https://a/x.zip", "https://b/y.zip"]);
+        let dialog = serde_json::json!({"kind": "url", "url": "https://a/x.zip"});
+        assert_eq!(source_urls(&dialog), vec!["https://a/x.zip"]);
+        assert!(source_urls(&serde_json::json!({"kind": "url"})).is_empty());
     }
 
     #[test]

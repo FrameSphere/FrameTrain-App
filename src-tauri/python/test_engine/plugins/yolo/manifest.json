@@ -1,0 +1,10 @@
+{
+  "task_type": "detect",
+  "name": "Object Detection (Ultralytics YOLO)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Prueft YOLO-Detektoren auf dem Test-Split: mAP50, mAP50-95, Precision, Recall und Boxen je Bild.",
+  "input_type": "image",
+  "output_format": "detection"
+}

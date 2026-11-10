@@ -57,6 +57,11 @@ class SummaryTest(unittest.TestCase):
         best = {"Sky": 0.86, "Tree": 0.80}
         self.assertEqual(YoloInferenceServer._summary(boxes, best), "2x Sky, 1x Tree")
 
+    def test_unsichere_boxen_zaehlen_nicht(self):
+        boxes = [{"label": "giraffe", "confidence": 0.94}, {"label": "giraffe", "confidence": 0.44},
+                 {"label": "giraffe", "confidence": 0.09}, {"label": "giraffe", "confidence": 0.05}]
+        self.assertEqual(YoloInferenceServer._summary(boxes, {"giraffe": 0.94}), "2x giraffe")
+
     def test_kuerzt_lange_klassenlisten(self):
         boxes = [{"label": f"K{i}"} for i in range(6)]
         best = {f"K{i}": 0.5 for i in range(6)}

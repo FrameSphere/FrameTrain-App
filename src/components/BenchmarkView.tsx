@@ -25,6 +25,14 @@ const seriesFill = (s: BenchSeries) => s.shade === 1
   : `color-mix(in srgb, ${seriesColor(s.color)} ${Math.round(s.shade * 100)}%, var(--ft-panel))`;
 const seriesName = (s: BenchSeries) => (s.multi && s.version ? `${s.model} · ${s.version}` : s.model);
 
+/** Kennzahl, nach der eine Aufgabe rankt. Detektoren melden mAP50, Sprachmodelle ROUGE-L. */
+export function metricOf(task: BenchTask): string {
+  for (const d of task.datasets) for (const r of d.results) if (r.metric.fraction !== null) return r.metric.label;
+  return 'accuracy';
+}
+const METRIC_NAMES: Record<string, string> = { mAP50: 'mAP50', rouge_l: 'ROUGE-L', macro_f1: 'Macro-F1', f1: 'F1' };
+export const metricName = (label: string) => METRIC_NAMES[label] ?? label;
+
 function valueText(r: BenchResult, f: Format): string {
   return r.metric.fraction !== null ? `${f.number(r.metric.fraction * 100, 1)}%` : f.number(r.metric.value, 3);
 }
@@ -387,7 +395,9 @@ export function BenchmarkView({ tasks, withoutResult, taskLabel, f }: {
             {task.datasets.some(d => d.results.some(r => r.metric.fraction !== null)) && (
               <>
                 <div className="ft-chart-card">
-                <p className="ft-eyebrow">{t('home.pipeline.bench.eyebrowBars')}</p>
+                <p className="ft-eyebrow">{metricOf(task) === 'accuracy'
+                  ? t('home.pipeline.bench.eyebrowBars')
+                  : t('home.pipeline.bench.eyebrowBarsMetric', { metric: metricName(metricOf(task)) })}</p>
                 <div className="ft-legend">
                   {task.series.map(m => (
                     <span key={m.key}><i className="ft-swatch" style={{ background: seriesFill(m) }} aria-hidden="true" />{seriesName(m)}</span>
@@ -400,7 +410,9 @@ export function BenchmarkView({ tasks, withoutResult, taskLabel, f }: {
                 </div>
                 {scatterSet && (
                   <div className="ft-chart-card">
-                    <p className="ft-eyebrow">{t('home.pipeline.bench.scatterTitle', { dataset: scatterSet.name })}</p>
+                    <p className="ft-eyebrow">{metricOf(task) === 'accuracy'
+                      ? t('home.pipeline.bench.scatterTitle', { dataset: scatterSet.name })
+                      : t('home.pipeline.bench.scatterTitleMetric', { metric: metricName(metricOf(task)), dataset: scatterSet.name })}</p>
                     <p className="ft-chart-note">{t('home.pipeline.bench.scatterNote')}</p>
                     <BenchScatter task={task} set={scatterSet} f={f} hover={hover} onHover={setHover} />
                   </div>

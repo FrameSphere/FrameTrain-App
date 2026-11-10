@@ -40,6 +40,24 @@ from ft_data.text import (
 from ft_data.media import sample as random_sample
 
 
+def macro_f1_scores(predictions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Macro-F1 und F1 je Klasse aus den Einzelvorhersagen (nur gelabelte)."""
+    pairs = [(p["expected_output"], p["predicted_output"]) for p in predictions
+             if p.get("expected_output") is not None and p.get("predicted_output") != "ERROR"]
+    if not pairs:
+        return {}
+    classes = sorted({e for e, _ in pairs})
+    per_class: Dict[str, float] = {}
+    for c in classes:
+        tp = sum(1 for e, p in pairs if e == c and p == c)
+        fp = sum(1 for e, p in pairs if e != c and p == c)
+        fn = sum(1 for e, p in pairs if e == c and p != c)
+        prec = tp / (tp + fp) if tp + fp else 0.0
+        rec = tp / (tp + fn) if tp + fn else 0.0
+        per_class[c] = round(2 * prec * rec / (prec + rec), 4) if prec + rec else 0.0
+    return {"macro_f1": round(sum(per_class.values()) / len(per_class), 4), "per_class_f1": per_class}
+
+
 class Plugin:
     def __init__(self, config: TestConfig):
         self.config    = config
@@ -299,6 +317,10 @@ class Plugin:
         avg_loss      = total_loss / labelled if labelled > 0 and self.problem_type == SINGLE_LABEL else None
 
         special = self._special_scores(predictions)
+        if self.problem_type == SINGLE_LABEL:
+            # Bei ungleich verteilten Klassen sagt Accuracy allein wenig; das
+            # Training meldete F1 schon, der Test bisher nicht.
+            special.update(macro_f1_scores(predictions))
         if self.problem_type == REGRESSION:
             # "Accuracy" waere bei Zahlwerten erfunden — Treffer innerhalb der
             # Toleranz stehen als within_tolerance in den Kennzahlen.

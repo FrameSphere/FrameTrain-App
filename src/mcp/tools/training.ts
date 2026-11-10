@@ -22,6 +22,21 @@ interface TrainingJob {
   config?: Record<string, unknown>;
 }
 
+const isRunning = (status: unknown) => ['running', 'pending', 'Running', 'Pending'].includes(String(status));
+
+/**
+ * Restzeit aus bisheriger Laufzeit und Fortschritt. Die Engine liefert keine
+ * eigene Schaetzung (estimated_time_remaining_seconds war immer null).
+ */
+export function etaSeconds(job: TrainingJob | null, now = Date.now()): number | null {
+  if (!job || !isRunning(job.status) || !job.started_at) return null;
+  const pct = Number(job.progress?.progress_percent ?? 0);
+  if (!(pct >= 2 && pct < 100)) return null;
+  const elapsed = (now - Date.parse(job.started_at)) / 1000;
+  if (!(elapsed > 0)) return null;
+  return Math.max(0, Math.round(elapsed * (100 - pct) / pct));
+}
+
 /** Die wichtigsten Felder von TrainingConfig (Rust); weitere werden durchgereicht. */
 export const TRAINING_CONFIG_SCHEMA: JsonSchema = {
   type: 'object',
@@ -43,7 +58,7 @@ export const TRAINING_CONFIG_SCHEMA: JsonSchema = {
     lora_alpha: S.int('LoRA alpha.'),
     load_in_4bit: S.bool('QLoRA 4-bit loading (CUDA only).'),
     gradient_checkpointing: S.bool('Trade compute for memory.'),
-    task_type: S.str('Plugin task type, e.g. "seq_classification", "causal_lm", "image_classification", "detection".'),
+    task_type: S.str('Plugin task type, e.g. "seq_classification", "causal_lm", "image_classification", "detect" (object detection; "detection" is accepted too).'),
     plugin_config: S.obj('Plugin-specific parameters (image_size, num_classes, ...).'),
   },
   additionalProperties: true,
@@ -148,26 +163,42 @@ export const trainingTools: McpTool[] = [
   defineTool({
     name: 'training_status',
     title: 'Training status',
-    description: 'Returns the current or a specific training job: status, epoch/step progress, latest losses and recent log lines. Without job_id it reports the currently running training (also Synapse and Dev Train runs).',
+    description: 'Returns the current or a specific training job: status, epoch/step progress, estimated time remaining, latest losses and recent log lines. Without job_id it reports the currently running training (also Synapse and Dev Train runs). wait_seconds (max 45) waits until the run ends or the time is up.',
     properties: {
       job_id: S.str('Training job id. Default: current training.'),
       log_lines: S.int('Number of recent log lines (0-200). Default 30.', { minimum: 0, maximum: 200 }),
+      wait_seconds: S.num('Wait up to this many seconds for the run to finish (0-45). Default 0.', { minimum: 0, maximum: 45 }),
     },
     async run(args) {
       const wanted = optStr(args, 'job_id');
       const lines = optNum(args, 'log_lines', 30)!;
-      const current = await call<TrainingJob | null>('get_current_training').catch(() => null);
-      const active = await call<Record<string, unknown>[]>('list_active_trainings').catch(() => []);
-      let job: TrainingJob | null = current && (!wanted || current.id === wanted) ? current : null;
-      if (!job && wanted) {
-        const history = await call<TrainingJob[]>('get_training_history').catch(() => []);
-        job = history.find((h) => h.id === wanted) ?? null;
+      const waitMs = Math.min(45, Math.max(0, optNum(args, 'wait_seconds', 0)!)) * 1000;
+      const deadline = Date.now() + waitMs;
+      const look = async () => {
+        const current = await call<TrainingJob | null>('get_current_training').catch(() => null);
+        const active = await call<Record<string, unknown>[]>('list_active_trainings').catch(() => []);
+        let job: TrainingJob | null = current && (!wanted || current.id === wanted) ? current : null;
+        if (!job && wanted) {
+          const history = await call<TrainingJob[]>('get_training_history').catch(() => []);
+          job = history.find((h) => h.id === wanted) ?? null;
+        }
+        return { job, active };
+      };
+      let { job, active } = await look();
+      // Vorher gab es kein Warten: der Assistent musste eng pollen oder eigene Schleifen bauen.
+      while (Date.now() < deadline && job && isRunning(job.status)) {
+        await new Promise((r) => setTimeout(r, Math.min(2000, Math.max(0, deadline - Date.now()))));
+        ({ job, active } = await look());
       }
       const id = wanted ?? job?.id;
       const run = id ? summarizeRun(getRun(id), lines) : null;
       if (!job && !run) return ok(wanted ? `No training with id ${wanted} found.` : 'No training is running.', { job: null, active });
       const status = run?.status ?? String(job?.status ?? 'unknown');
-      return ok(`Training ${id}: ${status}.`, { job: jobBrief(job), live: run, active });
+      const eta = etaSeconds(job);
+      const activeWithEta = active.map((a) => (a.training_id === id && a.estimated_time_remaining_seconds == null ? { ...a, estimated_time_remaining_seconds: eta } : a));
+      return ok(`Training ${id}: ${status}${eta != null ? `, about ${Math.round(eta)} s left` : ''}.`, {
+        job: jobBrief(job), eta_seconds: eta, live: run, active: activeWithEta,
+      });
     },
   }),
   defineTool({
@@ -190,9 +221,12 @@ export const trainingTools: McpTool[] = [
     properties: { limit: S.int('Maximum entries (1-100). Default 20.', { minimum: 1, maximum: 100 }) },
     async run(args) {
       const history = await call<TrainingJob[]>('get_training_history');
-      const sorted = [...history].sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+      // Der laufende Lauf steht erst nach dem Ende im Verlauf; vorher fehlte er hier ganz.
+      const current = await call<TrainingJob | null>('get_current_training').catch(() => null);
+      const all = current && !history.some((h) => h.id === current.id) ? [current, ...history] : history;
+      const sorted = [...all].sort((a, b) => String(b.created_at ?? b.started_at ?? '').localeCompare(String(a.created_at ?? a.started_at ?? '')));
       const items = sorted.slice(0, optNum(args, 'limit', 20)).map(jobBrief);
-      return ok(`${items.length} of ${history.length} job(s).`, items);
+      return ok(`${items.length} of ${all.length} job(s).`, items);
     },
   }),
 ];

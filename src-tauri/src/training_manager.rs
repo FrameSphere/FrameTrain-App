@@ -342,6 +342,37 @@ pub fn get_training_presets() -> Result<Vec<PresetConfig>, String> {
                 ..Default::default()
             },
         },
+        // Bisher gab es nur Presets fuer Textklassifikation (Benchmark 09.11.).
+        PresetConfig {
+            id: "yolo_detect".to_string(),
+            name: "Objekterkennung (YOLO)".to_string(),
+            description: "Feintuning eines YOLO-Detektors: 30 Epochen, Batch 16, Bildgroesse 640. Fuer kleine Datasets eher weniger Epochen.".to_string(),
+            config: TrainingConfig {
+                batch_size: 16,
+                epochs: 30,
+                task_type: "detect".to_string(),
+                // Das YOLO-Plugin liest Lernrate und Optimizer aus plugin_config.
+                plugin_config: serde_json::json!({ "imgsz": 640, "lr0": 0.01, "optimizer": "auto" }),
+                ..Default::default()
+            },
+        },
+        PresetConfig {
+            id: "llm_lora".to_string(),
+            name: "Sprachmodell mit LoRA".to_string(),
+            description: "LoRA-Feintuning fuer Chat- und Frage-Antwort-Daten: 2 Epochen, Lernrate 2e-4, 512 Tokens. Auf Apple Silicon ueber MLX.".to_string(),
+            config: TrainingConfig {
+                learning_rate: 2e-4,
+                batch_size: 4,
+                epochs: 2,
+                max_seq_length: 512,
+                use_lora: true,
+                lora_r: 8,
+                lora_alpha: 16,
+                warmup_ratio: 0.05,
+                task_type: "causal_lm".to_string(),
+                ..Default::default()
+            },
+        },
     ])
 }
 
@@ -381,8 +412,16 @@ pub fn rate_training_config(config: TrainingConfig) -> Result<ParameterRating, S
     } else if config.learning_rate < 1e-6 {
         warnings.push("Learning Rate sehr niedrig — Konvergenz kann sehr lang dauern.".to_string());
         score -= 10;
+    } else if config.learning_rate > 1e-4 && !config.use_lora {
+        // Vorher galt alles von 1e-6 bis 5e-4 als "optimal".
+        warnings.push("Learning Rate ist für volles Feintuning eher hoch (üblich 1e-5 – 5e-5; kleine Modelle vertragen bis etwa 1e-4).".to_string());
+        score -= 5;
+    } else if config.learning_rate < 1e-5 {
+        tips.push("Learning Rate ist eher niedrig — das Training braucht dann mehr Epochen.".to_string());
+    } else if config.use_lora {
+        tips.push("Learning Rate passt zu LoRA (üblich 1e-4 – 3e-4).".to_string());
     } else {
-        tips.push("Learning Rate ist im optimalen Bereich für Textklassifikation.".to_string());
+        tips.push("Learning Rate liegt im üblichen Bereich für Feintuning (1e-5 – 1e-4).".to_string());
     }
 
     // Batch Size

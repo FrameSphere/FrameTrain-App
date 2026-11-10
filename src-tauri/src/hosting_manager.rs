@@ -619,7 +619,14 @@ type St<'a> = tauri::State<'a, SharedHosting>;
 pub fn hosting_list(app: tauri::AppHandle, state: St<'_>) -> Vec<HostInfo> {
     sync_slots(&state);
     prime_tasks(&app, &state);
-    list(&state)
+    let all = list(&state);
+    // Die Hosting-Liste liegt in einer Datei fuer alle Accounts. Gezeigt wird nur,
+    // was dem angemeldeten Account gehoert; vorher erschienen Modelle anderer
+    // Accounts (sogar als Standardmodell), die models_list nicht kennt.
+    if crate::database::session_user_id().is_err() { return all; }
+    all.into_iter()
+        .filter(|h| crate::test_manager::get_version_path(&app, &h.id).is_ok())
+        .collect()
 }
 
 #[tauri::command]

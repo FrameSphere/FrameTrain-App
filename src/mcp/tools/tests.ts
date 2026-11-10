@@ -47,7 +47,7 @@ export const testsTools: McpTool[] = [
       dataset_id: S.str('Dataset id (usually its test split is used).'),
       batch_size: S.int('Default: plugin default.', { minimum: 1 }),
       max_samples: S.int('Only evaluate this many samples.', { minimum: 1 }),
-      task_type: S.str('Override the plugin task type.'),
+      task_type: S.str('Override the task type (e.g. "seq_classification", "causal_lm", "detect"). Default: derived from the trained version.'),
       plugin_config: S.obj('Plugin-specific test parameters.'),
     },
     required: ['version_id', 'dataset_id'],
@@ -120,22 +120,26 @@ export const testsTools: McpTool[] = [
   defineTool({
     name: 'tests_single_input',
     title: 'Single test',
-    description: 'Runs a trained version on one input without a dataset. input_type: "text" or "file" (absolute path to an image/audio file).',
+    description: 'Runs a trained version on one input without a dataset and returns the prediction (label, confidence, top predictions or generated text). input_type: "text" or "file" (absolute path to an image/audio file). Loads the model each time; for many inputs use lab_server_start + lab_infer.',
     properties: {
       version_id: S.str('Trained version id.'),
       input: S.str('Text or file path.'),
       input_type: S.enumOf('Kind of input.', ['text', 'file']),
-      task_type: S.str('Override the plugin task type.'),
+      task_type: S.str('Override the task type. Default: derived from the trained version.'),
     },
     required: ['version_id', 'input', 'input_type'],
     async run(args) {
+      // wait: true – vorher kam nur die Test-ID zurueck und das Ergebnis ging als UI-Event verloren.
       const out = await call<string>('test_single_input', {
         versionId: reqStr(args, 'version_id'), singleInput: reqStr(args, 'input'), singleInputType: reqStr(args, 'input_type'),
-        taskType: optStr(args, 'task_type') ?? null, pluginConfig: null,
+        taskType: optStr(args, 'task_type') ?? null, pluginConfig: null, wait: true,
       });
       let parsed: unknown = out;
       try { parsed = JSON.parse(out); } catch { /* Klartext */ }
-      return ok(typeof parsed === 'string' ? parsed : 'Prediction done.', { result: parsed });
+      const p = parsed as { predicted_output?: unknown; confidence?: unknown } | string;
+      const summary = typeof p === 'string' ? p
+        : `Prediction: ${String(p.predicted_output ?? '?')}${typeof p.confidence === 'number' ? ` (${Math.round(p.confidence * 1000) / 10} %)` : ''}.`;
+      return ok(summary, { result: parsed });
     },
   }),
   defineTool({

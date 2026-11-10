@@ -69,6 +69,8 @@ def find_weights(model_dir: Path) -> Path:
 
 
 _MAX_POLYGON_POINTS = 64
+# Ab dieser Konfidenz zaehlt eine Box in der Kurzfassung ("2x giraffe").
+SUMMARY_MIN_CONF = 0.25
 
 
 def _thin(points: list, limit: int = _MAX_POLYGON_POINTS) -> list:
@@ -212,8 +214,12 @@ class YoloInferenceServer:
             return "Keine Objekte"
         # Je Klasse zaehlen: "3x Person, Emptyspace" las sich wie drei
         # Personen, waren aber zwei Personen und ein Emptyspace.
+        # Gezaehlt werden nur sichere Boxen (ab 25 %): der Server liefert fuer die
+        # Studio-Vorschlaege alles ab 5 %, und "4x giraffe" fuer zwei Giraffen las
+        # sich falsch. Gibt es keine sichere Box, zaehlen alle (Boxen ohne Wert ebenso).
+        sure = [b for b in boxes if b.get("confidence") is None or b["confidence"] >= SUMMARY_MIN_CONF] or boxes
         counts: dict = {}
-        for b in boxes:
+        for b in sure:
             counts[b["label"]] = counts.get(b["label"], 0) + 1
         labels = [l for l in best_per_label.keys() if l in counts] or list(counts.keys())
         head = ", ".join(f"{counts[l]}x {l}" for l in labels[:3])

@@ -126,12 +126,23 @@ function durationOf(job: { started_at?: string | null; completed_at?: string | n
   return Number.isFinite(sec) && sec >= 0 ? sec : null;
 }
 
-/** Kennzahl eines Tests. Accuracy zuerst; sonst die erste Zahl aus `metrics`, ohne feste Skala. */
+/**
+ * Kennzahlen mit fester Skala 0..1 neben Accuracy: Detektoren melden mAP50,
+ * Sprachmodelle ROUGE-L. Damit ranken auch sie im Benchmark-Vergleich.
+ */
+const FRACTION_METRICS = ['mAP50', 'rouge_l', 'macro_f1', 'f1'];
+
+/** Kennzahl eines Tests. Accuracy zuerst, dann bekannte 0..1-Kennzahlen; sonst die erste Zahl aus `metrics`, ohne feste Skala. */
 export function testMetric(test: PipelineTest | undefined): TestMetric | null {
   const r = test?.results;
   if (!r) return null;
   if (typeof r.accuracy === 'number') return { label: 'accuracy', value: r.accuracy, fraction: r.accuracy };
-  for (const [label, value] of Object.entries(r.metrics ?? {})) {
+  const metrics = r.metrics ?? {};
+  for (const label of FRACTION_METRICS) {
+    const value = metrics[label];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1) return { label, value, fraction: value };
+  }
+  for (const [label, value] of Object.entries(metrics)) {
     if (typeof value === 'number' && Number.isFinite(value)) return { label, value, fraction: null };
   }
   return null;

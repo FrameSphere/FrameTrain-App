@@ -27,6 +27,12 @@ class TestProtocol:
         TestProtocol._send("status", {"status": status, "message": message})
 
     @staticmethod
+    def warning(message: str) -> None:
+        # Wurde von der Engine und dem YOLO-Test-Plugin aufgerufen, gab es aber
+        # nicht: der Aufruf selbst brach den Test ab (Live-Test 10.11.).
+        TestProtocol._send("status", {"status": "warning", "message": message})
+
+    @staticmethod
     def error(error: str, details: str = "") -> None:
         TestProtocol._send("error", {"error": error, "details": details})
 

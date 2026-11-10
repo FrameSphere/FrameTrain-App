@@ -459,7 +459,12 @@ impl SplitLayout {
 
 /// Ordnernamen wie "training"/"validation" auf train/val/test normalisieren.
 fn canonical_split_name(name: &str) -> Option<&'static str> {
-    match name.to_lowercase().as_str() {
+    // COCO-Ordner heissen train2017/val2017: angehaengte Jahreszahl ignorieren.
+    // Vorher galt images/train2017 + labels/train2017 als ungeteilt, und der
+    // Import zeigte weder Bilder noch einen brauchbaren Split (Benchmark 09.11.).
+    let lower = name.to_lowercase();
+    let base = lower.trim_end_matches(|c: char| c.is_ascii_digit());
+    match base {
         "train" | "training"                 => Some("train"),
         "val" | "valid" | "validation" | "dev" => Some("val"),
         "test" | "testing"                   => Some("test"),
@@ -676,7 +681,10 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
     // 1. Pre-Split
     let split_dirs: Vec<&str> = ["train","val","valid","test","validation","training","testing"]
         .iter().filter(|&&s| dir_names_lc.contains(&s.to_string())).copied().collect();
-    if split_dirs.len() >= 2 {
+    // Ein einzelner test/-Ordner ist ein reines Test-Dataset (Benchmark) und
+    // ebenfalls aufgeteilt; vorher hiess es "Typ unbekannt".
+    let only_eval = split_dirs.len() == 1 && matches!(split_dirs[0], "test" | "testing" | "val" | "valid" | "validation");
+    if split_dirs.len() >= 2 || only_eval {
         return DatasetAnalysis { detected_type: DatasetType::PreSplit, confidence: 95,
             pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
             dir_count: dir_names.len(), extensions: all_extensions,
@@ -916,6 +924,27 @@ fn read_class_names(base: &Path) -> Vec<String> {
     vec![]
 }
 
+/// Klassennamen aus classes.txt/data.yaml; fehlen sie, so viele Platzhalter
+/// (class_0 ...), wie die Labels Klassen-IDs nutzen. Vorher standen dort immer
+/// 'KlasseA'/'KlasseB' (nc 2): coco128 (IDs bis 79) liess sich dann weder
+/// trainieren noch testen (Live-Test 10.11.).
+fn class_names_or_from_labels(base: &Path) -> Vec<String> {
+    let names = read_class_names(base);
+    if !names.is_empty() { return names; }
+    let max_id = collect_files_recursive(base).into_iter()
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("txt")
+            && p.components().any(|c| c.as_os_str() == "labels"))
+        .filter_map(|p| fs::read_to_string(p).ok())
+        .flat_map(|c| c.lines().filter_map(|l| l.split_whitespace().next()?.parse::<f64>().ok()).collect::<Vec<_>>())
+        .filter(|v| *v >= 0.0 && v.fract() == 0.0 && *v < 10_000.0)
+        .map(|v| v as usize)
+        .max();
+    match max_id {
+        Some(m) => (0..=m).map(|i| format!("class_{}", i)).collect(),
+        None => vec![],
+    }
+}
+
 /// Liest den `names:`-Block einer Ultralytics-data.yaml.
 /// Unterstuetzt alle drei gebraeuchlichen Schreibweisen:
 ///   names: ['a', 'b']        (Inline-Liste)
@@ -978,7 +1007,7 @@ fn parse_yaml_class_names(content: &str) -> Vec<String> {
 /// Datensaetzen herumliegt) laesst Ultralytics sonst mit
 /// "No images found" abbrechen.
 pub fn generate_split_dataset_yaml(base: &Path, layout: &SplitLayout) -> Result<(), String> {
-    let class_names = read_class_names(base);
+    let class_names = class_names_or_from_labels(base);
     let nc = class_names.len();
     let names_block = if nc > 0 {
         class_names.iter()
@@ -1027,7 +1056,7 @@ pub fn generate_dataset_yaml(
     _labels_dir: &str,
     is_split: bool,
 ) -> Result<(), String> {
-    let class_names = read_class_names(base);
+    let class_names = class_names_or_from_labels(base);
     let nc = class_names.len();
 
     // names: als YAML-Liste mit Quotes -- Ultralytics-Standard
@@ -1541,6 +1570,12 @@ fn is_auxiliary_file(path: &Path) -> bool {
     if matches!(ext.as_str(), "py" | "yaml" | "yml" | "md" | "sh" | "toml" | "ini" | "cfg" | "log" | "cache" | "pyc") {
         return true;
     }
+    // README.txt / LICENSE.txt zaehlten frueher als Daten: ein Bildordner ohne
+    // erkannte Struktur wurde so "aufgeteilt", indem nur diese zwei Dateien wanderten.
+    let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+    if matches!(stem.as_str(), "readme" | "license" | "licence" | "copying" | "notice") && matches!(ext.as_str(), "" | "txt" | "rst") {
+        return true;
+    }
     matches!(name.as_str(), "readme" | "license" | "classes.txt" | "obj.names" | "obj.data" | "requirements.txt")
 }
 
@@ -1666,27 +1701,7 @@ pub async fn list_datasets_for_model(
                 // berechnen statt dem evtl. veralteten gespeicherten Wert zu vertrauen.
                 // Betrifft v.a. PreSplit-Datasets von HuggingFace, die bereits mit
                 // train/test-Ordnern ankommen ohne dass split_dataset() je lief.
-                let train_dir = storage.join("train");
-                let val_dir   = storage.join("val");
-                let test_dir  = storage.join("test");
-                let has_split_dirs = train_dir.exists() || val_dir.exists() || test_dir.exists();
-                if has_split_dirs {
-                    let train_count = collect_files_recursive(&train_dir).len();
-                    let val_count   = collect_files_recursive(&val_dir).len();
-                    let test_count  = collect_files_recursive(&test_dir).len();
-                    let total = (train_count + val_count + test_count).max(1) as f64;
-                    d.split_info = Some(SplitInfo {
-                        train_count, val_count, test_count,
-                        train_ratio: train_count as f64 / total,
-                        val_ratio:   val_count   as f64 / total,
-                        test_ratio:  test_count  as f64 / total,
-                    });
-                    d.status = "split".to_string();
-                } else if let Some(info) = detect_flat_split_files(&storage) {
-                    // Flache Dateien train.csv / val.csv / test.csv — genau die
-                    // Struktur, die der Hilfe-Dialog zeigt. Ohne diesen Zweig
-                    // meldete die App "Kein Split" für ihr eigenes dokumentiertes
-                    // Layout und verlangte einen manuellen Split.
+                if let Some(info) = live_split_info(&storage, d.split_info.as_ref()) {
                     d.split_info = Some(info);
                     d.status = "split".to_string();
                 }
@@ -1720,7 +1735,47 @@ pub async fn list_all_datasets(
 ) -> Result<Vec<DatasetInfo>, String> {
     let user_id = get_user_id(&state)?;
     let dir = get_datasets_dir(&app_handle, &user_id)?;
-    Ok(load_metadata(&dir))
+    // Wie list_datasets_for_model den Split aus den Ordnern lesen; vorher meldete
+    // dieselbe Abfrage ohne Modellfilter fuer dasselbe Dataset split_info: null.
+    Ok(load_metadata(&dir).into_iter().map(|mut d| {
+        let storage = dir.join(&d.id);
+        if let Some(info) = live_split_info(&storage, d.split_info.as_ref()) {
+            d.split_info = Some(info);
+            d.status = "split".to_string();
+        }
+        d
+    }).collect())
+}
+
+/// Split aus den tatsaechlichen train/val/test-Ordnern (bzw. flachen
+/// train.csv/test.csv). Tabellen zaehlen Zeilen; Parquet kennt Rust nicht -
+/// dort bleibt ein gespeicherter Zeilenstand (HF-Download) erhalten.
+fn live_split_info(storage: &Path, stored: Option<&SplitInfo>) -> Option<SplitInfo> {
+    if !storage.exists() { return None; }
+    let (train_dir, val_dir, test_dir) = (storage.join("train"), storage.join("val"), storage.join("test"));
+    if train_dir.exists() || val_dir.exists() || test_dir.exists() {
+        let files = |d: &Path| collect_files_recursive(d);
+        let only_parquet = [&train_dir, &val_dir, &test_dir].iter().flat_map(|d| files(d))
+            .all(|p| p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("parquet")).unwrap_or(false));
+        if only_parquet {
+            if let Some(s) = stored.filter(|s| s.train_count + s.val_count + s.test_count > 0) {
+                return Some(s.clone());
+            }
+        }
+        if let Some(rows) = tabular_split_info(storage, false) {
+            if !only_parquet { return Some(rows); }
+        }
+        let (train_count, val_count, test_count) = (files(&train_dir).len(), files(&val_dir).len(), files(&test_dir).len());
+        let total = (train_count + val_count + test_count).max(1) as f64;
+        return Some(SplitInfo {
+            train_count, val_count, test_count,
+            train_ratio: train_count as f64 / total,
+            val_ratio:   val_count   as f64 / total,
+            test_ratio:  test_count  as f64 / total,
+        });
+    }
+    // Flache Dateien train.csv / val.csv / test.csv — die Struktur, die der Hilfe-Dialog zeigt.
+    detect_flat_split_files(storage)
 }
 
 #[tauri::command]
@@ -1757,6 +1812,15 @@ pub async fn import_local_dataset(
         fs::create_dir_all(&target).ok();
         fs::copy(src, target.join(src.file_name().unwrap())).map_err(|e| format!("Copy: {}", e))?;
     }
+    // HF-Splitdateien (train-00000-of-00001.parquet, test.csv ...) in Split-Ordner
+    // legen. Vorher blieben sie "unsplit" nebeneinander liegen und Training/Test
+    // lasen alle Dateien gemeinsam - auch den Testteil (Benchmark 09.11.).
+    let moved_flat = src.is_dir() && organize_flat_split_files(&target);
+    // Nur ein train-Ordner (COCO: images/train2017) ist noch kein Split: flach
+    // ablegen, damit der normale Split danach Bilder und Labels gemeinsam teilt.
+    let flattened = src.is_dir() && flatten_single_train_split(&target);
+    let moved_flat = moved_flat || flattened;
+    let analysis = if moved_flat { detect_dataset_type(&target) } else { analysis };
     let (size, files) = dir_size(&target);
 
     // Bringt das Dataset seine train/val/test-Aufteilung schon mit, wird sie
@@ -1775,7 +1839,11 @@ pub async fn import_local_dataset(
                 test_ratio:  te as f64 / total,
             }))
         }
-        None => ("unused", None),
+        None => match tabular_split_info(&target, true) {
+            // Tabellen in train/val/test-Ordnern: Split uebernehmen (Zeilen zaehlen).
+            Some(info) => ("split", Some(info)),
+            None => ("unused", None),
+        },
     };
 
     let info = make_info(&dataset_id, &dataset_name, &model_id, "local",
@@ -1867,6 +1935,14 @@ pub async fn split_dataset(
         DatasetType::CommonVoice => return Err("Common Voice hat eigene Splits (metadata.tsv). Kein automatischer Split noetig.".to_string()),
         _ => split_flat_files(&base, train_ratio, val_ratio, test_ratio)?,
     };
+    // Vorher wurde auch ein "Split" gespeichert, der nur LICENSE/README verteilte
+    // (train 1, val 0, test 0) - das Dataset galt danach als aufgeteilt.
+    if (val_ratio > 0.0 || test_ratio > 0.0) && split_info.val_count + split_info.test_count == 0 {
+        return Err(format!(
+            "Aufteilen ergab keine Validierungs- oder Testdaten ({} Datei(en) im Training). \
+             Das Dataset enthaelt zu wenige oder nicht erkannte Dateien; pruefe es mit der Dataset-Pruefung.",
+            split_info.train_count));
+    }
 
     let (size, fc) = dir_size(&base);
     let updated = DatasetInfo { status: "split".to_string(), split_info: Some(split_info),
@@ -2360,9 +2436,23 @@ try:
     columns = [{{"name": str(c), "dtype": str(df[c].dtype)}} for c in df.columns]
     preview = df.head({limit})
     rows = json.loads(preview.to_json(orient="records", date_format="iso", default_handler=str))
+    # Klassennamen aus den HF-Metadaten (ClassLabel): die Zeilen zeigen 0/1/4,
+    # die Dataset-Pruefung aber neg/pos/joy - ohne Namen passte beides nicht zusammen.
+    label_names = {{}}
+    try:
+        import pyarrow.parquet as pq
+        meta = pq.read_schema(sys.argv[1]).metadata or {{}}
+        hf = json.loads(meta.get(b"huggingface", b"{{}}").decode("utf-8"))
+        feats = (hf.get("info") or {{}}).get("features") or {{}}
+        for col, f in feats.items():
+            if isinstance(f, dict) and f.get("_type") == "ClassLabel" and f.get("names"):
+                label_names[col] = list(f["names"])
+    except Exception:
+        pass
     print(json.dumps({{
         "columns": columns,
         "rows": rows,
+        "label_names": label_names,
         "total_rows": total_rows,
         "total_cols": total_cols,
         "shown_rows": len(rows),
@@ -2614,6 +2704,92 @@ fn flat_split_name(stem: &str) -> Option<&'static str> {
         "test" | "testing" | "eval" => Some("test"),
         _ => None,
     }
+}
+
+/// Legt flache Splitdateien (train.csv, validation-00000-of-00001.parquet ...)
+/// in train/, val/ und test/. Nur wenn es noch keine Split-Ordner gibt und
+/// die Dateien wirklich einen Split ergeben. true = es wurde verschoben.
+fn organize_flat_split_files(storage: &Path) -> bool {
+    if ["train", "val", "test"].iter().any(|d| storage.join(d).exists()) { return false; }
+    if detect_flat_split_files(storage).is_none() { return false; }
+    let Ok(entries) = fs::read_dir(storage) else { return false };
+    let mut moved = false;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(split) = flat_split_name(stem) else { continue };
+        let dir = storage.join(split);
+        if fs::create_dir_all(&dir).is_err() { continue; }
+        if let Some(name) = path.file_name() {
+            if fs::rename(&path, dir.join(name)).is_ok() { moved = true; }
+        }
+    }
+    moved
+}
+
+/// images/<train>/ + labels/<train>/ (bzw. <train>/images + <train>/labels)
+/// ohne weitere Splits nach images/ und labels/ verschieben. true = verschoben.
+fn flatten_single_train_split(storage: &Path) -> bool {
+    let Some(layout) = detect_split_layout_at(storage) else { return false };
+    if layout.splits.len() != 1 || layout.splits[0].0 != "train" { return false; }
+    let sub = layout.splits[0].1.clone();
+    let (img_src, lbl_src) = if layout.style == "nested" {
+        (storage.join(&layout.images_dir).join(&sub), storage.join(&layout.labels_dir).join(&sub))
+    } else {
+        (storage.join(&sub).join(&layout.images_dir), storage.join(&sub).join(&layout.labels_dir))
+    };
+    let (img_dst, lbl_dst) = (storage.join(&layout.images_dir), storage.join(&layout.labels_dir));
+    let move_all = |from: &Path, to: &Path| -> bool {
+        if fs::create_dir_all(to).is_err() { return false; }
+        let mut ok = true;
+        for f in list_files_in_dir(from) {
+            if let Some(name) = f.file_name() { ok &= fs::rename(&f, to.join(name)).is_ok(); }
+        }
+        ok
+    };
+    let moved = move_all(&img_src, &img_dst) && move_all(&lbl_src, &lbl_dst);
+    // Leere Restordner entfernen (remove_dir scheitert bei Inhalt, das ist gewollt).
+    let _ = fs::remove_dir(&img_src);
+    let _ = fs::remove_dir(&lbl_src);
+    if layout.style != "nested" { let _ = fs::remove_dir(storage.join(&sub)); }
+    moved
+}
+
+/// Zeilen einer Parquet-Datei aus den Metadaten (pyarrow liest nur den Footer).
+/// Rust kann Parquet nicht selbst lesen; ohne das stand "1 / 1 / 1" im Split.
+fn count_parquet_rows(path: &Path) -> Option<usize> {
+    let py = find_python_cmd().ok()?;
+    let out = std::process::Command::new(py).no_window()
+        .arg("-c").arg("import sys, pyarrow.parquet as pq; print(pq.ParquetFile(sys.argv[1]).metadata.num_rows)")
+        .arg(path).output().ok()?;
+    if !out.status.success() { return None; }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// Split-Info fuer Tabellen in train/val/test-Ordnern (Zeilen statt Dateien).
+/// with_parquet: Parquet-Zeilen ueber Python zaehlen (nur beim Import, nicht bei jeder Liste).
+fn tabular_split_info(storage: &Path, with_parquet: bool) -> Option<SplitInfo> {
+    let count = |name: &str| -> Option<usize> {
+        let dir = storage.join(name);
+        if !dir.is_dir() { return None; }
+        let files: Vec<PathBuf> = collect_files_recursive(&dir).into_iter()
+            .filter(|p| p.extension().and_then(|e| e.to_str()).map(is_row_splittable).unwrap_or(false))
+            .collect();
+        if files.is_empty() { return None; }
+        Some(files.iter().map(|p| {
+            let is_parquet = p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("parquet")).unwrap_or(false);
+            if is_parquet && with_parquet { count_parquet_rows(p).unwrap_or(1) } else { count_text_rows(p).unwrap_or(1) }
+        }).sum())
+    };
+    let (tr, va, te) = (count("train"), count("val"), count("test"));
+    if tr.is_none() && va.is_none() && te.is_none() { return None; }
+    let (tr, va, te) = (tr.unwrap_or(0), va.unwrap_or(0), te.unwrap_or(0));
+    let total = (tr + va + te).max(1) as f64;
+    Some(SplitInfo {
+        train_count: tr, val_count: va, test_count: te,
+        train_ratio: tr as f64 / total, val_ratio: va as f64 / total, test_ratio: te as f64 / total,
+    })
 }
 
 fn detect_flat_split_files(storage: &Path) -> Option<SplitInfo> {
@@ -3875,5 +4051,23 @@ mod metadata_lock_tests {
         assert!(upsert_metadata(&dir, &info("ds_x", &dir)).is_err());
         assert_eq!(fs::read_to_string(meta_path(&dir)).unwrap(), "[{ kaputt");
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod class_name_tests {
+    use super::*;
+
+    #[test]
+    fn ohne_klassenliste_so_viele_platzhalter_wie_die_labels_brauchen() {
+        let d = std::env::temp_dir().join(format!("ft-classes-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(d.join("labels")).unwrap();
+        fs::write(d.join("labels").join("a.txt"), "0 0.5 0.5 0.1 0.1\n79 0.2 0.2 0.1 0.1\n").unwrap();
+        let names = class_names_or_from_labels(&d);
+        assert_eq!(names.len(), 80);
+        assert_eq!(names[79], "class_79");
+        fs::write(d.join("classes.txt"), "auto\nrad\n").unwrap();
+        assert_eq!(class_names_or_from_labels(&d), vec!["auto", "rad"]);
+        let _ = fs::remove_dir_all(d);
     }
 }

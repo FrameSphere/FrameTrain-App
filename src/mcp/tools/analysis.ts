@@ -5,28 +5,50 @@ import type { McpTool } from '../types';
 
 type Json = Record<string, unknown>;
 
+/**
+ * Wiederholungen desselben Schritts entfernen. Die Engine meldet am Ende zwei
+ * Abschlusszeilen mit Start-Lernrate und Durchschnitts-Loss; sie erschienen als
+ * Spitze im Verlauf (Benchmark 09.11.). Ein Val-Loss darin wird uebernommen.
+ */
+export function dedupeSteps(logs: Json[]): Json[] {
+  const out: Json[] = [];
+  for (const l of logs) {
+    const prev = out[out.length - 1];
+    if (prev && typeof prev.step === 'number' && prev.step === l.step) {
+      if (prev.val_loss == null && l.val_loss != null) out[out.length - 1] = { ...prev, val_loss: l.val_loss };
+      continue;
+    }
+    out.push(l);
+  }
+  return out;
+}
+
 /** Loss-Verlauf aus den gespeicherten Metriken in Kennzahlen umrechnen. */
 export function summarizeMetrics(metrics: Json | null | undefined, full?: Json | null) {
   if (!metrics && !full) return null;
   const m = metrics ?? {};
   const pick = (k: string) => (typeof m[k] === 'number' ? (m[k] as number) : null);
   const src = full ?? m;
-  const history = Array.isArray(src.loss_history) ? (src.loss_history as Json[])
-    : Array.isArray(src.history) ? (src.history as Json[])
-      : Array.isArray(src.metrics) ? (src.metrics as Json[]) : [];
+  // Das gespeicherte Trainingsprotokoll heisst step_logs; vorher wurde nur nach
+  // loss_history gesucht, der Verlauf war leer (points: 0) und der "beste"
+  // Val-Loss war einfach der letzte.
+  const raw = [src.step_logs, src.loss_history, src.history, src.metrics].find(Array.isArray) as Json[] | undefined;
+  const history = dedupeSteps(raw ?? []);
   const train = history.map((h) => h.train_loss).filter((v): v is number => typeof v === 'number');
   const val = history.map((h) => h.val_loss).filter((v): v is number => typeof v === 'number');
   const finalVal = pick('final_val_loss') ?? (val.length ? val[val.length - 1] : null);
+  const bestVal = val.length ? Math.min(...val) : pick('best_val_loss') ?? finalVal;
   return {
     final_train_loss: pick('final_train_loss') ?? (train.length ? train[train.length - 1] : null),
     final_val_loss: finalVal,
-    // Ohne Verlauf ist der letzte Val-Loss die beste Schaetzung.
-    best_val_loss: val.length ? Math.min(...val) : pick('best_val_loss') ?? finalVal,
+    best_val_loss: bestVal,
+    val_losses: val,
     epochs: pick('total_epochs') ?? pick('epochs'),
     best_epoch: pick('best_epoch'),
     duration_seconds: pick('training_duration_seconds') ?? pick('duration_seconds'),
     points: history.length,
-    overfitting_hint: val.length >= 3 && val[val.length - 1] > Math.min(...val) * 1.1,
+    // Steigt der Val-Loss am Ende deutlich ueber sein Minimum, lernt das Modell auswendig.
+    overfitting_hint: val.length >= 2 && bestVal !== null && val[val.length - 1] > bestVal * 1.1,
   };
 }
 
@@ -53,7 +75,7 @@ export const analysisTools: McpTool[] = [
     properties: { version_id: S.str('Trained version id.'), limit: S.int('Default 100.', { minimum: 1, maximum: 1000 }) },
     required: ['version_id'],
     async run(args) {
-      const logs = await call<unknown[]>('get_training_logs', { versionId: reqStr(args, 'version_id') });
+      const logs = dedupeSteps(await call<Json[]>('get_training_logs', { versionId: reqStr(args, 'version_id') }));
       const limit = optNum(args, 'limit', 100)!;
       return ok(`${logs.length} log entr(ies), returning the last ${Math.min(limit, logs.length)}.`, { total: logs.length, entries: logs.slice(-limit) });
     },
@@ -69,7 +91,16 @@ export const analysisTools: McpTool[] = [
       const details = await call<Json>('get_version_details', { versionId });
       let report: unknown = null;
       try { report = await call('get_ai_analysis_report', { versionId }); } catch { /* keiner */ }
-      return ok('Version details.', { details, ai_report: report });
+      // Dataset, Einstellungen und Kennzahlen standen in der Beschreibung, fehlten aber in der Antwort.
+      const metrics = await call<Json | null>('get_training_metrics', { versionId }).catch(() => null);
+      const full = await call<Json | null>('get_training_full_data', { versionId }).catch(() => null);
+      const cfg = (full?.config ?? null) as Json | null;
+      const dataset = cfg?.dataset_path ? { path: cfg.dataset_path, id: String(cfg.dataset_path).split(/[\\/]/).pop() } : null;
+      const config = cfg ? Object.fromEntries(Object.entries(cfg).filter(([k]) => !k.startsWith('canvas_') && !k.endsWith('_path') && k !== 'checkpoint_dir')) : null;
+      return ok('Version details.', {
+        details, dataset, config, metrics: summarizeMetrics(metrics, full),
+        test_metrics: full?.classification_metrics ?? full?.detection_metrics ?? null, ai_report: report,
+      });
     },
   }),
   defineTool({
@@ -85,8 +116,10 @@ export const analysisTools: McpTool[] = [
           const m = await call<Json | null>('get_training_metrics', { versionId: id });
           const full = await call<Json | null>('get_training_full_data', { versionId: id }).catch(() => null);
           const cfg = ((full?.config ?? m?.config ?? {}) as Json);
+          const summary = summarizeMetrics(m, full);
           return {
-            version_id: id, ...summarizeMetrics(m, full),
+            version_id: id, ...summary, val_losses: undefined,
+            dataset: typeof cfg.dataset_path === 'string' ? cfg.dataset_path.split(/[\\/]/).pop() : null,
             learning_rate: cfg.learning_rate ?? null, batch_size: cfg.batch_size ?? null, epochs_config: cfg.epochs ?? null,
             use_lora: cfg.use_lora ?? null, optimizer: cfg.optimizer ?? null,
           };
@@ -95,6 +128,12 @@ export const analysisTools: McpTool[] = [
         }
       }));
       const scored = rows.filter((r): r is typeof r & { best_val_loss: number } => typeof (r as Json).best_val_loss === 'number');
+      // Val-Losses sind nur auf denselben Validierungsdaten vergleichbar. Vorher
+      // wurde quer ueber Modelle und Datasets ein "Bester" gekuert.
+      const datasets = new Set(scored.map((r) => (r as Json).dataset ?? null));
+      if (datasets.size > 1) {
+        return ok('Runs use different datasets, so their validation losses are not comparable; compare test results on a shared test dataset instead.', { runs: rows, best_version_id: null });
+      }
       const best = scored.sort((a, b) => a.best_val_loss - b.best_val_loss)[0];
       return ok(best ? `Lowest validation loss: ${best.version_id} (${best.best_val_loss}).` : 'Compared runs (no validation loss available).', { runs: rows, best_version_id: best?.version_id ?? null });
     },

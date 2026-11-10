@@ -149,6 +149,10 @@ def load_plugin(config: TrainingConfig):
     if not plugins_dir.exists():
         raise FileNotFoundError(f"plugins/-Verzeichnis nicht gefunden: {plugins_dir}")
 
+    # Gleiche Aufgabe, anderer Name: Synapse und aeltere Aufrufe sagen "detection".
+    aliases = {"detection": "detect", "object_detection": "detect", "yolo": "detect"}
+    config.task_type = aliases.get((config.task_type or "").strip(), (config.task_type or "").strip())
+
     available = []
 
     for plugin_dir in sorted(plugins_dir.iterdir()):

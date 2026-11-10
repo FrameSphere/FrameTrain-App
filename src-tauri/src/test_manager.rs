@@ -160,6 +160,59 @@ fn save_test_results(app_handle: &tauri::AppHandle, version_id: &str, results: &
     ).map(|_| ()).map_err(|e| format!("DB speichern: {}", e))
 }
 
+/// Gleiche Aufgabe, anderer Name: Training nennt Objekterkennung "detect",
+/// Synapse und aeltere Aufrufe "detection".
+pub(crate) fn normalize_task_type(t: &str) -> String {
+    match t.trim() {
+        "detection" | "object_detection" | "yolo" => "detect".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Aufgabentyp aus dem Versionsordner ableiten, wenn der Aufrufer keinen nennt.
+/// Vorher galt immer "seq_classification": Tests von YOLO- und LLM-Versionen
+/// scheiterten so ohne erkennbaren Grund (Benchmark-Lauf 09.11.).
+pub(crate) fn infer_task_type(model_path: &str) -> Option<String> {
+    let dir = PathBuf::from(model_path);
+    let read = |name: &str| fs::read_to_string(dir.join(name)).ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    // Von FrameTrain geschriebene Metadaten (YOLO: model.json, LLM: frametrain_llm.json)
+    for meta in ["frametrain_llm.json", "model.json"] {
+        if let Some(t) = read(meta).and_then(|v| v.get("task").and_then(|t| t.as_str()).map(normalize_task_type)) {
+            if !t.is_empty() { return Some(t); }
+        }
+    }
+    if let Some(cfg) = read("config.json") {
+        let archs: Vec<String> = cfg.get("architectures").and_then(|a| a.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let mt = cfg.get("model_type").and_then(|v| v.as_str()).unwrap_or("");
+        for a in &archs {
+            let t = if a.ends_with("ForSequenceClassification") { "seq_classification" }
+                else if a.ends_with("ForTokenClassification") { "token_classification" }
+                else if a.ends_with("ForImageClassification") { "hf_image_classification" }
+                else if a.ends_with("ForAudioClassification") { "audio_classification" }
+                else if a.ends_with("ForVideoClassification") { "video_classification" }
+                else if a.ends_with("ForCTC") || (a.ends_with("ForConditionalGeneration") && mt == "whisper") { "speech_recognition" }
+                else if a.ends_with("ForCausalLM") { "causal_lm" }
+                else if a.ends_with("ForConditionalGeneration") || a.ends_with("ForSeq2SeqLM") { "seq2seq" }
+                else { continue };
+            return Some(t.to_string());
+        }
+        if dir.join("adapter_config.json").exists() || dir.join("adapter").exists() { return Some("causal_lm".into()); }
+        return None;
+    }
+    // Nur PyTorch-Gewichte ohne HF-Config: Ultralytics-Modell (Original-Version eines YOLO-Imports)
+    let has_pt = fs::read_dir(&dir).ok()?.flatten()
+        .any(|e| e.path().extension().map_or(false, |x| x == "pt") && e.file_name().to_string_lossy().starts_with("yolo"));
+    if has_pt { Some("detect".into()) } else { None }
+}
+
+fn resolve_task_type(task_type: Option<String>, model_path: &str) -> String {
+    let given = task_type.map(|t| normalize_task_type(&t)).unwrap_or_default();
+    if !given.is_empty() { return given; }
+    infer_task_type(model_path).unwrap_or_else(|| "seq_classification".to_string())
+}
+
 // ============ Commands ============
 
 #[tauri::command]
@@ -224,11 +277,7 @@ pub async fn start_test(
 
     let output_dir = get_test_output_dir(&app_handle, &test_id)?;
 
-    let final_task_type = task_type
-        .unwrap_or_else(|| "seq_classification".to_string())
-        .trim()
-        .to_string();
-    let final_task_type = if final_task_type.is_empty() { "seq_classification".to_string() } else { final_task_type };
+    let final_task_type = resolve_task_type(task_type, &model_path);
 
     let final_plugin_config = plugin_config.unwrap_or_else(|| {
         serde_json::Value::Object(serde_json::Map::new())
@@ -269,7 +318,7 @@ pub async fn start_test(
     let vid = version_id.clone();
     let sc = Arc::clone(&state);
 
-    thread::spawn(move || { run_test(ah, test_id, cfg_str, vid, sc, false); });
+    thread::spawn(move || { let _ = run_test(ah, test_id, cfg_str, vid, sc, false); });
     Ok(job)
 }
 
@@ -281,17 +330,16 @@ pub async fn test_single_input(
     single_input_type: String,
     task_type: Option<String>,
     plugin_config: Option<serde_json::Value>,
+    // true: auf das Ergebnis warten und es als JSON zurueckgeben (MCP). Ohne
+    // wait kommt wie bisher sofort die Test-ID, das Ergebnis per Event (UI).
+    wait: Option<bool>,
     state: tauri::State<'_, Arc<Mutex<TestState>>>,
 ) -> Result<String, String> {
     let test_id = format!("single_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..8]);
     let model_path = get_version_path(&app_handle, &version_id)?;
     let output_dir = get_test_output_dir(&app_handle, &test_id)?;
 
-    let final_task_type = task_type
-        .unwrap_or_else(|| "seq_classification".to_string())
-        .trim()
-        .to_string();
-    let final_task_type = if final_task_type.is_empty() { "seq_classification".to_string() } else { final_task_type };
+    let final_task_type = resolve_task_type(task_type, &model_path);
 
     let final_plugin_config = plugin_config.unwrap_or_else(|| {
         serde_json::Value::Object(serde_json::Map::new())
@@ -319,14 +367,39 @@ pub async fn test_single_input(
     let vid = version_id.clone();
     let sc = Arc::clone(&state);
 
-    thread::spawn(move || { run_test(ah, tid, cfg_str, vid, sc, true); });
+    if wait.unwrap_or(false) {
+        let outcome = tauri::async_runtime::spawn_blocking(move || run_test(ah, tid, cfg_str, vid, sc, true))
+            .await.map_err(|e| format!("Test: {}", e))?;
+        // Einzeltests brauchen den Ordner danach nicht mehr (vorher blieben Dutzende leere Ordner liegen).
+        let _ = fs::remove_dir_all(&output_dir);
+        return match outcome {
+            Ok(Some(data)) => Ok(data.to_string()),
+            Ok(None) => Err("Der Einzeltest hat kein Ergebnis geliefert.".into()),
+            Err(e) => Err(e),
+        };
+    }
+    thread::spawn(move || { let _ = run_test(ah, tid, cfg_str, vid, sc, true); });
     Ok(test_id)
 }
 
+/// Fehlertext aus einer "error"-Nachricht der Engine (error + details).
+fn engine_error_text(data: Option<&serde_json::Value>) -> String {
+    let get = |k: &str| data.and_then(|d| d.get(k)).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let (err, details) = (get("error"), get("details"));
+    match (err.is_empty(), details.is_empty()) {
+        (false, false) => format!("{}: {}", err, details),
+        (true, false) => details,
+        (false, true) => err,
+        _ => "Unbekannter Fehler der Test-Engine".into(),
+    }
+}
+
+/// Fuehrt die Test-Engine aus. Rueckgabe: bei Einzeltests die Ergebnisdaten,
+/// sonst None; Err mit dem Fehlertext der Engine, wenn sie keinen Erfolg meldet.
 fn run_test(
     app_handle: tauri::AppHandle, test_id: String, config_path: String,
     version_id: String, state: Arc<Mutex<TestState>>, is_single: bool,
-) {
+) -> Result<Option<serde_json::Value>, String> {
     let task_type_for_results = fs::read_to_string(&config_path)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -334,12 +407,17 @@ fn run_test(
         .unwrap_or_else(|| "seq_classification".to_string());
 
     let python = get_python_path();
+    // Scheitert der Start, muss der Job trotzdem enden; sonst blieb er "aktuell"
+    // und jeder weitere Test meldete "Ein Test läuft bereits".
+    let fail_early = |e: String| -> Result<Option<serde_json::Value>, String> {
+        let _ = app_handle.emit("test-error", serde_json::json!({"test_id":test_id,"error":e}));
+        if !is_single { finish_job(&app_handle, &state, None, Some(e.clone())); }
+        let _ = app_handle.emit("test-done", serde_json::json!({"test_id":test_id}));
+        Err(e)
+    };
     let engine_path = match get_test_engine_path(&app_handle) {
         Ok(p) => p,
-        Err(e) => {
-            let _ = app_handle.emit("test-error", serde_json::json!({"test_id":test_id,"error":e}));
-            return;
-        }
+        Err(e) => return fail_early(e),
     };
 
     let mut child = match Command::new(&python).no_window().python_utf8()
@@ -348,10 +426,7 @@ fn run_test(
         .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
     {
         Ok(c) => c,
-        Err(e) => {
-            let _ = app_handle.emit("test-error", serde_json::json!({"test_id":test_id,"error":format!("Python: {}",e)}));
-            return;
-        }
+        Err(e) => return fail_early(format!("Python: {}", e)),
     };
 
     if let Some(stderr) = child.stderr.take() {
@@ -369,6 +444,9 @@ fn run_test(
 
     // Ergebnis des Laufs fuer den Verlauf (Startseite "Letzte Tests").
     let mut final_results: Option<TestResults> = None;
+    let mut single_result: Option<serde_json::Value> = None;
+    // Fehlertext der Engine; frueher nur als Event verschickt, der Job zeigte error: null.
+    let mut engine_error: Option<String> = None;
 
     if let Some(stdout) = child.stdout.take() {
         let ah = app_handle.clone();
@@ -398,6 +476,7 @@ fn run_test(
                     let mode = data.and_then(|d| d.get("mode")).and_then(|m| m.as_str()).unwrap_or("dataset");
 
                     if mode == "single" || is_single {
+                        single_result = data.cloned();
                         let _ = ah.emit("test-single-complete", serde_json::json!({"test_id":tid,"data":data}));
                     } else if let Some(d) = data {
                         // Ergebnisse aus results_file lesen
@@ -435,36 +514,57 @@ fn run_test(
                         let _ = ah.emit("test-complete", serde_json::json!({"test_id":tid,"version_id":vid,"data":data}));
                     }
                 }
-                "error" => { let _ = ah.emit("test-error", serde_json::json!({"test_id":tid,"data":msg.get("data")})); }
+                "error" => {
+                    engine_error = Some(engine_error_text(msg.get("data")));
+                    let _ = ah.emit("test-error", serde_json::json!({"test_id":tid,"data":msg.get("data")}));
+                }
                 _ => {}
             }
         }
     }
 
     let status = child.wait();
+    let success = status.as_ref().map(|s| s.success()).unwrap_or(false);
+    let got_result = if is_single { single_result.is_some() } else { final_results.is_some() };
+    let error = if got_result { None } else {
+        Some(engine_error.clone().unwrap_or_else(|| match status.as_ref().ok().and_then(|s| s.code()) {
+            Some(c) => format!("Die Test-Engine hat ohne Ergebnis beendet (Exit-Code {}).", c),
+            None => "Die Test-Engine wurde ohne Ergebnis beendet.".to_string(),
+        }))
+    };
     if !is_single {
-        if let Ok(mut s) = state.lock() {
-            // Frueher wurde der Job hier verworfen: jobs_history blieb leer und
-            // die Startseite zeigte nie einen Test (Live-Test 1.4.2).
-            if let Some(mut job) = s.current_job.take() {
-                if job.status != TestStatus::Stopped {
-                    job.status = if final_results.is_some() { TestStatus::Completed } else { TestStatus::Failed };
-                }
-                job.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                if let Some(r) = &final_results {
-                    // Fortschritt kam nicht bei jedem Plugin an; der fertige Lauf zeigt den Endstand.
-                    job.progress.total_samples = r.total_samples;
-                    job.progress.current_sample = r.total_samples;
-                    job.progress.progress_percent = 100.0;
-                }
-                job.results = final_results.map(|mut r| { r.predictions.clear(); r });
-                remember_test(&app_handle, &mut s.jobs_history, job);
-            }
-            s.stop_signal = false;
-        }
+        finish_job(&app_handle, &state, final_results, error.clone());
     }
-    let _ = app_handle.emit("test-finished", serde_json::json!({"test_id":test_id,"is_single":is_single,"success":status.map(|s| s.success()).unwrap_or(false)}));
+    let _ = app_handle.emit("test-finished", serde_json::json!({"test_id":test_id,"is_single":is_single,"success":success}));
     let _ = app_handle.emit("test-done", serde_json::json!({"test_id":test_id}));
+    match error {
+        Some(e) => Err(e),
+        None => Ok(single_result),
+    }
+}
+
+/// Schliesst den laufenden Dataset-Test ab und legt ihn in den Verlauf.
+fn finish_job(app_handle: &tauri::AppHandle, state: &Arc<Mutex<TestState>>, final_results: Option<TestResults>, error: Option<String>) {
+    if let Ok(mut s) = state.lock() {
+        // Frueher wurde der Job hier verworfen: jobs_history blieb leer und
+        // die Startseite zeigte nie einen Test (Live-Test 1.4.2).
+        if let Some(mut job) = s.current_job.take() {
+            if job.status != TestStatus::Stopped {
+                job.status = if final_results.is_some() { TestStatus::Completed } else { TestStatus::Failed };
+                if final_results.is_none() { job.error = error; }
+            }
+            job.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            if let Some(r) = &final_results {
+                // Fortschritt kam nicht bei jedem Plugin an; der fertige Lauf zeigt den Endstand.
+                job.progress.total_samples = r.total_samples;
+                job.progress.current_sample = r.total_samples;
+                job.progress.progress_percent = 100.0;
+            }
+            job.results = final_results.map(|mut r| { r.predictions.clear(); r });
+            remember_test(app_handle, &mut s.jobs_history, job);
+        }
+        s.stop_signal = false;
+    }
 }
 
 /// Aendert den laufenden Job, wenn er noch zu diesem Test gehoert.
@@ -691,5 +791,49 @@ mod history_tests {
         let back: Vec<TestJob> = serde_json::from_str(&json).unwrap();
         assert_eq!(back[0].status, TestStatus::Completed);
         assert!(json.contains("\"completed\""), "Startseite erwartet Kleinbuchstaben: {}", json);
+    }
+}
+
+#[cfg(test)]
+mod task_type_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ft-task-{}-{}", name, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn detection_heisst_detect() {
+        assert_eq!(normalize_task_type("detection"), "detect");
+        assert_eq!(normalize_task_type(" seq_classification "), "seq_classification");
+    }
+
+    #[test]
+    fn leitet_aufgabe_aus_dem_versionsordner_ab() {
+        // YOLO-Version: model.json mit task
+        let y = tmp("yolo");
+        fs::write(y.join("model.json"), r#"{"framework":"ultralytics","task":"detect"}"#).unwrap();
+        assert_eq!(infer_task_type(y.to_str().unwrap()).as_deref(), Some("detect"));
+        // Original eines YOLO-Imports: nur yolov8n.pt
+        let o = tmp("orig");
+        fs::write(o.join("yolov8n.pt"), b"x").unwrap();
+        assert_eq!(infer_task_type(o.to_str().unwrap()).as_deref(), Some("detect"));
+        // LoRA-Version eines Sprachmodells
+        let l = tmp("llm");
+        fs::write(l.join("frametrain_llm.json"), r#"{"task":"causal_lm"}"#).unwrap();
+        fs::write(l.join("config.json"), r#"{"architectures":["LlamaForCausalLM"]}"#).unwrap();
+        assert_eq!(infer_task_type(l.to_str().unwrap()).as_deref(), Some("causal_lm"));
+        // Klassifikator
+        let c = tmp("cls");
+        fs::write(c.join("config.json"), r#"{"architectures":["DistilBertForSequenceClassification"]}"#).unwrap();
+        assert_eq!(infer_task_type(c.to_str().unwrap()).as_deref(), Some("seq_classification"));
+        // Unbekannt -> Standard bleibt beim Aufrufer
+        let u = tmp("leer");
+        assert_eq!(infer_task_type(u.to_str().unwrap()), None);
+        assert_eq!(resolve_task_type(None, u.to_str().unwrap()), "seq_classification");
+        assert_eq!(resolve_task_type(Some("detection".into()), c.to_str().unwrap()), "detect");
+        for d in [y, o, l, c, u] { let _ = fs::remove_dir_all(d); }
     }
 }

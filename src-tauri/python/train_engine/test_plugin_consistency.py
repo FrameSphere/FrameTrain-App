@@ -24,7 +24,6 @@ TEST = Path(__file__).resolve().parent.parent / "test_engine" / "plugins"
 # Train) ist nie erlaubt: was man nicht trainieren kann, braucht keinen Test.
 TRAIN_ONLY = {
     "canvas": "Synapse-Netze testet canvas_inference_server.py",
-    "detect": "YOLO testet run_yolo_inference (Rust) und yolo_inference_server.py",
     "image_classification": "torchvision-Plugin: Test ueber die Canvas-/Bild-Pfade der App",
 }
 REQUIRED_KEYS = ("task_type", "entry", "class", "name")

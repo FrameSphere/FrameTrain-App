@@ -170,7 +170,9 @@
         "stepWorse": "{model}: {newer} ist auf diesem Dataset {points} Punkte schlechter als {older}.",
         "stepSame": "{model}: {newer} liegt auf diesem Dataset gleichauf mit {older}.",
         "closeTogether": "Dicht beieinander, vergrößert",
-        "eyebrowBars": "Genauigkeit · je Test-Dataset"
+        "eyebrowBars": "Genauigkeit · je Test-Dataset",
+        "eyebrowBarsMetric": "{metric} · je Test-Dataset",
+        "scatterTitleMetric": "{metric} gegen Tempo · {dataset}"
       }
     },
     "newTraining": "Neues Training",

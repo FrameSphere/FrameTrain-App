@@ -130,13 +130,15 @@ export function estimateTrainingRam(
   else if (mixedPrecision) gradients = size;
   else gradients = size * 2;
 
-  // 3. Optimizer-Zustand: AdamW haelt zwei Momente; bei Mixed Precision kommt
-  //    die FP32-Master-Copy dazu (=> 4x statt 2x). Adafactor braucht deutlich
-  //    weniger, weil es die zweite Ordnung faktorisiert.
+  // 3. Optimizer-Zustand: AdamW haelt zwei FP32-Momente = 8 Byte je Parameter,
+  //    also 4x "GB bei 16 Bit"; bei Mixed Precision kommt die FP32-Master-Copy
+  //    dazu (12 Byte => 6x). Vorher stand hier 2x/4x und die Schaetzung lag beim
+  //    Optimizer um die Haelfte zu niedrig (Benchmark 09.11.). Adafactor braucht
+  //    deutlich weniger, weil es die zweite Ordnung faktorisiert.
   const trainedGb = size * (adapterOnly ? 0.05 : 1.0);
   const optimizer = /adafactor/i.test(config.optimizer || '')
     ? trainedGb * (mixedPrecision ? 1.0 : 0.5)
-    : trainedGb * (mixedPrecision ? 4 : 2);
+    : trainedGb * (mixedPrecision ? 6 : 4);
 
   // 4. Aktivierungen: ~0.30 GB je Sample bei 128 Tokens bzw. 640 px (FP32),
   //    halb so viel in Mixed Precision. Gradient Checkpointing spart rund 70%.

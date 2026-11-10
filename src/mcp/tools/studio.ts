@@ -192,10 +192,10 @@ export const studioTools: McpTool[] = [
   defineTool({
     name: 'studio_samples_list',
     title: 'List samples',
-    description: 'Lists samples of a Studio project (paginated), optionally filtered by status (new, suggested, confirmed, skipped). Each sample has its id, content/text or media path, label/target/boxes and status.',
+    description: 'Lists samples of a Studio project (paginated), optionally filtered by status (new, suggested, confirmed, skipped) or by "doubt" (samples where studio_review found the model disagreeing). Each sample has its id, content/text or media path, label/target/boxes, status and doubt if any.',
     properties: {
       project_id: projectId,
-      status: S.enumOf('Only samples with this status.', SAMPLE_STATUS),
+      status: S.enumOf('Only samples with this status, or "doubt" for model doubts.', [...SAMPLE_STATUS, 'doubt']),
       offset: S.int('Default 0.', { minimum: 0 }),
       limit: S.int('1-200, default 50.', { minimum: 1, maximum: 200 }),
     },
@@ -276,7 +276,7 @@ export const studioTools: McpTool[] = [
   defineTool({
     name: 'studio_add_texts',
     title: 'Add texts',
-    description: 'Adds text samples to a text Studio project. For text_classify projects set label (a class name); for text_pairs projects set target (the expected output). Samples with label/target arrive as suggestions; confirm them with studio_set_annotation or in the app.',
+    description: 'Adds text samples to a text Studio project. For text_classify projects set label (a class name); for text_pairs projects set target (the expected output). Samples with label/target are stored as confirmed (you provided the label); samples without one arrive as new.',
     properties: {
       project_id: projectId,
       items: S.arr('Texts to add (max 1000 per call).', S.obj('One text sample.', {

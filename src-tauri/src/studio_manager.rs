@@ -1189,8 +1189,13 @@ pub async fn studio_set_annotation(
             .collect(),
         at: Utc::now().to_rfc3339(),
     };
+    let sid = event.sample_id.clone();
     append_jsonl(&events_path(&dir), &event)?;
     maybe_compact(&dir)?;
+    // Eine Entscheidung des Menschen erledigt den Zweifel der Modellpruefung.
+    // Vorher blieb er stehen und studio_stats meldete ihn weiter (Benchmark 09.11.).
+    let mut doubts = load_doubts(&dir);
+    if doubts.remove(&sid).is_some() { save_doubts(&dir, &doubts)?; }
     Ok(())
 }
 
@@ -2833,35 +2838,47 @@ Herkunft je Datei steht in PROVENANCE.csv, Verteilung und Prüfungen in EXPORT_R
 /// registriert werden soll.
 fn write_text_export(
     project: &StudioProject, samples: &[&StudioSample], out: &Path,
-) -> Result<PathBuf, String> {
+    train_ratio: f64, val_ratio: f64,
+) -> Result<(PathBuf, Vec<Option<String>>), String> {
     let seq2seq = project.task == "pairs";
     let mut provenance = String::from("sample_id,herkunft,lizenz,status\n");
     let daten = out.join("dataset");
     fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
 
-    if seq2seq {
-        let mut zeilen = String::new();
-        for s in samples {
-            let (Some(quelle), Some(ziel)) = (s.content.as_ref(), s.ann.target.as_ref()) else { continue };
-            zeilen.push_str(&serde_json::json!({ "source": quelle, "target": ziel }).to_string());
-            zeilen.push('\n');
-            provenance.push_str(&format!("{},{},{},{}\n", csv_field(&s.id),
-                csv_field(s.src.origin.as_deref().unwrap_or("")),
-                csv_field(s.src.license.as_deref().unwrap_or("")),
-                csv_field(&s.status)));
-        }
-        fs::write(daten.join("data.jsonl"), zeilen).map_err(|e| format!("JSONL: {}", e))?;
+    // Wie beim Bild-Export gruppenbewusst aufteilen. Vorher landete alles in
+    // einer data.csv ohne Split, obwohl der Export "train/val/test" versprach
+    // (Benchmark 09.11.).
+    let splits: Vec<Option<String>> = if train_ratio > 0.0 && train_ratio < 1.0 && samples.len() >= 3 {
+        let gruppen: Vec<String> = samples.iter()
+            .map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
+            .collect();
+        crate::yolo_export::assign_splits(&gruppen, train_ratio, val_ratio).into_iter().map(Some).collect()
     } else {
-        let mut zeilen = String::from("text,label\n");
-        for s in samples {
+        vec![None; samples.len()]
+    };
+    let mut teile: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let kopf = if seq2seq { "" } else { "text,label\n" };
+
+    for (s, split) in samples.iter().zip(&splits) {
+        let zeile = if seq2seq {
+            let (Some(quelle), Some(ziel)) = (s.content.as_ref(), s.ann.target.as_ref()) else { continue };
+            format!("{}\n", serde_json::json!({ "source": quelle, "target": ziel }))
+        } else {
             let (Some(text), Some(label)) = (s.content.as_ref(), s.ann.label.as_ref()) else { continue };
-            zeilen.push_str(&format!("{},{}\n", csv_field(text), csv_field(label)));
-            provenance.push_str(&format!("{},{},{},{}\n", csv_field(&s.id),
-                csv_field(s.src.origin.as_deref().unwrap_or("")),
-                csv_field(s.src.license.as_deref().unwrap_or("")),
-                csv_field(&s.status)));
-        }
-        fs::write(daten.join("data.csv"), zeilen).map_err(|e| format!("CSV: {}", e))?;
+            format!("{},{}\n", csv_field(text), csv_field(label))
+        };
+        let key = split.clone().unwrap_or_default();
+        teile.entry(key).or_insert_with(|| kopf.to_string()).push_str(&zeile);
+        provenance.push_str(&format!("{},{},{},{}\n", csv_field(&s.id),
+            csv_field(s.src.origin.as_deref().unwrap_or("")),
+            csv_field(s.src.license.as_deref().unwrap_or("")),
+            csv_field(&s.status)));
+    }
+    let datei = if seq2seq { "data.jsonl" } else { "data.csv" };
+    for (split, inhalt) in &teile {
+        let ziel = if split.is_empty() { daten.clone() } else { daten.join(split) };
+        fs::create_dir_all(&ziel).map_err(|e| format!("mkdir: {}", e))?;
+        fs::write(ziel.join(datei), inhalt).map_err(|e| format!("{}: {}", datei, e))?;
     }
 
     fs::write(out.join("PROVENANCE.csv"), provenance)
@@ -2885,7 +2902,7 @@ Herkunft je Text steht in PROVENANCE.csv.
         format = if seq2seq { "dataset/data.jsonl mit source und target" }
                  else { "dataset/data.csv mit text und label" });
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
-    Ok(daten)
+    Ok((daten, splits))
 }
 
 /// Schreibt das Projekt als Audiodatensatz.
@@ -3002,8 +3019,8 @@ pub async fn studio_export(
     let (zu_registrieren, exportiert, splits, hinweise): (PathBuf, Vec<&StudioSample>, Vec<Option<String>>, Vec<quality::Hinweis>) =
         match (project.modality.as_str(), project.task.as_str()) {
             ("text", _) => {
-                let d = write_text_export(&project, &selected, &out)?;
-                (d, selected.clone(), vec![None; selected.len()], vec![])
+                let (d, sp) = write_text_export(&project, &selected, &out, train_ratio, val_ratio)?;
+                (d, selected.clone(), sp, vec![])
             }
             ("audio", "transcript") => {
                 let d = write_audio_export(&project, &selected, &media_dir, &out)?;
@@ -3336,7 +3353,7 @@ mod tests {
         let s2 = textsample("s_2", "Tolle Piste", Some("lob"));
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        let daten = write_text_export(&project, &[&s1, &s2], &out).unwrap();
+        let (daten, _) = write_text_export(&project, &[&s1, &s2], &out, 0.8, 0.1).unwrap();
 
         let csv = fs::read_to_string(daten.join("data.csv")).unwrap();
         let tabelle = parse_csv(&csv);
@@ -3363,7 +3380,7 @@ mod tests {
         let s1 = textsample("s_1", "Tolle Piste", Some("lob"));
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        let daten = write_text_export(&project, &[&s1], &out).unwrap();
+        let (daten, _) = write_text_export(&project, &[&s1], &out, 0.8, 0.1).unwrap();
 
         assert_ne!(daten, out, "registriert werden darf nicht der Ordner mit den Beipackzetteln");
         let dateien: Vec<String> = fs::read_dir(&daten).unwrap()
@@ -3374,6 +3391,31 @@ mod tests {
         assert_eq!(analysis.detected_type.as_str(), "flat_file");
         assert!(analysis.warnings.iter().all(|w| !w.contains("gemischte")),
             "Warnungen: {:?}", analysis.warnings);
+    }
+
+    #[test]
+    fn textexport_teilt_in_train_val_test() {
+        // Vorher kam eine einzige data.csv heraus, obwohl der Export einen Split versprach.
+        let dir = TempDir::new("textexport_split");
+        let project = StudioProject {
+            id: "sp_t".to_string(), name: "Stimmung".to_string(),
+            modality: "text".to_string(), task: "classification".to_string(),
+            target_format: "flat_file".to_string(),
+            classes: vec!["neg".to_string(), "pos".to_string()],
+            created_at: "x".to_string(), updated_at: "x".to_string(),
+        };
+        let samples: Vec<StudioSample> = (0..40)
+            .map(|i| textsample(&format!("s_{}", i), &format!("Text {}", i), Some(if i % 2 == 0 { "neg" } else { "pos" })))
+            .collect();
+        let refs: Vec<&StudioSample> = samples.iter().collect();
+        let out = dir.path().join("out");
+        fs::create_dir_all(&out).unwrap();
+        let (daten, splits) = write_text_export(&project, &refs, &out, 0.8, 0.1).unwrap();
+        assert_eq!(splits.len(), 40);
+        let zeilen = |sp: &str| fs::read_to_string(daten.join(sp).join("data.csv")).map(|c| c.lines().count() - 1).unwrap_or(0);
+        assert_eq!(zeilen("train") + zeilen("val") + zeilen("test"), 40);
+        assert!(zeilen("train") > zeilen("val") && zeilen("val") > 0 && zeilen("test") > 0);
+        assert_eq!(crate::dataset_manager::detect_dataset_type(&daten).detected_type.as_str(), "pre_split");
     }
 
     #[test]
@@ -3391,7 +3433,7 @@ mod tests {
         let s2 = textsample("s_2", "Ohne Ziel", None);
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        let daten = write_text_export(&project, &[&s1, &s2], &out).unwrap();
+        let (daten, _) = write_text_export(&project, &[&s1, &s2], &out, 0.8, 0.1).unwrap();
 
         let jsonl = fs::read_to_string(daten.join("data.jsonl")).unwrap();
         let zeilen: Vec<&str> = jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
