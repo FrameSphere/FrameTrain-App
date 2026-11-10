@@ -109,8 +109,23 @@ export function TrainingContextProvider({ children }: { children: ReactNode }) {
     // mid-flight while a listen() promise from the previous instance is still pending).
     // That throw happens inside a .then() with no .catch(), which surfaces as an
     // unhandled promise rejection. Swallow it — the listener is gone either way.
+    //
+    // Note: the `UnlistenFn` type from @tauri-apps/api/event is declared as
+    // `() => void`, but its real implementation (`_unlisten`) is an `async
+    // function`. That means a throw inside it never reaches this call
+    // synchronously — it turns into a *rejected Promise* instead. A plain
+    // try/catch around `fn()` can never catch that; it only guards against a
+    // genuinely synchronous throw. We have to treat the return value as a
+    // possible thenable and swallow its rejection too.
     const safeUnlisten = (fn: () => void) => {
-      try { fn(); } catch { /* already unregistered — nothing to do */ }
+      try {
+        const maybePromise = fn() as unknown as void | Promise<unknown>;
+        if (maybePromise && typeof (maybePromise as Promise<unknown>).catch === 'function') {
+          (maybePromise as Promise<unknown>).catch(() => { /* already unregistered — nothing to do */ });
+        }
+      } catch {
+        /* already unregistered — nothing to do */
+      }
     };
     const add = (p: Promise<() => void>) =>
       p
