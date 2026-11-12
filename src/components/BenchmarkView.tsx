@@ -30,7 +30,7 @@ export function metricOf(task: BenchTask): string {
   for (const d of task.datasets) for (const r of d.results) if (r.metric.fraction !== null) return r.metric.label;
   return 'accuracy';
 }
-const METRIC_NAMES: Record<string, string> = { mAP50: 'mAP50', rouge_l: 'ROUGE-L', macro_f1: 'Macro-F1', f1: 'F1' };
+const METRIC_NAMES: Record<string, string> = { mAP50: 'mAP50', rouge_l: 'ROUGE-L', macro_f1: 'Macro-F1', f1: 'F1', clip_score: 'CLIP score' };
 export const metricName = (label: string) => METRIC_NAMES[label] ?? label;
 
 function valueText(r: BenchResult, f: Format): string {

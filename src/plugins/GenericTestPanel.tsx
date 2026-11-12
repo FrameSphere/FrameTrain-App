@@ -13,6 +13,7 @@ import type { TestPluginProps } from './types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { engineErrorText, engineErrorBroken, type EngineErrorData } from './engineError';
 import BrokenPackageNotice from '../components/BrokenPackageNotice';
+import ConfusionMatrixView from './ConfusionMatrixView';
 import type { BrokenPackage } from '../components/usePackageInstall';
 
 interface TopPred { label?: string; score?: number }
@@ -25,6 +26,13 @@ const TEST_METRICS: Array<{ key: string; percent: boolean }> = [
   { key: 'wer', percent: true }, { key: 'cer', percent: true },
   { key: 'rouge1', percent: true }, { key: 'rouge2', percent: true }, { key: 'rougeL', percent: true },
   { key: 'bleu', percent: false },
+  // Klassifikation (Macro-Mittel) und freie Antworten (VLM): Anteile.
+  { key: 'macro_f1', percent: true }, { key: 'macro_precision', percent: true },
+  { key: 'macro_recall', percent: true }, { key: 'weighted_f1', percent: true },
+  { key: 'exact_match', percent: true }, { key: 'tolerant_match', percent: true },
+  // CLIP-Score steht schon auf 0..100.
+  { key: 'clip_score', percent: false }, { key: 'clip_score_base', percent: false },
+  { key: 'clip_score_delta', percent: false },
 ];
 
 /** Fehlerraten und ROUGE als Prozent, BLEU (0..100) als Zahl, sonst drei Nachkommastellen. */
@@ -107,6 +115,8 @@ export default function GenericTestPanel({
   const [summary, setSummary] = useState<{
     total: number; accuracy: number | null; correct: number | null;
     metrics?: Record<string, number>; images?: string[];
+    /** Unveraenderte Kennzahlen (Konfusionsmatrix, Werte je Klasse, Hinweise). */
+    raw?: Record<string, unknown>;
   } | null>(null);
 
   const unlistenRef = useRef<Array<() => void>>([]);
@@ -184,7 +194,8 @@ export default function GenericTestPanel({
           const d = e.payload.data;
           // Zusatzkennzahlen (Entitaeten-F1, Recall@k, ROUGE-L …) — nur Zahlen.
           const metrics = d?.metrics ? Object.fromEntries(
-            Object.entries(d.metrics).filter(([, v]) => typeof v === 'number'),
+            // accuracy steht schon in der Trefferzeile darueber.
+            Object.entries(d.metrics).filter(([k, v]) => typeof v === 'number' && k !== 'accuracy'),
           ) as Record<string, number> : undefined;
           setSummary({
             total: d?.total_samples ?? 0,
@@ -192,6 +203,7 @@ export default function GenericTestPanel({
             correct: d?.correct_predictions ?? null,
             metrics,
             images: Array.isArray(d?.images) ? d.images : undefined,
+            raw: d?.metrics,
           });
           setStatus(null);
           setRunning(false);
@@ -371,6 +383,12 @@ export default function GenericTestPanel({
                     ))}
                   </div>
                 )}
+                {Array.isArray(summary.raw?.metrics_note_codes) && (summary.raw.metrics_note_codes as string[]).map(code => (
+                  <p key={code} className="text-amber-200/80 text-[11px] pt-1">
+                    {t(`testPlugins.metricNotes.${code}`, { model: String(summary.raw?.clip_model ?? '') })}
+                  </p>
+                ))}
+                {summary.raw && <ConfusionMatrixView metrics={summary.raw} />}
                 {summary.images && summary.images.length > 0 && (
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-2">
                     {summary.images.slice(0, 12).map(p => (

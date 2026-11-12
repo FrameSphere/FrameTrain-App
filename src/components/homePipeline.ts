@@ -132,6 +132,9 @@ function durationOf(job: { started_at?: string | null; completed_at?: string | n
  */
 const FRACTION_METRICS = ['mAP50', 'rouge_l', 'macro_f1', 'f1'];
 
+/** Text-zu-Bild: CLIP-Score (0..100), hoeher = Bild passt besser zum Prompt. */
+const RAW_METRICS = ['clip_score'];
+
 /** Kennzahl eines Tests. Accuracy zuerst, dann bekannte 0..1-Kennzahlen; sonst die erste Zahl aus `metrics`, ohne feste Skala. */
 export function testMetric(test: PipelineTest | undefined): TestMetric | null {
   const r = test?.results;
@@ -141,6 +144,13 @@ export function testMetric(test: PipelineTest | undefined): TestMetric | null {
   for (const label of FRACTION_METRICS) {
     const value = metrics[label];
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1) return { label, value, fraction: value };
+  }
+  // Kennzahlen ohne 0..1-Skala, die vor beliebigen Zahlen (Bildanzahl,
+  // Schrittzahl) stehen: die Reihenfolge in `metrics` ist nach dem Speichern
+  // nicht verlaesslich.
+  for (const label of RAW_METRICS) {
+    const value = metrics[label];
+    if (typeof value === 'number' && Number.isFinite(value)) return { label, value, fraction: null };
   }
   for (const [label, value] of Object.entries(metrics)) {
     if (typeof value === 'number' && Number.isFinite(value)) return { label, value, fraction: null };

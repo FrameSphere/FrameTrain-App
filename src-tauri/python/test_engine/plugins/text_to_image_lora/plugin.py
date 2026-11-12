@@ -113,6 +113,8 @@ class Plugin:
 
         out_dir = Path(self.config.output_path) / "images"
         notes: List[str] = []
+        # Codes fuer die Test-Ansicht (dort uebersetzt), Text fuer MCP/Logs.
+        note_codes: List[str] = []
         scorer = None
         if self.use_clip:
             from _shared_clip import DEFAULT_CLIP_MODEL, ClipScorer
@@ -120,6 +122,7 @@ class Plugin:
             scorer, reason = ClipScorer.load(self.clip_model or DEFAULT_CLIP_MODEL, self.pipe.device)
             if reason:
                 notes.append(reason)
+                note_codes.append("clip_unavailable")
                 TestProtocol.warning(reason)
         compare = self.compare_base
         if compare:
@@ -127,6 +130,7 @@ class Plugin:
             if reason:
                 compare = False
                 notes.append(reason)
+                note_codes.append("base_merged" if "merge_lora" in reason else "base_unsupported")
                 TestProtocol.warning(reason)
         results: List[Dict[str, Any]] = []
         total_time = 0.0
@@ -177,6 +181,9 @@ class Plugin:
                     scores["clip_score_delta"] = round(scores["clip_score"] - base, 3)
         if notes:
             scores["metrics_note"] = " ".join(notes)
+            scores["metrics_note_codes"] = note_codes
+            if "clip_unavailable" in note_codes:
+                scores["clip_model"] = self.clip_model or "openai/clip-vit-base-patch32"
         results_file.write_text(json.dumps({
             "metrics": {**scores, "generated_images": len(results), "images_dir": str(out_dir),
                         "num_inference_steps": self.steps, "guidance_scale": self.guidance},

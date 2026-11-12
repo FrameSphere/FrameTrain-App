@@ -6,6 +6,11 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import type { TestPluginProps } from '../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { engineErrorText } from '../engineError';
+import ConfusionMatrixView from '../ConfusionMatrixView';
+import { formatTestMetric, metricLabel } from '../GenericTestPanel';
+
+/** Zusatzkennzahlen, die in der Zusammenfassung als Zahl stehen. */
+const SUMMARY_METRICS = ['macro_f1', 'macro_precision', 'macro_recall'];
 
 type Prediction = { label: string; confidence: number };
 
@@ -17,7 +22,7 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
   const [result, setResult] = useState<{ top: Prediction[]; inference_time: number } | null>(null);
   const [dsLoading, setDsLoading] = useState(false);
   const [dsError, setDsError] = useState<string | null>(null);
-  const [dsResult, setDsResult] = useState<{ accuracy: number; total: number } | null>(null);
+  const [dsResult, setDsResult] = useState<{ accuracy: number; total: number; metrics?: Record<string, unknown> } | null>(null);
   const [selectedDs, setSelectedDs] = useState(datasets[0]?.id ?? '');
   const unlistenRef = useRef<(() => void)[]>([]);
   useEffect(() => () => { unlistenRef.current.forEach(f => f()); }, []);
@@ -64,10 +69,14 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
         batchSize: 16, maxSamples: null,
         taskType: 'image_classification', pluginConfig: {},
       });
-      const u1 = await listen<{ test_id: string; data?: { accuracy?: number; total_samples?: number } }>(
+      const u1 = await listen<{ test_id: string; data?: { accuracy?: number; total_samples?: number; metrics?: Record<string, unknown> } }>(
         'test-complete', e => {
           if (e.payload.test_id !== job.id) return;
-          setDsResult({ accuracy: e.payload.data?.accuracy ?? 0, total: e.payload.data?.total_samples ?? 0 });
+          setDsResult({
+            accuracy: e.payload.data?.accuracy ?? 0,
+            total: e.payload.data?.total_samples ?? 0,
+            metrics: e.payload.data?.metrics,
+          });
           setDsLoading(false);
         }
       );
@@ -152,6 +161,17 @@ export default function ImageClassificationTestPlugin({ versionId, modelId, mode
             <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-1">
               <p className="text-2xl font-bold text-white">{(dsResult.accuracy * 100).toFixed(2)}%</p>
               <p className="text-gray-400 text-xs">{t('testPlugins.imageClassification.accuracyOver', { n: dsResult.total })}</p>
+              {dsResult.metrics && SUMMARY_METRICS.some(k => typeof dsResult.metrics?.[k] === 'number') && (
+                <div className="pt-2 space-y-0.5">
+                  {SUMMARY_METRICS.filter(k => typeof dsResult.metrics?.[k] === 'number').map(k => (
+                    <div key={k} className="flex items-center justify-between text-[11px]">
+                      <span className="text-gray-400">{t(`testPlugins.generic.metricLabels.${k}`, metricLabel(k))}</span>
+                      <span className="tabular-nums text-white">{formatTestMetric(k, dsResult.metrics?.[k])}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {dsResult.metrics && <ConfusionMatrixView metrics={dsResult.metrics} />}
             </div>
           )}
         </div>

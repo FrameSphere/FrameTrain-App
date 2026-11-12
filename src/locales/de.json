@@ -3662,8 +3662,32 @@
         "rouge1": "ROUGE-1",
         "rouge2": "ROUGE-2",
         "rougeL": "ROUGE-L",
-        "bleu": "BLEU"
+        "bleu": "BLEU",
+        "macro_f1": "Macro-F1",
+        "macro_precision": "Macro-Precision",
+        "macro_recall": "Macro-Recall",
+        "weighted_f1": "Gewichteter F1",
+        "exact_match": "Exakte Übereinstimmung",
+        "tolerant_match": "Tolerante Übereinstimmung (enthält Antwort)",
+        "clip_score": "CLIP-Score",
+        "clip_score_base": "CLIP-Score (Basismodell)",
+        "clip_score_delta": "CLIP-Score LoRA gegenüber Basis"
       }
+    },
+    "confusion": {
+      "title": "Konfusionsmatrix",
+      "axes": "Zeilen: erwartete Klasse · Spalten: vorhergesagte Klasse",
+      "limited": "Gezeigt werden die {shown} am häufigsten verwechselten von {total} Klassen.",
+      "perClass": "Je Klasse",
+      "class": "Klasse",
+      "precision": "Precision",
+      "recall": "Recall",
+      "support": "Beispiele"
+    },
+    "metricNotes": {
+      "clip_unavailable": "Kein CLIP-Score: das CLIP-Modell {model} liegt nicht lokal vor. Unter Modelle herunterladen oder plugin_config clip_model auf einen lokalen Ordner setzen.",
+      "base_merged": "Kein Vergleich mit dem Basismodell: die LoRA ist in die Pipeline eingerechnet.",
+      "base_unsupported": "Kein Vergleich mit dem Basismodell: diese diffusers-Version kann die LoRA nicht abschalten."
     }
   },
   "studio": {
