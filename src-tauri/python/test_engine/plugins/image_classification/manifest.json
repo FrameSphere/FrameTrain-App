@@ -1,0 +1,10 @@
+{
+  "task_type": "image_classification",
+  "name": "Image Classification (torchvision)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Inferenz fuer mit FrameTrain trainierte torchvision-Bildmodelle (model.pt mit arch und classes).",
+  "input_type": "image",
+  "output_format": "classification"
+}
