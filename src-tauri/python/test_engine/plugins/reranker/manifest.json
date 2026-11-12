@@ -1,0 +1,10 @@
+{
+  "task_type": "reranker",
+  "name": "Reranker / Cross-Encoder - Test",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Ordnet Passagen zu einer Frage; MRR@10 und nDCG@10, bei Paaren mit Score Accuracy und Spearman.",
+  "input_type": "text",
+  "output_format": "ranking"
+}

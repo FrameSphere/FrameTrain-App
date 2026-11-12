@@ -1,0 +1,14 @@
+{
+  "task_type": "reranker",
+  "name": "Reranker / Cross-Encoder (Sentence-Transformers)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert Cross-Encoder, die Frage und Passage gemeinsam lesen und eine Relevanz ausgeben (ms-marco-MiniLM, BGE-Reranker oder jeder HF-Encoder). Paare mit Score/Label oder Frage + positive/negative Passagen.",
+  "supported_architectures": [
+    "bert", "distilbert", "roberta", "xlm-roberta", "deberta", "deberta-v2",
+    "electra", "albert", "camembert", "mpnet", "modernbert"
+  ],
+  "dataset_formats": ["jsonl", "json", "csv", "tsv", "parquet"],
+  "metrics": ["train_loss", "val_loss", "mrr_at_10", "ndcg_at_10", "accuracy", "spearman"]
+}
