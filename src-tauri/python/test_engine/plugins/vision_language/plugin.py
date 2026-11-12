@@ -3,8 +3,10 @@
 single:  single_input ist der Bildpfad, die Frage steht in plugin_config
          "question". Fuer Aufrufer mit nur einem Eingabefeld geht auch
          "pfad/zum/bild.jpg ||| Frage".
-dataset: Antworten fuer die Val/Test-Beispiele, Kennzahlen exact match und
-         ROUGE-L (results.json: metrics + predictions).
+dataset: Antworten fuer die Val/Test-Beispiele, Kennzahlen exact match,
+         tolerante Uebereinstimmung, ROUGE-L und bei Texterkennung CER
+         (results.json: metrics + predictions). plugin_config "ocr": true/false
+         erzwingt bzw. unterdrueckt CER, sonst entscheiden die Prompts.
 """
 import json
 import sys
@@ -37,6 +39,7 @@ class Plugin:
         pc = config.plugin_config or {}
         self.question = str(pc.get("question", "") or "")
         self.max_new_tokens = int(pc.get("max_new_tokens", 0) or 0)
+        self.ocr = pc.get("ocr") if isinstance(pc.get("ocr"), bool) else None
         self.model = None
         self.processor = None
         self.family = "chat"
@@ -90,7 +93,8 @@ class Plugin:
 
     def run_dataset(self):
         from PIL import Image
-        from ft_data.image_text import evaluation_samples, normalise_answer, text_scores
+        from ft_data.image_text import evaluation_samples, normalise_answer
+        from _shared_text_metrics import free_text_scores, tolerant_match
         from ft_data.media import sample as random_sample
 
         root = Path(self.config.dataset_path)
@@ -126,13 +130,15 @@ class Plugin:
                     "expected_output": s.answer,
                     "predicted_output": a,
                     "is_correct": normalise_answer(a) == normalise_answer(s.answer),
+                    "tolerant_correct": tolerant_match(a, s.answer),
                     "confidence": None,
                     "inference_time": dt,
                 })
             elapsed = max(time.time() - started, 1e-6)
             TestProtocol.progress(current=len(results), total=len(samples), sps=len(results) / elapsed)
 
-        scores = text_scores(preds, [s.answer for s in samples])
+        scores = free_text_scores(preds, [s.answer for s in samples],
+                                  prompts=[r["input_text"] for r in results], ocr=self.ocr)
         out = Path(self.config.output_path)
         out.mkdir(parents=True, exist_ok=True)
         results_file = out / "results.json"
