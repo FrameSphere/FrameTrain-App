@@ -4,16 +4,19 @@ single:  Prompt -> PNG; das Ergebnis ist der Pfad des Bildes (die Test-Seite
          zeigt es an).
 dataset: fuer N Captions des Datasets je ein Bild. Eine Trefferquote gibt es
          bei Bilderzeugung nicht; results.json stellt Prompt, erzeugtes und
-         Original-Bild nebeneinander.
+         Original-Bild nebeneinander. Kennzahl: CLIP-Score (Prompt <-> Bild),
+         optional dasselbe mit dem Basismodell und gleichem Seed.
 
 plugin_config: num_inference_steps (25), guidance_scale (7.5), seed (42),
-negative_prompt, max_images (16, Obergrenze fuer den Dataset-Lauf).
+negative_prompt, max_images (16, Obergrenze fuer den Dataset-Lauf),
+clip_model (openai/clip-vit-base-patch32, nur lokal), clip_score (true),
+compare_base (false; nur bei reinen LoRA-Gewichten moeglich).
 """
 import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,6 +34,9 @@ class Plugin:
         self.seed = int(pc.get("seed", 42) or 0)
         self.negative_prompt = str(pc.get("negative_prompt", "") or "")
         self.max_images = int(pc.get("max_images", 16) or 16)
+        self.clip_model = str(pc.get("clip_model") or "")
+        self.use_clip = pc.get("clip_score", True) is not False
+        self.compare_base = bool(pc.get("compare_base", False))
         self.pipe = None
         self.info: Dict[str, Any] = {}
         self.size = 512
@@ -51,7 +57,8 @@ class Plugin:
         dev = self.pipe.device
         TestProtocol.status("loading", f"Pipeline geladen | {self.size}px | {self.steps} Schritte | Geraet: {dev}")
 
-    def _render(self, prompt: str, out_dir: Path, name: str, seed: int) -> Path:
+    def _render(self, prompt: str, out_dir: Path, name: str, seed: int):
+        """Erzeugt und speichert ein Bild; Rueckgabe (Pfad, PIL-Bild)."""
         from ft_data.diffusion import generate_image
 
         img = generate_image(self.pipe, prompt, steps=self.steps, guidance=self.guidance,
@@ -59,7 +66,17 @@ class Plugin:
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / name
         img.save(path)
-        return path
+        return path, img
+
+    def _lora_switchable(self) -> Optional[str]:
+        """None, wenn das Basismodell per disable_lora erreichbar ist, sonst der Grund."""
+        model_path = Path(self.config.model_path)
+        if (model_path / "model_index.json").exists():
+            return ("Vergleich mit dem Basismodell nicht moeglich: die LoRA ist in die Pipeline "
+                    "eingerechnet (merge_lora).")
+        if not hasattr(self.pipe, "disable_lora"):
+            return "Vergleich mit dem Basismodell nicht moeglich: diffusers kennt disable_lora nicht."
+        return None
 
     def run_single(self):
         from ft_data.diffusion import safe_filename
@@ -68,8 +85,8 @@ class Plugin:
         if not prompt:
             raise ValueError("Prompt ist leer.")
         t0 = time.time()
-        path = self._render(prompt, Path(self.config.output_path),
-                            f"{safe_filename(prompt)}_{self.seed}.png", self.seed)
+        path, _img = self._render(prompt, Path(self.config.output_path),
+                                  f"{safe_filename(prompt)}_{self.seed}.png", self.seed)
         TestProtocol.complete_single(
             predicted=str(path), confidence=None, top_predictions=[],
             inference_time=time.time() - t0,
@@ -95,6 +112,22 @@ class Plugin:
         TestProtocol.status("running", f"Erzeuge {len(samples)} Bilder aus Captions ({split})...")
 
         out_dir = Path(self.config.output_path) / "images"
+        notes: List[str] = []
+        scorer = None
+        if self.use_clip:
+            from _shared_clip import DEFAULT_CLIP_MODEL, ClipScorer
+            TestProtocol.status("loading", "Lade CLIP-Modell fuer den CLIP-Score...")
+            scorer, reason = ClipScorer.load(self.clip_model or DEFAULT_CLIP_MODEL, self.pipe.device)
+            if reason:
+                notes.append(reason)
+                TestProtocol.warning(reason)
+        compare = self.compare_base
+        if compare:
+            reason = self._lora_switchable()
+            if reason:
+                compare = False
+                notes.append(reason)
+                TestProtocol.warning(reason)
         results: List[Dict[str, Any]] = []
         total_time = 0.0
         started = time.time()
@@ -103,15 +136,28 @@ class Plugin:
                 TestProtocol.status("stopped", "Test abgebrochen.")
                 return
             t0 = time.time()
-            path = self._render(s.answer, out_dir, f"{idx:04d}.png", self.seed + idx)
+            path, img = self._render(s.answer, out_dir, f"{idx:04d}.png", self.seed + idx)
             dt = time.time() - t0
             total_time += dt
-            results.append({
+            row: Dict[str, Any] = {
                 "sample_id": idx, "input_text": s.answer, "input_path": str(s.image),
                 "expected_output": str(s.image), "predicted_output": str(path),
                 # Kein richtig/falsch bei Bilderzeugung — bewusst null statt erfunden.
                 "is_correct": None, "confidence": None, "inference_time": dt,
-            })
+            }
+            if scorer:
+                row["clip_score"] = round(scorer.score(img, s.answer), 3)
+            if compare:
+                # Gleicher Seed, LoRA aus: der Unterschied kommt nur von der LoRA.
+                self.pipe.disable_lora()
+                try:
+                    base_path, base_img = self._render(s.answer, out_dir / "base", f"{idx:04d}.png", self.seed + idx)
+                finally:
+                    self.pipe.enable_lora()
+                row["base_image"] = str(base_path)
+                if scorer:
+                    row["clip_score_base"] = round(scorer.score(base_img, s.answer), 3)
+            results.append(row)
             elapsed = max(time.time() - started, 1e-6)
             TestProtocol.progress(current=idx, total=len(samples), sps=idx / elapsed,
                                   eta=(len(samples) - idx) * elapsed / idx)
@@ -119,8 +165,20 @@ class Plugin:
         out = Path(self.config.output_path)
         out.mkdir(parents=True, exist_ok=True)
         results_file = out / "results.json"
+        from _shared_clip import mean, round_or_none
+        scores: Dict[str, Any] = {}
+        if scorer:
+            scores["clip_score"] = round_or_none(mean([r.get("clip_score") for r in results]))
+            scores["clip_model"] = scorer.name
+            if compare:
+                base = round_or_none(mean([r.get("clip_score_base") for r in results]))
+                scores["clip_score_base"] = base
+                if base is not None and scores["clip_score"] is not None:
+                    scores["clip_score_delta"] = round(scores["clip_score"] - base, 3)
+        if notes:
+            scores["metrics_note"] = " ".join(notes)
         results_file.write_text(json.dumps({
-            "metrics": {"generated_images": len(results), "images_dir": str(out_dir),
+            "metrics": {**scores, "generated_images": len(results), "images_dir": str(out_dir),
                         "num_inference_steps": self.steps, "guidance_scale": self.guidance},
             "predictions": results,
         }, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -130,6 +188,8 @@ class Plugin:
             accuracy=None, correct=None, average_loss=None,
             average_inference_time=total_time / max(len(results), 1),
             samples_per_second=len(results) / elapsed,
+            metrics=scores or None,
             extra={"output_kind": "image", "images_dir": str(out_dir),
-                   "images": [r["predicted_output"] for r in results]},
+                   "images": [r["predicted_output"] for r in results],
+                   **({"base_images": [r["base_image"] for r in results]} if compare else {})},
         )
