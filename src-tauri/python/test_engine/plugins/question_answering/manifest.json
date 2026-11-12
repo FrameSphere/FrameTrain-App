@@ -1,0 +1,10 @@
+{
+  "task_type": "question_answering",
+  "name": "Extraktives Frage-Antwort (SQuAD) - Test",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Exact Match und F1 wie bei SQuAD (auch keine Antwort, SQuAD v2); Einzeltest markiert die Antwortstelle im Kontext.",
+  "input_type": "text",
+  "output_format": "span"
+}
