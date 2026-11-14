@@ -385,7 +385,8 @@ class YOLOPlugin(TrainPlugin):
         if (str(self.optimizer_name).upper(), self.lr0) == ("SGD", 0.01) and (optimizer, lr0) != ("SGD", 0.01):
             self.optimizer_name, self.lr0 = optimizer, lr0
             MessageProtocol.status("setup",
-                f"{self.family}: Optimierer {optimizer} mit lr0 {lr0} (statt SGD 0.01, das fuer Transformer-Detektoren zu hoch ist)")
+                f"{self.family}: Optimierer '{optimizer}' (Ultralytics waehlt AdamW mit passender Rate) "
+                "statt SGD 0.01, das fuer Transformer-Detektoren zu hoch ist")
         if self.family != "yolo":
             MessageProtocol.status("setup", f"Modellfamilie: {self.family}")
         return True
@@ -967,7 +968,13 @@ class YOLOPlugin(TrainPlugin):
                 if self.is_stopped:
                     return True
                 # Nichts mehr fortzusetzen: normales Training ab diesen Gewichten.
+            from ft_data.ultralytics_family import warmup_bias_lr_for
+            extra_args = {}
+            wbl = warmup_bias_lr_for(self.optimizer_name, (self.config.plugin_config or {}).get("warmup_bias_lr"))
+            if wbl is not None:
+                extra_args["warmup_bias_lr"] = wbl
             self.results = self.model.train(
+                **extra_args,
                 data=self._data_arg,
                 epochs=self.config.epochs,
                 batch=self.config.batch_size,

@@ -147,8 +147,27 @@ def default_hyperparams(family: str) -> Tuple[str, float]:
     """(optimizer, lr0) fuer eine Familie, wenn der Nutzer nichts geaendert hat.
 
     RT-DETR ist ein Transformer: mit SGD und lr0 0.01 (YOLO-Standard) divergiert
-    das Fine-Tuning; Ultralytics selbst nimmt dort AdamW mit 1e-4.
+    das Fine-Tuning. "auto" laesst Ultralytics waehlen (AdamW mit kleiner Rate
+    und ohne erhoehte Bias-Lernrate in der Aufwaermphase).
     """
     if family == "rtdetr":
-        return "AdamW", 0.0001
+        return "auto", 0.01
     return "SGD", 0.01
+
+
+ADAM_OPTIMIZERS = {"adam", "adamw", "nadam", "radam", "adamax"}
+
+
+def warmup_bias_lr_for(optimizer: str, configured=None) -> float | None:
+    """warmup_bias_lr, das zum Optimierer passt (None = Ultralytics-Standard).
+
+    Ultralytics waermt die Bias-Parameter mit 0.1 auf. Bei optimizer="auto"
+    setzt es den Wert fuer Adam selbst auf 0 — bei ausdruecklich gewaehltem
+    AdamW nicht. Gemessen (RT-DETR, coco128-Ausschnitt, 1 Epoche): AdamW mit
+    0.1 -> mAP50 0.00, mit 0.0 bzw. "auto" -> 0.50.
+    """
+    if configured not in (None, ""):
+        return float(configured)
+    if str(optimizer or "").strip().lower() in ADAM_OPTIMIZERS:
+        return 0.0
+    return None

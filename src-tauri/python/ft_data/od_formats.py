@@ -203,6 +203,20 @@ def coco_split_files(root: Path) -> Dict[str, Path]:
 
 
 # ── Gemeinsam ───────────────────────────────────────────────────────────────
+def remap_by_name(dataset_names: List[str], model_names: List[str]) -> Dict[int, int]:
+    """Dataset-ID -> Modell-ID ueber den Klassennamen (Gross-/Kleinschreibung egal).
+
+    Stimmt kein einziger Name ueberein (Platzhalter wie class_0), bleiben die
+    IDs, wie sie sind — dann hat das Modell auf genau diesen IDs trainiert.
+    """
+    norm = lambda s: str(s).strip().lower().replace("_", " ")
+    index = {norm(n): i for i, n in enumerate(model_names)}
+    remap = {i: index[norm(n)] for i, n in enumerate(dataset_names) if norm(n) in index}
+    if not remap:
+        return {i: i for i in range(len(dataset_names))}
+    return remap
+
+
 def load_detection_dataset(root: Path, class_names: Optional[List[str]] = None) -> Dict[str, Any]:
     """{"format", "classes", "splits": {split: [Datensatz]}} fuer YOLO oder COCO.
 
@@ -225,10 +239,18 @@ def load_detection_dataset(root: Path, class_names: Optional[List[str]] = None) 
         return {"format": "coco_json", "classes": names, "splits": splits}
     if yolo:
         splits = {s: yolo_records(d) for s, d in yolo.items()}
-        names = list(class_names or read_yolo_names(root))
+        names = read_yolo_names(root)
         top = max((b["label"] for recs in splits.values() for r in recs for b in r["boxes"]), default=-1)
         if len(names) <= top:
             names += [f"class_{i}" for i in range(len(names), top + 1)]
+        if class_names:
+            # Label-IDs des Datasets ueber den Namen auf die Klassen des Modells
+            # abbilden (coco128: 0 = person, COCO-DETR/YOLOS: 1 = person).
+            remap = remap_by_name(names, class_names)
+            for recs in splits.values():
+                for r in recs:
+                    r["boxes"] = [{**b, "label": remap.get(b["label"], -1 - b["label"])} for b in r["boxes"]]
+            names = list(class_names)
         return {"format": "yolo_bbox", "classes": names, "splits": splits}
     raise ValueError(
         f"In '{root}' wurden weder YOLO-Labels (images/ + labels/*.txt) noch eine COCO-JSON-Datei "
