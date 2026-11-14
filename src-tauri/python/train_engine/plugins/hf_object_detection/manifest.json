@@ -1,0 +1,13 @@
+{
+  "task_type": "hf_object_detection",
+  "name": "Object Detection (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert HuggingFace-Detektoren (AutoModelForObjectDetection): DETR, Conditional/Deformable DETR, RT-DETR/RT-DETRv2, YOLOS. Daten im YOLO- oder COCO-JSON-Format.",
+  "supported_architectures": [
+    "detr", "conditional_detr", "deformable_detr", "rt_detr", "rt_detr_v2", "yolos", "dab_detr", "d_fine", "table-transformer"
+  ],
+  "dataset_formats": ["yolo_bbox", "coco_json", "pre_split"],
+  "metrics": ["mAP50", "mAP50-95", "precision", "recall", "train_loss", "val_loss"]
+}

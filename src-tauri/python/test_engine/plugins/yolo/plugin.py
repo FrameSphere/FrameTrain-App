@@ -89,16 +89,20 @@ class Plugin:
         self.names: Dict[int, str] = {}
         self.is_stopped = False
         self.conf = float(config.get_plugin_value("conf", 0.25))
+        self.family = "yolo"
 
     def stop(self):
         self.is_stopped = True
 
     def setup(self):
-        from ultralytics import YOLO
+        from ft_data.ultralytics_family import load_ultralytics, resolve_family
 
         weights = find_weights(Path(self.config.model_path))
-        TestProtocol.status("loading", f"Lade YOLO-Gewichte {weights.name}...")
-        self.model = YOLO(str(weights))
+        # RT-DETR, YOLO-World und YOLOE brauchen ihre eigene Ultralytics-Klasse;
+        # ein trainiertes model.pt verraet die Familie nur ueber model.json.
+        self.family = resolve_family(str(weights))
+        TestProtocol.status("loading", f"Lade Ultralytics-Gewichte {weights.name} ({self.family})...")
+        self.model = load_ultralytics(str(weights), self.family)
         names = getattr(self.model, "names", None) or {}
         self.names = {int(k): str(v) for k, v in (names.items() if isinstance(names, dict) else enumerate(names))}
         TestProtocol.status("loading", f"Modell geladen | Klassen: {len(self.names)}")
