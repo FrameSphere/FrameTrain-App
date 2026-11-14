@@ -52,7 +52,8 @@ def task_from_weights_name(name: str) -> Optional[str]:
     for task, suffix in TASK_SUFFIX.items():
         if stem.endswith(suffix):
             return task
-    if stem.startswith("yolo"):
+    if stem.startswith("yolo") or stem.startswith("rtdetr") or stem.startswith("rt-detr"):
+        # RT-DETR (rtdetr-l/-x) ist ein reiner Box-Detektor.
         return "detect"
     return None
 
@@ -210,6 +211,9 @@ class YOLOPlugin(TrainPlugin):
         self.momentum     = float(pc.get("momentum", 0.937))
         self.wd           = float(pc.get("weight_decay", 0.0005))
         self.device_arg   = pc.get("device", "")
+        # Modellfamilie (yolo, rtdetr, yolo_world, yolov10, yolo12, yolo26 ...);
+        # bestimmt die Ultralytics-Klasse beim Laden. Erst setup() kennt sie.
+        self.family       = "yolo"
 
 
     def stop(self) -> None:
@@ -240,6 +244,8 @@ class YOLOPlugin(TrainPlugin):
         # einer dataset.yaml, Pose braucht kpt_shape.
         self.task = self._initial_task(root)
         self.yolo_model = self._resolve_weights()
+        if not self._check_family():
+            return False
         if not self._settle_task():
             return False
 
@@ -364,6 +370,25 @@ class YOLOPlugin(TrainPlugin):
                if suffix else "Fuer detect werden Gewichte ohne Aufgaben-Suffix gebraucht (z.B. yolo11n.pt), ")
             + "oder task auf 'auto' stellen.")
         return False
+
+    def _check_family(self) -> bool:
+        """Familie der Gewichte bestimmen; nicht trainierbare mit klarer Meldung abweisen."""
+        from ft_data.ultralytics_family import resolve_family, training_blocker, default_hyperparams
+        self.family = resolve_family(self.yolo_model)
+        blocker = training_blocker(self.yolo_model, self.family)
+        if blocker:
+            MessageProtocol.error(*blocker)
+            return False
+        # YOLO-Standardwerte aus der Oberflaeche (SGD, lr0 0.01) passen nicht zu
+        # RT-DETR. Nur ersetzen, wenn der Nutzer sie nicht geaendert hat.
+        optimizer, lr0 = default_hyperparams(self.family)
+        if (str(self.optimizer_name).upper(), self.lr0) == ("SGD", 0.01) and (optimizer, lr0) != ("SGD", 0.01):
+            self.optimizer_name, self.lr0 = optimizer, lr0
+            MessageProtocol.status("setup",
+                f"{self.family}: Optimierer {optimizer} mit lr0 {lr0} (statt SGD 0.01, das fuer Transformer-Detektoren zu hoch ist)")
+        if self.family != "yolo":
+            MessageProtocol.status("setup", f"Modellfamilie: {self.family}")
+        return True
 
     # Rueckwaertskompatibel: frueher Klassenattribut.
     _TASK_SUFFIX = TASK_SUFFIX
@@ -850,7 +875,7 @@ class YOLOPlugin(TrainPlugin):
             MessageProtocol.error("Training", "setup() nicht aufgerufen.")
             return False
         try:
-            from ultralytics import YOLO
+            from ft_data.ultralytics_family import load_ultralytics
         except ImportError:
             MessageProtocol.error("Ultralytics", "Import fehlgeschlagen.")
             return False
@@ -859,7 +884,7 @@ class YOLOPlugin(TrainPlugin):
             resume_ckpt = self._resume_checkpoint() if resume_requested(self.resume) else None
             start_weights = str(resume_ckpt) if resume_ckpt else self.yolo_model
             MessageProtocol.status("train", f"Lade {start_weights}...")
-            self.model = YOLO(start_weights)
+            self.model = load_ultralytics(start_weights, self.family)
             if self.device_arg:
                 device = self.device_arg
             elif torch.cuda.is_available():
@@ -1006,8 +1031,8 @@ class YOLOPlugin(TrainPlugin):
             # "... training to N epochs is finished, nothing to resume"
             MessageProtocol.status("train",
                 f"Fortsetzen nicht moeglich ({e}). Neues Training ab diesen Gewichten.")
-            from ultralytics import YOLO
-            self.model = YOLO(self.yolo_model)
+            from ft_data.ultralytics_family import load_ultralytics
+            self.model = load_ultralytics(self.yolo_model, self.family)
             for event, fns in getattr(self, "_callbacks", {}).items():
                 for fn in fns:
                     self.model.add_callback(event, fn)
@@ -1041,7 +1066,7 @@ class YOLOPlugin(TrainPlugin):
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(src), output_path)
             meta = {"framework":"ultralytics","base_model":self.yolo_model,
-                    "task":self.task,"imgsz":self.imgsz,"yaml_path":self._yaml_path,
+                    "task":self.task,"family":self.family,"imgsz":self.imgsz,"yaml_path":self._yaml_path,
                     "data":self._data_arg,
                     "metrics":self.validate()}
             with open(Path(output_path).with_suffix(".json"), "w") as f:
@@ -1099,6 +1124,7 @@ class YOLOPlugin(TrainPlugin):
             "framework":    "ultralytics",
             "base_model":   self.yolo_model,
             "task":         self.task,
+            "family":       self.family,
             # Von der Analyse-Seite ausgewertet:
             "architecture": Path(self.yolo_model).stem or "yolo",
             "device":       self._device_used,
