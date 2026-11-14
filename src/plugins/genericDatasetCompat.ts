@@ -41,6 +41,10 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: ['.jsonl', '.json', '.parquet', ...CONLL_EXTS], missing: 'tokens' };
     case 'sentence_embedding':
       return { exts: TABLE_EXTS, missing: 'pairs' };
+    case 'reranker':
+      return { exts: TABLE_EXTS, missing: 'pairs' };
+    case 'question_answering':
+      return { exts: TABLE_EXTS, missing: 'qa' };
     case 'text_to_image_lora':
       return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'textToImage' };
     case 'vision_language':

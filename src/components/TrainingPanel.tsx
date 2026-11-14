@@ -21,7 +21,7 @@ import { canvasSettingsLocation } from '../ai/analysisTaskContext';
 import { estimateTrainingRam, ramVerdict, ramEstimateLines, type ModelArch } from '../ai/resourceEstimate';
 
 /** Aufgaben, deren Eingabe Tokens sind — dort gilt die Architektur-Rechnung. */
-const TEXT_RAM_TASKS = new Set(['seq_classification', 'token_classification', 'sentence_embedding', 'causal_lm', 'seq2seq']);
+const TEXT_RAM_TASKS = new Set(['seq_classification', 'token_classification', 'sentence_embedding', 'causal_lm', 'seq2seq', 'question_answering', 'reranker']);
 import { clampNumber, parseNumberInput } from './numberInput';
 import { appendLossPoint } from './lossStats';
 import { useAISettings, TOKEN_BUDGET_CONFIG } from '../contexts/AISettingsContext';

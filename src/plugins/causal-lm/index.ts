@@ -5,7 +5,7 @@ import CausalLMTestPlugin from './TestPlugin';
 const causalLMPlugin: ModelPlugin = {
   id: 'causal-lm',
   name: 'LLM Fine-Tuning (LoRA)',
-  description: 'Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Präferenzpaare (chosen/rejected) per DPO.',
+  description: 'Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Präferenzpaare (chosen/rejected) per DPO. Kleine Modelle (GPT-2, SmolLM-135M) auch voll ohne LoRA; bei reinem Text (.txt oder Textspalte) wird die Perplexität vor und nach dem Training gemeldet.',
   taskType: 'causal_lm',
   // LoRA ist der Normalfall: volles Fine-Tuning eines 7B-Modells braucht
   // >100 GB. LoRA-Lernraten liegen etwa 10x ueber denen des vollen Trainings.
@@ -19,11 +19,15 @@ const causalLMPlugin: ModelPlugin = {
   // und mit der Referenz verglichen (Exact Match, ROUGE-L).
   // export_gguf: zusaetzlich GGUF + Ollama-Modelfile (llama.cpp-Konvertierung wird
   // bei Bedarf einmalig geladen); gguf_type: q8_0 | f16 | bf16.
+  // text_column: Rohtext aus einer frei benannten Spalte (leer = text/content/… oder
+  // die einzige Spalte). Volles Fine-Tuning = LoRA im Formular ausschalten; die
+  // Engine sperrt es mit Erklaerung, wenn das Modell nicht in den Speicher passt.
   // dpo_*: greifen nur bei Praeferenzdaten (chosen/rejected). dpo_sft_weight
   // haelt das Antwortformat stabil — reines DPO (0) zerlegte es im Test.
   defaultPluginConfig: {
     backend: 'auto', system_prompt: '', eval_samples: 10, eval_baseline: true,
     max_new_tokens: 256, export_gguf: false, gguf_type: 'q8_0', dpo_beta: 0.1, dpo_sft_weight: 1.0,
+    text_column: '',
   },
   hiddenTrainingFields: ['label_smoothing', 'group_by_length'],
   detect: detectCausalLM,

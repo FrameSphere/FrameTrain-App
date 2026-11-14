@@ -73,10 +73,10 @@ describe('Sentence Embeddings – Erkennung', () => {
     expect(pluginOf('BAAI/bge-base-en-v1.5', { model_type: 'bert' })).toBe('sentence-embedding');
   });
 
-  it('Cross-Encoder und Reranker sind Sequenzklassifikation', () => {
+  it('Cross-Encoder und Reranker sind keine Embeddings (eigenes Reranker-Plugin)', () => {
     expect(detectSentenceEmbedding('cross-encoder/stsb-roberta-base')).toBe(false);
     expect(detectSentenceEmbedding('BAAI/bge-reranker-base')).toBe(false);
-    expect(pluginOf('cross-encoder/ms-marco-MiniLM-L-6-v2')).toBe('hf-encoder');
+    expect(pluginOf('cross-encoder/ms-marco-MiniLM-L-6-v2')).toBe('reranker');
   });
 
   it('Decoder-Embeddings (gte-Qwen2) und fremde Architekturen nicht', () => {
