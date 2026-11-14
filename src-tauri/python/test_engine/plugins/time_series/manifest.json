@@ -1,0 +1,10 @@
+{
+  "task_type": "time_series",
+  "name": "Zeitreihen-Vorhersage (PatchTST) – Test",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "MAE, RMSE, sMAPE und MASE auf dem letzten Zeitabschnitt, verglichen mit naiver Vorhersage; Kurve Vorhersage gegen echte Werte.",
+  "input_type": "text",
+  "output_format": "series"
+}
