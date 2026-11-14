@@ -61,9 +61,23 @@ def gpt2_dir(path: Path, n_embd: int = 32) -> Path:
     return path
 
 
+def use_train_core() -> None:
+    """Train- und Test-Engine haben je ein Paket `core`. Laufen Tests beider in
+    einem Prozess, muss vor einem Train-Plugin wieder das der Train-Engine gelten."""
+    for k in [k for k in sys.modules if k == "core" or k.startswith("core.")]:
+        mod_file = getattr(sys.modules[k], "__file__", "") or ""
+        if str(_TRAIN) not in mod_file:
+            sys.modules.pop(k)
+    while str(_TRAIN) in sys.path:
+        sys.path.remove(str(_TRAIN))
+    sys.path.insert(0, str(_TRAIN))
+
+
 def load_plugin(engine: str, name: str):
     """plugins/<name>/plugin.py als eigenes Modul (alle heissen plugin.py)."""
     root = _TRAIN if engine == "train" else _PY / "test_engine"
+    if engine == "train":
+        use_train_core()
     if engine == "test":
         for p in (str(root),):
             if p not in sys.path:
@@ -77,8 +91,8 @@ def load_plugin(engine: str, name: str):
 
 def run_training(name: str, cfg: dict):
     """setup -> export wie der Orchestrator; Rueckgabe (metrics, export_pfad, Meldungen)."""
-    from core.config import TrainingConfig
     mod = load_plugin("train", name)
+    from core.config import TrainingConfig
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         plugin = mod.Plugin(TrainingConfig.from_dict(cfg))

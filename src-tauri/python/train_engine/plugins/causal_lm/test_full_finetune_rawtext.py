@@ -68,7 +68,7 @@ class SpeichersperreTest(unittest.TestCase):
     def test_engine_sperrt_vor_dem_laden(self):
         """Nur config.json eines 70B-Llama: setup() bricht ab, ohne Gewichte zu brauchen."""
         mod = T.load_plugin("train", "causal_lm")
-        from core.config import TrainingConfig
+        from core.config import TrainingConfig  # nach load_plugin: core der Train-Engine
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "config.json").write_text(json.dumps({
                 "model_type": "llama", "hidden_size": 8192, "num_hidden_layers": 80,
@@ -92,7 +92,7 @@ class SpeichersperreTest(unittest.TestCase):
 
     def test_parameter_schaetzung_gpt2_namen(self):
         mod = T.load_plugin("train", "causal_lm")
-        from core.config import TrainingConfig
+        from core.config import TrainingConfig  # nach load_plugin: core der Train-Engine
         p = mod.Plugin(TrainingConfig.from_dict({"model_path": "/nicht/da"}))
         p.model_cfg = {"n_embd": 768, "n_layer": 12, "vocab_size": 50257}
         self.assertTrue(80e6 < p._estimate_params() < 200e6)
