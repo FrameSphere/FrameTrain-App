@@ -28,10 +28,10 @@ def make_dataset(root: Path, color_masks: bool):
     pal = np.array([[0, 0, 0], [255, 0, 0]], dtype=np.uint8)
     for split, n in (("train", 8), ("val", 2), ("test", 3)):
         for i in range(n):
-            img = (rng.random((32, 32, 3)) * 80).astype(np.uint8)
-            m = np.zeros((32, 32), dtype=np.uint8)
-            y0, x0 = rng.integers(0, 16, size=2)
-            m[y0:y0 + 14, x0:x0 + 14] = 1
+            img = (rng.random((64, 64, 3)) * 80).astype(np.uint8)
+            m = np.zeros((64, 64), dtype=np.uint8)
+            y0, x0 = rng.integers(0, 36, size=2)
+            m[y0:y0 + 28, x0:x0 + 28] = 1
             img[m == 1] = 230
             (root / split / "images").mkdir(parents=True, exist_ok=True)
             (root / split / "masks").mkdir(parents=True, exist_ok=True)
@@ -47,7 +47,7 @@ def make_tiny_segformer(path: Path):
                           hidden_sizes=[8, 16], num_attention_heads=[1, 1], decoder_hidden_size=16,
                           patch_sizes=[7, 3], strides=[4, 2], num_labels=2)
     SegformerForSemanticSegmentation(cfg).save_pretrained(path)
-    SegformerImageProcessor(size={"height": 32, "width": 32}).save_pretrained(path)
+    SegformerImageProcessor(size={"height": 64, "width": 64}).save_pretrained(path)
 
 
 def run(script: Path, cfg: dict, tmp: Path):

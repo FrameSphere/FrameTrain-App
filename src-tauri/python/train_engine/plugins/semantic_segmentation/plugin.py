@@ -34,6 +34,8 @@ from core.protocol import MessageProtocol
 from core import hf_training as hft
 from ft_data import segmentation as seg
 
+MIN_SIZE = 64
+
 SUPPORTED_ARCHITECTURES = [
     "segformer", "upernet", "dpt", "beit", "data2vec-vision",
     "mobilevit", "mobilevitv2", "mobilenet_v2",
@@ -129,6 +131,12 @@ class Plugin(TrainPlugin):
         size = int(pc.get("image_size") or 0)
         if size > 0:
             self.prep["size"] = (size, size)
+        h, w = self.prep["size"]
+        if min(h, w) < MIN_SIZE:
+            # Bei Gesamt-Stride 32 schrumpft die letzte Stufe unter 2x2 Pixel; auf
+            # Apple MPS bricht der Rueckweg dann mit einem Metal-Assert ab.
+            self.prep["size"] = (max(h, MIN_SIZE), max(w, MIN_SIZE))
+            MessageProtocol.status("init", f"Eingabegroesse auf mindestens {MIN_SIZE} px angehoben.")
         MessageProtocol.status("init", f"Bild-Prozessor geladen | Eingabegroesse {self.prep['size'][0]}x{self.prep['size'][1]}")
 
     # ── 2. Daten ────────────────────────────────────────────────────────────
@@ -182,6 +190,8 @@ class Plugin(TrainPlugin):
         for attr in ("semantic_loss_ignore_index", "loss_ignore_index"):
             if hasattr(self.model.config, attr):
                 setattr(self.model.config, attr, seg.IGNORE_INDEX)
+        if apply_mps_fixes(self.model):
+            MessageProtocol.status("building_model", "MPS-Anpassung fuer den SegFormer-Decoder aktiv.")
         params = sum(p.numel() for p in self.model.parameters())
         MessageProtocol.status(
             "building_model",
@@ -301,3 +311,17 @@ def seg_sample(items, n: int, seed: int):
     items = list(items)
     random.Random(seed).shuffle(items)
     return sorted(items[:n])
+
+
+def apply_mps_fixes(model) -> bool:
+    """SegFormer auf Apple MPS (torch 2.12): der Decoder verkettet die Stufen im
+    channels_last-Layout; der Rueckweg durch linear_fuse/BatchNorm bricht dann mit
+    "view size is not compatible with input tensor's size and stride" ab
+    (gemessen bei 128-512 px, Batch 2-8). Eine zusammenhaengende Eingabe fuer
+    linear_fuse behebt das; auf CPU/CUDA aendert es nichts am Ergebnis."""
+    head = getattr(model, "decode_head", None)
+    fuse = getattr(head, "linear_fuse", None)
+    if fuse is None:
+        return False
+    fuse.register_forward_pre_hook(lambda _m, args: (args[0].contiguous(),) + tuple(args[1:]))
+    return True
