@@ -28,6 +28,13 @@ plugin_config:
   gguf_type         q8_0 (Standard, halbe Groesse) | f16 | bf16 | f32
   dpo_beta          DPO (Daten mit chosen/rejected): Staerke der Praeferenz, Standard 0.1
   dpo_sft_weight    DPO: Anteil SFT-Loss auf der guten Antwort (RPO), 0 = reines DPO
+  text_column       Rohtext aus dieser Spalte (Weitertrainieren ohne Prompt/Antwort)
+
+Volles Fine-Tuning (use_lora aus) ist fuer kleine Modelle gedacht (GPT-2,
+SmolLM-135M). Passt der geschaetzte Bedarf (16 Byte je Parameter plus
+Aktivierungen) nicht in 70 % des Speichers, bricht setup() mit Erklaerung ab.
+Bei Rohtext (.txt oder Textspalte) wird die Perplexitaet vor und nach dem
+Training auf dem Val-Split gemeldet.
 """
 from __future__ import annotations
 
@@ -184,6 +191,8 @@ class Plugin(TrainPlugin):
                         "(bitsandbytes). Es wird mit normalem LoRA weitertrainiert."
                         + (" Auf dem Mac: Einstellungen → Python-Pakete → „LLM Fine-Tuning“ (installiert mlx-lm), dann Backend 'auto' oder 'mlx'."
                            if _is_apple_silicon() else ""))
+        if not (self.config.use_lora or self.quant_bits):
+            self._check_full_finetune_memory()
         MessageProtocol.status(
             "init",
             f"Architektur: {self.model_type or 'unbekannt'} | Backend: {self.backend.upper()}"
@@ -202,6 +211,55 @@ class Plugin(TrainPlugin):
                 "init", "Modell ohne Chat-Template (Basismodell) — es wird ein einfaches "
                         "'### User / ### Assistant'-Format verwendet und mitgespeichert.")
         return True
+
+    def _check_full_finetune_memory(self) -> None:
+        """Volles Fine-Tuning nur, wenn Gewichte, Gradienten und AdamW-Zustand in den Speicher passen."""
+        n = self._estimate_params()
+        block = D.full_finetune_block(n, D.available_memory_bytes())
+        if block:
+            raise ValueError(block)
+        if n:
+            MessageProtocol.status(
+                "init", f"Volles Fine-Tuning: ca. {n/1e6:.1f}M Parameter, geschaetzter Speicherbedarf "
+                        f"{D.full_finetune_bytes(n)/1024**3:.1f} GB")
+
+    def _estimate_params(self) -> float:
+        """Parameterzahl fuer die Speicherpruefung, ohne das Modell zu laden.
+
+        Reihenfolge: safetensors-Koepfe (exakt), Groessen aus config.json
+        (auch GPT-2-Namen n_embd/n_layer), Dateigroesse der Gewichte.
+        """
+        n = self._params_from_weights()
+        if n:
+            return n
+        c = self.model_cfg
+        h = c.get("hidden_size") or c.get("n_embd") or c.get("d_model") or 0
+        l = c.get("num_hidden_layers") or c.get("n_layer") or c.get("num_layers") or 0
+        v = c.get("vocab_size", 0)
+        if h and l:
+            inter = c.get("intermediate_size") or c.get("n_inner") or 4 * h
+            return float(l * (4 * h * h + 3 * h * inter) + v * h)
+        size = sum(f.stat().st_size for f in self.model_path.glob("*.bin"))
+        dtype = str(c.get("torch_dtype") or c.get("dtype") or "float32")
+        return float(size) / (2 if "16" in dtype else 4)
+
+    def _params_from_weights(self) -> float:
+        """Parameterzahl aus den safetensors-Koepfen, wenn config.json keine Groessen nennt."""
+        import struct
+        total = 0
+        for f in sorted(self.model_path.glob("*.safetensors")):
+            try:
+                with open(f, "rb") as fh:
+                    head = json.loads(fh.read(struct.unpack("<Q", fh.read(8))[0]))
+            except Exception:
+                continue
+            for k, v in head.items():
+                if k != "__metadata__" and isinstance(v, dict):
+                    n = 1
+                    for d in v.get("shape", []):
+                        n *= int(d)
+                    total += n
+        return float(total)
 
     def _choose_backend(self, want_quant: int) -> str:
         requested = self.backend if self.backend in ("auto", "torch", "mlx") else "auto"
@@ -493,6 +551,16 @@ class Plugin(TrainPlugin):
             model=self.model, args=args, train_dataset=train_ds, eval_dataset=eval_ds,
             data_collator=collate,
             callbacks=[hft.progress_callback(TrainerCallback, self, total)])
+        if eval_ds is not None and self.data and self.data.kind == "text":
+            # Weitertrainieren auf Rohtext hat keine Antworten zum Vergleichen —
+            # die Kennzahl ist die Perplexitaet, deshalb auch VOR dem Training.
+            before = self._trainer.evaluate().get("eval_loss")
+            # Der Vorher-Wert ist kein Val-Loss von Epoche 1 (siehe MLX-Callback).
+            self._pending_eval = None
+            if before is not None:
+                self._baseline_val_loss = float(before)
+                MessageProtocol.status(
+                    "evaluating", f"Perplexitaet vor dem Training: {math.exp(min(float(before), 50)):.2f}")
         self._trainer.train()
         self._steps_done = int(self._trainer.state.global_step)
         return not self.is_stopped
@@ -754,6 +822,10 @@ class Plugin(TrainPlugin):
             "lora": bool(self.config.use_lora or self.quant_bits), "quant_bits": int(self.quant_bits),
             "chat_template": self.template_source, "data_kind": self.data.kind if self.data else "",
         })
+        if "perplexity" in metrics and "baseline_perplexity" in metrics:
+            MessageProtocol.status(
+                "validating", f"Perplexitaet: vorher {metrics['baseline_perplexity']:.2f} -> "
+                              f"nachher {metrics['perplexity']:.2f}")
         if self.after.get("exact_match") is not None:
             msg = f"Nachher: Exact Match {self.after['exact_match']:.0%}, ROUGE-L {self.after['rougeL']:.2f}"
             if self.baseline:
