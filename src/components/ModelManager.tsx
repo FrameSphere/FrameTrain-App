@@ -25,6 +25,7 @@ import {
   Ban,
   Heart,
   AlertTriangle,
+  Plus,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -37,6 +38,7 @@ import type { ModelConfig } from '../plugins/types';
 import { dateLocale } from '../utils/dateLocale';
 import { submitSupportTicket } from '../utils/supportTicket';
 import ModalPortal from './ui/ModalPortal';
+import BlankModelPanel from './BlankModelPanel';
 import { pluginName, pluginDescription } from '../plugins/pluginText';
 
 // ============ Types ============
@@ -62,7 +64,7 @@ interface HuggingFaceModel {
   pipeline_tag?: string;
 }
 
-type ImportMode = 'local' | 'huggingface';
+type ImportMode = 'local' | 'huggingface' | 'new';
 
 // ============ Helpers ============
 
@@ -1016,7 +1018,7 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
 
             {/* Tabs */}
             <div className="flex border-b border-white/10 flex-shrink-0">
-              {(['local', 'huggingface'] as ImportMode[]).map((mode) => (
+              {(['local', 'huggingface', 'new'] as ImportMode[]).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setImportMode(mode)}
@@ -1027,15 +1029,21 @@ export default function ModelManager({ userId, userEmail }: { userId?: string; u
                   }`}
                   style={importMode === mode ? { borderColor: currentTheme.colors.primary, color: currentTheme.colors.primary } : {}}
                 >
-                  {mode === 'local' ? <HardDrive className="w-4 h-4" /> : <Cloud className="w-4 h-4" />}
-                  {mode === 'local' ? t('modelManager.local') : t('modelManager.huggingface')}
+                  {mode === 'local' ? <HardDrive className="w-4 h-4" /> : mode === 'new' ? <Plus className="w-4 h-4" /> : <Cloud className="w-4 h-4" />}
+                  {mode === 'local' ? t('modelManager.local') : mode === 'new' ? t('modelManager.blankModel.tab') : t('modelManager.huggingface')}
                 </button>
               ))}
             </div>
 
             {/* Modal Body */}
             <div className={`p-6 overflow-y-auto flex-1 min-h-0 ${importMode === 'huggingface' ? 'flex flex-col' : ''}`}>
-              {importMode === 'local' ? (
+              {importMode === 'new' ? (
+                <BlankModelPanel
+                  gradientClass={currentTheme.colors.gradient}
+                  onCreated={() => { closeModal(); void loadModels(); }}
+                  onError={(msg) => error(t('modelManager.blankModel.create'), msg)}
+                />
+              ) : importMode === 'local' ? (
                 <LocalImportPanel
                   isDragging={isDragging}
                   selectedPath={selectedPath}

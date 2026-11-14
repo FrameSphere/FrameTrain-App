@@ -854,7 +854,18 @@
       "ticketSubject": "Plugin-Wunsch: {name}",
       "ticketBody": "Modell: {name}\nErkannter Typ: {type}\n\nGewünschtes Plugin:\n{note}"
     },
-    "changePlugin": "ändern"
+    "changePlugin": "ändern",
+    "blankModel": {
+      "tab": "Neu",
+      "intro": "Manche Aufgaben brauchen kein heruntergeladenes Basismodell. FrameTrain legt ein leeres Modell an; das Netz entsteht beim ersten Training aus deinen Daten.",
+      "timeSeries": "Zeitreihen-Vorhersage",
+      "timeSeriesHint": "PatchTST, neu initialisiert. Ein vortrainierter PatchTST lässt sich auch von Hugging Face laden.",
+      "tabular": "Tabellen-Klassifikation / -Regression",
+      "tabularHint": "Netz für gemischte Spalten (Zahlen, Kategorien, fehlende Werte).",
+      "nameLabel": "Name",
+      "create": "Modell anlegen",
+      "creating": "Wird angelegt..."
+    }
   },
   "diffViewer": {
     "title": "Code Änderungen",
@@ -2373,7 +2384,21 @@
       "document_prefix": "Präfix für Dokumente",
       "multi_label": "Multi-Label (auto, true, false)",
       "problem_type": "Aufgabentyp (auto, single, multi, regression)",
-      "threshold": "Schwelle (Multi-Label)"
+      "threshold": "Schwelle (Multi-Label)",
+      "time_column": "Zeitspalte (leer = erkennen)",
+      "target_columns": "Wertspalten, mit Komma getrennt (leer = alle Zahlenspalten)",
+      "id_column": "Spalte mit Serien-ID (optional)",
+      "context_length": "Kontextlänge (Zeitschritte)",
+      "prediction_length": "Vorhersagelänge (Zeitschritte)",
+      "season_length": "Saisonlänge für den naiven Vergleich (0 = letzter Wert)",
+      "val_ratio": "Anteil Validierung (Ende jeder Serie)",
+      "test_ratio": "Anteil Test (Ende jeder Serie)",
+      "d_model": "Modellbreite (d_model)",
+      "num_layers": "Transformer-Schichten",
+      "from_scratch": "Gewichte des Basismodells ignorieren",
+      "device": "Gerät (auto, cpu, mps, cuda)",
+      "target_column": "Zielspalte (leer = label/target oder letzte Spalte)",
+      "hidden_layers": "Verdeckte Schichten (z. B. 128,64)"
     }
   },
   "analysisPanel": {
@@ -3662,8 +3687,39 @@
         "rouge1": "ROUGE-1",
         "rouge2": "ROUGE-2",
         "rougeL": "ROUGE-L",
-        "bleu": "BLEU"
+        "bleu": "BLEU",
+        "mae": "MAE",
+        "rmse": "RMSE",
+        "smape": "sMAPE (%)",
+        "mase": "MASE",
+        "naive_mae": "MAE naive Vorhersage",
+        "naive_rmse": "RMSE naive Vorhersage",
+        "naive_smape": "sMAPE naive Vorhersage (%)",
+        "naive_mase": "MASE naive Vorhersage",
+        "mae_skill": "MAE-Verbesserung gegenüber naiv",
+        "r2": "R²",
+        "accuracy": "Accuracy",
+        "macro_f1": "Macro-F1",
+        "baseline_accuracy": "Accuracy häufigste Klasse",
+        "baseline_macro_f1": "Macro-F1 häufigste Klasse",
+        "baseline_mae": "MAE Mittelwert",
+        "baseline_rmse": "RMSE Mittelwert"
       }
+    },
+    "timeSeries": {
+      "singleLabel": "Letzte Werte der Reihe",
+      "singlePlaceholder": "12, 15, 14, 18, 21, ... (älteste zuerst; bei mehreren Spalten eine Zeile je Zeitschritt, mit ; getrennt)",
+      "result": "Vorhersage für die nächsten Zeitschritte",
+      "chartTitle": "Vorhersage gegen echte Werte",
+      "chartSubtitle": "Testzeitraum der Serie {series}, Spalte {column}. Links der gestrichelten Linie: Kontext.",
+      "legendActual": "Echt",
+      "legendForecast": "Modell",
+      "legendNaive": "Naive Vorhersage"
+    },
+    "tabular": {
+      "singleLabel": "Werte einer Zeile",
+      "singlePlaceholder": "alter=31; stadt=Berlin; einkommen=4200  oder  {\"alter\": 31, \"stadt\": \"Berlin\"}  oder Werte in Spaltenreihenfolge",
+      "result": "Vorhersage"
     }
   },
   "studio": {
@@ -4648,6 +4704,14 @@
     },
     "vision-language": {
       "description": "Bild + Frage → Antwort, Bildbeschreibung, Texterkennung: SmolVLM, Qwen2-VL, PaliGemma, LLaVA, BLIP."
+    },
+    "time-series": {
+      "name": "Zeitreihen-Vorhersage (PatchTST)",
+      "description": "Sagt die nächsten Werte einer oder mehrerer Zeitreihen voraus (CSV/Parquet mit Zeitspalte). PatchTST neu angelegt oder von Hugging Face; zeitliche Aufteilung, Vergleich mit naiver Vorhersage."
+    },
+    "tabular": {
+      "name": "Tabellen-Klassifikation und -Regression",
+      "description": "Sagt eine Spalte aus den übrigen voraus (CSV/Parquet). Zahlen werden normalisiert, Kategorien als Embeddings gelernt, fehlende Werte behandelt; Klassen oder Zahl werden automatisch erkannt."
     }
   },
   "engineErrors": {

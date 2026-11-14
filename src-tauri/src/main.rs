@@ -235,6 +235,7 @@ fn main() {
             model_manager::get_models_directory,
             model_manager::list_models,
             model_manager::import_local_model,
+            model_manager::create_task_model,
             model_manager::delete_model,
             model_manager::rename_model,
             model_manager::set_model_plugin,

@@ -50,6 +50,8 @@ class Plugin(TrainPlugin):
         self.from_scratch = bool(pc.get("from_scratch", False))
         self.device = resolve_device(str(pc.get("device", "auto")))
         torch.manual_seed(int(self.config.seed or 42))
+        import numpy as np
+        np.random.seed(int(self.config.seed or 42))  # Batch-Reihenfolge reproduzierbar
         if self.context < 4 or self.horizon < 1:
             raise ValueError("context_length muss >= 4 und prediction_length >= 1 sein.")
         # Weitertrainieren einer FrameTrain-Version: deren Fenster gelten.

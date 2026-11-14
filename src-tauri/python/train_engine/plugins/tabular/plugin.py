@@ -50,6 +50,8 @@ class Plugin(TrainPlugin):
         self.patience = int(pc.get("patience", 10))
         self.device = resolve_device(str(pc.get("device", "cpu")))
         torch.manual_seed(int(self.config.seed or 42))
+        import numpy as np
+        np.random.seed(int(self.config.seed or 42))  # Batch-Reihenfolge reproduzierbar
         MessageProtocol.status("init", f"Tabellen-Plugin bereit (Geraet: {self.device})")
 
     def load_data(self) -> None:

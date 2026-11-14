@@ -21,10 +21,14 @@ import tokenClassificationPlugin from './token-classification';
 import sentenceEmbeddingPlugin from './sentence-embedding';
 import textToImageLoraPlugin from './text-to-image-lora';
 import visionLanguagePlugin from './vision-language';
+import timeSeriesPlugin from './time-series';
+import tabularPlugin from './tabular';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
   canvasPlugin,               // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
+  timeSeriesPlugin,           // PatchTST / leeres Zeitreihenmodell (model_type patchtst, ft_time_series)
+  tabularPlugin,              // leeres Tabellenmodell (model_type ft_tabular)
   yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11)
   // Generative Bildmodelle vor den Klassifikatoren: "blip-image-captioning"
   // oder "stable-diffusion" sollen nicht an einer Bild-Heuristik haengen bleiben.
