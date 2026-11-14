@@ -836,6 +836,7 @@
       "requestSentDetail": "Dein Plugin-Wunsch ist als Support-Ticket beim FrameTrain-Team angekommen. Die Antwort findest du in den Einstellungen unter Support.",
       "pluginDesc": {
         "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Auch für trainierte best.pt-Dateien.",
+        "semantic-segmentation": "Semantische Segmentierung mit Bild + Maske (SegFormer, UperNet, DPT, BEiT, MobileViT). Kennzahlen: mIoU, Pixel-Accuracy.",
         "hf-image-classification": "Bildklassifikation mit einem heruntergeladenen HuggingFace-Bildmodell (ViT, DeiT, ConvNeXt, Swin, ResNet).",
         "image-classification": "Bildklassifikation per Transfer Learning auf torchvision-Backbones (ResNet, EfficientNet, MobileNet). Ein Ordner pro Klasse.",
         "audio-classification": "Audioklassifikation mit Wav2Vec2, HuBERT, WavLM, AST oder dem Whisper-Encoder.",
@@ -3399,6 +3400,7 @@
       "common_voice": "Common Voice",
       "pre_split": "Voraufgeteilt",
       "multi_shard": "Multi-Shard Parquet",
+      "image_mask": "Bild + Maske",
       "unknown": "Unbekannt"
     },
     "msg": {
@@ -3450,7 +3452,8 @@
         "pairs": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) mit Satzpaaren gefunden.",
         "textToImage": "Keine Bilddateien gefunden – für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).",
         "visionLanguage": "Keine Bilddateien gefunden – ein VLM lernt aus Bild + Frage + Antwort.",
-        "llm": "Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext)."
+        "llm": "Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext).",
+        "segmentation": "Keine Maskendateien (.png) gefunden – semantische Segmentierung braucht zu jedem Bild eine Maske (images/ + masks/)."
       },
       "cannotTrain": "{model} kann dieses Dataset nicht trainieren.",
       "typeUnknown": "Dataset-Typ nicht erkannt – {model} kann es eventuell nicht lesen.",
@@ -3614,6 +3617,20 @@
       "datasetTitle": "Dataset-Genauigkeit",
       "measure": "Genauigkeit messen",
       "accuracyOver": "Genauigkeit über {n} Samples"
+    },
+    "segmentation": {
+      "singleTitle": "Einzelbild",
+      "imageMissing": "Bildpfad fehlt.",
+      "segment": "Segmentieren",
+      "noMask": "Die Engine hat keine Maske geliefert.",
+      "maskAlt": "Vorhergesagte Klassenmaske",
+      "opacity": "Deckkraft der Maske",
+      "legend": "Klassen im Bild (Flächenanteil)",
+      "split": "Split {split}",
+      "pixelAccuracy": "Pixel-Accuracy",
+      "meanAccuracy": "Mittlere Klassen-Accuracy",
+      "perClass": "IoU je Klasse",
+      "notPresent": "nicht vorhanden"
     },
     "generic": {
       "inputMissing": "{label} fehlt.",
@@ -4621,6 +4638,10 @@
     },
     "image-classification": {
       "description": "Transfer Learning für Bildklassifikation: ResNet, EfficientNet, ViT, MobileNet. Erwartet einen Ordner pro Klasse (ImageFolder)."
+    },
+    "semantic-segmentation": {
+      "name": "Semantische Segmentierung (HuggingFace)",
+      "description": "Trainiert HuggingFace-Segmentierungsmodelle (SegFormer, UperNet, DPT, BEiT, MobileViT) auf Bild + Maske; Kennzahlen mIoU und Pixel-Accuracy."
     },
     "hf-image-classification": {
       "description": "Trainiert das heruntergeladene HuggingFace-Bildmodell selbst (ViT, DeiT, ConvNeXt, Swin, ResNet)."

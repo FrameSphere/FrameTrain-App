@@ -35,6 +35,8 @@ pub enum DatasetType {
     CommonVoice,
     PreSplit,
     MultiShard,
+    /// images/ + masks/ (semantische Segmentierung, PNG-Masken mit gleichem Basename)
+    ImageMask,
     #[default]
     Unknown,
 }
@@ -51,6 +53,7 @@ impl DatasetType {
             DatasetType::CommonVoice     => "common_voice",
             DatasetType::PreSplit        => "pre_split",
             DatasetType::MultiShard      => "multi_shard",
+            DatasetType::ImageMask       => "image_mask",
             DatasetType::Unknown         => "unknown",
         }
     }
@@ -631,6 +634,38 @@ fn read_existing_dataset_yaml(path: &Path) -> Option<serde_json::Value> {
     })
 }
 
+/// Ordnernamen fuer Segmentierungsmasken (wie ft_data/segmentation.py).
+const MASK_DIRS: &[&str] = &["masks", "mask", "segmentation", "segmentations",
+    "segmentationclass", "segmentationclasspng", "gt"];
+
+/// images/ + Maskenordner mit PNG-Masken. "labels"/"annotations" zaehlen nur,
+/// wenn dort ausschliesslich Bilder liegen (keine YOLO-.txt / VOC-.xml).
+fn detect_image_mask(path: &Path, dir_names: &[String], file_count: usize, extensions: &[String]) -> Option<DatasetAnalysis> {
+    let img_dir = dir_names.iter().find(|d| matches!(d.to_lowercase().as_str(), "images"|"imgs"|"image"|"img"|"jpegimages"))?.clone();
+    let mask_dir = dir_names.iter().find(|d| MASK_DIRS.contains(&d.to_lowercase().as_str())).cloned().or_else(|| {
+        dir_names.iter().find(|d| {
+            matches!(d.to_lowercase().as_str(), "labels"|"label"|"annotations"|"annotation") && {
+                let files = list_files_in_dir(&path.join(d.as_str()));
+                !files.is_empty() && files.iter().all(|f| f.extension().and_then(|e| e.to_str()).map(|e| is_image(e)).unwrap_or(false))
+            }
+        }).cloned()
+    })?;
+    let masks = list_files_in_dir(&path.join(&mask_dir));
+    if !masks.iter().any(|f| f.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("png")).unwrap_or(false)) {
+        return None;
+    }
+    let pairing = check_basename_pairing(&path.join(&img_dir), &path.join(&mask_dir));
+    let mut hints: Vec<DatasetHint> = Vec::new();
+    if !pairing.is_paired {
+        let n = pairing.orphan_primaries.len();
+        hints.push(hint("orphan_images", serde_json::json!({ "count": n }), format!("{} Bild(er) ohne Label.", n)));
+    }
+    Some(DatasetAnalysis { detected_type: DatasetType::ImageMask, confidence: 90,
+        pairing_status: Some(pairing), warnings: hint_texte(&hints), hints, file_count,
+        dir_count: dir_names.len(), extensions: extensions.to_vec(),
+        schema_hint: Some(serde_json::json!({ "images_dir": img_dir, "masks_dir": mask_dir })) })
+}
+
 pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
     let mut hints: Vec<DatasetHint> = Vec::new();
     let dir_names     = list_subdir_names(path);
@@ -689,6 +724,12 @@ pub fn detect_dataset_type(path: &Path) -> DatasetAnalysis {
             pairing_status: None, warnings: vec![], hints: vec![], file_count: total_file_count,
             dir_count: dir_names.len(), extensions: all_extensions,
             schema_hint: Some(serde_json::json!({ "split_dirs": split_dirs })) };
+    }
+
+    // 1b. Bild + Segmentierungsmaske (images/ + masks/). Vor YOLO und den
+    //     Ordner-Klassen: sonst galten "images" und "masks" als zwei Klassen.
+    if let Some(a) = detect_image_mask(path, &dir_names, total_file_count, &all_extensions) {
+        return a;
     }
 
     // 2. YOLO / PascalVOC
@@ -1929,6 +1970,12 @@ pub async fn split_dataset(
         }
         DatasetType::AudioTranscript => split_audio_transcript(&base, train_ratio, val_ratio, test_ratio)?,
         DatasetType::FolderClass     => split_folder_class(&base, train_ratio, val_ratio, test_ratio)?,
+        DatasetType::ImageMask => {
+            let re       = detect_dataset_type(&base);
+            let img_dir  = re.schema_hint.as_ref().and_then(|s| s.get("images_dir")).and_then(|v| v.as_str()).unwrap_or("images").to_string();
+            let mask_dir = re.schema_hint.as_ref().and_then(|s| s.get("masks_dir")).and_then(|v| v.as_str()).unwrap_or("masks").to_string();
+            split_paired_dirs(&base, &img_dir, &mask_dir, train_ratio, val_ratio, test_ratio)?
+        }
         // FIX Bug 3: Klarere Fehlermeldung mit konkreten Alternativen.
         DatasetType::CocoJson   => return Err("COCO JSON kann nicht automatisch gesplittet werden – die annotations.json referenziert Bilder per ID, ein Split wuerde diese Verknuepfungen zerreissen. Alternativen: (1) Dataset direkt ohne Split im Training nutzen, (2) manuell mit einem COCO-Split-Tool aufteilen, oder (3) zuerst ins YOLO-Format konvertieren.".to_string()),
         DatasetType::PreSplit   => return Err("Dieses Dataset ist bereits aufgeteilt.".to_string()),
@@ -3929,6 +3976,35 @@ mod split_layout_tests {
         let a = detect_dataset_type(dir.path());
         assert!(matches!(a.detected_type, DatasetType::FolderClass), "erkannt als {:?}", a.detected_type);
         assert_eq!(a.schema_hint.unwrap()["media_type"], "video");
+    }
+
+    #[test]
+    fn bilder_und_masken_sind_image_mask() {
+        // Vorher: "images" und "masks" galten als zwei Klassen (FolderClass).
+        let dir = TempDir::new("imagemask");
+        fs::create_dir_all(dir.path().join("images")).unwrap();
+        fs::create_dir_all(dir.path().join("masks")).unwrap();
+        for n in ["a", "b"] {
+            fs::write(dir.path().join("images").join(format!("{}.jpg", n)), b"x").unwrap();
+            fs::write(dir.path().join("masks").join(format!("{}.png", n)), b"x").unwrap();
+        }
+        let a = detect_dataset_type(dir.path());
+        assert!(matches!(a.detected_type, DatasetType::ImageMask), "erkannt als {:?}", a.detected_type);
+        assert_eq!(a.schema_hint.unwrap()["masks_dir"], "masks");
+        assert!(a.pairing_status.unwrap().is_paired);
+    }
+
+    #[test]
+    fn labels_nur_mit_png_sind_masken_mit_txt_bleibt_yolo() {
+        let dir = TempDir::new("labelsmask");
+        fs::create_dir_all(dir.path().join("images")).unwrap();
+        fs::create_dir_all(dir.path().join("labels")).unwrap();
+        fs::write(dir.path().join("images").join("a.jpg"), b"x").unwrap();
+        fs::write(dir.path().join("labels").join("a.png"), b"x").unwrap();
+        assert!(matches!(detect_dataset_type(dir.path()).detected_type, DatasetType::ImageMask));
+        fs::remove_file(dir.path().join("labels").join("a.png")).unwrap();
+        fs::write(dir.path().join("labels").join("a.txt"), b"0 0.5 0.5 0.1 0.1").unwrap();
+        assert!(matches!(detect_dataset_type(dir.path()).detected_type, DatasetType::YoloBbox));
     }
 
     #[test]

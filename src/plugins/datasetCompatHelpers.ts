@@ -22,6 +22,7 @@ export type DatasetType =
   | 'common_voice'     // clips/*.mp3 + metadata.tsv
   | 'pre_split'        // train/ val/ test/ bereits vorhanden
   | 'multi_shard'      // part-XXXX.parquet oder train-XXXX-of-XXXX.parquet
+  | 'image_mask'       // images/ + masks/ (Segmentierungsmasken, gleiche Basenames)
   | 'unknown';
 
 /** Modality – für zukünftige Plugin-Erweiterungen */
@@ -191,6 +192,7 @@ export const DATASET_TYPE_LABELS: Record<DatasetType, { label: string; labelKey:
   common_voice:     { labelKey: 'datasetCompat.datasetTypes.common_voice', label: 'Common Voice',        icon: 'volume',      color: 'text-teal-400',    modality: 'audio' },
   pre_split:        { labelKey: 'datasetCompat.datasetTypes.pre_split', label: 'Voraufgeteilt',       icon: 'split',       color: 'text-emerald-400', modality: 'text'  },
   multi_shard:      { labelKey: 'datasetCompat.datasetTypes.multi_shard', label: 'Multi-Shard Parquet', icon: 'layers',      color: 'text-indigo-400',  modality: 'text'  },
+  image_mask:       { labelKey: 'datasetCompat.datasetTypes.image_mask', label: 'Bild + Maske',        icon: 'image',       color: 'text-pink-400',    modality: 'image' },
   unknown:          { labelKey: 'datasetCompat.datasetTypes.unknown', label: 'Unbekannt',           icon: 'help',        color: 'text-gray-400',    modality: 'text'  },
 };
 

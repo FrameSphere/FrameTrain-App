@@ -21,6 +21,7 @@ import tokenClassificationPlugin from './token-classification';
 import sentenceEmbeddingPlugin from './sentence-embedding';
 import textToImageLoraPlugin from './text-to-image-lora';
 import visionLanguagePlugin from './vision-language';
+import semanticSegmentationPlugin from './semantic-segmentation';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
@@ -32,6 +33,9 @@ const PLUGINS: ModelPlugin[] = [
   visionLanguagePlugin,       // SmolVLM / Qwen2-VL / PaliGemma / LLaVA / BLIP (LoRA)
   // Vor dem torchvision-Plugin: ein heruntergeladenes HuggingFace-Bildmodell
   // soll auch wirklich trainiert werden, nicht durch ein resnet18 ersetzt.
+  // Vor der HF-Bildklassifikation: BEiT/MobileViT gibt es als Klassifikator
+  // und als Segmentierer; dieses Plugin greift nur mit Segmentierungs-Hinweis.
+  semanticSegmentationPlugin, // SegFormer / UperNet / DPT / BEiT / MobileViT (Bild + Maske)
   hfImageClassificationPlugin,
   imageClassificationPlugin,  // torchvision-Backbones (ohne HF-Gewichte)
   // Vor der Audio-Klassifikation: Whisper, *ForCTC und wav2vec2-…-960h sind
