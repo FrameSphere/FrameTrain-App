@@ -15,7 +15,7 @@
 
 import { parseDelimitedRows } from './csvRows';
 
-export type LabTask = 'asr' | 'video' | 'vlm' | 'text_to_image' | 'token' | 'embedding' | 'other';
+export type LabTask = 'asr' | 'tts' | 'video' | 'vlm' | 'text_to_image' | 'token' | 'embedding' | 'other';
 export type MediaKind = 'image' | 'audio' | 'video';
 
 export interface DatasetFileInfo { name: string; path: string; is_dir: boolean; split: string }
@@ -33,6 +33,8 @@ export interface TaskSampleDraft {
   question?: string;
   /** Text-zu-Bild: das Bild, zu dem die Caption gehoert. */
   refImage?: string;
+  /** Sprachausgabe: die Aufnahme, zu der das Transkript gehoert. */
+  refAudio?: string;
   /** NER: Soll-Entitaeten mit Zeichenpositionen in `text`. */
   entities?: ExpectedEntity[];
 }
@@ -57,6 +59,7 @@ export function mediaKindOf(name: string): MediaKind | null {
 export function labTaskFor(taskType?: string | null, modality?: string | null): LabTask {
   const m = modality ?? '';
   const tt = taskType ?? '';
+  if (m === 'tts' || tt === 'text_to_speech') return 'tts';
   if (m === 'asr' || tt === 'speech_recognition') return 'asr';
   if (m === 'video' || tt === 'video_classification') return 'video';
   if (m === 'vlm' || tt === 'vision_language') return 'vlm';
@@ -213,6 +216,16 @@ async function asrSamples(files: DatasetFileInfo[], read: Reader): Promise<TaskS
     filePath: f.path,
     fileKind: 'audio' as const,
   }));
+}
+
+/**
+ * Sprachausgabe: dieselben Paare wie die Spracherkennung, nur umgekehrt — das
+ * Transkript ist die Eingabe, die Aufnahme zeigt, wie es klingen soll.
+ */
+async function ttsSamples(files: DatasetFileInfo[], read: Reader): Promise<TaskSampleDraft[] | null> {
+  const pairs = (await asrSamples(files, read))?.filter(s => s.label?.trim());
+  if (!pairs?.length) return null;
+  return pairs.map(s => ({ text: s.label!.trim(), rawData: s.rawData, refAudio: s.filePath }));
 }
 
 function videoSamples(files: DatasetFileInfo[]): TaskSampleDraft[] | null {
@@ -423,6 +436,7 @@ async function embeddingSamples(files: DatasetFileInfo[], read: Reader): Promise
 export async function buildTaskSamples(task: LabTask, files: DatasetFileInfo[], read: Reader): Promise<TaskSampleDraft[] | null> {
   switch (task) {
     case 'asr': return asrSamples(files, read);
+    case 'tts': return ttsSamples(files, read);
     case 'video': return videoSamples(files);
     case 'vlm': return vlmSamples(files, read);
     case 'text_to_image': return textToImageSamples(files, read);

@@ -11,11 +11,12 @@ Protokoll:
                             {"file_path": "/v.mp4", "start": 2.0, "end": 6.0}\n (Video)
                             {"file_path": "/bild.png", "question": "..."}\n (VLM)
                             {"text": "...", "messages": [...], "stream": true}\n (LLM-Chat, Hosting)
+                            {"text": "..."}\n -> {"predicted": "/pfad.wav", "audio_path": ..., "output_kind": "audio"} (Sprachausgabe)
   Python -> Rust (stdout):  {"predicted": "...", "confidence": 0.95, ...}\n
                             vorher bei "stream": {"type": "token", "text": "..."}\n je Textstueck
 
 Startup:
-  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|video|causal_lm|token|embedding|vlm|text_to_image",
+  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|tts|video|causal_lm|token|embedding|vlm|text_to_image",
                     "input_kind": "text|image|audio"}\n
   Python -> Rust:  {"type": "error", "message": "..."}\n  (bei Fehler)
 """
@@ -106,6 +107,11 @@ def detect_modality(model_cfg: dict) -> str:
     arch = archs[0] if archs else ""
     model_type = str(model_cfg.get("model_type", "")).lower()
 
+    # Sprachausgabe (SpeechT5-TTS, VITS / MMS-TTS): Text rein, WAV raus. Ohne
+    # diesen Zweig fiel SpeechT5 ans Ende und wurde als Textklassifikator geladen.
+    if _is_tts_config(model_cfg):
+        return "tts"
+
     # Vor dem ForConditionalGeneration-Zweig: SmolVLM, BLIP & Co. melden sich
     # genauso wie T5 und wurden sonst als Text-Seq2Seq ohne Bild geladen.
     if model_type not in ASR_MODEL_TYPES and _is_vlm_config(model_cfg):
@@ -159,6 +165,14 @@ def detect_modality_for_dir(model_path: Path, model_cfg: dict) -> str:
     if (model_path / "modules.json").exists() or (model_path / "sentence_bert_config.json").exists():
         return "embedding"
     return detect_modality(model_cfg)
+def _is_tts_config(model_cfg: dict) -> bool:
+    try:
+        from ft_data.tts import tts_kind
+    except ImportError:
+        return False
+    return tts_kind(model_cfg) is not None
+
+
 def _is_vlm_config(model_cfg: dict) -> bool:
     try:
         from ft_data.vlm import is_vlm_config
@@ -193,6 +207,8 @@ INPUT_KIND = {
     "vlm":     "image",
     # Prompt rein, Pfad des erzeugten PNG raus.
     "text_to_image": "text",
+    # Text rein, Pfad der erzeugten WAV-Datei raus.
+    "tts":     "text",
 }
 
 
@@ -247,6 +263,7 @@ class ModelServer:
             "image":   self._load_image,
             "audio":   self._load_audio,
             "asr":     self._load_asr,
+            "tts":     self._load_tts,
             "video":   self._load_video,
             "token":   self._load_token,
             "embedding": self._load_embedding,
@@ -426,6 +443,14 @@ class ModelServer:
         self.t2i_out = self.model_path / "generated"
         self.model = self.pipe.unet
 
+    def _load_tts(self):
+        """Sprachausgabe ueber ft_data.tts — dieselbe Erzeugung wie im Test-Plugin."""
+        from ft_data.tts import load_tts
+        self.tts = load_tts(self.model_path, self.device)
+        # Erzeugtes Audio liegt beim Modell, damit Labor und Hosting es spaeter noch finden.
+        self.tts_out = self.model_path / "generated"
+        self.model = self.tts.model
+
     def _load_audio(self):
         from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
         self.processor = AutoFeatureExtractor.from_pretrained(
@@ -452,6 +477,11 @@ class ModelServer:
             return self._infer_audio(self._require_file(req, "Audio"))
         if self.modality == "asr":
             return self._infer_asr(self._require_file(req, "Audio"))
+        if self.modality == "tts":
+            if not str(req.get("text") or "").strip():
+                raise ValueError("Dieses Modell spricht Text — bitte einen Text eingeben "
+                                 "oder Transkripte aus einem Dataset laden.")
+            return self._infer_tts(self._require_text(req))
         if self.modality == "video":
             return self._infer_video(self._require_file(req, "Video"), req.get("start"), req.get("end"))
         if self.modality == "seq2seq":
@@ -589,6 +619,17 @@ class ModelServer:
         # Keine confidence: eine ehrliche Wahrscheinlichkeit fuer einen ganzen
         # Satz gibt es nicht, und eine erfundene wuerde "Unsicherste zuerst" verfaelschen.
         return {"predicted": text.strip(), "inference_time": time.time() - t0}
+
+    def _infer_tts(self, text: str) -> dict:
+        from ft_data.tts import safe_filename, write_wav
+        t0 = time.time()
+        wave, sr = self.tts.synthesize(text)
+        path = write_wav(
+            self.tts_out / f"{time.strftime('%Y%m%d_%H%M%S')}_{safe_filename(text, 32)}.wav", wave, sr)
+        # Keine confidence: erzeugtes Audio hat keine Wahrscheinlichkeit.
+        return {"predicted": str(path), "audio_path": str(path), "output_kind": "audio",
+                "audio_seconds": len(wave) / sr, "sampling_rate": sr,
+                "inference_time": time.time() - t0}
 
     def _infer_video(self, path: Path, start=None, end=None) -> dict:
         try:

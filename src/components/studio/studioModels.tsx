@@ -29,7 +29,8 @@ export function passendeAufgaben(project: Pick<StudioProject, 'modality' | 'task
   if (project.modality === 'audio') {
     // Transkripte trainieren Spracherkenner (Whisper, Wav2Vec2-CTC). Die
     // liefen frueher mangels eigenem Plugin als seq2seq bzw. Audio-Klassifikation.
-    return project.task === 'transcript' ? ['speech_recognition'] : ['audio_classification'];
+    // Dieselben Paare aus Aufnahme und Transkript trainieren auch Sprachausgabe (SpeechT5).
+    return project.task === 'transcript' ? ['speech_recognition', 'text_to_speech'] : ['audio_classification'];
   }
   return ['detect'];
 }

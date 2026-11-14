@@ -133,6 +133,7 @@
         "canvas": "Custom networks (Canvas)",
         "audio_classification": "Audio classification",
         "speech_recognition": "Speech recognition",
+        "text_to_speech": "Text to speech",
         "sentence_embedding": "Embeddings",
         "hf_image_classification": "Image classification",
         "image_classification": "Image classification",
@@ -3135,6 +3136,8 @@
       "expected": "Expected",
       "wer": "Word error rate (WER): {value} %",
       "generated": "Generated",
+      "generatedAudio": "Generated audio",
+      "referenceAudio": "Recording from the dataset",
       "reference": "Image from the dataset",
       "entitiesExpected": "Expected entities",
       "entitiesFound": "Found",
@@ -3450,6 +3453,7 @@
         "video": "No video files (.mp4, .mov, .webm, .mkv, .avi) found.",
         "table": "No table files (.csv, .tsv, .json, .jsonl, .parquet) found.",
         "speech": "No audio files (or Parquet with audio and text column) found – speech recognition needs recordings with transcripts.",
+        "tts": "No audio files (or Parquet with audio and text column) found – text to speech needs recordings with transcripts.",
         "tokens": "No token data found (JSONL/Parquet with tokens + ner_tags or CoNLL text .conll/.iob/.txt).",
         "pairs": "No table files (.csv, .tsv, .json, .jsonl, .parquet) with sentence pairs found.",
         "textToImage": "No image files found – text-to-image LoRA needs images (with .txt captions, metadata.jsonl or an instance prompt).",
@@ -3654,6 +3658,10 @@
       "t2iLabel": "Prompt",
       "t2iPlaceholder": "Describe the image, e.g. a photo of sks dog on the beach",
       "t2iResult": "Generated image",
+      "ttsLabel": "Text to speak",
+      "ttsPlaceholder": "Enter the text the model should speak …",
+      "ttsResult": "Generated audio",
+      "ttsGenerated": "Generated recordings (selection)",
       "vlmImageLabel": "Image",
       "vlmImagePlaceholder": "Full path to an image, e.g. /Users/you/pictures/invoice.png",
       "vlmQuestionLabel": "Question about the image (optional)",
@@ -3666,7 +3674,8 @@
         "rouge1": "ROUGE-1",
         "rouge2": "ROUGE-2",
         "rougeL": "ROUGE-L",
-        "bleu": "BLEU"
+        "bleu": "BLEU",
+        "real_time_factor": "Compute time per second of audio"
       }
     }
   },
@@ -4403,6 +4412,7 @@
       "audio_cls": "Audio classification",
       "video_cls": "Video classification",
       "asr": "Speech recognition",
+      "tts": "Text to speech · text in, audio out",
       "token": "Named entities (NER)",
       "embedding": "Sentence embeddings",
       "vlm": "Vision-language · image + question",
@@ -4497,6 +4507,7 @@
         "vlm": "Attach an image and ask (optional) …",
         "audio": "Attach or record audio",
         "asr": "Record speech or attach audio",
+        "tts": "Text for {name} to speak …",
         "video": "Attach or drop a video",
         "tensor": "Text or numbers, e.g. 0.5, 1.2"
       },
@@ -4650,6 +4661,9 @@
     "text-to-image-lora": {
       "name": "Text-to-Image LoRA (Stable Diffusion)",
       "description": "Teaches Stable Diffusion 1.x/2.x or SDXL your own style or object via LoRA."
+    },
+    "text-to-speech": {
+      "description": "Text to speech: fine-tunes SpeechT5 on audio + transcripts for a voice of your own. VITS / MMS-TTS can be tested and hosted, but not trained. Measures intelligibility by transcribing the output back (WER/CER)."
     },
     "speech-recognition": {
       "name": "Speech Recognition (ASR)",

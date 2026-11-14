@@ -109,6 +109,15 @@ export default function HostResultView({ result, host, file, inputText = '', com
       </figure>
     );
     copyText = p;
+  } else if (modality === 'tts' && typeof extra.audio_path === 'string') {
+    const p = extra.audio_path;
+    body = (
+      <figure className="space-y-1">
+        <audio controls src={convertFileSrc(p)} aria-label={t('laboratoryPanel.taskViews.generatedAudio')} className="w-full max-w-md" />
+        <figcaption className="text-[11px] text-gray-500 break-all">{p}</figcaption>
+      </figure>
+    );
+    copyText = p;
   } else if (modality === 'token' && Array.isArray(extra.entities)) {
     body = <EntityText text={inputText} entities={extra.entities as EntitySpan[]} />;
   } else if (modality === 'embedding' && typeof extra.similarity === 'number') {

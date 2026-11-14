@@ -63,8 +63,8 @@ describe('Audio wird seit 1.2.17 unterstuetzt', () => {
     'facebook/wav2vec2-base', 'superb/hubert-base-superb-ks',
   ])('%s -> audio-classification', (id) => expect(pluginOf(id)).toBe('audio-classification'));
 
-  it('Sprachsynthese bleibt abgelehnt – das ist kein Klassifikator', () => {
-    expect(pluginOf('microsoft/speecht5_tts')).toBeNull();
+  it('Sprachsynthese ist kein Klassifikator: SpeechT5-TTS geht ans TTS-Plugin, Bark bleibt abgelehnt', () => {
+    expect(pluginOf('microsoft/speecht5_tts')).toBe('text-to-speech');
     expect(pluginOf('suno/bark')).toBeNull();
   });
 });
@@ -124,7 +124,7 @@ describe('Ablehnungen nennen den Grund, auch ohne config.json', () => {
   };
 
   it.each([
-    ['microsoft/speecht5_tts', /Text-to-Speech|Sprachsynthese/i],
+    ['microsoft/speecht5_vc', /Text-to-Speech|Sprachsynthese/i],
     ['facebook/detr-resnet-50', /Objekterkennung/i],
     ['openai/clip-vit-base-patch32', /multimodal/i],
   ])('%s', (id, muster) => expect(reasonOf(id)).toMatch(muster));

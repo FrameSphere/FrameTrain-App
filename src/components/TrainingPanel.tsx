@@ -614,7 +614,7 @@ const SEQUENCE_ONLY_FIELDS = [
 /** Tasks ohne Token-Sequenzen: Bild, Audio, Objekterkennung. */
 const NON_SEQUENCE_TASKS = new Set([
   'detect', 'image_classification', 'hf_image_classification', 'audio_classification',
-  'video_classification', 'text_to_image_lora', 'speech_recognition',
+  'video_classification', 'text_to_image_lora', 'speech_recognition', 'text_to_speech',
 ]);
 
 export function isSequenceTask(taskType?: string, modelName?: string): boolean {

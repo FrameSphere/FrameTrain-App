@@ -133,6 +133,7 @@
         "canvas": "Eigene Netze (Canvas)",
         "audio_classification": "Audioklassifikation",
         "speech_recognition": "Spracherkennung",
+        "text_to_speech": "Sprachausgabe",
         "sentence_embedding": "Embeddings",
         "hf_image_classification": "Bildklassifikation",
         "image_classification": "Bildklassifikation",
@@ -3131,6 +3132,8 @@
       "expected": "Soll",
       "wer": "Wortfehlerrate (WER): {value} %",
       "generated": "Erzeugt",
+      "generatedAudio": "Erzeugtes Audio",
+      "referenceAudio": "Aufnahme aus dem Dataset",
       "reference": "Bild aus dem Dataset",
       "entitiesExpected": "Soll-Entitäten",
       "entitiesFound": "Gefunden",
@@ -3446,6 +3449,7 @@
         "video": "Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.",
         "table": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) gefunden.",
         "speech": "Keine Audiodateien (oder Parquet mit Audio- und Textspalte) gefunden – Spracherkennung braucht Aufnahmen mit Transkript.",
+        "tts": "Keine Audiodateien (oder Parquet mit Audio- und Textspalte) gefunden – Sprachausgabe braucht Aufnahmen mit Transkript.",
         "tokens": "Keine Token-Daten gefunden (JSONL/Parquet mit tokens + ner_tags oder CoNLL-Text .conll/.iob/.txt).",
         "pairs": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) mit Satzpaaren gefunden.",
         "textToImage": "Keine Bilddateien gefunden – für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).",
@@ -3650,6 +3654,10 @@
       "t2iLabel": "Prompt",
       "t2iPlaceholder": "Beschreibung des Bildes, z.B. a photo of sks dog on the beach",
       "t2iResult": "Erzeugtes Bild",
+      "ttsLabel": "Text zum Sprechen",
+      "ttsPlaceholder": "Text eingeben, den das Modell sprechen soll …",
+      "ttsResult": "Erzeugtes Audio",
+      "ttsGenerated": "Erzeugte Aufnahmen (Auswahl)",
       "vlmImageLabel": "Bild",
       "vlmImagePlaceholder": "Vollständiger Pfad zu einem Bild, z.B. /Users/du/bilder/rechnung.png",
       "vlmQuestionLabel": "Frage zum Bild (optional)",
@@ -3662,7 +3670,8 @@
         "rouge1": "ROUGE-1",
         "rouge2": "ROUGE-2",
         "rougeL": "ROUGE-L",
-        "bleu": "BLEU"
+        "bleu": "BLEU",
+        "real_time_factor": "Rechenzeit je Sekunde Audio"
       }
     }
   },
@@ -4399,6 +4408,7 @@
       "audio_cls": "Audioklassifikation",
       "video_cls": "Videoklassifikation",
       "asr": "Spracherkennung",
+      "tts": "Sprachausgabe · Text rein, Audio raus",
       "token": "Named Entities (NER)",
       "embedding": "Sentence-Embeddings",
       "vlm": "Vision-Language · Bild + Frage",
@@ -4494,6 +4504,7 @@
         "vlm": "Bild anhängen und Frage stellen (optional) …",
         "audio": "Audio anhängen oder aufnehmen",
         "asr": "Sprache aufnehmen oder Audio anhängen",
+        "tts": "Text, den {name} sprechen soll …",
         "video": "Video anhängen oder hineinziehen",
         "tensor": "Text oder Zahlen, z. B. 0.5, 1.2"
       },
@@ -4636,6 +4647,9 @@
     },
     "text-to-image-lora": {
       "description": "Bringt Stable Diffusion 1.x/2.x oder SDXL per LoRA einen eigenen Stil oder ein eigenes Objekt bei."
+    },
+    "text-to-speech": {
+      "description": "Sprachausgabe: trainiert SpeechT5 auf Audio + Transkript auf eine eigene Stimme. VITS / MMS-TTS lässt sich testen und hosten, aber nicht trainieren. Misst die Verständlichkeit per Rücktranskription (WER/CER)."
     },
     "speech-recognition": {
       "description": "Spracherkennung: Whisper/Moonshine als Seq2Seq, wav2vec2/HuBERT/WavLM mit CTC. Misst WER und CER."

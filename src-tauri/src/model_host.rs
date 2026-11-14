@@ -181,6 +181,8 @@ pub(crate) fn infer_timeout_secs(modality: &str) -> u64 {
         "causal_lm" => 180,
         // Lange Aufnahmen laufen in 30-s-Stuecken durch, Videos werden erst dekodiert.
         "asr" | "video" => 120,
+        // Sprachausgabe erzeugt Satz fuer Satz; ein Absatz braucht auf der CPU ueber 30 s.
+        "tts" => 180,
         _ => 30,
     }
 }
