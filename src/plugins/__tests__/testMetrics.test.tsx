@@ -181,7 +181,8 @@ describe('Auswertung ausserhalb der Test-Ansicht', () => {
     });
     const ctx: McpCallContext = { callId: 't', client: { name: 'Test' }, source: 'local', userId: 'u1' };
     const r = await registry.get('tests_results')!.run({ version_id: 'v1' }, ctx);
-    const items = (r.structuredContent as { items?: unknown[] }).items ?? (r.structuredContent as unknown[]);
+    const sc = r.structuredContent as unknown as { items?: unknown[] } | unknown[];
+    const items = Array.isArray(sc) ? sc : sc.items;
     const first = (Array.isArray(items) ? items[0] : null) as { metrics: typeof CLASSIFY_METRICS; accuracy: number };
     expect(first.accuracy).toBe(0.6667);
     expect(first.metrics.macro_f1).toBe(0.6556);
