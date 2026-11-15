@@ -47,8 +47,11 @@ export function detectTextToSpeech(modelPathOrId: string, configJson?: ModelConf
   const name = modelNameSegment(normalized);
   const has = (t: string) => containsToken(name, t) || containsToken(normalized, t);
   if (has('vits') || has('mms-tts')) return true;
-  // "speecht5" allein reicht nicht: speecht5_asr und speecht5_vc sind andere Aufgaben.
-  const family = ['speecht5', 'speech-t5', 'speecht5-tts'].some(has) || /speecht5/.test(name);
-  if (family) return has('tts');
-  return ['tts', 'text-to-speech'].some(t => containsToken(name, t));
+  // SpeechT5 gibt es auch als Spracherkenner (speecht5_asr) und Stimmwandler
+  // (speecht5_vc). Nachtrainierte Stimmen heissen oft "speecht5_finetuned_…"
+  // ohne "tts" im Namen — deshalb zaehlt die Familie, solange nichts dagegen spricht.
+  if (/speech-?t5/.test(name)) return !['asr', 'vc', 'stt'].some(has);
+  // Bewusst KEIN allgemeines "tts": Parler-TTS, XTTS, Bark & Co. kann das
+  // Plugin weder trainieren noch abspielen.
+  return false;
 }
