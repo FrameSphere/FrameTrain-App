@@ -93,9 +93,9 @@ def main():
                            + (f"; ignored: {', '.join(skipped)}" if skipped else ""))
 
     hidden = max(dim // 2, BOTTLENECK * 2)
+    torch.manual_seed(42)  # same result on every run
     model = nn.Sequential(nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, BOTTLENECK), nn.ReLU(),
                           nn.Linear(BOTTLENECK, hidden), nn.ReLU(), nn.Linear(hidden, dim))
-    torch.manual_seed(42)
     order = torch.randperm(len(x))
     cut = max(len(x) // 10, 1)
     val, train = x[order[:cut]], x[order[cut:]]
