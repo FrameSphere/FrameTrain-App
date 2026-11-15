@@ -51,10 +51,30 @@ Zusätzlich live in der Preview:
 
 In der Oberfläche gesehen (Bildschirmsteuerung): Startseite listet alle neuen Modelle nach dem Neuladen, Modelle-Seite zeigt für jedes das richtige Plugin, Import-Reiter „Neu“ mit Zeitreihen/Tabellen, Segmentierungs-Einzeltest mit Überlagerung, Deckkraft-Regler und Legende, TTS-Einzeltest mit Audio-Player (Dauer wird geladen), Zeitreihen-Test mit Kennzahlen und Kurve (Ist, Modell, naiv).
 
+## Runde 3 (15.11. abends): Labor und Hosting für die neuen Aufgaben
+
+Der Modell-Server (`test_engine/model_server.py`) bedient Segmentierung, HF-Erkennung, Frage-Antwort, Reranker, Zeitreihen und Tabellen jetzt über die Test-Plugins der Aufgaben: das Plugin wird einmal geladen, jede Anfrage ist ein Einzeltest. Damit rechnen Test, Labor und Hosting mit demselben Code. Rust schätzt die Aufgabe vor dem Laden (`guess_task`) und reicht bei Frage-Antwort und Reranker die Frage aus dem zweiten Feld weiter. Ansichten: Überlagerung mit Legende (Segmentierung), freier Text (Frage-Antwort, Zeitreihe), Rangliste (Reranker), Klasse mit Konfidenz (Tabelle), Boxen wie bei YOLO (HF-Erkennung). Texte EN/DE.
+
+Tests: 9 neue Python-Tests (`test_model_server_plugins.py`), neue Fälle in `hosting_manager.rs` und `model_host.rs`, 5 neue vitest-Fälle. Stand: vitest 1343, `cargo test` 293.
+
+Live in der Preview, jeweils Labor (`lab_server_start` + `lab_infer`) und Hosting (`hosting_load` + `hosting_infer`):
+
+| Aufgabe | Erkannt als | Labor | Hosting |
+|---|---|---|---|
+| Segmentierung | segmentation / Bild | Klasse, Legende, Überlagerung | ok |
+| HF-Erkennung | hf_detect / Bild | läuft; yolos-tiny findet nichts ab 0,25 (höchster Wert 0,17) | ok |
+| Frage-Antwort | qa / Text | Antwort mit markierter Stelle, auch mit Frage im zweiten Feld | ok |
+| Reranker | reranker / Text | Platz 1 mit Wert, Rangliste | ok |
+| Zeitreihe | time_series / Text | 16 Vorhersagewerte | ok |
+| Tabelle | tabular / Text | „ja“ 0,80 | ok |
+
+Nicht im Fenster gesehen: die neuen Ansichten in Labor und Hosting (nur per vitest und über die Antworten der KI-Verbindung geprüft).
+
 Weiter offen:
 - Startseite lädt nach Läufen über die KI-Verbindung nicht von selbst neu (erst der Neuladen-Knopf zeigt neue Modelle und Tests); TTS-Modell steht dort als „Pretrained“.
 - Nicht im Fenster gesehen: Boxen-Ansicht der HF-Erkennung (yolos-tiny lag nach 3 Epochen unter der Schwelle), markierte Antwort bei Frage-Antwort, Konfusionsmatrix-Ansicht (Textklassifikatoren haben eigene Ansichten ohne Matrix), Audio wurde geladen, aber nicht abgehört.
 - CLIP-Score und VLM-Kennzahlen nicht über einen Test in der App, nur auf Engine-Ebene bzw. per Unit-Test.
-- Labor/Hosting kennen Segmentierung, HF-Erkennung, Frage-Antwort, Reranker, Zeitreihen und Tabellen nicht (nur TTS wurde ergänzt).
+- Labor: Datasets der neuen Aufgaben werden noch nicht als Stichproben aufbereitet (kein Soll-Vergleich für Maske, Antwort, Vorhersage); Eingabe von Hand oder per Datei geht.
+- Reranker-Werte sind Logits, keine 0..1-Werte; die Balken in der Rangliste sind dafür nicht skaliert.
 - `models_create_blank` ändert die Werkzeugliste der KI-Verbindung: vor einem Release mit den laufenden Prüfungen bei Anthropic/OpenAI abstimmen.
 - Windows, Linux, CUDA: weiterhin ungetestet.
