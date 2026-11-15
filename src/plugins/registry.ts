@@ -25,12 +25,16 @@ import rerankerPlugin from './reranker';
 import textToImageLoraPlugin from './text-to-image-lora';
 import visionLanguagePlugin from './vision-language';
 import semanticSegmentationPlugin from './semantic-segmentation';
+import timeSeriesPlugin from './time-series';
+import tabularPlugin from './tabular';
 
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
   canvasPlugin,               // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
   yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11, RT-DETR .pt)
   hfObjectDetectionPlugin,    // HF-Detektoren (DETR, RT-DETR im HF-Format, YOLOS)
+  timeSeriesPlugin,           // PatchTST / leeres Zeitreihenmodell (model_type patchtst, ft_time_series)
+  tabularPlugin,              // leeres Tabellenmodell (model_type ft_tabular)
   // Generative Bildmodelle vor den Klassifikatoren: "blip-image-captioning"
   // oder "stable-diffusion" sollen nicht an einer Bild-Heuristik haengen bleiben.
   textToImageLoraPlugin,      // Stable Diffusion 1.x/2.x, SDXL (LoRA)

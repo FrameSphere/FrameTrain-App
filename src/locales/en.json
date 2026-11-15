@@ -858,7 +858,18 @@
       "ticketSubject": "Plugin request: {name}",
       "ticketBody": "Model: {name}\nDetected type: {type}\n\nRequested plugin:\n{note}"
     },
-    "changePlugin": "change"
+    "changePlugin": "change",
+    "blankModel": {
+      "tab": "New",
+      "intro": "Some tasks do not need a downloaded base model. FrameTrain creates an empty model; the network is built from your data at the first training.",
+      "timeSeries": "Time series forecasting",
+      "timeSeriesHint": "PatchTST, initialized from scratch. A pretrained PatchTST can also be downloaded from Hugging Face.",
+      "tabular": "Tabular classification / regression",
+      "tabularHint": "Network for mixed columns (numbers, categories, missing values).",
+      "nameLabel": "Name",
+      "create": "Create model",
+      "creating": "Creating..."
+    }
   },
   "diffViewer": {
     "title": "Code Changes",
@@ -2380,7 +2391,21 @@
       "document_prefix": "Document prefix",
       "multi_label": "Multi-label (auto, true, false)",
       "problem_type": "Problem type (auto, single, multi, regression)",
-      "threshold": "Threshold (multi-label)"
+      "threshold": "Threshold (multi-label)",
+      "time_column": "Time column (empty = detect)",
+      "target_columns": "Value columns, comma-separated (empty = all numeric)",
+      "id_column": "Series ID column (optional)",
+      "context_length": "Context length (time steps)",
+      "prediction_length": "Forecast length (time steps)",
+      "season_length": "Season length for the naive baseline (0 = last value)",
+      "val_ratio": "Validation share (end of each series)",
+      "test_ratio": "Test share (end of each series)",
+      "d_model": "Model width (d_model)",
+      "num_layers": "Transformer layers",
+      "from_scratch": "Ignore base model weights",
+      "device": "Device (auto, cpu, mps, cuda)",
+      "target_column": "Target column (empty = label/target or last column)",
+      "hidden_layers": "Hidden layers (e.g. 128,64)"
     }
   },
   "analysisPanel": {
@@ -3711,11 +3736,24 @@
         "macro_precision": "Macro precision",
         "macro_recall": "Macro recall",
         "weighted_f1": "Weighted F1",
-        "exact_match": "Exact match",
         "tolerant_match": "Tolerant match (contains answer)",
         "clip_score": "CLIP score",
         "clip_score_base": "CLIP score (base model)",
-        "clip_score_delta": "CLIP score LoRA vs. base"
+        "clip_score_delta": "CLIP score LoRA vs. base",
+        "mae": "MAE",
+        "rmse": "RMSE",
+        "smape": "sMAPE (%)",
+        "mase": "MASE",
+        "naive_mae": "MAE naive forecast",
+        "naive_rmse": "RMSE naive forecast",
+        "naive_smape": "sMAPE naive forecast (%)",
+        "naive_mase": "MASE naive forecast",
+        "mae_skill": "MAE improvement over naive",
+        "r2": "R²",
+        "baseline_accuracy": "Accuracy most frequent class",
+        "baseline_macro_f1": "Macro F1 most frequent class",
+        "baseline_mae": "MAE mean value",
+        "baseline_rmse": "RMSE mean value"
       },
       "detectedObjects": "Detected objects"
     },
@@ -3733,6 +3771,21 @@
       "clip_unavailable": "No CLIP score: the CLIP model {model} is not available locally. Download it under Models or set plugin_config clip_model to a local folder.",
       "base_merged": "No base model comparison: the LoRA is merged into the pipeline.",
       "base_unsupported": "No base model comparison: this diffusers version cannot switch the LoRA off."
+    },
+    "timeSeries": {
+      "singleLabel": "Recent values of the series",
+      "singlePlaceholder": "12, 15, 14, 18, 21, ... (oldest first; one row per time step separated by ; for several columns)",
+      "result": "Forecast for the next time steps",
+      "chartTitle": "Forecast vs. actual values",
+      "chartSubtitle": "Test period of series {series}, column {column}. Left of the dashed line: context.",
+      "legendActual": "Actual",
+      "legendForecast": "Model",
+      "legendNaive": "Naive forecast"
+    },
+    "tabular": {
+      "singleLabel": "Values of one row",
+      "singlePlaceholder": "age=31; city=Berlin; income=4200  or  {\"age\": 31, \"city\": \"Berlin\"}  or values in column order",
+      "result": "Prediction"
     }
   },
   "studio": {
@@ -4747,6 +4800,14 @@
     "hf-object-detection": {
       "name": "Object Detection (HuggingFace)",
       "description": "Trains HuggingFace detectors (DETR, Conditional/Deformable DETR, RT-DETR, YOLOS) on YOLO or COCO boxes."
+    },
+    "time-series": {
+      "name": "Time Series Forecasting (PatchTST)",
+      "description": "Predicts the next values of one or more time series (CSV/Parquet with a time column). PatchTST created from scratch or from Hugging Face; split by time, compared with a naive forecast."
+    },
+    "tabular": {
+      "name": "Tabular Classification and Regression",
+      "description": "Predicts one column from the others (CSV/Parquet). Numbers are normalized, categories learned as embeddings, missing values handled; classes or numbers are detected automatically."
     }
   },
   "engineErrors": {

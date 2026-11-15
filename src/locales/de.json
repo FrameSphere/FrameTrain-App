@@ -858,7 +858,18 @@
       "ticketSubject": "Plugin-Wunsch: {name}",
       "ticketBody": "Modell: {name}\nErkannter Typ: {type}\n\nGewünschtes Plugin:\n{note}"
     },
-    "changePlugin": "ändern"
+    "changePlugin": "ändern",
+    "blankModel": {
+      "tab": "Neu",
+      "intro": "Manche Aufgaben brauchen kein heruntergeladenes Basismodell. FrameTrain legt ein leeres Modell an; das Netz entsteht beim ersten Training aus deinen Daten.",
+      "timeSeries": "Zeitreihen-Vorhersage",
+      "timeSeriesHint": "PatchTST, neu initialisiert. Ein vortrainierter PatchTST lässt sich auch von Hugging Face laden.",
+      "tabular": "Tabellen-Klassifikation / -Regression",
+      "tabularHint": "Netz für gemischte Spalten (Zahlen, Kategorien, fehlende Werte).",
+      "nameLabel": "Name",
+      "create": "Modell anlegen",
+      "creating": "Wird angelegt..."
+    }
   },
   "diffViewer": {
     "title": "Code Änderungen",
@@ -2377,7 +2388,21 @@
       "document_prefix": "Präfix für Dokumente",
       "multi_label": "Multi-Label (auto, true, false)",
       "problem_type": "Aufgabentyp (auto, single, multi, regression)",
-      "threshold": "Schwelle (Multi-Label)"
+      "threshold": "Schwelle (Multi-Label)",
+      "time_column": "Zeitspalte (leer = erkennen)",
+      "target_columns": "Wertspalten, mit Komma getrennt (leer = alle Zahlenspalten)",
+      "id_column": "Spalte mit Serien-ID (optional)",
+      "context_length": "Kontextlänge (Zeitschritte)",
+      "prediction_length": "Vorhersagelänge (Zeitschritte)",
+      "season_length": "Saisonlänge für den naiven Vergleich (0 = letzter Wert)",
+      "val_ratio": "Anteil Validierung (Ende jeder Serie)",
+      "test_ratio": "Anteil Test (Ende jeder Serie)",
+      "d_model": "Modellbreite (d_model)",
+      "num_layers": "Transformer-Schichten",
+      "from_scratch": "Gewichte des Basismodells ignorieren",
+      "device": "Gerät (auto, cpu, mps, cuda)",
+      "target_column": "Zielspalte (leer = label/target oder letzte Spalte)",
+      "hidden_layers": "Verdeckte Schichten (z. B. 128,64)"
     }
   },
   "analysisPanel": {
@@ -3687,7 +3712,7 @@
       "vlmResult": "Antwort des Modells",
       "transcript": "Transkript",
       "metricLabels": {
-        "exact_match": "Exact Match",
+        "exact_match": "Exakte Übereinstimmung",
         "f1": "F1",
         "has_answer_exact_match": "Exact Match (mit Antwort)",
         "has_answer_f1": "F1 (mit Antwort)",
@@ -3707,11 +3732,24 @@
         "macro_precision": "Macro-Precision",
         "macro_recall": "Macro-Recall",
         "weighted_f1": "Gewichteter F1",
-        "exact_match": "Exakte Übereinstimmung",
         "tolerant_match": "Tolerante Übereinstimmung (enthält Antwort)",
         "clip_score": "CLIP-Score",
         "clip_score_base": "CLIP-Score (Basismodell)",
-        "clip_score_delta": "CLIP-Score LoRA gegenüber Basis"
+        "clip_score_delta": "CLIP-Score LoRA gegenüber Basis",
+        "mae": "MAE",
+        "rmse": "RMSE",
+        "smape": "sMAPE (%)",
+        "mase": "MASE",
+        "naive_mae": "MAE naive Vorhersage",
+        "naive_rmse": "RMSE naive Vorhersage",
+        "naive_smape": "sMAPE naive Vorhersage (%)",
+        "naive_mase": "MASE naive Vorhersage",
+        "mae_skill": "MAE-Verbesserung gegenüber naiv",
+        "r2": "R²",
+        "baseline_accuracy": "Accuracy häufigste Klasse",
+        "baseline_macro_f1": "Macro-F1 häufigste Klasse",
+        "baseline_mae": "MAE Mittelwert",
+        "baseline_rmse": "RMSE Mittelwert"
       },
       "detectedObjects": "Erkannte Objekte"
     },
@@ -3729,6 +3767,21 @@
       "clip_unavailable": "Kein CLIP-Score: das CLIP-Modell {model} liegt nicht lokal vor. Unter Modelle herunterladen oder plugin_config clip_model auf einen lokalen Ordner setzen.",
       "base_merged": "Kein Vergleich mit dem Basismodell: die LoRA ist in die Pipeline eingerechnet.",
       "base_unsupported": "Kein Vergleich mit dem Basismodell: diese diffusers-Version kann die LoRA nicht abschalten."
+    },
+    "timeSeries": {
+      "singleLabel": "Letzte Werte der Reihe",
+      "singlePlaceholder": "12, 15, 14, 18, 21, ... (älteste zuerst; bei mehreren Spalten eine Zeile je Zeitschritt, mit ; getrennt)",
+      "result": "Vorhersage für die nächsten Zeitschritte",
+      "chartTitle": "Vorhersage gegen echte Werte",
+      "chartSubtitle": "Testzeitraum der Serie {series}, Spalte {column}. Links der gestrichelten Linie: Kontext.",
+      "legendActual": "Echt",
+      "legendForecast": "Modell",
+      "legendNaive": "Naive Vorhersage"
+    },
+    "tabular": {
+      "singleLabel": "Werte einer Zeile",
+      "singlePlaceholder": "alter=31; stadt=Berlin; einkommen=4200  oder  {\"alter\": 31, \"stadt\": \"Berlin\"}  oder Werte in Spaltenreihenfolge",
+      "result": "Vorhersage"
     }
   },
   "studio": {
@@ -4729,6 +4782,14 @@
     "hf-object-detection": {
       "name": "Objekterkennung (HuggingFace)",
       "description": "Trainiert HuggingFace-Detektoren (DETR, Conditional/Deformable DETR, RT-DETR, YOLOS) auf YOLO- oder COCO-Boxen."
+    },
+    "time-series": {
+      "name": "Zeitreihen-Vorhersage (PatchTST)",
+      "description": "Sagt die nächsten Werte einer oder mehrerer Zeitreihen voraus (CSV/Parquet mit Zeitspalte). PatchTST neu angelegt oder von Hugging Face; zeitliche Aufteilung, Vergleich mit naiver Vorhersage."
+    },
+    "tabular": {
+      "name": "Tabellen-Klassifikation und -Regression",
+      "description": "Sagt eine Spalte aus den übrigen voraus (CSV/Parquet). Zahlen werden normalisiert, Kategorien als Embeddings gelernt, fehlende Werte behandelt; Klassen oder Zahl werden automatisch erkannt."
     }
   },
   "engineErrors": {

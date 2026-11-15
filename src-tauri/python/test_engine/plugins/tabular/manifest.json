@@ -1,0 +1,10 @@
+{
+  "task_type": "tabular",
+  "name": "Tabellen-Klassifikation und -Regression – Test",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Accuracy/Macro-F1 bzw. MAE/RMSE/R2 gegen den Vergleichswert ohne Modell; Einzeltest fuer eine Zeile.",
+  "input_type": "text",
+  "output_format": "label_or_number"
+}

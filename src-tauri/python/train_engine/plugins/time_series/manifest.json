@@ -1,0 +1,11 @@
+{
+  "task_type": "time_series",
+  "name": "Zeitreihen-Vorhersage (PatchTST)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "PatchTST aus transformers, neu initialisiert oder von Hugging Face; zeitliche Aufteilung, Vergleich mit naiver Vorhersage.",
+  "supported_architectures": ["patchtst", "ft_time_series"],
+  "dataset_formats": ["csv", "tsv", "parquet", "jsonl"],
+  "requirements": ["torch>=2.0.0", "transformers>=4.36.0", "numpy>=1.26.0", "pandas>=2.2.0", "pyarrow>=14.0.0"]
+}

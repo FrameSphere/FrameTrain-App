@@ -1,0 +1,10 @@
+{
+  "task_type": "tabular",
+  "name": "Tabellen-Klassifikation und -Regression",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Torch-Netz fuer gemischte Spalten (Zahlen normalisiert, Kategorien als Embeddings, fehlende Werte mit Indikator). Kein Basismodell noetig.",
+  "dataset_formats": ["csv", "tsv", "parquet", "jsonl"],
+  "requirements": ["torch>=2.0.0", "numpy>=1.26.0", "pandas>=2.2.0", "pyarrow>=14.0.0"]
+}

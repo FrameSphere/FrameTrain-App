@@ -548,6 +548,79 @@ pub async fn import_local_model(
     Ok(info)
 }
 
+/// Inhalt der config.json eines leeren Aufgabenmodells — oder None fuer eine
+/// unbekannte Aufgabe. Liefert (model_type, plugin_id).
+pub fn blank_task_model(task: &str) -> Option<(&'static str, &'static str)> {
+    match task {
+        "time_series" => Some(("ft_time_series", "time-series")),
+        "tabular" => Some(("ft_tabular", "tabular")),
+        _ => None,
+    }
+}
+
+/// Legt ein leeres Modell fuer Aufgaben ohne Basismodell an (Zeitreihen,
+/// Tabellen). Wie bei Synapse-Netzen entsteht ein Modellordner mit Eintrag in
+/// der Bibliothek; Gewichte gibt es erst nach dem ersten Training. Danach
+/// laeuft alles ueber den normalen Weg (Training -> Version -> Test).
+#[tauri::command]
+pub async fn create_task_model(
+    app_handle: tauri::AppHandle,
+    task: String,
+    model_name: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<ModelInfo, String> {
+    let (model_type, plugin_id) = blank_task_model(task.trim())
+        .ok_or_else(|| format!("Unbekannte Aufgabe: {}", task))?;
+    let name = if model_name.trim().is_empty() { plugin_id.to_string() } else { model_name.trim().to_string() };
+
+    let model_id   = format!("local_{}", &uuid::Uuid::new_v4().to_string().replace("-","")[..12]);
+    let models_dir = get_models_dir(&app_handle)?;
+    let target     = models_dir.join(&model_id);
+    fs::create_dir_all(&target).map_err(|e| format!("Modellordner anlegen: {}", e))?;
+    let config = serde_json::json!({ "model_type": model_type, "frametrain_task": task.trim() });
+    fs::write(target.join("config.json"), serde_json::to_string_pretty(&config).unwrap_or_default())
+        .map_err(|e| format!("config.json: {}", e))?;
+    let marker = serde_json::json!({ "plugin_id": plugin_id, "set_at": Utc::now().to_rfc3339() });
+    fs::write(target.join(PLUGIN_OVERRIDE_FILE), serde_json::to_string_pretty(&marker).unwrap_or_default())
+        .map_err(|e| format!("Plugin-Zuordnung: {}", e))?;
+
+    let (size, files) = calculate_dir_size(&target)?;
+    let info = ModelInfo {
+        id: model_id.clone(), name: name.clone(), source: "local".to_string(),
+        source_path: Some(target.to_string_lossy().to_string()), local_path: target.to_string_lossy().to_string(),
+        size_bytes: size, file_count: files, created_at: Utc::now(),
+        model_type: Some(model_type.to_string()), plugin_override: Some(plugin_id.to_string()),
+    };
+    save_metadata(&models_dir, &info)?;
+
+    let db = state.db.lock().map_err(|e| format!("DB Lock: {}", e))?;
+    let model_path_str = target.to_string_lossy().to_string();
+    let now = Utc::now().to_rfc3339();
+    let db_model = crate::database::Model {
+        id: model_id.clone(), name,
+        description: Some(format!("Leeres Modell: {}", task.trim())),
+        base_model: Some("local".to_string()),
+        model_path: Some(model_path_str.clone()),
+        status: "ready".to_string(), created_at: now.clone(), updated_at: now,
+    };
+    db.create_model(&db_model).map_err(|e| format!("DB create_model: {}", e))?;
+    if let Err(e) = db.create_root_version(&model_id, &model_path_str) {
+        eprintln!("[Model] Root-Version konnte nicht erstellt werden: {}", e);
+    }
+    Ok(info)
+}
+
+#[cfg(test)]
+mod blank_task_model_tests {
+    use super::blank_task_model;
+    #[test]
+    fn bekannte_aufgaben() {
+        assert_eq!(blank_task_model("time_series"), Some(("ft_time_series", "time-series")));
+        assert_eq!(blank_task_model("tabular"), Some(("ft_tabular", "tabular")));
+        assert_eq!(blank_task_model("../x"), None);
+    }
+}
+
 /// Ordnet einem Modell von Hand ein Plugin zu (oder entfernt die Zuordnung).
 ///
 /// Erkennt FrameTrain ein Modell beim Import nicht, ist die Alternative sonst
