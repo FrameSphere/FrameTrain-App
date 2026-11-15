@@ -40,6 +40,8 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
       return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'audio' };
     case 'speech_recognition':
       return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'speech' };
+    case 'text_to_speech':
+      return { exts: [...AUDIO_EXTS, '.parquet'], missing: 'tts' };
     case 'token_classification':
       return { exts: ['.jsonl', '.json', '.parquet', ...CONLL_EXTS], missing: 'tokens' };
     case 'sentence_embedding':

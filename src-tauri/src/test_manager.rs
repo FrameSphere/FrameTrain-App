@@ -194,6 +194,7 @@ pub(crate) fn infer_task_type(model_path: &str) -> Option<String> {
                 else if a.ends_with("ForObjectDetection") { "hf_object_detection" }
                 else if a.ends_with("ForAudioClassification") { "audio_classification" }
                 else if a.ends_with("ForVideoClassification") { "video_classification" }
+                else if a.ends_with("ForTextToSpeech") || a == "VitsModel" { "text_to_speech" }
                 else if a.ends_with("ForCTC") || (a.ends_with("ForConditionalGeneration") && mt == "whisper") { "speech_recognition" }
                 else if a.ends_with("ForCausalLM") { "causal_lm" }
                 else if a.ends_with("ForConditionalGeneration") || a.ends_with("ForSeq2SeqLM") { "seq2seq" }
@@ -848,6 +849,12 @@ mod task_type_tests {
         let c = tmp("cls");
         fs::write(c.join("config.json"), r#"{"architectures":["DistilBertForSequenceClassification"]}"#).unwrap();
         assert_eq!(infer_task_type(c.to_str().unwrap()).as_deref(), Some("seq_classification"));
+        // Sprachausgabe: SpeechT5-TTS und VITS / MMS-TTS
+        let s = tmp("tts");
+        fs::write(s.join("config.json"), r#"{"architectures":["SpeechT5ForTextToSpeech"],"model_type":"speecht5"}"#).unwrap();
+        assert_eq!(infer_task_type(s.to_str().unwrap()).as_deref(), Some("text_to_speech"));
+        fs::write(s.join("config.json"), r#"{"architectures":["VitsModel"],"model_type":"vits"}"#).unwrap();
+        assert_eq!(infer_task_type(s.to_str().unwrap()).as_deref(), Some("text_to_speech"));
         // Unbekannt -> Standard bleibt beim Aufrufer
         let u = tmp("leer");
         assert_eq!(infer_task_type(u.to_str().unwrap()), None);

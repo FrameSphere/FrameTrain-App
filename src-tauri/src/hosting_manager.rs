@@ -408,6 +408,7 @@ pub fn guess_task(dir: &Path, is_yolo: bool, is_canvas: bool) -> (String, String
     let video = ["videomae", "timesformer", "vivit"];
     let vlm = cfg.get("vision_config").is_some() && cfg.get("text_config").is_some() && !mt.contains("whisper");
     if vlm { return pair("vlm", "image"); }
+    if arch.ends_with("ForTextToSpeech") || arch == "VitsModel" || mt == "vits" { return pair("tts", "text"); }
     if arch.ends_with("ForImageClassification") || image.contains(&mt.as_str()) { return pair("image", "image"); }
     if arch.ends_with("ForVideoClassification") || video.contains(&mt.as_str()) { return pair("video", "video"); }
     if arch.ends_with("ForCTC") || arch.ends_with("ForSpeechSeq2Seq") || mt == "whisper" { return pair("asr", "audio"); }
@@ -938,6 +939,10 @@ mod tests {
         assert_eq!(guess_task(&dir, false, false).0, "causal_lm");
         std::fs::write(dir.join("config.json"), r#"{"architectures":["WhisperForConditionalGeneration"],"model_type":"whisper"}"#).unwrap();
         assert_eq!(guess_task(&dir, false, false), ("asr".to_string(), "audio".to_string()));
+        std::fs::write(dir.join("config.json"), r#"{"architectures":["SpeechT5ForTextToSpeech"],"model_type":"speecht5"}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false), ("tts".to_string(), "text".to_string()));
+        std::fs::write(dir.join("config.json"), r#"{"architectures":["VitsModel"],"model_type":"vits"}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false), ("tts".to_string(), "text".to_string()));
         std::fs::write(dir.join("config.json"), r#"{"architectures":["ViTForImageClassification"],"model_type":"vit"}"#).unwrap();
         assert_eq!(guess_task(&dir, false, false).1, "image");
         std::fs::write(dir.join("config.json"), r#"{"model_type":"idefics3","vision_config":{},"text_config":{}}"#).unwrap();

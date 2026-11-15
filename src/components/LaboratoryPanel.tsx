@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import { buildTaskSamples, folderLabel, labTaskFor, type ExpectedEntity, type MediaKind } from './labTaskSamples';
-import { EntityText, GeneratedImage, GeneratedText, PairView, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
+import { EntityText, GeneratedAudio, GeneratedImage, GeneratedText, PairView, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
 import {
   labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes, shownPrediction,
   compareClassSets, classColor, legendEntries, type TruthBox,
@@ -125,6 +125,8 @@ interface LabSample {
   question?: string;
   /** Text-zu-Bild: Bild aus dem Dataset zur Caption. */
   refImage?: string;
+  /** Sprachausgabe: Aufnahme aus dem Dataset zum Transkript. */
+  refAudio?: string;
   /** NER: Soll-Entitaeten mit Zeichenpositionen im Text. */
   entities?: ExpectedEntity[];
 }
@@ -2645,6 +2647,9 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                         if (serverModality === 'text_to_image' && testResult.predicted && testResult.predicted !== '?') {
                           return <GeneratedImage path={String(extra.image_path ?? testResult.predicted)} refImage={currentSample.refImage} prompt={currentSample.text} />;
                         }
+                        if (serverModality === 'tts' && testResult.predicted && testResult.predicted !== '?') {
+                          return <GeneratedAudio path={String(extra.audio_path ?? testResult.predicted)} refAudio={currentSample.refAudio} />;
+                        }
                         if (serverModality === 'token') {
                           const ents = Array.isArray(extra.entities) ? extra.entities as EntitySpan[] : [];
                           return (
@@ -2726,7 +2731,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             </span>
                           </div>
                         );
-                      })() : serverModality === 'embedding' || serverModality === 'text_to_image' ? null
+                      })() : serverModality === 'embedding' || serverModality === 'text_to_image' || serverModality === 'tts' ? null
                       : currentSample.label && (() => {
                         // Freier Text (LLM, Seq2Seq, VLM): Gross/klein und Leerraum egal.
                         const generative = ['causal_lm', 'seq2seq', 'vlm'].includes(serverModality ?? '');

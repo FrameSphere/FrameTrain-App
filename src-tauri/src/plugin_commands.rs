@@ -799,6 +799,9 @@ pub fn packages_for_task(task_type: &str) -> (&'static str, Vec<&'static str>) {
         "reranker" => ("seq_classification", with(&["sentence-transformers"])),
         "question_answering" => ("seq_classification", with(&["pandas"])),
         "speech_recognition" => ("seq_classification", with(&["librosa", "soundfile", "jiwer"])),
+        // speechbrain (x-vector) ist optional und steht deshalb nicht hier: ohne das
+        // Paket trainiert das Plugin mit einem Standard-Sprechervektor.
+        "text_to_speech" => ("seq_classification", with(&["librosa", "soundfile", "sentencepiece", "jiwer"])),
         "audio_classification" => ("seq_classification", with(&["librosa", "soundfile", "scikit-learn"])),
         "video_classification" => ("seq_classification", with(&["opencv-python", "scikit-learn"])),
         "seq2seq" => ("seq_classification", with(&["rouge-score", "sacrebleu"])),
@@ -1653,6 +1656,8 @@ mod dependency_version_tests {
         assert!(packages_for_task("hf_object_detection").1.contains(&"timm"));
         assert!(packages_for_task("sentence_embedding").1.contains(&"sentence-transformers"));
         assert!(packages_for_task("speech_recognition").1.contains(&"jiwer"));
+        assert!(packages_for_task("text_to_speech").1.contains(&"sentencepiece"));
+        assert!(!packages_for_task("text_to_speech").1.contains(&"speechbrain"));
     }
 
     #[test]

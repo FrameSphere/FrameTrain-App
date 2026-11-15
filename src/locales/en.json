@@ -143,7 +143,8 @@
         "text_to_image_lora": "Text to image",
         "vision_language": "Vision and language",
         "time_series": "Time series",
-        "other": "Other models"
+        "other": "Other models",
+        "text_to_speech": "Text to speech"
       },
       "open": {
         "training": "Open training",
@@ -3174,7 +3175,9 @@
       "question": "Question",
       "prompt": "Prompt",
       "vectorInfo": "Vector with {dim} dimensions, norm {norm}",
-      "pairHint": "Separate two sentences with ||| to measure their similarity."
+      "pairHint": "Separate two sentences with ||| to measure their similarity.",
+      "generatedAudio": "Generated audio",
+      "referenceAudio": "Recording from the dataset"
     },
     "noObjects": "No objects"
   },
@@ -3487,7 +3490,8 @@
         "visionLanguage": "No image files found – a VLM learns from image + question + answer.",
         "llm": "No training data found – expected .jsonl/.json/.csv/.parquet (chat, question-answer) or .txt/.md (plain text).",
         "segmentation": "No mask files (.png) found – semantic segmentation needs one mask per image (images/ + masks/).",
-        "hfDetect": "No YOLO labels (.txt) and no COCO JSON file found – without boxes a detector learns nothing."
+        "hfDetect": "No YOLO labels (.txt) and no COCO JSON file found – without boxes a detector learns nothing.",
+        "tts": "No audio files (or Parquet with audio and text column) found – text to speech needs recordings with transcripts."
       },
       "cannotTrain": "{model} cannot train this dataset.",
       "typeUnknown": "Dataset type not detected – {model} may not be able to read it.",
@@ -3753,9 +3757,14 @@
         "baseline_accuracy": "Accuracy most frequent class",
         "baseline_macro_f1": "Macro F1 most frequent class",
         "baseline_mae": "MAE mean value",
-        "baseline_rmse": "RMSE mean value"
+        "baseline_rmse": "RMSE mean value",
+        "real_time_factor": "Compute time per second of audio"
       },
-      "detectedObjects": "Detected objects"
+      "detectedObjects": "Detected objects",
+      "ttsLabel": "Text to speak",
+      "ttsPlaceholder": "Enter the text the model should speak …",
+      "ttsResult": "Generated audio",
+      "ttsGenerated": "Generated recordings (selection)"
     },
     "confusion": {
       "title": "Confusion matrix",
@@ -4531,7 +4540,8 @@
       "yolo_obb": "Rotated boxes (YOLO)",
       "yolo_classify": "Image classification (YOLO)",
       "canvas": "Synapse model",
-      "unknown": "Unknown task"
+      "unknown": "Unknown task",
+      "tts": "Text to speech · text in, audio out"
     },
     "page": {
       "title": "Hosting",
@@ -4616,7 +4626,8 @@
         "audio": "Attach or record audio",
         "asr": "Record speech or attach audio",
         "video": "Attach or drop a video",
-        "tensor": "Text or numbers, e.g. 0.5, 1.2"
+        "tensor": "Text or numbers, e.g. 0.5, 1.2",
+        "tts": "Text for {name} to speak …"
       },
       "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain. If the switch is already on, it no longer applies after an update: reset the permission, turn the switch on again, restart.",
       "openSettings": "Open settings",
@@ -4808,6 +4819,9 @@
     "tabular": {
       "name": "Tabular Classification and Regression",
       "description": "Predicts one column from the others (CSV/Parquet). Numbers are normalized, categories learned as embeddings, missing values handled; classes or numbers are detected automatically."
+    },
+    "text-to-speech": {
+      "description": "Text to speech: fine-tunes SpeechT5 on audio + transcripts for a voice of your own. VITS / MMS-TTS can be tested and hosted, but not trained. Measures intelligibility by transcribing the output back (WER/CER)."
     }
   },
   "engineErrors": {

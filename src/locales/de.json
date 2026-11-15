@@ -143,7 +143,8 @@
         "text_to_image_lora": "Text zu Bild",
         "vision_language": "Bild und Sprache",
         "time_series": "Zeitreihen",
-        "other": "Weitere Modelle"
+        "other": "Weitere Modelle",
+        "text_to_speech": "Sprachausgabe"
       },
       "open": {
         "training": "Training öffnen",
@@ -3171,7 +3172,9 @@
       "question": "Frage",
       "prompt": "Prompt",
       "vectorInfo": "Vektor mit {dim} Dimensionen, Norm {norm}",
-      "pairHint": "Zwei Sätze mit ||| trennen, um ihre Ähnlichkeit zu messen."
+      "pairHint": "Zwei Sätze mit ||| trennen, um ihre Ähnlichkeit zu messen.",
+      "generatedAudio": "Erzeugtes Audio",
+      "referenceAudio": "Aufnahme aus dem Dataset"
     },
     "noObjects": "Keine Objekte"
   },
@@ -3483,7 +3486,8 @@
         "visionLanguage": "Keine Bilddateien gefunden – ein VLM lernt aus Bild + Frage + Antwort.",
         "llm": "Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext).",
         "segmentation": "Keine Maskendateien (.png) gefunden – semantische Segmentierung braucht zu jedem Bild eine Maske (images/ + masks/).",
-        "hfDetect": "Keine YOLO-Labels (.txt) und keine COCO-JSON-Datei gefunden – ohne Boxen lernt ein Detektor nichts."
+        "hfDetect": "Keine YOLO-Labels (.txt) und keine COCO-JSON-Datei gefunden – ohne Boxen lernt ein Detektor nichts.",
+        "tts": "Keine Audiodateien (oder Parquet mit Audio- und Textspalte) gefunden – Sprachausgabe braucht Aufnahmen mit Transkript."
       },
       "cannotTrain": "{model} kann dieses Dataset nicht trainieren.",
       "typeUnknown": "Dataset-Typ nicht erkannt – {model} kann es eventuell nicht lesen.",
@@ -3749,9 +3753,14 @@
         "baseline_accuracy": "Accuracy häufigste Klasse",
         "baseline_macro_f1": "Macro-F1 häufigste Klasse",
         "baseline_mae": "MAE Mittelwert",
-        "baseline_rmse": "RMSE Mittelwert"
+        "baseline_rmse": "RMSE Mittelwert",
+        "real_time_factor": "Rechenzeit je Sekunde Audio"
       },
-      "detectedObjects": "Erkannte Objekte"
+      "detectedObjects": "Erkannte Objekte",
+      "ttsLabel": "Text zum Sprechen",
+      "ttsPlaceholder": "Text eingeben, den das Modell sprechen soll …",
+      "ttsResult": "Erzeugtes Audio",
+      "ttsGenerated": "Erzeugte Aufnahmen (Auswahl)"
     },
     "confusion": {
       "title": "Konfusionsmatrix",
@@ -4527,7 +4536,8 @@
       "yolo_obb": "Gedrehte Boxen (YOLO)",
       "yolo_classify": "Bildklassifikation (YOLO)",
       "canvas": "Synapse-Modell",
-      "unknown": "Unbekannte Aufgabe"
+      "unknown": "Unbekannte Aufgabe",
+      "tts": "Sprachausgabe · Text rein, Audio raus"
     },
     "page": {
       "title": "Hosting",
@@ -4613,7 +4623,8 @@
         "audio": "Audio anhängen oder aufnehmen",
         "asr": "Sprache aufnehmen oder Audio anhängen",
         "video": "Video anhängen oder hineinziehen",
-        "tensor": "Text oder Zahlen, z. B. 0.5, 1.2"
+        "tensor": "Text oder Zahlen, z. B. 0.5, 1.2",
+        "tts": "Text, den {name} sprechen soll …"
       },
       "screenPermission": "macOS erlaubt FrameTrain die Bildschirmaufnahme noch nicht. Erlaube sie unter Datenschutz & Sicherheit → Bildschirmaufnahme und starte FrameTrain neu. Ist der Schalter schon an, gilt er nach einem Update nicht mehr: Freigabe zurücksetzen, Schalter neu einschalten, neu starten.",
       "openSettings": "Einstellungen öffnen",
@@ -4790,6 +4801,9 @@
     "tabular": {
       "name": "Tabellen-Klassifikation und -Regression",
       "description": "Sagt eine Spalte aus den übrigen voraus (CSV/Parquet). Zahlen werden normalisiert, Kategorien als Embeddings gelernt, fehlende Werte behandelt; Klassen oder Zahl werden automatisch erkannt."
+    },
+    "text-to-speech": {
+      "description": "Sprachausgabe: trainiert SpeechT5 auf Audio + Transkript auf eine eigene Stimme. VITS / MMS-TTS lässt sich testen und hosten, aber nicht trainieren. Misst die Verständlichkeit per Rücktranskription (WER/CER)."
     }
   },
   "engineErrors": {

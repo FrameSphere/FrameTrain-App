@@ -145,6 +145,26 @@ export function GeneratedImage({ path, refImage, prompt }: { path: string; refIm
   );
 }
 
+/** Sprachausgabe: erzeugtes Audio, darunter die Aufnahme aus dem Dataset zum Vergleich. */
+export function GeneratedAudio({ path, refAudio }: { path: string; refAudio?: string }) {
+  const { t } = useLanguage();
+  return (
+    <div className="space-y-2">
+      <figure className="space-y-1">
+        <figcaption className="text-[10px] text-gray-500">{t('laboratoryPanel.taskViews.generatedAudio')}</figcaption>
+        <audio controls src={convertFileSrc(path)} className="w-full" />
+        <p className="text-[10px] text-gray-500 break-all">{path}</p>
+      </figure>
+      {refAudio && (
+        <figure className="space-y-1">
+          <figcaption className="text-[10px] text-gray-500">{t('laboratoryPanel.taskViews.referenceAudio')}</figcaption>
+          <audio controls preload="none" src={convertFileSrc(refAudio)} className="w-full" />
+        </figure>
+      )}
+    </div>
+  );
+}
+
 /** Vergleich fuer freien Text: Gross/klein, Leerraum und Satzzeichen am Ende egal. */
 export function sameText(a: string, b: string): boolean {
   const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.!?。]+$/, '');

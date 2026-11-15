@@ -95,7 +95,7 @@ describe('detectPluginForModel', () => {
     // (gpt2 war hier das Beispiel, ist aber seit dem LLM-Plugin trainierbar –
     // dann muss es eben dort landen und nicht beim Encoder aus dem Namen.)
     const r = detectPluginForModel({
-      id: 'x', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'speecht5',
+      id: 'x', name: 'mein-bert-projekt', source_path: IMPORT_DIR, model_type: 'bark',
     });
     expect(r.supported).toBe(false);
     const g = detectPluginForModel({

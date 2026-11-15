@@ -1,0 +1,10 @@
+{
+  "task_type": "text_to_speech",
+  "name": "Text-to-Speech / Sprachausgabe",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Erzeugt Audio aus Text (SpeechT5, VITS / MMS-TTS) und misst die Verstaendlichkeit per Ruecktranskription (WER/CER), sofern ein ASR-Modell lokal vorhanden ist.",
+  "input_type": "text",
+  "output_format": "audio"
+}

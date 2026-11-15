@@ -1,0 +1,13 @@
+{
+  "task_type": "text_to_speech",
+  "name": "Text-to-Speech / Sprachausgabe (SpeechT5)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert SpeechT5 (microsoft/speecht5_tts) auf Audio + Transkript auf eine eigene Stimme. Sprecher-Embeddings (x-vector) ueber speechbrain, ohne das Paket ein neutraler Sprechervektor. VITS / MMS-TTS ist nur testbar, nicht trainierbar.",
+  "supported_architectures": ["speecht5"],
+  "inference_only_architectures": ["vits"],
+  "optional_packages": ["speechbrain"],
+  "dataset_formats": ["audio_transcript", "audiofolder", "common_voice", "pre_split", "parquet"],
+  "metrics": ["train_loss", "val_loss"]
+}

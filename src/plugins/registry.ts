@@ -15,6 +15,7 @@ import imageClassificationPlugin from './image-classification';
 import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
 import speechRecognitionPlugin from './speech-recognition';
+import textToSpeechPlugin from './text-to-speech';
 import videoClassificationPlugin from './video-classification';
 import seq2seqPlugin from './seq2seq';
 import causalLMPlugin from './causal-lm';
@@ -48,6 +49,7 @@ const PLUGINS: ModelPlugin[] = [
   imageClassificationPlugin,  // torchvision-Backbones (ohne HF-Gewichte)
   // Vor der Audio-Klassifikation: Whisper, *ForCTC und wav2vec2-…-960h sind
   // Spracherkenner. Ein wav2vec2 ohne solche Hinweise bleibt Klassifikation.
+  textToSpeechPlugin,         // SpeechT5 (trainierbar), VITS / MMS-TTS (nur Test)
   speechRecognitionPlugin,    // Whisper / Moonshine / wav2vec2-CTC
   audioClassificationPlugin,  // Wav2Vec2 / HuBERT / WavLM / AST
   videoClassificationPlugin,  // VideoMAE / TimeSformer / ViViT
@@ -198,7 +200,9 @@ const TEXT_DOMAIN_KEYS = new Set([
 const KNOWN_UNSUPPORTED: Record<string, string> = {
   // Decoder-LLMs (gpt2, llama, mistral, qwen2, falcon …) trainiert seit dem
   // causal-lm-Plugin FrameTrain selbst — sie stehen deshalb nicht mehr hier.
-  speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
+  // Die TTS-Variante (speecht5_tts) trainiert das Plugin text-to-speech; hier
+  // landen nur noch die anderen SpeechT5-Aufgaben.
+  speecht5: 'Von SpeechT5 trainiert FrameTrain die Text-to-Speech-Variante (microsoft/speecht5_tts). Spracherkennung und Stimmwandlung mit SpeechT5 werden nicht unterstützt — für Spracherkennung Whisper oder wav2vec2 nutzen.',
   segformer: 'SegFormer ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   sam: 'SAM (Segment Anything) ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   // BLIP (Captioning) laeuft seit dem Plugin vision-language. CLIP erzeugt

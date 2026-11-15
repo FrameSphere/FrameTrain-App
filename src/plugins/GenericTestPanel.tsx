@@ -94,9 +94,10 @@ interface GenericTestPanelProps extends TestPluginProps {
   pluginConfig?: Record<string, unknown>;
   /**
    * 'image': das Ergebnis ist der Pfad eines erzeugten Bildes (Text-to-Image)
-   * und wird als Bild angezeigt statt als Text.
+   * und wird als Bild angezeigt statt als Text. 'audio': Pfad einer erzeugten
+   * WAV-Datei (Text-to-Speech), gezeigt als Audio-Player.
    */
-  resultKind?: 'text' | 'image' | 'boxes';
+  resultKind?: 'text' | 'image' | 'boxes' | 'audio';
   /**
    * Optionales zweites Feld (z. B. die Frage zum Bild bei VLMs). Der Wert geht
    * als plugin_config[configKey] an die Engine — single_input bleibt der Pfad,
@@ -143,7 +144,7 @@ export default function GenericTestPanel({
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [summary, setSummary] = useState<{
     total: number; accuracy: number | null; correct: number | null;
-    metrics?: Record<string, number>; images?: string[];
+    metrics?: Record<string, number>; images?: string[]; audios?: string[];
     /** Unveraenderte Kennzahlen (Konfusionsmatrix, Werte je Klasse, Hinweise). */
     raw?: Record<string, unknown>;
   } | null>(null);
@@ -222,7 +223,7 @@ export default function GenericTestPanel({
         });
       const offC = await listen<{ test_id?: string; data?: {
         total_samples?: number; accuracy?: number | null; correct_predictions?: number | null;
-        metrics?: Record<string, unknown>; images?: string[];
+        metrics?: Record<string, unknown>; images?: string[]; audios?: string[];
       } }>(
         'test-complete', e => {
           const d = e.payload.data;
@@ -238,6 +239,7 @@ export default function GenericTestPanel({
             metrics,
             images: Array.isArray(d?.images) ? d.images : undefined,
             raw: d?.metrics,
+            audios: Array.isArray(d?.audios) ? d.audios : undefined,
           });
           setStatus(null);
           setRunning(false);
@@ -320,6 +322,11 @@ export default function GenericTestPanel({
                   alt={input}
                   className="max-h-80 w-auto rounded-lg border border-white/10"
                 />
+                <p className="text-gray-500 text-[11px] break-all">{single.predicted}</p>
+              </div>
+            ) : resultKind === 'audio' && single.predicted !== '—' ? (
+              <div className="space-y-1">
+                <audio controls src={convertFileSrc(single.predicted)} aria-label={resultLabel} className="w-full" />
                 <p className="text-gray-500 text-[11px] break-all">{single.predicted}</p>
               </div>
             ) : (
@@ -429,6 +436,14 @@ export default function GenericTestPanel({
                   </p>
                 ))}
                 {summary.raw && <ConfusionMatrixView metrics={summary.raw} />}
+                {summary.audios && summary.audios.length > 0 && (
+                  <div className="space-y-1.5 pt-2">
+                    <p className="text-gray-400 text-[11px]">{t('testPlugins.generic.ttsGenerated')}</p>
+                    {summary.audios.slice(0, 6).map(p => (
+                      <audio key={p} controls preload="none" src={convertFileSrc(p)} className="w-full h-8" />
+                    ))}
+                  </div>
+                )}
                 {summary.images && summary.images.length > 0 && (
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-2">
                     {summary.images.slice(0, 12).map(p => (

@@ -109,7 +109,9 @@ function formatDownloads(n: number | undefined): string {
  * Textgenerierung (Decoder-LLMs) trainiert seit dem causal-lm-Plugin ebenfalls.
  */
 const UNSUPPORTED_PIPELINE_TAGS: Record<string, string> = {
-  'text-to-speech': 'Sprachsynthese',
+  // SpeechT5 und VITS / MMS-TTS erkennt das Plugin text-to-speech am Namen;
+  // hier landen nur die uebrigen TTS-Modelle.
+  'text-to-speech': 'Sprachsynthese mit einer Architektur, die FrameTrain nicht kennt (trainierbar: microsoft/speecht5_tts; nur zum Testen: VITS / MMS-TTS)',
   'text-to-audio': 'Audiogenerierung',
   'image-to-image': 'Bild-zu-Bild',
   // Bekannte Detektoren (YOLO, RT-DETR, DETR, YOLOS) erkennt detectPlugin vorher;
