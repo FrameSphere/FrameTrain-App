@@ -1,0 +1,14 @@
+{
+  "task_type": "semantic_segmentation",
+  "name": "Semantic Segmentation (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Trainiert HuggingFace-Segmentierungsmodelle (SegFormer, UperNet, DPT, BEiT, MobileViT) auf Bild + Maske. Kennzahlen: mIoU, Pixel-Accuracy.",
+  "supported_architectures": [
+    "segformer", "upernet", "dpt", "beit", "data2vec-vision",
+    "mobilevit", "mobilevitv2", "mobilenet_v2"
+  ],
+  "dataset_formats": ["image_mask", "pre_split"],
+  "metrics": ["train_loss", "val_loss", "mean_iou", "pixel_accuracy", "mean_accuracy"]
+}

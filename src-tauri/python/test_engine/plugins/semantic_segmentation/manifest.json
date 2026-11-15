@@ -1,0 +1,10 @@
+{
+  "task_type": "semantic_segmentation",
+  "name": "Semantic Segmentation (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "mIoU, IoU je Klasse und Pixel-Accuracy auf einem Test-Split; Einzelbild mit eingefaerbter Maske.",
+  "input_type": "image",
+  "output_format": "segmentation"
+}
