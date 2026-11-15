@@ -130,5 +130,12 @@ class HyperparamTest(unittest.TestCase):
             self.assertIn("YOLOE", err.call_args[0][0])
 
 
+
+class GeraetAufAppleSilicon(unittest.TestCase):
+    def test_rtdetr_trainiert_auf_cpu_statt_mps(self):
+        from ft_data.ultralytics_family import mps_or_cpu
+        self.assertEqual(mps_or_cpu("rtdetr"), "cpu")
+        self.assertEqual(mps_or_cpu("yolo"), "mps")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

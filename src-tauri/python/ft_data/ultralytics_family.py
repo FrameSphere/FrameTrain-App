@@ -171,3 +171,13 @@ def warmup_bias_lr_for(optimizer: str, configured=None) -> float | None:
     if str(optimizer or "").strip().lower() in ADAM_OPTIMIZERS:
         return 0.0
     return None
+
+
+def mps_or_cpu(family: str) -> str:
+    """Geraet fuers Training auf Apple Silicon.
+
+    RT-DETR braucht im Rueckwaertsschritt grid_sampler_2d_backward, das PyTorch
+    auf MPS nicht hat: das Training brach mit NotImplementedError ab
+    (Live-Test 15.11.2026). Vorhersage und Test laufen auf MPS.
+    """
+    return "cpu" if family == "rtdetr" else "mps"

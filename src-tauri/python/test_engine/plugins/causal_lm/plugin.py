@@ -46,9 +46,16 @@ class Plugin:
         if not model_path.exists():
             raise FileNotFoundError(f"Modellpfad existiert nicht: {model_path}")
         meta_file = model_path / "frametrain_llm.json"
-        if meta_file.exists() and not self.system_prompt:
+        self.raw_text_model = False
+        if meta_file.exists():
             try:
-                self.system_prompt = json.loads(meta_file.read_text(encoding="utf-8")).get("system_prompt", "")
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                if not self.system_prompt:
+                    self.system_prompt = meta.get("system_prompt", "")
+                # Auf Rohtext weitertrainiert: der Einzeltest setzt den Text fort.
+                # Mit Chat-Vorlage antwortete das Modell in einer Schleife aus
+                # "### Assistant:"-Bloecken (Live-Test 15.11.).
+                self.raw_text_model = meta.get("data_kind") == "text"
             except Exception:
                 pass
 
@@ -96,6 +103,21 @@ class Plugin:
             out = self.model.generate(**enc, **kwargs)
         return self.tokenizer.decode(out[0][enc["input_ids"].shape[1]:], skip_special_tokens=True).strip()
 
+    def _continue(self, text: str) -> str:
+        """Fortsetzung ohne Chat-Vorlage (Modelle, die auf Rohtext trainiert wurden)."""
+        import torch
+        enc = self.tokenizer(text, return_tensors="pt").to(self.device)
+        kwargs: Dict[str, Any] = {"max_new_tokens": min(self.max_new_tokens, 128),
+                                  "pad_token_id": self.tokenizer.pad_token_id,
+                                  "repetition_penalty": 1.3, "no_repeat_ngram_size": 4}
+        if self.temperature > 0:
+            kwargs.update(do_sample=True, temperature=self.temperature, top_p=0.95)
+        else:
+            kwargs["do_sample"] = False
+        with torch.no_grad():
+            out = self.model.generate(**enc, **kwargs)
+        return text + self.tokenizer.decode(out[0][enc["input_ids"].shape[1]:], skip_special_tokens=True)
+
     def _text_loss(self, text: str) -> Optional[float]:
         import torch
         ids = self.tokenizer(text, return_tensors="pt", add_special_tokens=False,
@@ -110,7 +132,10 @@ class Plugin:
         if not text.strip():
             raise ValueError("Eingabetext ist leer.")
         t0 = time.time()
-        answer = self._generate(self._messages(text))
+        if self.raw_text_model and not text.strip().startswith("["):
+            answer = self._continue(text)
+        else:
+            answer = self._generate(self._messages(text))
         # Freier Text hat keine ehrliche Konfidenz — wie bei Seq2Seq keine erfinden.
         TestProtocol.complete_single(predicted=answer, confidence=None,
                                      top_predictions=[], inference_time=time.time() - t0)

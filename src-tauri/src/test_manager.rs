@@ -501,6 +501,7 @@ fn run_test(
                                     let sps      = d.get("samples_per_second").and_then(|v| v.as_f64());
                                     let mut mm: std::collections::HashMap<String, serde_json::Value> = Default::default();
                                     if let Some(obj) = metrics.as_object() { for (k,v) in obj { mm.insert(k.clone(), v.clone()); } }
+                                    merge_message_metrics(&mut mm, d);
 
                                     let full = TestResults {
                                         total_samples: total,
@@ -735,6 +736,18 @@ fn parse_results_json(fj: &serde_json::Value) -> (serde_json::Value, Vec<Predict
     (metrics, preds)
 }
 
+/// Kennzahlen aus der Abschlussmeldung ergaenzen. Plugins mit nackter
+/// Ergebnisliste (LLM, Bild, Audio) senden sie nur dort: Perplexitaet und
+/// ROUGE-L fehlten sonst in den gespeicherten Ergebnissen (Live-Test 15.11.).
+/// Werte aus der Ergebnisdatei haben Vorrang.
+fn merge_message_metrics(mm: &mut std::collections::HashMap<String, serde_json::Value>, data: &serde_json::Value) {
+    if let Some(obj) = data.get("metrics").and_then(|m| m.as_object()) {
+        for (k, v) in obj {
+            mm.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+}
+
 #[cfg(test)]
 mod results_json_tests {
     use super::*;
@@ -749,6 +762,17 @@ mod results_json_tests {
         assert_eq!(m["f1"], 0.9);
         let (_, p) = parse_results_json(&serde_json::json!([zeile]));
         assert_eq!(p.len(), 1, "nackte Liste (Bild/Audio/Seq2Seq/LLM) muss gelesen werden");
+    }
+
+    #[test]
+    fn kennzahlen_aus_der_meldung_werden_ergaenzt() {
+        let mut mm: std::collections::HashMap<String, serde_json::Value> = Default::default();
+        mm.insert("f1".into(), serde_json::json!(0.9));
+        merge_message_metrics(&mut mm, &serde_json::json!({"metrics": {"perplexity": 1.12, "f1": 0.1}}));
+        assert_eq!(mm["perplexity"], 1.12);
+        assert_eq!(mm["f1"], 0.9, "Wert aus der Ergebnisdatei bleibt");
+        merge_message_metrics(&mut mm, &serde_json::json!({"total_samples": 3}));
+        assert_eq!(mm.len(), 2);
     }
 
     #[test]

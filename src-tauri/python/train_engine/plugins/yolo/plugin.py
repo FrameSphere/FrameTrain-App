@@ -876,7 +876,7 @@ class YOLOPlugin(TrainPlugin):
             MessageProtocol.error("Training", "setup() nicht aufgerufen.")
             return False
         try:
-            from ft_data.ultralytics_family import load_ultralytics
+            from ft_data.ultralytics_family import load_ultralytics, mps_or_cpu
         except ImportError:
             MessageProtocol.error("Ultralytics", "Import fehlgeschlagen.")
             return False
@@ -891,7 +891,10 @@ class YOLOPlugin(TrainPlugin):
             elif torch.cuda.is_available():
                 device = "0"
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                device = "mps"
+                device = mps_or_cpu(self.family)
+                if device == "cpu":
+                    MessageProtocol.status("train", "RT-DETR trainiert auf Apple Silicon auf der CPU: "
+                                           "PyTorch fehlt auf MPS eine Operation (grid_sampler_2d_backward).")
             else:
                 device = "cpu"
             # Die Analyse-Seite liest das Geraet aus den final_metrics; ohne das
