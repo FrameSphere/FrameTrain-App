@@ -149,7 +149,24 @@ describe('training', () => {
     });
     const r = await run('training_start', { model_id: 'm1', dataset_id: 'd1', config: { epochs: 2, learning_rate: 2e-5 } });
     expect(r.content[0].text).toContain('job1');
-    expect(argsOf('start_training')[0]).toEqual({ modelId: 'm1', modelName: 'distilbert', datasetId: 'd1', datasetName: 'imdb', config: { epochs: 2, learning_rate: 2e-5 }, versionId: null });
+    // Ohne task_type kommt die Aufgabe aus dem erkannten Plugin (Live-Test 15.11.:
+    // sonst lief jedes Modell als seq_classification).
+    const sent = argsOf('start_training')[0] as { config: Record<string, unknown> };
+    expect(sent).toMatchObject({ modelId: 'm1', modelName: 'distilbert', datasetId: 'd1', datasetName: 'imdb', versionId: null });
+    expect(sent.config).toMatchObject({ epochs: 2, learning_rate: 2e-5, task_type: 'seq_classification' });
+  });
+
+  it('training_start nimmt die Aufgabe des Plugins und laesst eine genannte stehen', async () => {
+    const seg = { ...MODEL, id: 'm2', name: 'mit-b0', model_type: 'segformer', source_path: 'nvidia/mit-b0' };
+    backend({
+      list_models: [seg], list_all_datasets: [DATASET], enable_prevent_sleep: null,
+      start_training: { id: 'job2', model_id: 'm2', model_name: 'mit-b0', dataset_id: 'd1', dataset_name: 'imdb', status: 'Running' },
+    });
+    await run('training_start', { model_id: 'm2', dataset_id: 'd1' });
+    expect((argsOf('start_training')[0] as { config: Record<string, unknown> }).config.task_type).toBe('semantic_segmentation');
+    await run('training_start', { model_id: 'm2', dataset_id: 'd1', config: { task_type: 'detect' } });
+    const calls = argsOf('start_training');
+    expect((calls[calls.length - 1] as { config: Record<string, unknown> }).config.task_type).toBe('detect');
   });
 
   it('training_status verbindet Job und Event-Mitschnitt', async () => {

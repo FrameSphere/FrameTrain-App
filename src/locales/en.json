@@ -4931,6 +4931,7 @@
         "models_delete": "Delete model",
         "models_download_hf": "Download model",
         "models_hf_files": "Hugging Face files",
+        "models_create_blank": "Create blank model",
         "models_import_local": "Import local model",
         "models_info": "Model details",
         "models_list": "List models",

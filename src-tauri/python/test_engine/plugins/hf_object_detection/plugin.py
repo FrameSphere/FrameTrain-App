@@ -93,6 +93,9 @@ class Plugin:
     def _as_rows(self, dets: List[Dict[str, Any]], min_conf: float) -> List[Dict[str, Any]]:
         out = []
         for d in dets:
+            # Hoechster Wert ueberhaupt: erklaert "nichts gefunden" bei einem
+            # kaum trainierten Modell (mAP > 0, aber alles unter der Schwelle).
+            self.best_score = max(getattr(self, "best_score", 0.0), float(d["score"]))
             if d["score"] < min_conf:
                 continue
             x1, y1, x2, y2 = (round(v, 1) for v in d["box"])
@@ -106,6 +109,7 @@ class Plugin:
         if not path.exists():
             raise ValueError(f"Bilddatei nicht gefunden: {path}")
         t0 = time.time()
+        self.best_score = 0.0
         dets = self._as_rows(self._detect([path])[0], self.conf)
         counts = Counter(d["label"] for d in dets)
         best = max(dets, key=lambda d: d["confidence"]) if dets else None
@@ -113,11 +117,13 @@ class Plugin:
         with Image.open(path) as im:
             w, h = im.size
         TestProtocol.complete_single(
-            predicted=describe(counts),
+            predicted=describe(counts) if dets else
+            f"(nichts ab {self.conf:.2f} - hoechster Wert {self.best_score:.2f})",
             confidence=best["confidence"] if best else None,
             top_predictions=[{"label": k, "score": max(d["confidence"] for d in dets if d["label"] == k)} for k in counts],
             inference_time=time.time() - t0,
-            extra={"detections": dets, "image_path": str(path), "image_width": w, "image_height": h},
+            extra={"detections": dets, "image_path": str(path), "image_width": w, "image_height": h,
+                   "conf_threshold": self.conf, "best_score": round(self.best_score, 4)},
         )
 
     # ── Dataset ───────────────────────────────────────────────────────────────
@@ -174,7 +180,10 @@ class Plugin:
         m = detection_metrics(all_preds, all_gts, conf=self.conf)
         # Reihenfolge zaehlt: die Startseite zeigt die erste Kennzahl (mAP50).
         metrics = {"mAP50": m["mAP50"], "mAP50-95": m["mAP50-95"], "precision": m["precision"],
-                   "recall": m["recall"], "images_exact": correct / len(rows)}
+                   "recall": m["recall"], "images_exact": correct / len(rows),
+                   # Precision/Recall zaehlen nur Boxen ab der Schwelle; liegt der
+                   # hoechste Wert darunter, sind beide 0, obwohl mAP > 0 ist.
+                   "conf_threshold": self.conf, "best_score": round(getattr(self, "best_score", 0.0), 4)}
 
         out_dir = Path(self.config.output_path)
         out_dir.mkdir(parents=True, exist_ok=True)

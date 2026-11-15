@@ -47,10 +47,23 @@ class FetchError(Exception):
 
 # ── Pruefen ─────────────────────────────────────────────────────────────────
 
+MASK_DIRS = ("masks", "mask", "annotations", "annotation", "segmentation", "segmentationclass", "gt")
+
+
+def _mask_classes(path: Path) -> List[str]:
+    for name in ("classes.txt", "class_names.txt", "labels.txt", "obj.names"):
+        for f in (path / name, *path.glob(f"*/{name}")):
+            if f.is_file():
+                rows = [ln.strip() for ln in f.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()]
+                # "name r g b" oder "name: r,g,b" -> nur der Name
+                return [r.split(":")[0].split()[0] if (":" in r or len(r.split()) == 4) else r for r in rows]
+    return []
+
+
 def inspect(path: Path) -> Dict[str, Any]:
     """Was liegt im Ordner? Bilder, YOLO-Labels, VOC, COCO, Parquet, Klassen, Splits."""
     path = Path(path)
-    images = yolo = voc = coco = parquet = csv = audio = video = transcripts = 0
+    images = yolo = voc = coco = parquet = csv = audio = video = transcripts = masks = label_images = 0
     class_dirs: Dict[str, int] = {}
     splits: Dict[str, int] = {}
     yaml_files: List[str] = []
@@ -60,6 +73,15 @@ def inspect(path: Path) -> Dict[str, Any]:
         ext = f.suffix.lower()
         rel_parts = [p.lower() for p in f.relative_to(path).parts]
         if ext in IMAGE_EXTS:
+            # Segmentierung: Masken sind selbst Bilder (masks/, annotations/ ...).
+            # Sie zaehlen nicht als Trainingsbilder, sonst gilt der Ordner als
+            # "Bilder ohne Labels" (Live-Test 15.11.).
+            if any(p in MASK_DIRS for p in rel_parts[:-1]):
+                masks += 1
+                continue
+            if "labels" in rel_parts[:-1]:
+                label_images += 1
+                continue
             images += 1
             if "labels" not in rel_parts and "images" not in rel_parts:
                 class_dirs[f.parent.name] = class_dirs.get(f.parent.name, 0) + 1
@@ -91,7 +113,14 @@ def inspect(path: Path) -> Dict[str, Any]:
     classes = _yaml_classes(path, yaml_files)
     folder_classes = sorted(k for k in class_dirs if k.lower() not in
                             ("train", "val", "valid", "validation", "test", "images", "audio", "clips", "videos", path.name.lower()))
-    if images and yolo:
+    # labels/ voller Bilder (ohne YOLO-Textdateien) ist ebenfalls ein Maskenordner.
+    if label_images and not yolo:
+        masks += label_images
+    else:
+        images += label_images
+    if images and masks and not yolo:
+        fmt = "image_mask"
+    elif images and yolo:
         fmt = "yolo"
     elif images and voc:
         fmt = "voc"
@@ -116,6 +145,11 @@ def inspect(path: Path) -> Dict[str, Any]:
         problems.append("No recognizable data files (images, audio, video, parquet, CSV/JSONL) found.")
     if fmt == "images":
         problems.append("Images without labels or class folders. Usable for labeling in the Dataset Builder, not directly for supervised training.")
+    if fmt == "image_mask":
+        if not classes:
+            classes = _mask_classes(path)
+        if masks < images:
+            problems.append(f"Only {masks} masks for {images} images. Images without a mask are skipped.")
     if fmt == "yolo" and yolo < images * 0.5:
         problems.append(f"Only {yolo} label files for {images} images. Many images are unlabeled.")
     if fmt == "audio" and not transcripts:
@@ -125,7 +159,7 @@ def inspect(path: Path) -> Dict[str, Any]:
         problems.extend(table["problems"])
     return {
         "table": table,
-        "format": fmt, "images": images, "audio": audio, "video": video, "transcripts": transcripts, "yolo_labels": yolo, "voc_xml": voc, "coco_json": coco,
+        "format": fmt, "images": images, "masks": masks, "audio": audio, "video": video, "transcripts": transcripts, "yolo_labels": yolo, "voc_xml": voc, "coco_json": coco,
         "parquet_files": parquet, "table_files": csv, "splits": splits, "classes": classes,
         "yaml_files": yaml_files[:5], "problems": problems,
     }

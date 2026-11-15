@@ -64,6 +64,19 @@ class FetchTest(unittest.TestCase):
         label = next((out / "train" / "labels").glob("*.txt")).read_text().split()
         self.assertEqual(label[0], "1")
 
+    def test_inspect_erkennt_bild_und_maske(self):
+        # Masken sind selbst Bilder: frueher "images" + "nicht direkt trainierbar".
+        for sub in ("images", "masks"):
+            (self.root / sub).mkdir()
+            for n in ("a.png", "b.png"):
+                (self.root / sub / n).write_bytes(_png())
+        (self.root / "classes.txt").write_text("hintergrund\nquadrat\n")
+        rep = fetch.inspect(self.root)
+        self.assertEqual(rep["format"], "image_mask")
+        self.assertEqual((rep["images"], rep["masks"]), (2, 2))
+        self.assertEqual(rep["classes"], ["hintergrund", "quadrat"])
+        self.assertEqual(rep["problems"], [])
+
     def test_inspect_meldet_fehlende_bilder(self):
         (self.root / "a.parquet").write_bytes(b"x")
         rep = fetch.inspect(self.root)

@@ -1,6 +1,6 @@
 // Domaene models: Modellbibliothek (lokal + Hugging Face).
 
-import { call, defineTool, ok, optNum, reqStr, S } from '../util';
+import { call, defineTool, ok, optNum, optStr, reqStr, S, ToolFailure } from '../util';
 import type { McpTool } from '../types';
 import { runAsJob } from './common';
 import { findModel, listModels, listVersions, modelBrief, type ModelInfo } from './lookup';
@@ -106,6 +106,25 @@ export const modelsTools: McpTool[] = [
       return runAsJob('import', 'Model import', () => call<ModelInfo>('import_local_model', {
         sourcePath: reqStr(args, 'source_path'), modelName: reqStr(args, 'model_name'),
       }), { describe: (m) => `Imported ${m.name} (${m.id}).` });
+    },
+  }),
+  defineTool({
+    name: 'models_create_blank',
+    title: 'Create blank model',
+    description: 'Creates an empty model for tasks that need no downloaded base model: "time_series" (forecasting with PatchTST, trained from scratch) or "tabular" (classification/regression on table columns). The model gets its weights with the first training_start on a CSV/Parquet dataset.',
+    properties: {
+      task: S.str('"time_series" or "tabular".'),
+      model_name: S.str('Display name in the library. Default: the task name.'),
+    },
+    required: ['task'],
+    approval: 'once',
+    async run(args) {
+      const task = reqStr(args, 'task').trim().toLowerCase();
+      if (task !== 'time_series' && task !== 'tabular') {
+        throw new ToolFailure(`Unknown task "${task}". Use "time_series" or "tabular".`);
+      }
+      const m = await call<ModelInfo>('create_task_model', { task, modelName: optStr(args, 'model_name') ?? '' });
+      return ok(`Created blank ${task} model ${m.name} (${m.id}). Import a table dataset for it, then training_start.`, { model: modelBrief(m) });
     },
   }),
   defineTool({

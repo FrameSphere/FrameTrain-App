@@ -4913,6 +4913,7 @@
         "models_delete": "Modell loeschen",
         "models_download_hf": "Modell herunterladen",
         "models_hf_files": "Hugging-Face-Dateien",
+        "models_create_blank": "Leeres Modell anlegen",
         "models_import_local": "Lokales Modell importieren",
         "models_info": "Modell-Details",
         "models_list": "Modelle auflisten",
