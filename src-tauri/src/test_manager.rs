@@ -177,7 +177,7 @@ pub(crate) fn infer_task_type(model_path: &str) -> Option<String> {
     let read = |name: &str| fs::read_to_string(dir.join(name)).ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
     // Von FrameTrain geschriebene Metadaten (YOLO: model.json, LLM: frametrain_llm.json)
-    for meta in ["frametrain_llm.json", "model.json"] {
+    for meta in ["frametrain_llm.json", "frametrain_rerank.json", "model.json"] {
         if let Some(t) = read(meta).and_then(|v| v.get("task").and_then(|t| t.as_str()).map(normalize_task_type)) {
             if !t.is_empty() { return Some(t); }
         }
@@ -190,6 +190,8 @@ pub(crate) fn infer_task_type(model_path: &str) -> Option<String> {
             let t = if a.ends_with("ForSequenceClassification") { "seq_classification" }
                 else if a.ends_with("ForTokenClassification") { "token_classification" }
                 else if a.ends_with("ForImageClassification") { "hf_image_classification" }
+                else if a.ends_with("ForSemanticSegmentation") { "semantic_segmentation" }
+                else if a.ends_with("ForQuestionAnswering") { "question_answering" }
                 // DETR, RT-DETR (HF-Format), YOLOS: eigenes Test-Plugin hf_object_detection
                 else if a.ends_with("ForObjectDetection") { "hf_object_detection" }
                 else if a.ends_with("ForAudioClassification") { "audio_classification" }
@@ -845,6 +847,17 @@ mod task_type_tests {
         fs::write(l.join("frametrain_llm.json"), r#"{"task":"causal_lm"}"#).unwrap();
         fs::write(l.join("config.json"), r#"{"architectures":["LlamaForCausalLM"]}"#).unwrap();
         assert_eq!(infer_task_type(l.to_str().unwrap()).as_deref(), Some("causal_lm"));
+        // Segmentierung, Frage-Antwort, Reranker (Live-Test 15.11.: liefen als seq_classification)
+        let sg = tmp("seg");
+        fs::write(sg.join("config.json"), r#"{"model_type":"segformer","architectures":["SegformerForSemanticSegmentation"]}"#).unwrap();
+        assert_eq!(infer_task_type(sg.to_str().unwrap()).as_deref(), Some("semantic_segmentation"));
+        let qa = tmp("qa");
+        fs::write(qa.join("config.json"), r#"{"architectures":["BertForQuestionAnswering"]}"#).unwrap();
+        assert_eq!(infer_task_type(qa.to_str().unwrap()).as_deref(), Some("question_answering"));
+        let rr = tmp("rerank");
+        fs::write(rr.join("frametrain_rerank.json"), r#"{"task":"reranker"}"#).unwrap();
+        fs::write(rr.join("config.json"), r#"{"architectures":["BertForSequenceClassification"]}"#).unwrap();
+        assert_eq!(infer_task_type(rr.to_str().unwrap()).as_deref(), Some("reranker"));
         // Klassifikator
         let c = tmp("cls");
         fs::write(c.join("config.json"), r#"{"architectures":["DistilBertForSequenceClassification"]}"#).unwrap();

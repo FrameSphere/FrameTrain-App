@@ -5,6 +5,7 @@ import { getRun, summarizeRun } from '../runLog';
 import { call, defineTool, ok, optNum, optObj, optStr, reqStr, S } from '../util';
 import type { JsonSchema, McpTool } from '../types';
 import { findDataset, findModel } from './lookup';
+import { detectPluginForModel } from '../../plugins/registry';
 
 interface TrainingJob {
   id: string;
@@ -152,9 +153,23 @@ export const trainingTools: McpTool[] = [
     async run(args) {
       const model = await findModel(reqStr(args, 'model_id'));
       const ds = await findDataset(reqStr(args, 'dataset_id'));
+      // Ohne task_type nimmt die Engine seq_classification — ein SegFormer,
+      // YOLOS oder SpeechT5 scheiterte dann an "Architektur nicht unterstuetzt".
+      // Die Aufgabe kommt deshalb wie in der Trainingsseite aus dem Plugin.
+      const config: Record<string, unknown> = { ...(optObj(args, 'config') ?? {}) };
+      if (!config.task_type) {
+        const detection = detectPluginForModel(model);
+        if (detection.supported && detection.plugin.taskType) {
+          config.task_type = detection.plugin.taskType;
+          config.plugin_config = {
+            ...(detection.plugin.defaultPluginConfig ?? {}),
+            ...((config.plugin_config as Record<string, unknown> | undefined) ?? {}),
+          };
+        }
+      }
       const job = await call<TrainingJob>('start_training', {
         modelId: model.id, modelName: model.name, datasetId: ds.id, datasetName: ds.name,
-        config: optObj(args, 'config') ?? {}, versionId: optStr(args, 'version_id') ?? null,
+        config, versionId: optStr(args, 'version_id') ?? null,
       });
       try { await call('enable_prevent_sleep'); } catch { /* optional */ }
       return ok(`Training started (job ${job.id}): ${model.name} on ${ds.name}. Progress: training_status.`, { job: jobBrief(job) });
