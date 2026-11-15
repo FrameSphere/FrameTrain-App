@@ -24,11 +24,37 @@ Behoben (Commit 83fff21), danach live gegengeprüft:
 1. `training_start` über die KI-Verbindung nahm ohne `task_type` immer `seq_classification`; SegFormer scheiterte mit „Architektur nicht unterstützt“. Jetzt kommt die Aufgabe samt Standard-`plugin_config` aus dem erkannten Plugin.
 2. Tests ohne `task_type` liefen bei Segmentierung, Frage-Antwort und Reranker als `seq_classification` (Reranker: Accuracy 0 statt MRR). `infer_task_type` kennt die drei jetzt.
 
-Offen:
-- `datasets_check` kennt Bild+Maske nicht: meldet „Images without labels … not directly for supervised training“, obwohl der Import `image_mask` erkennt.
-- Zeitreihen und Tabellen sind live NICHT geprüft: das leere Modell entsteht nur über den Reiter „Neu“, ein Werkzeug für die KI-Verbindung fehlt.
-- Oberfläche nur angesehen, nicht durchgeklickt: Startseite listet die neuen Modelle, die Tests-Seite erkennt SegFormer als „Semantic Segmentation“. Klicks in der Preview wurden von der Bildschirmsteuerung abgewiesen; Masken-Überlagerung, Boxen, Audio-Player, Konfusionsmatrix und Kurve sind im Webview nicht gesehen. CSP erlaubt `asset:` für Bilder und Audio.
-- HF-Erkennung: Precision/Recall 0 bei mAP50 0,46 (Schwelle bei schwach trainiertem Modell); prüfen, ob die Schwelle für die beiden Werte sinnvoll ist.
-- TTS: Trainings-Fortschritt meldet `train_loss` 0; Startseite zeigt das Modell als „Pretrained“.
-- Startseite zeigt beim Reranker weiter „0.0 % in the last test“ aus dem ersten, falsch zugeordneten Lauf.
-- Nicht live: RT-DETR über Ultralytics, volles Fine-Tuning/Rohtext bei LLMs, neue Kennzahlen-Ansicht (Konfusionsmatrix, CLIP-Score), Labor/Hosting für die neuen Aufgaben, Windows/CUDA.
+## Runde 2 (15.11. nachmittags): Befunde behoben, Rest live geprüft
+
+Stand der Tests danach: `tsc` sauber, vitest 1338, `cargo test` 293, Python-Tests der betroffenen Plugins grün.
+
+Behoben und live gegengeprüft:
+3. `datasets_check` erkennt Bild+Maske als `image_mask` (40 Bilder, 40 Masken, Klassen aus `classes.txt`, keine Warnung).
+4. Neues Werkzeug `models_create_blank` (Zeitreihen, Tabellen) für die KI-Verbindung.
+5. RT-DETR (Ultralytics) brach auf Apple Silicon ab (`grid_sampler_2d_backward` fehlt auf MPS). Training läuft dort jetzt auf der CPU, mit Hinweis.
+6. Kennzahlen, die ein Plugin nur in der Abschlussmeldung sendet, fehlten in den gespeicherten Ergebnissen (LLM: Perplexität, ROUGE-L). Rust ergänzt sie jetzt.
+7. Einzeltest eines auf Rohtext trainierten LLM lief durch die Chat-Vorlage und wiederholte „### Assistant:“. Er setzt den Text jetzt fort.
+8. HF-Erkennung nennt Schwelle und höchsten Wert, wenn nichts über der Schwelle liegt (Precision/Recall 0 war kein Fehler).
+
+Zusätzlich live in der Preview:
+
+| Was | Ergebnis |
+|---|---|
+| Zeitreihen (leeres Modell, PatchTST) | Training ok; Test MAE 0,447 gegen naiv 5,494, MASE 0,42; Einzeltest liefert 16 Werte |
+| Tabellen (leeres Modell) | Training ok; Accuracy 0,717 gegen Basis 0,567, Macro-F1 0,716; Einzeltest „ja“ 0,80 |
+| RT-DETR-l (Ultralytics) | Training ok (CPU); Test mAP50 0,82, mAP50-95 0,82; Einzelbild findet Boxen |
+| LLM volles Fine-Tuning auf Rohtext (SmolLM2-135M, MLX) | Perplexität 11,78 -> 1,25; Test speichert Perplexität 1,123 |
+| TTS, längerer Lauf | Loss 0,57 / Val 0,60 sichtbar (der Wert 0 im Kurzlauf kam von nur 6 Schritten) |
+| TTS im Labor | Server lädt, `lab_infer` erzeugt WAV (1,6 s) |
+| Neue Klassifikations-Kennzahlen (bench-electra-small) | Macro-F1 0,90, Konfusionsmatrix [[25,0],[6,29]], Werte je Klasse |
+| CLIP-Score mit echtem `openai/clip-vit-base-patch32` (Engine-Ebene) | passender Prompt 28,1, falscher 13,7 |
+
+In der Oberfläche gesehen (Bildschirmsteuerung): Startseite listet alle neuen Modelle nach dem Neuladen, Modelle-Seite zeigt für jedes das richtige Plugin, Import-Reiter „Neu“ mit Zeitreihen/Tabellen, Segmentierungs-Einzeltest mit Überlagerung, Deckkraft-Regler und Legende, TTS-Einzeltest mit Audio-Player (Dauer wird geladen), Zeitreihen-Test mit Kennzahlen und Kurve (Ist, Modell, naiv).
+
+Weiter offen:
+- Startseite lädt nach Läufen über die KI-Verbindung nicht von selbst neu (erst der Neuladen-Knopf zeigt neue Modelle und Tests); TTS-Modell steht dort als „Pretrained“.
+- Nicht im Fenster gesehen: Boxen-Ansicht der HF-Erkennung (yolos-tiny lag nach 3 Epochen unter der Schwelle), markierte Antwort bei Frage-Antwort, Konfusionsmatrix-Ansicht (Textklassifikatoren haben eigene Ansichten ohne Matrix), Audio wurde geladen, aber nicht abgehört.
+- CLIP-Score und VLM-Kennzahlen nicht über einen Test in der App, nur auf Engine-Ebene bzw. per Unit-Test.
+- Labor/Hosting kennen Segmentierung, HF-Erkennung, Frage-Antwort, Reranker, Zeitreihen und Tabellen nicht (nur TTS wurde ergänzt).
+- `models_create_blank` ändert die Werkzeugliste der KI-Verbindung: vor einem Release mit den laufenden Prüfungen bei Anthropic/OpenAI abstimmen.
+- Windows, Linux, CUDA: weiterhin ungetestet.
