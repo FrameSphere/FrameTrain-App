@@ -1,0 +1,51 @@
+[
+  {
+    "file": "train/mlm_domain_adaptation.py", "script_type": "train",
+    "name": "Domain adaptation with masked language modeling",
+    "description": "Continue pre-training BERT, RoBERTa, DistilBERT or ELECTRA on your own unlabeled text, so a later classification or NER fine-tuning starts from a model that knows your vocabulary. Reads any table with a text column or .txt files and reports validation loss and perplexity before and after.",
+    "model_type": "Classifier", "task_type": "Pre-Training", "framework": "transformers",
+    "tags": ["mlm", "bert", "domain-adaptation", "unlabeled-text"]
+  },
+  {
+    "file": "train/clip_contrastive_finetune.py", "script_type": "train",
+    "name": "CLIP fine-tuning on image + caption pairs",
+    "description": "Teach CLIP your own products, style or domain terms for image search and zero-shot classification. Reads metadata.csv (file_name, caption) or an image with a .txt file of the same name and reports contrastive loss and retrieval recall@1 before and after.",
+    "model_type": "Vision", "task_type": "Fine-Tuning", "framework": "transformers",
+    "tags": ["clip", "contrastive", "image-text", "retrieval"]
+  },
+  {
+    "file": "train/whisper_lora.py", "script_type": "train",
+    "name": "Whisper fine-tuning with LoRA",
+    "description": "Adapt Whisper to your speakers, accent or vocabulary with little memory: only a small LoRA adapter is trained and merged at the end, so the saved version works like a normal Whisper model in tests, laboratory and hosting. Reads audio + transcript pairs and reports word error rate before and after.",
+    "model_type": "Seq2Seq", "task_type": "LoRA / QLoRA", "framework": "transformers",
+    "tags": ["whisper", "lora", "speech-recognition", "peft"]
+  },
+  {
+    "file": "train/tabular_anomaly_autoencoder.py", "script_type": "train",
+    "name": "Anomaly detection on tables (autoencoder)",
+    "description": "Find unusual rows without labels: an autoencoder learns what a normal row looks like and scores every row by its reconstruction error. Works on CSV, TSV or Parquet with numeric and categorical columns and writes the scores of all rows plus a threshold. The base model's weights are not used, so a blank Tabular model is enough.",
+    "model_type": "Custom", "task_type": "Custom", "framework": "pytorch",
+    "tags": ["anomaly-detection", "tabular", "autoencoder", "unsupervised"]
+  },
+  {
+    "file": "test/text_classifier_robustness.py", "script_type": "test",
+    "name": "Robustness check for text classifiers",
+    "description": "Does the prediction survive small changes? Runs the test data as it is and with lower case, removed punctuation, typos and extra spaces, then reports accuracy per variant and how often the prediction flips, with an example.",
+    "model_type": "Classifier", "task_type": "Text Classification", "framework": "transformers",
+    "tags": ["robustness", "evaluation", "typos", "text-classification"]
+  },
+  {
+    "file": "test/classifier_calibration.py", "script_type": "test",
+    "name": "Calibration check (ECE) for text classifiers",
+    "description": "Can you trust the confidence? Compares confidence with actual accuracy in ten bins, reports the Expected Calibration Error and searches a temperature that closes the gap.",
+    "model_type": "Classifier", "task_type": "Text Classification", "framework": "transformers",
+    "tags": ["calibration", "ece", "confidence", "evaluation"]
+  },
+  {
+    "file": "test/chronos_zero_shot_forecast.py", "script_type": "test",
+    "name": "Zero-shot forecast baseline with Chronos",
+    "description": "Forecast the last part of your time series with the pretrained Chronos model, without any training, and compare it with a naive forecast (MAE, MASE, coverage of the 80 % band). The number your own model has to beat. Downloads chronos-bolt-tiny (about 35 MB) unless the selected model is a Chronos checkpoint.",
+    "model_type": "Custom", "task_type": "Custom", "framework": "pytorch",
+    "tags": ["time-series", "forecasting", "chronos", "zero-shot", "baseline"]
+  }
+]
