@@ -14,10 +14,17 @@ describe('checkHfModelSupport', () => {
       .toEqual({ supported: true });
   });
 
-  it('warnt weiter bei Objekterkennung ohne YOLO-Plugin', () => {
-    const r = checkHfModelSupport('facebook/detr-resnet-50', 'object-detection');
+  // Bis 1.8.3 abgelehnt — seit dem Plugin hf-object-detection trainierbar.
+  it('laesst HF-Detektoren durch (DETR, RT-DETR, YOLOS)', () => {
+    for (const id of ['facebook/detr-resnet-50', 'PekingU/rtdetr_r18vd', 'hustvl/yolos-tiny']) {
+      expect(checkHfModelSupport(id, 'object-detection').supported, id).toBe(true);
+    }
+  });
+
+  it('warnt weiter bei Detektoren ohne Plugin', () => {
+    const r = checkHfModelSupport('google/owlv2-base-patch16-ensemble', 'object-detection');
     expect(r.supported).toBe(false);
-    expect(r.reason).toBeTruthy();
+    expect(r.reason).toMatch(/DETR/);
   });
 
   // Bis 1.3.3 abgelehnt — seit dem causal-lm-Plugin trainierbar.

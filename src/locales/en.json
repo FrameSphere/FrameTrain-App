@@ -620,7 +620,7 @@
       },
       "yolo": {
         "name": "YOLO Object Detection (Ultralytics)",
-        "description": "Trains YOLOv5/v8/v9/YOLO11 models for bounding box detection. Requires Ultralytics."
+        "description": "Trains YOLOv5/v8/v9/v10, YOLO11/12/26 and RT-DETR models for bounding box detection. Requires Ultralytics."
       },
       "llm": {
         "name": "LLM fine-tuning (LoRA / QLoRA)",
@@ -835,7 +835,8 @@
       "requestSentTitle": "Thanks — noted",
       "requestSentDetail": "Your plugin request reached the FrameTrain team as a support ticket. You'll find the reply under Settings > Support.",
       "pluginDesc": {
-        "yolo": "Object detection with bounding boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Also for trained best.pt files.",
+        "yolo": "Object detection with bounding boxes (YOLOv5/v8/v9/v10, YOLO11/12/26, RT-DETR, Ultralytics). Also for trained best.pt files.",
+        "hf-object-detection": "Object detection with a downloaded HuggingFace detector (DETR, RT-DETR, YOLOS); data as YOLO labels or COCO JSON.",
         "hf-image-classification": "Image classification with a downloaded HuggingFace vision model (ViT, DeiT, ConvNeXt, Swin, ResNet).",
         "image-classification": "Image classification via transfer learning on torchvision backbones (ResNet, EfficientNet, MobileNet). One folder per class.",
         "audio-classification": "Audio classification with Wav2Vec2, HuBERT, WavLM, AST or the Whisper encoder.",
@@ -3445,6 +3446,7 @@
       "noCheck": "No compatibility check configured.",
       "missing": {
         "detect": "No label files (.txt or Pascal VOC .xml) found – without labels an object detection model learns nothing.",
+        "hfDetect": "No YOLO labels (.txt) and no COCO JSON file found – without boxes a detector learns nothing.",
         "image": "No image files (or Parquet with an image column) found.",
         "audio": "No audio files (or Parquet with an audio column) found.",
         "video": "No video files (.mp4, .mov, .webm, .mkv, .avi) found.",
@@ -3639,6 +3641,7 @@
       "imageLabel": "Single image",
       "imagePlaceholder": "Full path to an image file, e.g. /Users/you/pictures/cat.png",
       "detectedClass": "Detected class",
+      "detectedObjects": "Detected objects",
       "videoLabel": "Single video",
       "videoPlaceholder": "Full path to a video, e.g. /Users/you/clips/jump.mp4",
       "causalLmLabel": "Prompt / question",
@@ -4631,6 +4634,10 @@
       "name": "Image Classification",
       "description": "Image classification via transfer learning: ResNet, EfficientNet, ViT, MobileNet. Expects one folder per class (ImageFolder)."
     },
+    "hf-object-detection": {
+      "name": "Object Detection (HuggingFace)",
+      "description": "Trains HuggingFace detectors (DETR, Conditional/Deformable DETR, RT-DETR, YOLOS) on YOLO or COCO boxes."
+    },
     "hf-image-classification": {
       "name": "Image Classification (HuggingFace)",
       "description": "Trains the downloaded HuggingFace vision model itself (ViT, DeiT, ConvNeXt, Swin, ResNet)."
@@ -4657,7 +4664,7 @@
     },
     "yolo": {
       "name": "YOLO Object Detection",
-      "description": "YOLOv5 / YOLOv8 / YOLOv9 / YOLO11 – detection, segmentation, keypoints, rotated boxes and classification via Ultralytics"
+      "description": "YOLOv5 / v8 / v9 / v10, YOLO11 / 12 / 26, RT-DETR – detection, segmentation, keypoints, rotated boxes and classification via Ultralytics"
     },
     "xlm-roberta": {
       "name": "XLM-RoBERTa",

@@ -4,8 +4,30 @@
   "version": "1.0",
   "entry": "plugin.py",
   "class": "YOLOPlugin",
-  "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle fuer Bounding-Box-Erkennung via Ultralytics.",
-  "supported_architectures": ["yolov5", "yolov8", "yolov9", "yolo11", "yolo"],
-  "dataset_formats": ["yolo_bbox", "pascal_voc", "pre_split"],
-  "metrics": ["mAP50", "mAP50-95", "precision", "recall", "box_loss", "cls_loss"]
+  "description": "Trainiert Ultralytics-Modelle (YOLOv5/v8/v9/v10, YOLO11/12/26, RT-DETR; YOLO-World mit Paket clip) fuer Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation.",
+  "supported_architectures": [
+    "yolov5",
+    "yolov8",
+    "yolov9",
+    "yolov10",
+    "yolo11",
+    "yolo12",
+    "yolo26",
+    "yolo",
+    "rtdetr",
+    "yolo_world"
+  ],
+  "dataset_formats": [
+    "yolo_bbox",
+    "pascal_voc",
+    "pre_split"
+  ],
+  "metrics": [
+    "mAP50",
+    "mAP50-95",
+    "precision",
+    "recall",
+    "box_loss",
+    "cls_loss"
+  ]
 }

@@ -10,6 +10,7 @@ import xlmRobertaPlugin from './xlm-roberta';
 import hfEncoderPlugin from './hf-encoder';
 import canvasPlugin from './canvas';
 import yoloPlugin from './yolo';
+import hfObjectDetectionPlugin from './hf-object-detection';
 import imageClassificationPlugin from './image-classification';
 import hfImageClassificationPlugin from './hf-image-classification';
 import audioClassificationPlugin from './audio-classification';
@@ -25,7 +26,8 @@ import visionLanguagePlugin from './vision-language';
 /** Alle registrierten Plugins – Reihenfolge bestimmt Priorität bei der Erkennung */
 const PLUGINS: ModelPlugin[] = [
   canvasPlugin,               // Canvas Neural Net (Synapse Builder) — muss vor generischen stehen
-  yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11)
+  yoloPlugin,                 // YOLO Object Detection (YOLOv5/v8/v9/v11, RT-DETR .pt)
+  hfObjectDetectionPlugin,    // HF-Detektoren (DETR, RT-DETR im HF-Format, YOLOS)
   // Generative Bildmodelle vor den Klassifikatoren: "blip-image-captioning"
   // oder "stable-diffusion" sollen nicht an einer Bild-Heuristik haengen bleiben.
   textToImageLoraPlugin,      // Stable Diffusion 1.x/2.x, SDXL (LoRA)
@@ -183,7 +185,6 @@ const KNOWN_UNSUPPORTED: Record<string, string> = {
   // Decoder-LLMs (gpt2, llama, mistral, qwen2, falcon …) trainiert seit dem
   // causal-lm-Plugin FrameTrain selbst — sie stehen deshalb nicht mehr hier.
   speecht5: 'SpeechT5 ist ein Sprachsynthese-Modell (Text-to-Speech).',
-  detr: 'DETR ist ein Objekterkennungs-Modell, kein Bildklassifikator — für Objekterkennung nutze ein YOLO-Modell.',
   segformer: 'SegFormer ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   sam: 'SAM (Segment Anything) ist ein Segmentierungs-Modell, kein Bildklassifikator.',
   // BLIP (Captioning) laeuft seit dem Plugin vision-language. CLIP erzeugt

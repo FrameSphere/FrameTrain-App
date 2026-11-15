@@ -620,7 +620,7 @@
       },
       "yolo": {
         "name": "YOLO Objekterkennung (Ultralytics)",
-        "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
+        "description": "Trainiert YOLOv5/v8/v9/v10-, YOLO11/12/26- und RT-DETR-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
       },
       "llm": {
         "name": "LLM Fine-Tuning (LoRA / QLoRA)",
@@ -835,7 +835,8 @@
       "requestSentTitle": "Danke — notiert",
       "requestSentDetail": "Dein Plugin-Wunsch ist als Support-Ticket beim FrameTrain-Team angekommen. Die Antwort findest du in den Einstellungen unter Support.",
       "pluginDesc": {
-        "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Auch für trainierte best.pt-Dateien.",
+        "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/v10, YOLO11/12/26, RT-DETR, Ultralytics). Auch für trainierte best.pt-Dateien.",
+        "hf-object-detection": "Objekterkennung mit einem heruntergeladenen HuggingFace-Detektor (DETR, RT-DETR, YOLOS); Daten als YOLO-Labels oder COCO-JSON.",
         "hf-image-classification": "Bildklassifikation mit einem heruntergeladenen HuggingFace-Bildmodell (ViT, DeiT, ConvNeXt, Swin, ResNet).",
         "image-classification": "Bildklassifikation per Transfer Learning auf torchvision-Backbones (ResNet, EfficientNet, MobileNet). Ein Ordner pro Klasse.",
         "audio-classification": "Audioklassifikation mit Wav2Vec2, HuBERT, WavLM, AST oder dem Whisper-Encoder.",
@@ -3441,6 +3442,7 @@
       "noCheck": "Keine Kompatibilitätsprüfung konfiguriert.",
       "missing": {
         "detect": "Keine Label-Dateien (.txt oder Pascal-VOC-.xml) gefunden – ohne Labels lernt ein Objekterkennungs-Modell nichts.",
+        "hfDetect": "Keine YOLO-Labels (.txt) und keine COCO-JSON-Datei gefunden – ohne Boxen lernt ein Detektor nichts.",
         "image": "Keine Bilddateien (oder Parquet mit Bildspalte) gefunden.",
         "audio": "Keine Audiodateien (oder Parquet mit Audiospalte) gefunden.",
         "video": "Keine Videodateien (.mp4, .mov, .webm, .mkv, .avi) gefunden.",
@@ -3635,6 +3637,7 @@
       "imageLabel": "Einzelnes Bild",
       "imagePlaceholder": "Vollständiger Pfad zu einer Bilddatei, z.B. /Users/du/bilder/katze.png",
       "detectedClass": "Erkannte Klasse",
+      "detectedObjects": "Erkannte Objekte",
       "videoLabel": "Einzelnes Video",
       "videoPlaceholder": "Vollständiger Pfad zu einem Video, z.B. /Users/du/clips/sprung.mp4",
       "causalLmLabel": "Eingabe / Frage",
@@ -4622,6 +4625,10 @@
     "image-classification": {
       "description": "Transfer Learning für Bildklassifikation: ResNet, EfficientNet, ViT, MobileNet. Erwartet einen Ordner pro Klasse (ImageFolder)."
     },
+    "hf-object-detection": {
+      "name": "Objekterkennung (HuggingFace)",
+      "description": "Trainiert HuggingFace-Detektoren (DETR, Conditional/Deformable DETR, RT-DETR, YOLOS) auf YOLO- oder COCO-Boxen."
+    },
     "hf-image-classification": {
       "description": "Trainiert das heruntergeladene HuggingFace-Bildmodell selbst (ViT, DeiT, ConvNeXt, Swin, ResNet)."
     },
@@ -4641,7 +4648,7 @@
       "description": "Spracherkennung: Whisper/Moonshine als Seq2Seq, wav2vec2/HuBERT/WavLM mit CTC. Misst WER und CER."
     },
     "yolo": {
-      "description": "YOLOv5 / YOLOv8 / YOLOv9 / YOLO11 – Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation via Ultralytics"
+      "description": "YOLOv5 / v8 / v9 / v10, YOLO11 / 12 / 26, RT-DETR – Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation via Ultralytics"
     },
     "xlm-roberta": {
       "description": "Keyword-Erkennung und Textklassifikation mit XLM-RoBERTa base/large, mehrsprachig."

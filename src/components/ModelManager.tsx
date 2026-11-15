@@ -110,7 +110,9 @@ const UNSUPPORTED_PIPELINE_TAGS: Record<string, string> = {
   'text-to-speech': 'Sprachsynthese',
   'text-to-audio': 'Audiogenerierung',
   'image-to-image': 'Bild-zu-Bild',
-  'object-detection': 'Objekterkennung (dafür ein YOLO-Modell nutzen)',
+  // Bekannte Detektoren (YOLO, RT-DETR, DETR, YOLOS) erkennt detectPlugin vorher;
+  // hier landen nur unbekannte Architekturen wie OWLv2 oder Grounding DINO.
+  'object-detection': 'Objekterkennung mit einer Architektur ohne Plugin (unterstützt: YOLO/RT-DETR über Ultralytics sowie DETR, RT-DETR und YOLOS im HuggingFace-Format)',
   'image-segmentation': 'Bildsegmentierung',
 };
 
@@ -142,7 +144,7 @@ export function checkHfModelSupport(
       supported: false,
       // Der Satz nannte frueher nur Sequenzklassifikation. Seit 1.2.17 kommen
       // Bild, Audio und Seq2Seq dazu — die alte Formulierung log den Nutzer an.
-      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), NER/Token-Klassifikation, Sentence Embeddings, Bild-, Audio- und Videoklassifikation, Seq2Seq (T5/BART) Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi), Stable-Diffusion-LoRA, Vision-Language-Modelle sowie YOLO-Objekterkennung.`,
+      reason: `Dieses Modell ist für ${tagReason} gedacht. FrameTrain trainiert derzeit Textklassifikation (BERT & verwandte), NER/Token-Klassifikation, Sentence Embeddings, Bild-, Audio- und Videoklassifikation, Seq2Seq (T5/BART) Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi), Stable-Diffusion-LoRA, Vision-Language-Modelle sowie Objekterkennung (YOLO, RT-DETR, DETR, YOLOS).`,
     };
   }
   return { supported: false, reason: (result as { supported: false; reason: string }).reason };

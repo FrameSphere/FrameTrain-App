@@ -792,6 +792,8 @@ pub fn packages_for_task(task_type: &str) -> (&'static str, Vec<&'static str>) {
         "text_to_image_lora" => ("generative", with(&["diffusers", "peft", "pillow"])),
         "vision_language" => ("generative", with(&["peft", "pillow"])),
         "detect" => ("yolo", vec!["torch", "ultralytics", "numpy", "pillow", "opencv-python"]),
+        // DETR/RT-DETR/YOLOS ueber transformers; timm fuer DETR-ResNet-Backbones.
+        "hf_object_detection" => ("seq_classification", with(&["pillow", "timm", "scipy"])),
         "token_classification" => ("seq_classification", with(&["seqeval", "scikit-learn"])),
         "sentence_embedding" => ("seq_classification", with(&["sentence-transformers"])),
         "speech_recognition" => ("seq_classification", with(&["librosa", "soundfile", "jiwer"])),
@@ -1646,6 +1648,7 @@ mod dependency_version_tests {
         assert_eq!(packages_for_task("text_to_image_lora").0, "generative");
         assert!(packages_for_task("text_to_image_lora").1.contains(&"diffusers"));
         assert_eq!(packages_for_task("detect").0, "yolo");
+        assert!(packages_for_task("hf_object_detection").1.contains(&"timm"));
         assert!(packages_for_task("sentence_embedding").1.contains(&"sentence-transformers"));
         assert!(packages_for_task("speech_recognition").1.contains(&"jiwer"));
     }

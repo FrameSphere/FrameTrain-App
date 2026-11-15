@@ -190,6 +190,8 @@ pub(crate) fn infer_task_type(model_path: &str) -> Option<String> {
             let t = if a.ends_with("ForSequenceClassification") { "seq_classification" }
                 else if a.ends_with("ForTokenClassification") { "token_classification" }
                 else if a.ends_with("ForImageClassification") { "hf_image_classification" }
+                // DETR, RT-DETR (HF-Format), YOLOS: eigenes Test-Plugin hf_object_detection
+                else if a.ends_with("ForObjectDetection") { "hf_object_detection" }
                 else if a.ends_with("ForAudioClassification") { "audio_classification" }
                 else if a.ends_with("ForVideoClassification") { "video_classification" }
                 else if a.ends_with("ForCTC") || (a.ends_with("ForConditionalGeneration") && mt == "whisper") { "speech_recognition" }
@@ -203,7 +205,11 @@ pub(crate) fn infer_task_type(model_path: &str) -> Option<String> {
     }
     // Nur PyTorch-Gewichte ohne HF-Config: Ultralytics-Modell (Original-Version eines YOLO-Imports)
     let has_pt = fs::read_dir(&dir).ok()?.flatten()
-        .any(|e| e.path().extension().map_or(false, |x| x == "pt") && e.file_name().to_string_lossy().starts_with("yolo"));
+        .any(|e| e.path().extension().map_or(false, |x| x == "pt") && {
+            // Ultralytics-RT-DETR (rtdetr-l.pt) testet dasselbe Plugin wie YOLO.
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            n.starts_with("yolo") || n.starts_with("rtdetr")
+        });
     if has_pt { Some("detect".into()) } else { None }
 }
 
@@ -807,6 +813,7 @@ mod task_type_tests {
     #[test]
     fn detection_heisst_detect() {
         assert_eq!(normalize_task_type("detection"), "detect");
+        assert_eq!(normalize_task_type("hf_object_detection"), "hf_object_detection");
         assert_eq!(normalize_task_type(" seq_classification "), "seq_classification");
     }
 
@@ -820,6 +827,18 @@ mod task_type_tests {
         let o = tmp("orig");
         fs::write(o.join("yolov8n.pt"), b"x").unwrap();
         assert_eq!(infer_task_type(o.to_str().unwrap()).as_deref(), Some("detect"));
+        // Ultralytics-RT-DETR-Import: nur rtdetr-l.pt
+        let r = tmp("rtdetr");
+        fs::write(r.join("rtdetr-l.pt"), b"x").unwrap();
+        assert_eq!(infer_task_type(r.to_str().unwrap()).as_deref(), Some("detect"));
+        // HF-Detektor (DETR/RT-DETR/YOLOS): eigenes Test-Plugin
+        let h = tmp("hfdet");
+        fs::write(h.join("config.json"), r#"{"model_type":"rt_detr","architectures":["RTDetrForObjectDetection"]}"#).unwrap();
+        assert_eq!(infer_task_type(h.to_str().unwrap()).as_deref(), Some("hf_object_detection"));
+        // Trainierte Version: model.json nennt die Aufgabe
+        let v = tmp("hfdetv");
+        fs::write(v.join("model.json"), r#"{"framework":"transformers","task":"hf_object_detection"}"#).unwrap();
+        assert_eq!(infer_task_type(v.to_str().unwrap()).as_deref(), Some("hf_object_detection"));
         // LoRA-Version eines Sprachmodells
         let l = tmp("llm");
         fs::write(l.join("frametrain_llm.json"), r#"{"task":"causal_lm"}"#).unwrap();
