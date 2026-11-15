@@ -246,8 +246,8 @@ Was Labor und Hosting brauchten und bekommen haben:
 2. VITS auf der Trainingsseite sperren (siehe oben).
 3. `microsoft/speecht5_asr` landet am Namensteil „asr" bei der Spracherkennung, die SpeechT5
    nicht trainieren kann. Das war schon vorher so und ist hier nicht geändert.
-4. `src-tauri/target/` im Worktree (Build für die Rust-Tests) ist von git ignoriert und kann
-   gelöscht werden.
+4. `graphify update .` wurde im Worktree nicht ausgeführt (`graphify-out/` ist dort nicht
+   ignoriert und soll nicht committet werden); nach dem Zusammenführen im Haupt-Checkout nachholen.
 
 ## Wie gut klingt es nach kurzem Training, und was brauchen Nutzer?
 
