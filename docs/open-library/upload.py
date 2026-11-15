@@ -17,6 +17,16 @@ API = "https://frame-train.com/api/library/scripts"
 HERE = Path(__file__).resolve().parent
 
 
+def ssl_context():
+    """Das Python von python.org bringt auf dem Mac keine Stammzertifikate mit; certifi hat sie."""
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def request(method, url, key=None, payload=None):
     headers = {"Content-Type": "application/json"}
     if key:
@@ -24,10 +34,12 @@ def request(method, url, key=None, payload=None):
     req = urllib.request.Request(url, method=method, headers=headers,
                                  data=json.dumps(payload).encode() if payload is not None else None)
     try:
-        with urllib.request.urlopen(req, timeout=60) as res:
+        with urllib.request.urlopen(req, timeout=60, context=ssl_context()) as res:
             return res.status, res.read().decode()
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
+    except urllib.error.URLError as e:
+        sys.exit(f"Keine Verbindung zu frame-train.com: {e.reason}")
 
 
 def existing(script_type, key):
