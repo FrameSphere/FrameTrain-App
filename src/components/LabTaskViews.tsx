@@ -166,6 +166,23 @@ export function GeneratedAudio({ path, refAudio }: { path: string; refAudio?: st
 }
 
 /** Vergleich fuer freien Text: Gross/klein, Leerraum und Satzzeichen am Ende egal. */
+/** Klassenanteile einer Segmentierung: Farbe, Name, Flaechenanteil. */
+export function SegmentLegend({ legend }: { legend: unknown }) {
+  const rows = Array.isArray(legend) ? legend as { label?: string; color?: string; share?: number }[] : [];
+  if (!rows.length) return null;
+  return (
+    <ul className="space-y-0.5 text-xs" data-testid="segment-legend">
+      {rows.slice(0, 12).map((r, i) => (
+        <li key={`${r.label}-${i}`} className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-sm border border-white/20 flex-shrink-0" style={{ background: r.color ?? '#888' }} />
+          <span className="text-gray-300 truncate">{r.label}</span>
+          {typeof r.share === 'number' && <span className="ml-auto tabular-nums text-gray-500">{(r.share * 100).toFixed(1)} %</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function sameText(a: string, b: string): boolean {
   const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.!?。]+$/, '');
   return norm(a) === norm(b);

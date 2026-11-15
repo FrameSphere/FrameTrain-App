@@ -4537,7 +4537,13 @@
       "yolo_classify": "Bildklassifikation (YOLO)",
       "canvas": "Synapse-Modell",
       "unknown": "Unbekannte Aufgabe",
-      "tts": "Sprachausgabe · Text rein, Audio raus"
+      "tts": "Sprachausgabe · Text rein, Audio raus",
+      "segmentation": "Semantische Segmentierung · Bild rein, Maske raus",
+      "hf_detect": "Objekterkennung (Hugging Face)",
+      "qa": "Frage-Antwort · findet die Antwort in einem Text",
+      "reranker": "Reranker · ordnet Passagen nach Relevanz",
+      "time_series": "Zeitreihen-Vorhersage",
+      "tabular": "Tabellen-Vorhersage"
     },
     "page": {
       "title": "Hosting",
@@ -4624,7 +4630,11 @@
         "asr": "Sprache aufnehmen oder Audio anhängen",
         "video": "Video anhängen oder hineinziehen",
         "tensor": "Text oder Zahlen, z. B. 0.5, 1.2",
-        "tts": "Text, den {name} sprechen soll …"
+        "tts": "Text, den {name} sprechen soll …",
+        "qa": "Frage ||| Text, in dem die Antwort steht",
+        "reranker": "Frage ||| Passage A ||| Passage B",
+        "time_series": "Letzte Werte, älteste zuerst: 12, 15, 14, …",
+        "tabular": "spalte=wert; spalte=wert; …"
       },
       "screenPermission": "macOS erlaubt FrameTrain die Bildschirmaufnahme noch nicht. Erlaube sie unter Datenschutz & Sicherheit → Bildschirmaufnahme und starte FrameTrain neu. Ist der Schalter schon an, gilt er nach einem Update nicht mehr: Freigabe zurücksetzen, Schalter neu einschalten, neu starten.",
       "openSettings": "Einstellungen öffnen",
@@ -4634,6 +4644,7 @@
     "result": {
       "copy": "Kopieren",
       "noObjects": "Keine Objekte erkannt",
+      "segmentation": "Segmentierung als Überlagerung",
       "tokensPerSecond": "{value} Token/s",
       "imageGone": "Originalbild nicht mehr vorhanden"
     },

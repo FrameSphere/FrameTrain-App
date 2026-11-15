@@ -110,7 +110,7 @@ export function composerSpec(host: Pick<HostInfo, 'modality' | 'input_kind'> | n
   if (kind === 'audio') return { file: 'audio', text: 'none', placeholder: modality === 'asr' ? 'asr' : 'audio', extensions: AUDIO_EXT, chat: false };
   if (kind === 'video') return { file: 'video', text: 'none', placeholder: 'video', extensions: VIDEO_EXT, chat: false };
   if (kind === 'tensor') return { file: null, text: 'required', placeholder: 'tensor', extensions: [], chat: false };
-  const placeholder = ['causal_lm', 'seq2seq', 'token', 'embedding', 'text_to_image', 'tts'].includes(modality) ? modality : 'text';
+  const placeholder = ['causal_lm', 'seq2seq', 'token', 'embedding', 'text_to_image', 'tts', 'qa', 'reranker', 'time_series', 'tabular'].includes(modality) ? modality : 'text';
   return { file: null, text: 'required', placeholder, extensions: [], chat: modality === 'causal_lm' };
 }
 

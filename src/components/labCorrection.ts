@@ -33,8 +33,8 @@ export function correctionKindFor(
   if (modality === 'detect') return 'boxes';
   // Freier Text als Soll: Umformulierung, LLM-Antwort, Transkript, Bildantwort,
   // Entitaeten ("EU [ORG]") und bei Text-zu-Bild der bessere Prompt.
-  if (['seq2seq', 'causal_lm', 'asr', 'vlm', 'token', 'embedding', 'text_to_image', 'tts'].includes(modality ?? '')) return 'text';
-  if (modality === 'text' || modality === 'image' || modality === 'audio' || modality === 'video' || modality === 'canvas') {
+  if (['seq2seq', 'causal_lm', 'asr', 'vlm', 'token', 'embedding', 'text_to_image', 'tts', 'qa', 'reranker', 'time_series'].includes(modality ?? '')) return 'text';
+  if (modality === 'text' || modality === 'image' || modality === 'audio' || modality === 'video' || modality === 'canvas' || modality === 'tabular') {
     return 'label';
   }
   // Unbekannte Modalitaet (Dev-Script): bei Dateien hilft nur ein Label,

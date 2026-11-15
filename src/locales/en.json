@@ -4541,7 +4541,13 @@
       "yolo_classify": "Image classification (YOLO)",
       "canvas": "Synapse model",
       "unknown": "Unknown task",
-      "tts": "Text to speech · text in, audio out"
+      "tts": "Text to speech · text in, audio out",
+      "segmentation": "Semantic segmentation · image in, mask out",
+      "hf_detect": "Object detection (Hugging Face)",
+      "qa": "Question answering · finds the answer in a text",
+      "reranker": "Reranker · orders passages by relevance",
+      "time_series": "Time series forecast",
+      "tabular": "Table prediction"
     },
     "page": {
       "title": "Hosting",
@@ -4627,7 +4633,11 @@
         "asr": "Record speech or attach audio",
         "video": "Attach or drop a video",
         "tensor": "Text or numbers, e.g. 0.5, 1.2",
-        "tts": "Text for {name} to speak …"
+        "tts": "Text for {name} to speak …",
+        "qa": "Question ||| text that contains the answer",
+        "reranker": "Question ||| passage A ||| passage B",
+        "time_series": "Recent values, oldest first: 12, 15, 14, …",
+        "tabular": "column=value; column=value; …"
       },
       "screenPermission": "macOS does not allow FrameTrain to record the screen yet. Allow it under Privacy & Security → Screen Recording and restart FrameTrain. If the switch is already on, it no longer applies after an update: reset the permission, turn the switch on again, restart.",
       "openSettings": "Open settings",
@@ -4637,6 +4647,7 @@
     "result": {
       "copy": "Copy",
       "noObjects": "No objects detected",
+      "segmentation": "Segmentation overlay",
       "tokensPerSecond": "{value} tokens/s",
       "imageGone": "Original image no longer available"
     },

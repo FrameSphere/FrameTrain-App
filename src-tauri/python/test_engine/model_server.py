@@ -16,7 +16,8 @@ Protokoll:
                             vorher bei "stream": {"type": "token", "text": "..."}\n je Textstueck
 
 Startup:
-  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|tts|video|causal_lm|token|embedding|vlm|text_to_image",
+  Python -> Rust:  {"type": "ready", "modality": "text|image|audio|seq2seq|asr|tts|video|causal_lm|token|embedding|vlm|text_to_image
+                                              |segmentation|hf_detect|qa|reranker|time_series|tabular",
                     "input_kind": "text|image|audio"}\n
   Python -> Rust:  {"type": "error", "message": "..."}\n  (bei Fehler)
 """
@@ -156,6 +157,51 @@ def detect_modality(model_cfg: dict) -> str:
     return "text"
 
 
+# Aufgaben, die der Server ueber ihr Test-Plugin bedient (ein Weg fuer Test,
+# Labor und Hosting): Modalitaet -> (task_type des Plugins, Eingabeart).
+PLUGIN_TASKS = {
+    "segmentation": ("semantic_segmentation", "image"),
+    "hf_detect":    ("hf_object_detection", "image"),
+    "qa":           ("question_answering", "text"),
+    "reranker":     ("reranker", "text"),
+    "time_series":  ("time_series", "text"),
+    "tabular":      ("tabular", "text"),
+}
+_TASK_TO_MODALITY = {task: m for m, (task, _) in PLUGIN_TASKS.items()}
+
+
+def detect_plugin_modality(model_path: Path, model_cfg: dict):
+    """Modalitaet einer Aufgabe mit eigenem Test-Plugin, sonst None.
+
+    Gleiche Regeln wie infer_task_type in test_manager.rs: erst die von
+    FrameTrain geschriebenen Metadaten, dann die Architektur. Ohne diesen
+    Zweig lud das Labor SegFormer, DETR, QA-BERT und Reranker als
+    Textklassifikator mit Zufallskopf.
+    """
+    for meta in ("frametrain_rerank.json", "model.json"):
+        f = Path(model_path) / meta
+        if f.is_file():
+            try:
+                task = str(json.loads(f.read_text(encoding="utf-8")).get("task", ""))
+            except (OSError, ValueError):
+                task = ""
+            if task in _TASK_TO_MODALITY:
+                return _TASK_TO_MODALITY[task]
+    model_type = str(model_cfg.get("model_type", "")).lower()
+    if model_type == "ft_tabular" or model_cfg.get("frametrain_task") == "tabular":
+        return "tabular"
+    if model_type in ("ft_time_series", "patchtst") or model_cfg.get("frametrain_task") == "time_series":
+        return "time_series"
+    for arch in (a for a in (model_cfg.get("architectures") or []) if isinstance(a, str)):
+        if arch.endswith("ForSemanticSegmentation"):
+            return "segmentation"
+        if arch.endswith("ForQuestionAnswering"):
+            return "qa"
+        if arch.endswith("ForObjectDetection"):
+            return "hf_detect"
+    return None
+
+
 def detect_modality_for_dir(model_path: Path, model_cfg: dict) -> str:
     """Wie detect_modality, prueft aber zusaetzlich die Dateien im Ordner.
 
@@ -209,6 +255,7 @@ INPUT_KIND = {
     "text_to_image": "text",
     # Text rein, Pfad der erzeugten WAV-Datei raus.
     "tts":     "text",
+    **{m: kind for m, (_, kind) in PLUGIN_TASKS.items()},
 }
 
 
@@ -256,6 +303,12 @@ class ModelServer:
         model_cfg = self._read_config()
 
         self.id2label = self._load_labels(model_cfg)
+
+        plugin_modality = detect_plugin_modality(self.model_path, model_cfg)
+        if plugin_modality:
+            self.modality = plugin_modality
+            self._load_plugin(PLUGIN_TASKS[plugin_modality][0])
+            return
 
         self.modality = detect_modality_for_dir(self.model_path, model_cfg)
 
@@ -443,6 +496,72 @@ class ModelServer:
         self.t2i_out = self.model_path / "generated"
         self.model = self.pipe.unet
 
+    def _load_plugin(self, task_type: str):
+        """Laedt das Test-Plugin der Aufgabe einmal; jede Anfrage ist ein Einzeltest."""
+        import importlib.util
+        from core.config import TestConfig
+        spec = importlib.util.spec_from_file_location(
+            "ft_test_engine_main", Path(__file__).resolve().parent / "test_engine.py")
+        engine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(engine)
+        out_dir = self.model_path / "generated"
+        config = TestConfig(model_path=str(self.model_path), output_path=str(out_dir),
+                            task_type=task_type, mode="single")
+        with self._quiet_protocol():
+            self.plugin = engine.load_plugin(config)
+            self.plugin.setup()
+
+    def _quiet_protocol(self, sink=None):
+        """Faengt die Meldungen des Test-Plugins ab: der Server spricht sein eigenes Zeilenprotokoll."""
+        import contextlib
+        from core.protocol import TestProtocol
+
+        @contextlib.contextmanager
+        def patched():
+            original = TestProtocol._send
+
+            def capture(msg_type, data):
+                if sink is not None and msg_type == "complete":
+                    sink.update(data)
+            TestProtocol._send = staticmethod(capture)
+            try:
+                yield
+            finally:
+                TestProtocol._send = staticmethod(original)
+        return patched()
+
+    def _infer_plugin(self, req: dict) -> dict:
+        _, kind = PLUGIN_TASKS[self.modality]
+        question = str(req.get("question") or "").strip()
+        if kind == "image":
+            single = str(self._require_file(req, "Bild"))
+        else:
+            single = self._require_text(req)
+            # Frage im zweiten Feld: QA erwartet "Frage ||| Kontext", der Reranker
+            # "Frage ||| Passage A ||| Passage B" (eine Passage je Zeile).
+            if question and "|||" not in single and not single.lstrip().startswith("{"):
+                if self.modality == "qa":
+                    single = f"{question} ||| {single}"
+                elif self.modality == "reranker":
+                    parts = [ln.strip() for ln in single.splitlines() if ln.strip()]
+                    single = " ||| ".join([question] + parts)
+        cfg = self.plugin.config
+        cfg.mode = "single"
+        cfg.single_input = single
+        cfg.single_input_type = "file" if kind == "image" else "text"
+        data: dict = {}
+        with self._quiet_protocol(data):
+            self.plugin.run_single()
+        if not data:
+            raise RuntimeError("Das Test-Plugin hat kein Ergebnis geliefert.")
+        out = dict(data)
+        out.pop("mode", None)
+        out["predicted"] = str(out.pop("predicted_output", "?"))
+        if self.modality == "hf_detect":
+            # Gleiche Felder wie der YOLO-Server: Labor und Hosting zeichnen die Boxen.
+            out["boxes"] = out.get("detections") or []
+        return out
+
     def _load_tts(self):
         """Sprachausgabe ueber ft_data.tts — dieselbe Erzeugung wie im Test-Plugin."""
         from ft_data.tts import load_tts
@@ -464,6 +583,8 @@ class ModelServer:
     # ── Inferenz ─────────────────────────────────────────────────────────
 
     def infer(self, req: dict) -> dict:
+        if self.modality in PLUGIN_TASKS:
+            return self._infer_plugin(req)
         if self.modality == "vlm":
             return self._infer_vlm(self._require_file(req, "Bild"), req)
         if self.modality == "text_to_image":

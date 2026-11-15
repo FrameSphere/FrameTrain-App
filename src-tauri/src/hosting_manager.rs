@@ -403,6 +403,24 @@ pub fn guess_task(dir: &Path, is_yolo: bool, is_canvas: bool) -> (String, String
         .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let arch = cfg["architectures"][0].as_str().unwrap_or("");
     let mt = cfg["model_type"].as_str().unwrap_or("").to_lowercase();
+    // Aufgaben mit eigenem Test-Plugin (wie detect_plugin_modality in model_server.py).
+    for meta in ["frametrain_rerank.json", "model.json"] {
+        let task = std::fs::read_to_string(dir.join(meta)).ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v["task"].as_str().map(str::to_string)).unwrap_or_default();
+        match task.as_str() {
+            "reranker" => return pair("reranker", "text"),
+            "time_series" => return pair("time_series", "text"),
+            "tabular" => return pair("tabular", "text"),
+            "hf_object_detection" => return pair("hf_detect", "image"),
+            _ => {}
+        }
+    }
+    if mt == "ft_tabular" { return pair("tabular", "text"); }
+    if mt == "ft_time_series" || mt == "patchtst" { return pair("time_series", "text"); }
+    if arch.ends_with("ForSemanticSegmentation") { return pair("segmentation", "image"); }
+    if arch.ends_with("ForQuestionAnswering") { return pair("qa", "text"); }
+    if arch.ends_with("ForObjectDetection") { return pair("hf_detect", "image"); }
     let audio = ["wav2vec2", "hubert", "wavlm", "whisper", "audio-spectrogram-transformer", "ast", "data2vec-audio"];
     let image = ["resnet", "vit", "deit", "beit", "convnext", "swin", "efficientnet", "mobilenet_v2", "mobilevit", "regnet", "dinov2"];
     let video = ["videomae", "timesformer", "vivit"];
@@ -939,6 +957,21 @@ mod tests {
         assert_eq!(guess_task(&dir, false, false).0, "causal_lm");
         std::fs::write(dir.join("config.json"), r#"{"architectures":["WhisperForConditionalGeneration"],"model_type":"whisper"}"#).unwrap();
         assert_eq!(guess_task(&dir, false, false), ("asr".to_string(), "audio".to_string()));
+        // Aufgaben mit eigenem Test-Plugin
+        for (cfg, want) in [
+            (r#"{"architectures":["SegformerForSemanticSegmentation"],"model_type":"segformer"}"#, ("segmentation", "image")),
+            (r#"{"architectures":["BertForQuestionAnswering"],"model_type":"bert"}"#, ("qa", "text")),
+            (r#"{"architectures":["YolosForObjectDetection"],"model_type":"yolos"}"#, ("hf_detect", "image")),
+            (r#"{"model_type":"ft_tabular"}"#, ("tabular", "text")),
+            (r#"{"model_type":"patchtst"}"#, ("time_series", "text")),
+        ] {
+            std::fs::write(dir.join("config.json"), cfg).unwrap();
+            assert_eq!(guess_task(&dir, false, false), (want.0.to_string(), want.1.to_string()));
+        }
+        std::fs::write(dir.join("config.json"), r#"{"architectures":["BertForSequenceClassification"]}"#).unwrap();
+        std::fs::write(dir.join("frametrain_rerank.json"), r#"{"task":"reranker"}"#).unwrap();
+        assert_eq!(guess_task(&dir, false, false), ("reranker".to_string(), "text".to_string()));
+        std::fs::remove_file(dir.join("frametrain_rerank.json")).unwrap();
         std::fs::write(dir.join("config.json"), r#"{"architectures":["SpeechT5ForTextToSpeech"],"model_type":"speecht5"}"#).unwrap();
         assert_eq!(guess_task(&dir, false, false), ("tts".to_string(), "text".to_string()));
         std::fs::write(dir.join("config.json"), r#"{"architectures":["VitsModel"],"model_type":"vits"}"#).unwrap();

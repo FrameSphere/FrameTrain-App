@@ -6,7 +6,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { Copy, Check } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { DetectionOverlay, type DetectionBox } from '../LaboratoryPanel';
-import { EntityText, SimilarityView, type EntitySpan } from '../LabTaskViews';
+import { EntityText, SimilarityView, type EntitySpan, SegmentLegend } from '../LabTaskViews';
 import { MarkdownText } from '../ui/MarkdownText';
 import { summarizeBoxes } from '../labGroundTruth';
 import { formatMs, tokensPerSecond, topPredictions, type Attachment, type HostInfo, type InferResult } from './hostingModel';
@@ -109,6 +109,15 @@ export default function HostResultView({ result, host, file, inputText = '', com
       </figure>
     );
     copyText = p;
+  } else if (modality === 'segmentation' && typeof extra.overlay_path === 'string') {
+    const p = extra.overlay_path;
+    body = (
+      <figure className="space-y-1.5">
+        <img src={convertFileSrc(p)} alt={t('hosting.result.segmentation')} className={`max-w-full ${compact ? 'max-h-56' : 'max-h-80'} object-contain rounded-xl border border-white/10 bg-black/20`} />
+        <SegmentLegend legend={extra.legend} />
+      </figure>
+    );
+    copyText = JSON.stringify(extra.legend ?? [], null, 2);
   } else if (modality === 'tts' && typeof extra.audio_path === 'string') {
     const p = extra.audio_path;
     body = (
@@ -124,7 +133,7 @@ export default function HostResultView({ result, host, file, inputText = '', com
     body = <SimilarityView similarity={extra.similarity} />;
   } else if (modality === 'causal_lm') {
     body = <MarkdownText text={result.predicted} className="text-sm text-gray-100" />;
-  } else if (['seq2seq', 'vlm', 'asr', 'embedding'].includes(modality)) {
+  } else if (['seq2seq', 'vlm', 'asr', 'embedding', 'qa', 'time_series'].includes(modality)) {
     body = <p className="text-sm text-gray-100 whitespace-pre-wrap break-words leading-relaxed">{result.predicted}</p>;
   } else {
     body = (

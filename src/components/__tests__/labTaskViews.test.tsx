@@ -59,3 +59,51 @@ describe('sameText', () => {
     expect(sameText('Tier', 'Werkzeug')).toBe(false);
   });
 });
+
+// Labor/Hosting fuer die Aufgaben mit eigenem Test-Plugin (Engine-Ausbau).
+import { SegmentLegend } from '../LabTaskViews';
+import { composerSpec } from '../hosting/hostingModel';
+import { correctionKindFor } from '../labCorrection';
+import en from '../../locales/en.json';
+import de from '../../locales/de.json';
+
+describe('SegmentLegend', () => {
+  it('zeigt Klasse, Farbe und Flaechenanteil', () => {
+    const { container, getByTestId } = render(
+      <SegmentLegend legend={[{ label: 'hintergrund', color: '#000000', share: 0.885 }, { label: 'kreis', color: '#008000', share: 0.058 }]} />,
+    );
+    expect(getByTestId('segment-legend').querySelectorAll('li')).toHaveLength(2);
+    expect(container.textContent).toContain('hintergrund88.5 %');
+  });
+
+  it('bleibt ohne Legende leer', () => {
+    expect(render(<SegmentLegend legend={undefined} />).container.textContent).toBe('');
+  });
+});
+
+describe('neue Aufgaben in Hosting und Labor', () => {
+  it('Eingabe je Aufgabe: Bild oder Text mit eigenem Platzhalter', () => {
+    expect(composerSpec({ modality: 'segmentation', input_kind: 'image' })).toMatchObject({ file: 'image', text: 'none' });
+    expect(composerSpec({ modality: 'hf_detect', input_kind: 'image' })).toMatchObject({ file: 'image' });
+    for (const m of ['qa', 'reranker', 'time_series', 'tabular']) {
+      expect(composerSpec({ modality: m, input_kind: 'text' })).toMatchObject({ file: null, text: 'required', placeholder: m, chat: false });
+    }
+  });
+
+  it('Texte fuer Aufgabe und Platzhalter gibt es in beiden Sprachen', () => {
+    for (const loc of [en, de] as { hosting: { task: Record<string, string>; composer: { placeholder: Record<string, string> } } }[]) {
+      for (const m of ['segmentation', 'hf_detect', 'qa', 'reranker', 'time_series', 'tabular']) {
+        expect(loc.hosting.task[m], m).toBeTruthy();
+      }
+      for (const m of ['qa', 'reranker', 'time_series', 'tabular']) {
+        expect(loc.hosting.composer.placeholder[m], m).toBeTruthy();
+      }
+    }
+  });
+
+  it('Korrektur im Labor: freier Text bzw. Label', () => {
+    expect(correctionKindFor('qa')).toBe('text');
+    expect(correctionKindFor('time_series')).toBe('text');
+    expect(correctionKindFor('tabular')).toBe('label');
+  });
+});

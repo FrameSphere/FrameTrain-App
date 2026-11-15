@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { detectPluginForModel, pickPreferredModelId } from '../plugins/registry';
 import { buildTaskSamples, folderLabel, labTaskFor, type ExpectedEntity, type MediaKind } from './labTaskSamples';
-import { EntityText, GeneratedAudio, GeneratedImage, GeneratedText, PairView, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
+import { EntityText, GeneratedAudio, GeneratedImage, GeneratedText, PairView, SegmentLegend, SimilarityView, TranscriptCheck, compareEntities, sameText, type EntitySpan } from './LabTaskViews';
 import {
   labelPathsForImage, classNamesFromYaml, parseYoloLabelFile, summarizeBoxes, shownPrediction,
   compareClassSets, classColor, legendEntries, type TruthBox,
@@ -2647,6 +2647,15 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                         if (serverModality === 'text_to_image' && testResult.predicted && testResult.predicted !== '?') {
                           return <GeneratedImage path={String(extra.image_path ?? testResult.predicted)} refImage={currentSample.refImage} prompt={currentSample.text} />;
                         }
+                        if (serverModality === 'segmentation' && typeof extra.overlay_path === 'string') {
+                          // Ueberlagerung aus Bild und vorhergesagter Maske; darunter die Klassenanteile.
+                          return (
+                            <>
+                              <GeneratedImage path={extra.overlay_path} refImage={undefined} prompt={currentSample.text} />
+                              <SegmentLegend legend={extra.legend} />
+                            </>
+                          );
+                        }
                         if (serverModality === 'tts' && testResult.predicted && testResult.predicted !== '?') {
                           return <GeneratedAudio path={String(extra.audio_path ?? testResult.predicted)} refAudio={currentSample.refAudio} />;
                         }
@@ -2673,7 +2682,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             </div>
                           );
                         }
-                        if (['causal_lm', 'seq2seq', 'vlm', 'asr'].includes(serverModality ?? '')) {
+                        if (['causal_lm', 'seq2seq', 'vlm', 'asr', 'qa', 'time_series'].includes(serverModality ?? '')) {
                           return (
                             <>
                               {serverModality === 'vlm' && typeof extra.question === 'string' && extra.question && (
@@ -2731,7 +2740,7 @@ export default function LaboratoryPanel({ userId }: { userId?: string }) {
                             </span>
                           </div>
                         );
-                      })() : serverModality === 'embedding' || serverModality === 'text_to_image' || serverModality === 'tts' ? null
+                      })() : ['embedding', 'text_to_image', 'tts', 'segmentation', 'hf_detect', 'qa', 'reranker', 'time_series'].includes(serverModality ?? '') ? null
                       : currentSample.label && (() => {
                         // Freier Text (LLM, Seq2Seq, VLM): Gross/klein und Leerraum egal.
                         const generative = ['causal_lm', 'seq2seq', 'vlm'].includes(serverModality ?? '');
