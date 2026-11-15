@@ -796,6 +796,8 @@ pub fn packages_for_task(task_type: &str) -> (&'static str, Vec<&'static str>) {
         "hf_object_detection" => ("seq_classification", with(&["pillow", "timm", "scipy"])),
         "token_classification" => ("seq_classification", with(&["seqeval", "scikit-learn"])),
         "sentence_embedding" => ("seq_classification", with(&["sentence-transformers"])),
+        "reranker" => ("seq_classification", with(&["sentence-transformers"])),
+        "question_answering" => ("seq_classification", with(&["pandas"])),
         "speech_recognition" => ("seq_classification", with(&["librosa", "soundfile", "jiwer"])),
         "audio_classification" => ("seq_classification", with(&["librosa", "soundfile", "scikit-learn"])),
         "video_classification" => ("seq_classification", with(&["opencv-python", "scikit-learn"])),

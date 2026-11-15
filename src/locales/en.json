@@ -128,6 +128,8 @@
       "task": {
         "seq_classification": "Text classification",
         "token_classification": "Entities (NER/POS)",
+        "question_answering": "Question answering",
+        "reranker": "Rerankers",
         "seq2seq": "Seq2Seq",
         "causal_lm": "Language models",
         "canvas": "Custom networks (Canvas)",
@@ -3455,6 +3457,7 @@
         "speech": "No audio files (or Parquet with audio and text column) found – speech recognition needs recordings with transcripts.",
         "tokens": "No token data found (JSONL/Parquet with tokens + ner_tags or CoNLL text .conll/.iob/.txt).",
         "pairs": "No table files (.csv, .tsv, .json, .jsonl, .parquet) with sentence pairs found.",
+        "qa": "No SQuAD JSON or table (.csv, .tsv, .json, .jsonl, .parquet) with context, question and answer found.",
         "textToImage": "No image files found – text-to-image LoRA needs images (with .txt captions, metadata.jsonl or an instance prompt).",
         "visionLanguage": "No image files found – a VLM learns from image + question + answer.",
         "llm": "No training data found – expected .jsonl/.json/.csv/.parquet (chat, question-answer) or .txt/.md (plain text).",
@@ -3669,6 +3672,14 @@
       "embeddingLabel": "Sentence or sentence pair",
       "embeddingPlaceholder": "One sentence – the most similar texts come from the dataset selected below. Or compare two sentences: Sentence A ||| Sentence B",
       "embeddingResult": "Result (cosine similarity)",
+      "qaLabel": "Context",
+      "qaPlaceholder": "Paste the text that contains the answer. Or in one line: Question ||| Context",
+      "qaQuestionLabel": "Question",
+      "qaQuestionPlaceholder": "e.g. Where does Anna live?",
+      "qaResult": "Answer (marked in the context)",
+      "rerankLabel": "Query and passages",
+      "rerankPlaceholder": "Query ||| Passage A ||| Passage B – or only the query: the passages then come from the dataset selected below",
+      "rerankResult": "Passages by relevance",
       "metrics": "Metrics",
       "t2iLabel": "Prompt",
       "t2iPlaceholder": "Describe the image, e.g. a photo of sks dog on the beach",
@@ -3680,6 +3691,16 @@
       "vlmResult": "Model answer",
       "transcript": "Transcript",
       "metricLabels": {
+        "exact_match": "Exact match",
+        "f1": "F1",
+        "has_answer_exact_match": "Exact match (with answer)",
+        "has_answer_f1": "F1 (with answer)",
+        "no_answer_accuracy": "Correct \"no answer\"",
+        "mrr_at_10": "MRR@10",
+        "ndcg_at_10": "nDCG@10",
+        "hit_at_1": "Hit@1",
+        "spearman": "Spearman",
+        "accuracy": "Accuracy",
         "wer": "Word error rate (WER)",
         "cer": "Character error rate (CER)",
         "rouge1": "ROUGE-1",
@@ -4653,7 +4674,7 @@
   "plugins": {
     "causal-lm": {
       "name": "LLM Fine-Tuning (LoRA)",
-      "description": "Fine-tunes decoder LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) with LoRA or QLoRA on chat, question-answer or plain text data; preference pairs (chosen/rejected) via DPO."
+      "description": "Fine-tunes decoder LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) with LoRA or QLoRA on chat, question-answer or plain text data; preference pairs (chosen/rejected) via DPO. Small models (GPT-2, SmolLM-135M) can also be fully fine-tuned without LoRA; on plain text (.txt or a text column) the perplexity is reported before and after training."
     },
     "hf-encoder": {
       "name": "HF Encoder (Generic)",
@@ -4682,6 +4703,14 @@
     "hf-image-classification": {
       "name": "Image Classification (HuggingFace)",
       "description": "Trains the downloaded HuggingFace vision model itself (ViT, DeiT, ConvNeXt, Swin, ResNet)."
+    },
+    "question-answering": {
+      "name": "Question Answering (extractive)",
+      "description": "Finds the answer to a question as a passage in a text (SQuAD style, also \"no answer\") with BERT, RoBERTa, DeBERTa, XLM-R and friends."
+    },
+    "reranker": {
+      "name": "Reranker (Cross-Encoder)",
+      "description": "Trains cross-encoders that read query and passage together and score their relevance (ms-marco MiniLM, BGE reranker or any BERT encoder). Second stage for search and RAG."
     },
     "sentence-embedding": {
       "name": "Sentence Embeddings (Search/RAG)",

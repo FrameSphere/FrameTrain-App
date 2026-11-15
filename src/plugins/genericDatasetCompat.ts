@@ -47,6 +47,10 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
     case 'semantic_segmentation':
       // Bilder plus PNG-Masken; ohne Masken lernt das Modell nichts.
       return { exts: ['.png'], missing: 'segmentation' };
+    case 'reranker':
+      return { exts: TABLE_EXTS, missing: 'pairs' };
+    case 'question_answering':
+      return { exts: TABLE_EXTS, missing: 'qa' };
     case 'text_to_image_lora':
       return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'textToImage' };
     case 'vision_language':

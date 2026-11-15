@@ -220,6 +220,12 @@ def detect_format(columns: Iterable[str], overrides: Optional[Dict[str, Any]] = 
     """
     cols = {c.lower(): c for c in columns}
     ov = overrides or {}
+    t_col = str(ov.get("text_column") or "").strip()
+    if t_col:
+        # Weitertrainieren auf Rohtext aus einer frei benannten Spalte.
+        if t_col not in columns:
+            raise ValueError(f"Textspalte '{t_col}' aus plugin_config nicht gefunden. Vorhanden: {sorted(columns)}")
+        return "text", (t_col,)
     p_col, r_col = ov.get("prompt_column"), ov.get("response_column")
     if p_col and r_col:
         missing = [c for c in (p_col, r_col) if c not in columns]
@@ -242,11 +248,15 @@ def detect_format(columns: Iterable[str], overrides: Optional[Dict[str, Any]] = 
     for t in TEXT_COLUMNS:
         if t in cols:
             return "text", (cols[t],)
+    if len(cols) == 1:
+        # Eine einzige Spalte ohne Prompt/Antwort: das ist Rohtext.
+        return "text", (next(iter(cols.values())),)
     raise ValueError(
         "Konnte das Datenformat nicht erkennen. Gefundene Spalten: "
         f"{sorted(columns)}.\nErwartet z. B. 'messages' (Chat), 'prompt'/'completion', "
         "'instruction'/'output' (Alpaca), 'question'/'answer' oder 'text'.\n"
-        "Andere Namen lassen sich im Plugin-Parameter prompt_column / response_column setzen."
+        "Andere Namen lassen sich im Plugin-Parameter prompt_column / response_column setzen, "
+        "Rohtext aus einer beliebigen Spalte mit text_column."
     )
 
 
@@ -540,3 +550,60 @@ def score_generations(preds: List[str], refs: List[str]) -> Dict[str, float]:
         "exact_match": sum(exact_match(p, r) for p, r in zip(preds, refs)) / n,
         "rougeL": sum(rouge_l(p, r) for p, r in zip(preds, refs)) / n,
     }
+
+
+# ─── Speicherbedarf beim vollen Fine-Tuning ───────────────────────────────────
+
+# AdamW in fp32: Gewichte 4 + Gradienten 4 + zwei Momente 8 Byte je Parameter.
+FULL_FT_BYTES_PER_PARAM = 16
+# Aktivierungen, Puffer und Laufzeit kommen grob obendrauf.
+FULL_FT_OVERHEAD = 1.25
+# Nur dieser Anteil des Speichers gilt als nutzbar (System, andere Programme).
+MEMORY_BUDGET = 0.7
+
+
+def full_finetune_bytes(n_params: float) -> float:
+    return float(n_params) * FULL_FT_BYTES_PER_PARAM * FULL_FT_OVERHEAD
+
+
+def available_memory_bytes() -> Optional[float]:
+    """Speicher, in dem trainiert wird: GPU-Speicher bei CUDA, sonst der Arbeitsspeicher
+    (auf Apple Silicon teilen sich CPU und GPU denselben)."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return float(torch.cuda.get_device_properties(0).total_memory)
+    except Exception:
+        pass
+    try:
+        import os
+        return float(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
+    except (ValueError, OSError, AttributeError):
+        pass
+    try:
+        import psutil
+        return float(psutil.virtual_memory().total)
+    except Exception:
+        return None
+
+
+def full_finetune_block(n_params: float, available: Optional[float]) -> Optional[str]:
+    """Begruendung, warum volles Fine-Tuning hier nicht geht — oder None.
+
+    Ohne bekannte Parameterzahl oder Speichergroesse wird nicht gesperrt.
+    """
+    if not n_params or not available:
+        return None
+    need = full_finetune_bytes(n_params)
+    budget = available * MEMORY_BUDGET
+    if need <= budget:
+        return None
+    gb = 1024 ** 3
+    return (
+        f"Volles Fine-Tuning ist fuer dieses Modell gesperrt: {n_params / 1e9:.2f} Mrd. Parameter brauchen mit "
+        f"AdamW rund {need / gb:.0f} GB (je Parameter 16 Byte fuer Gewichte, Gradienten und Optimizer, dazu "
+        f"Aktivierungen). Nutzbar sind hier etwa {budget / gb:.0f} GB ({MEMORY_BUDGET:.0%} von "
+        f"{available / gb:.0f} GB).\n\nLoRA einschalten: dann werden nur kleine Zusatzmatrizen trainiert "
+        "(meist unter 1 % der Parameter) und der Speicherbedarf sinkt auf etwa die Modellgroesse. "
+        "Volles Fine-Tuning eignet sich fuer kleine Modelle wie GPT-2 oder SmolLM-135M."
+    )

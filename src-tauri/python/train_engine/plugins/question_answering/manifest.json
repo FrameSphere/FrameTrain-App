@@ -1,0 +1,14 @@
+{
+  "task_type": "question_answering",
+  "name": "Extraktives Frage-Antwort (SQuAD)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Findet die Antwort auf eine Frage als Textstelle im Kontext (BERT, RoBERTa, DeBERTa, XLM-R, DistilBERT). SQuAD-JSON oder Tabellen mit context/question/answer, auch ohne Antwort (SQuAD v2).",
+  "supported_architectures": [
+    "bert", "distilbert", "roberta", "xlm-roberta", "deberta", "deberta-v2",
+    "electra", "albert", "camembert", "mpnet", "modernbert", "mobilebert", "longformer", "splinter"
+  ],
+  "dataset_formats": ["json", "jsonl", "csv", "tsv", "parquet"],
+  "metrics": ["train_loss", "val_loss", "exact_match", "f1"]
+}

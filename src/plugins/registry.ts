@@ -20,6 +20,8 @@ import seq2seqPlugin from './seq2seq';
 import causalLMPlugin from './causal-lm';
 import tokenClassificationPlugin from './token-classification';
 import sentenceEmbeddingPlugin from './sentence-embedding';
+import questionAnsweringPlugin from './question-answering';
+import rerankerPlugin from './reranker';
 import textToImageLoraPlugin from './text-to-image-lora';
 import visionLanguagePlugin from './vision-language';
 import semanticSegmentationPlugin from './semantic-segmentation';
@@ -51,6 +53,10 @@ const PLUGINS: ModelPlugin[] = [
   // model_type und liessen ein NER- oder Embedding-Modell nie durch. Die
   // beiden greifen nur bei eindeutigem Signal (Architektur bzw. Name) — ein
   // Basis-BERT ohne Hinweis landet weiter bei der Sequenzklassifikation.
+  // Frage-Antwort und Reranker ebenso nur bei eindeutigem Signal
+  // (…ForQuestionAnswering / squad im Namen bzw. cross-encoder, reranker).
+  questionAnsweringPlugin,    // Extraktives QA (SQuAD)
+  rerankerPlugin,             // Cross-Encoder / Reranker
   tokenClassificationPlugin,  // NER / POS (…ForTokenClassification)
   sentenceEmbeddingPlugin,    // Sentence-Transformers (all-MiniLM, BGE, E5, GTE)
   xlmRobertaPlugin,
@@ -109,7 +115,7 @@ export function detectPlugin(
     // Der Hinweis auf Text-Encoder gehoert nur zu Textmodellen. Bei einem
     // Bildmodell wie DETR stand er sinnlos daneben.
     const textHint = TEXT_DOMAIN_KEYS.has(knownKey)
-      ? ' Für Text trainiert FrameTrain Encoder (BERT & Co.) für Sequenz- und Token-Klassifikation (NER/POS) sowie Sentence Embeddings, Seq2Seq-Modelle (T5, BART) und Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi).'
+      ? ' Für Text trainiert FrameTrain Encoder (BERT & Co.) für Sequenz- und Token-Klassifikation (NER/POS), Frage-Antwort, Reranker sowie Sentence Embeddings, Seq2Seq-Modelle (T5, BART) und Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi).'
       : '';
     return {
       supported: false,

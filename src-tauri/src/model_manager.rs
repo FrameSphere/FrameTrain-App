@@ -157,8 +157,30 @@ pub fn read_plugin_override(model_dir: &Path) -> Option<String> {
 /// model_type — ein lokal importierter Ordner "minilm" landete so als
 /// BERT-Klassifikator beim HF-Encoder (Live-Test 1.4.1).
 fn embedding_by_files(model_dir: &Path) -> Option<String> {
+    // Cross-Encoder (Reranker) speichert sentence-transformers ebenfalls mit
+    // modules.json — die eigene Markierung muss deshalb vorher greifen, sonst
+    // landete ein trainierter Reranker beim Embedding-Plugin.
+    if let Some(task) = task_by_marker_files(model_dir) {
+        return Some(task);
+    }
     let marked = model_dir.join("modules.json").is_file() || model_dir.join("sentence_bert_config.json").is_file();
     marked.then(|| "sentence-embedding".to_string())
+}
+
+/// Markierungen, die die Train-Plugins neben das Modell schreiben, und der
+/// Cross-Encoder-Eintrag von sentence-transformers.
+fn task_by_marker_files(model_dir: &Path) -> Option<String> {
+    if model_dir.join("frametrain_rerank.json").is_file() {
+        return Some("reranker".to_string());
+    }
+    if model_dir.join("frametrain_qa.json").is_file() {
+        return Some("question-answering".to_string());
+    }
+    let cross_encoder = fs::read_to_string(model_dir.join("config_sentence_transformers.json")).ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|v| v.get("model_type").and_then(|m| m.as_str()).map(|m| m == "CrossEncoder"))
+        .unwrap_or(false);
+    cross_encoder.then(|| "reranker".to_string())
 }
 
 /// Erkennt einen Ultralytics-Checkpoint am Inhalt statt am Dateinamen.
@@ -1350,6 +1372,27 @@ mod model_type_tests {
         fs::write(dir.join(PLUGIN_OVERRIDE_FILE), br#"{"plugin_id":"hf-encoder"}"#).unwrap();
         assert_eq!(read_plugin_override(&dir).as_deref(), Some("hf-encoder"), "Hand schlaegt Dateien");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reranker_und_frage_antwort_werden_an_dateien_erkannt() {
+        let dir = tmp("cross_encoder");
+        fs::write(dir.join("modules.json"), "[]").unwrap();
+        fs::write(dir.join("config_sentence_transformers.json"), br#"{"model_type":"CrossEncoder"}"#).unwrap();
+        assert_eq!(read_plugin_override(&dir).as_deref(), Some("reranker"),
+                   "Cross-Encoder trotz modules.json nicht als Embedding");
+        let _ = fs::remove_dir_all(&dir);
+
+        let st = tmp("st_embedding");
+        fs::write(st.join("modules.json"), "[]").unwrap();
+        fs::write(st.join("config_sentence_transformers.json"), br#"{"model_type":"SentenceTransformer"}"#).unwrap();
+        assert_eq!(read_plugin_override(&st).as_deref(), Some("sentence-embedding"));
+        let _ = fs::remove_dir_all(&st);
+
+        let qa = tmp("qa_marker");
+        fs::write(qa.join("frametrain_qa.json"), "{}").unwrap();
+        assert_eq!(read_plugin_override(&qa).as_deref(), Some("question-answering"));
+        let _ = fs::remove_dir_all(&qa);
     }
 }
 

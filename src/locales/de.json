@@ -128,6 +128,8 @@
       "task": {
         "seq_classification": "Textklassifikation",
         "token_classification": "Entitäten (NER/POS)",
+        "question_answering": "Frage-Antwort",
+        "reranker": "Reranker",
         "seq2seq": "Seq2Seq",
         "causal_lm": "Sprachmodelle",
         "canvas": "Eigene Netze (Canvas)",
@@ -3451,6 +3453,7 @@
         "speech": "Keine Audiodateien (oder Parquet mit Audio- und Textspalte) gefunden – Spracherkennung braucht Aufnahmen mit Transkript.",
         "tokens": "Keine Token-Daten gefunden (JSONL/Parquet mit tokens + ner_tags oder CoNLL-Text .conll/.iob/.txt).",
         "pairs": "Keine Tabellendateien (.csv, .tsv, .json, .jsonl, .parquet) mit Satzpaaren gefunden.",
+        "qa": "Kein SQuAD-JSON und keine Tabelle (.csv, .tsv, .json, .jsonl, .parquet) mit Kontext, Frage und Antwort gefunden.",
         "textToImage": "Keine Bilddateien gefunden – für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).",
         "visionLanguage": "Keine Bilddateien gefunden – ein VLM lernt aus Bild + Frage + Antwort.",
         "llm": "Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext).",
@@ -3665,6 +3668,14 @@
       "embeddingLabel": "Satz oder Satzpaar",
       "embeddingPlaceholder": "Ein Satz – die ähnlichsten Texte kommen aus dem unten gewählten Dataset. Oder zwei Sätze vergleichen: Satz A ||| Satz B",
       "embeddingResult": "Ergebnis (Kosinus-Ähnlichkeit)",
+      "qaLabel": "Kontext",
+      "qaPlaceholder": "Text einfügen, in dem die Antwort steht. Oder in einer Zeile: Frage ||| Kontext",
+      "qaQuestionLabel": "Frage",
+      "qaQuestionPlaceholder": "z. B. Wo wohnt Anna?",
+      "qaResult": "Antwort (im Kontext markiert)",
+      "rerankLabel": "Suchanfrage und Passagen",
+      "rerankPlaceholder": "Anfrage ||| Passage A ||| Passage B – oder nur die Anfrage: die Passagen kommen dann aus dem unten gewählten Dataset",
+      "rerankResult": "Passagen nach Relevanz",
       "metrics": "Kennzahlen",
       "t2iLabel": "Prompt",
       "t2iPlaceholder": "Beschreibung des Bildes, z.B. a photo of sks dog on the beach",
@@ -3676,6 +3687,16 @@
       "vlmResult": "Antwort des Modells",
       "transcript": "Transkript",
       "metricLabels": {
+        "exact_match": "Exact Match",
+        "f1": "F1",
+        "has_answer_exact_match": "Exact Match (mit Antwort)",
+        "has_answer_f1": "F1 (mit Antwort)",
+        "no_answer_accuracy": "Richtig \"keine Antwort\"",
+        "mrr_at_10": "MRR@10",
+        "ndcg_at_10": "nDCG@10",
+        "hit_at_1": "Treffer auf Platz 1",
+        "spearman": "Spearman",
+        "accuracy": "Accuracy",
         "wer": "Wortfehlerrate (WER)",
         "cer": "Zeichenfehlerrate (CER)",
         "rouge1": "ROUGE-1",
@@ -4649,7 +4670,7 @@
   },
   "plugins": {
     "causal-lm": {
-      "description": "Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Präferenzpaare (chosen/rejected) per DPO."
+      "description": "Feinjustiert Decoder-LLMs (Llama, Qwen, Mistral, Gemma, Phi, SmolLM) mit LoRA oder QLoRA auf Chat-, Frage-Antwort- oder Textdaten; Präferenzpaare (chosen/rejected) per DPO. Kleine Modelle (GPT-2, SmolLM-135M) auch voll ohne LoRA; bei reinem Text (.txt oder Textspalte) wird die Perplexität vor und nach dem Training gemeldet."
     },
     "hf-encoder": {
       "description": "Textklassifikation mit HuggingFace-Encodern (BERT, DistilBERT, RoBERTa, DeBERTa und Verwandte)."
@@ -4672,6 +4693,14 @@
     },
     "hf-image-classification": {
       "description": "Trainiert das heruntergeladene HuggingFace-Bildmodell selbst (ViT, DeiT, ConvNeXt, Swin, ResNet)."
+    },
+    "question-answering": {
+      "name": "Frage-Antwort (extraktiv)",
+      "description": "Findet die Antwort auf eine Frage als Textstelle im Kontext (SQuAD-Stil, auch \"keine Antwort\") mit BERT, RoBERTa, DeBERTa, XLM-R & Co."
+    },
+    "reranker": {
+      "name": "Reranker (Cross-Encoder)",
+      "description": "Trainiert Cross-Encoder, die Anfrage und Passage gemeinsam lesen und ihre Relevanz bewerten (ms-marco-MiniLM, BGE-Reranker oder jeder BERT-Encoder). Zweite Stufe für Suche und RAG."
     },
     "sentence-embedding": {
       "description": "Trainiert Embedding-Modelle für semantische Suche, RAG und Ähnlichkeit (all-MiniLM, BGE, E5, GTE, MPNet oder jeder BERT-Encoder)."
