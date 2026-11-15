@@ -428,7 +428,13 @@ pub fn build_request(is_canvas: bool, input_kind: &str, modality: &str, input: &
             Err(_) => serde_json::json!({ "input": text, "input_type": "text" }),
         }
     } else {
-        serde_json::json!({ "text": text })
+        // Frage-Antwort und Reranker nehmen die Frage aus dem zweiten Feld
+        // (Live-Test 15.11.: sie ging verloren, "Frage fehlt").
+        let q = input.question.as_deref().map(str::trim).filter(|q| !q.is_empty());
+        match q {
+            Some(q) if modality == "qa" || modality == "reranker" => serde_json::json!({ "text": text, "question": q }),
+            _ => serde_json::json!({ "text": text }),
+        }
     };
 
     // Chat-Verlauf und Streaming versteht nur der LLM-Zweig des HF-Servers;
@@ -547,6 +553,13 @@ mod tests {
 
     #[test]
     fn bildmodell_verlangt_datei() {
+        // Frage-Antwort und Reranker: Frage aus dem zweiten Feld geht mit.
+        let mut q = input("Mainz liegt am Rhein.");
+        q.question = Some(" Wo liegt Mainz? ".into());
+        let r = build_request(false, "text", "qa", &q).unwrap();
+        assert_eq!(r["question"], "Wo liegt Mainz?");
+        assert_eq!(r["text"], "Mainz liegt am Rhein.");
+        assert!(build_request(false, "text", "text", &q).unwrap().get("question").is_none());
         assert!(build_request(false, "image", "image", &input("x")).is_err());
         let mut i = input("");
         i.file_path = Some("/tmp/a.png".into());
