@@ -620,7 +620,7 @@
       },
       "yolo": {
         "name": "YOLO Object Detection (Ultralytics)",
-        "description": "Trains YOLOv5/v8/v9/YOLO11 models for bounding box detection. Requires Ultralytics."
+        "description": "Trains YOLOv5/v8/v9/v10, YOLO11/12/26 and RT-DETR models for bounding box detection. Requires Ultralytics."
       },
       "llm": {
         "name": "LLM fine-tuning (LoRA / QLoRA)",
@@ -835,14 +835,15 @@
       "requestSentTitle": "Thanks — noted",
       "requestSentDetail": "Your plugin request reached the FrameTrain team as a support ticket. You'll find the reply under Settings > Support.",
       "pluginDesc": {
-        "yolo": "Object detection with bounding boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Also for trained best.pt files.",
+        "yolo": "Object detection with bounding boxes (YOLOv5/v8/v9/v10, YOLO11/12/26, RT-DETR, Ultralytics). Also for trained best.pt files.",
         "semantic-segmentation": "Semantic segmentation with image + mask (SegFormer, UperNet, DPT, BEiT, MobileViT). Metrics: mIoU, pixel accuracy.",
         "hf-image-classification": "Image classification with a downloaded HuggingFace vision model (ViT, DeiT, ConvNeXt, Swin, ResNet).",
         "image-classification": "Image classification via transfer learning on torchvision backbones (ResNet, EfficientNet, MobileNet). One folder per class.",
         "audio-classification": "Audio classification with Wav2Vec2, HuBERT, WavLM, AST or the Whisper encoder.",
         "seq2seq": "Text to text: summarization, translation, rewriting (T5, BART, Pegasus, Marian).",
         "xlm-roberta": "Text classification with XLM-RoBERTa base/large, multilingual.",
-        "hf-encoder": "Text classification with HuggingFace encoders (BERT, DistilBERT, RoBERTa, DeBERTa and relatives)."
+        "hf-encoder": "Text classification with HuggingFace encoders (BERT, DistilBERT, RoBERTa, DeBERTa and relatives).",
+        "hf-object-detection": "Object detection with a downloaded HuggingFace detector (DETR, RT-DETR, YOLOS); data as YOLO labels or COCO JSON."
       },
       "changeTitle": "Change plugin",
       "changeDescription": "For \"{name}\" (detected type: {type}) you can set the plugin yourself — for instance when automatic detection gets it wrong.",
@@ -3457,7 +3458,8 @@
         "textToImage": "No image files found – text-to-image LoRA needs images (with .txt captions, metadata.jsonl or an instance prompt).",
         "visionLanguage": "No image files found – a VLM learns from image + question + answer.",
         "llm": "No training data found – expected .jsonl/.json/.csv/.parquet (chat, question-answer) or .txt/.md (plain text).",
-        "segmentation": "No mask files (.png) found – semantic segmentation needs one mask per image (images/ + masks/)."
+        "segmentation": "No mask files (.png) found – semantic segmentation needs one mask per image (images/ + masks/).",
+        "hfDetect": "No YOLO labels (.txt) and no COCO JSON file found – without boxes a detector learns nothing."
       },
       "cannotTrain": "{model} cannot train this dataset.",
       "typeUnknown": "Dataset type not detected – {model} may not be able to read it.",
@@ -3693,7 +3695,8 @@
         "clip_score": "CLIP score",
         "clip_score_base": "CLIP score (base model)",
         "clip_score_delta": "CLIP score LoRA vs. base"
-      }
+      },
+      "detectedObjects": "Detected objects"
     },
     "confusion": {
       "title": "Confusion matrix",
@@ -4702,7 +4705,7 @@
     },
     "yolo": {
       "name": "YOLO Object Detection",
-      "description": "YOLOv5 / YOLOv8 / YOLOv9 / YOLO11 – detection, segmentation, keypoints, rotated boxes and classification via Ultralytics"
+      "description": "YOLOv5 / v8 / v9 / v10, YOLO11 / 12 / 26, RT-DETR – detection, segmentation, keypoints, rotated boxes and classification via Ultralytics"
     },
     "xlm-roberta": {
       "name": "XLM-RoBERTa",
@@ -4711,6 +4714,10 @@
     "vision-language": {
       "name": "Vision-Language (VLM, LoRA)",
       "description": "Image + question → answer, captioning, text recognition: SmolVLM, Qwen2-VL, PaliGemma, LLaVA, BLIP."
+    },
+    "hf-object-detection": {
+      "name": "Object Detection (HuggingFace)",
+      "description": "Trains HuggingFace detectors (DETR, Conditional/Deformable DETR, RT-DETR, YOLOS) on YOLO or COCO boxes."
     }
   },
   "engineErrors": {

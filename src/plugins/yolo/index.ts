@@ -7,7 +7,7 @@ import YOLOTestPlugin from './TestPlugin';
 const yoloPlugin: ModelPlugin = {
   id: 'yolo',
   name: 'YOLO Object Detection',
-  description: 'YOLOv5 / YOLOv8 / YOLOv9 / YOLO11 – Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation via Ultralytics',
+  description: 'YOLOv5 / v8 / v9 / v10, YOLO11 / 12 / 26, RT-DETR – Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation via Ultralytics',
   // Ein task_type fuer alle YOLO-Aufgaben: das Python-Plugin liest die
   // Aufgabe aus den Gewichten (yolo11n-seg.pt, -pose, -obb, -cls).
   taskType: 'detect',

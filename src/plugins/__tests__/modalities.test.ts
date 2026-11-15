@@ -87,8 +87,9 @@ describe('Bildmodelle: Klassifikatoren ja, alles andere nein', () => {
   ])('%s -> hf-image-classification', (id) => expect(pluginOf(id)).toBe('hf-image-classification'));
 
   it('DETR ist Objekterkennung, kein Klassifikator', () => {
-    // Matchte frueher auf den Teilstring "resnet".
-    expect(pluginOf('facebook/detr-resnet-50')).toBeNull();
+    // Matchte frueher auf den Teilstring "resnet"; seit dem Plugin
+    // hf-object-detection wird DETR trainiert statt abgelehnt.
+    expect(pluginOf('facebook/detr-resnet-50')).toBe('hf-object-detection');
   });
 
   it('CLIP ist multimodal, kein Klassifikator', () => {
@@ -125,7 +126,6 @@ describe('Ablehnungen nennen den Grund, auch ohne config.json', () => {
 
   it.each([
     ['microsoft/speecht5_tts', /Text-to-Speech|Sprachsynthese/i],
-    ['facebook/detr-resnet-50', /Objekterkennung/i],
     ['openai/clip-vit-base-patch32', /multimodal/i],
   ])('%s', (id, muster) => expect(reasonOf(id)).toMatch(muster));
 

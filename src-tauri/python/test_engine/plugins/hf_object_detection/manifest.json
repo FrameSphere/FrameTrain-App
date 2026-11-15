@@ -1,0 +1,10 @@
+{
+  "task_type": "hf_object_detection",
+  "name": "Object Detection (HuggingFace)",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Plugin",
+  "description": "Prueft HuggingFace-Detektoren (DETR, RT-DETR, YOLOS ...) auf dem Test-Split: mAP50, mAP50-95, Precision, Recall und Boxen je Bild.",
+  "input_type": "image",
+  "output_format": "detection"
+}

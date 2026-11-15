@@ -18,6 +18,32 @@ import type { BrokenPackage } from '../components/usePackageInstall';
 
 interface TopPred { label?: string; score?: number }
 
+/** Box eines Detektors in Bildpixeln (wie das YOLO-Test-Plugin sie liefert). */
+export interface DetectionBox { label: string; confidence: number; x1: number; y1: number; x2: number; y2: number }
+
+/** Boxen ueber dem Eingabebild; Koordinaten in Pixeln des Originalbilds. */
+function BoxImage({ src, boxes, width, height }: { src: string; boxes: DetectionBox[]; width: number; height: number }) {
+  const px = Math.max(width, height) / 320;
+  return (
+    <div className="relative inline-block max-w-full">
+      <img src={src} alt="" className="max-h-80 w-auto rounded-lg border border-white/10 block" />
+      {width > 0 && height > 0 && (
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none">
+          {boxes.map((b, i) => (
+            <g key={i}>
+              <rect x={b.x1} y={b.y1} width={b.x2 - b.x1} height={b.y2 - b.y1} fill="none" stroke="#f97316" strokeWidth={1.5 * px} />
+              <text x={b.x1 + 3 * px} y={Math.max(b.y1 - 4 * px, 11 * px)} fill="#fdba74" fontSize={11 * px} fontWeight={600}
+                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.7)', strokeWidth: 3 * px }}>
+                {b.label} {(b.confidence * 100).toFixed(0)}%
+              </text>
+            </g>
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 /**
  * Aufgabenspezifische Kennzahlen aus dem Testlauf (data.metrics). Fehlerraten
  * und ROUGE sind Anteile (als % gezeigt), BLEU steht schon auf 0..100.
@@ -70,7 +96,7 @@ interface GenericTestPanelProps extends TestPluginProps {
    * 'image': das Ergebnis ist der Pfad eines erzeugten Bildes (Text-to-Image)
    * und wird als Bild angezeigt statt als Text.
    */
-  resultKind?: 'text' | 'image';
+  resultKind?: 'text' | 'image' | 'boxes';
   /**
    * Optionales zweites Feld (z. B. die Frage zum Bild bei VLMs). Der Wert geht
    * als plugin_config[configKey] an die Engine — single_input bleibt der Pfad,
@@ -100,7 +126,10 @@ export default function GenericTestPanel({
   const [input, setInput] = useState('');
   const [secondary, setSecondary] = useState('');
   const [singleBusy, setSingleBusy] = useState(false);
-  const [single, setSingle] = useState<{ predicted: string; confidence?: number; top: TopPred[]; ms: number } | null>(null);
+  const [single, setSingle] = useState<{
+    predicted: string; confidence?: number; top: TopPred[]; ms: number;
+    boxes?: DetectionBox[]; image?: { path: string; width: number; height: number };
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [broken, setBroken] = useState<BrokenPackage | null>(null);
 
@@ -138,7 +167,10 @@ export default function GenericTestPanel({
           ...(secondaryInput && secondary.trim() ? { [secondaryInput.configKey]: secondary.trim() } : {}),
         },
       });
-      const off = await listen<{ test_id: string; data?: { predicted_output?: string; confidence?: number; top_predictions?: TopPred[]; inference_time?: number } }>(
+      const off = await listen<{ test_id: string; data?: {
+        predicted_output?: string; confidence?: number; top_predictions?: TopPred[]; inference_time?: number;
+        detections?: DetectionBox[]; image_path?: string; image_width?: number; image_height?: number;
+      } }>(
         'test-single-complete', e => {
           if (e.payload.test_id !== testId) return;
           const d = e.payload.data;
@@ -147,6 +179,8 @@ export default function GenericTestPanel({
             confidence: d?.confidence ?? undefined,
             top: d?.top_predictions ?? [],
             ms: Math.round((d?.inference_time ?? 0) * 1000),
+            boxes: Array.isArray(d?.detections) ? d.detections : undefined,
+            image: d?.image_path ? { path: d.image_path, width: d.image_width ?? 0, height: d.image_height ?? 0 } : undefined,
           });
           setStatus(null);
           setSingleBusy(false);
@@ -273,7 +307,13 @@ export default function GenericTestPanel({
         {single && (
           <div className="rounded-xl bg-slate-900/60 border border-white/10 p-4 space-y-2">
             <p className="text-gray-400 text-[11px]">{resultLabel}</p>
-            {resultKind === 'image' && single.predicted !== '—' ? (
+            {resultKind === 'boxes' && single.image ? (
+              <div className="space-y-1">
+                <BoxImage src={convertFileSrc(single.image.path)} boxes={single.boxes ?? []}
+                  width={single.image.width} height={single.image.height} />
+                <p className="text-white text-sm break-words">{single.predicted}</p>
+              </div>
+            ) : resultKind === 'image' && single.predicted !== '—' ? (
               <div className="space-y-1">
                 <img
                   src={convertFileSrc(single.predicted)}

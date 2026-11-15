@@ -17,6 +17,7 @@ import { SEQ2SEQ_MODEL_TYPES } from '../seq2seq/detect';
 import { HF_IMAGE_MODEL_TYPES } from '../hf-image-classification/detect';
 import { HF_ENCODER_SUPPORTED_MODEL_TYPES } from '../hf-encoder/detect';
 import { YOLO_MODEL_TYPES } from '../yolo/detect';
+import { HF_DETECTION_MODEL_TYPES } from '../hf-object-detection/detect';
 import { detectXLMRoberta } from '../xlm-roberta/detect';
 import { PLUGINS } from '../registry';
 
@@ -47,6 +48,7 @@ describe('Frontend-Architekturlisten == Train-Manifeste', () => {
     ['hf_image_classification', 'HF_IMAGE_MODEL_TYPES', HF_IMAGE_MODEL_TYPES],
     ['seq_classification', 'HF_ENCODER_SUPPORTED_MODEL_TYPES', HF_ENCODER_SUPPORTED_MODEL_TYPES],
     ['detect', 'YOLO_MODEL_TYPES', YOLO_MODEL_TYPES],
+    ['hf_object_detection', 'HF_DETECTION_MODEL_TYPES', HF_DETECTION_MODEL_TYPES],
   ];
   // Bewusste Ausnahmen: das Python-Plugin kann es, die Namensliste im Frontend
   // leitet es aber woanders hin. whisper trainiert audio_classification als

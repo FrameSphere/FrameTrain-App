@@ -620,7 +620,7 @@
       },
       "yolo": {
         "name": "YOLO Objekterkennung (Ultralytics)",
-        "description": "Trainiert YOLOv5/v8/v9/YOLO11-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
+        "description": "Trainiert YOLOv5/v8/v9/v10-, YOLO11/12/26- und RT-DETR-Modelle für Bounding-Box-Erkennung. Benötigt Ultralytics."
       },
       "llm": {
         "name": "LLM Fine-Tuning (LoRA / QLoRA)",
@@ -835,14 +835,15 @@
       "requestSentTitle": "Danke — notiert",
       "requestSentDetail": "Dein Plugin-Wunsch ist als Support-Ticket beim FrameTrain-Team angekommen. Die Antwort findest du in den Einstellungen unter Support.",
       "pluginDesc": {
-        "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/YOLO11, Ultralytics). Auch für trainierte best.pt-Dateien.",
+        "yolo": "Objekterkennung mit Bounding Boxes (YOLOv5/v8/v9/v10, YOLO11/12/26, RT-DETR, Ultralytics). Auch für trainierte best.pt-Dateien.",
         "semantic-segmentation": "Semantische Segmentierung mit Bild + Maske (SegFormer, UperNet, DPT, BEiT, MobileViT). Kennzahlen: mIoU, Pixel-Accuracy.",
         "hf-image-classification": "Bildklassifikation mit einem heruntergeladenen HuggingFace-Bildmodell (ViT, DeiT, ConvNeXt, Swin, ResNet).",
         "image-classification": "Bildklassifikation per Transfer Learning auf torchvision-Backbones (ResNet, EfficientNet, MobileNet). Ein Ordner pro Klasse.",
         "audio-classification": "Audioklassifikation mit Wav2Vec2, HuBERT, WavLM, AST oder dem Whisper-Encoder.",
         "seq2seq": "Text zu Text: Zusammenfassung, Übersetzung, Umformulierung (T5, BART, Pegasus, Marian).",
         "xlm-roberta": "Textklassifikation mit XLM-RoBERTa base/large, mehrsprachig.",
-        "hf-encoder": "Textklassifikation mit HuggingFace-Encodern (BERT, DistilBERT, RoBERTa, DeBERTa und verwandte)."
+        "hf-encoder": "Textklassifikation mit HuggingFace-Encodern (BERT, DistilBERT, RoBERTa, DeBERTa und verwandte).",
+        "hf-object-detection": "Objekterkennung mit einem heruntergeladenen HuggingFace-Detektor (DETR, RT-DETR, YOLOS); Daten als YOLO-Labels oder COCO-JSON."
       },
       "changeTitle": "Plugin ändern",
       "changeDescription": "Für \"{name}\" (erkannter Typ: {type}) kannst du das Plugin selbst festlegen — etwa wenn die automatische Erkennung danebenliegt.",
@@ -3453,7 +3454,8 @@
         "textToImage": "Keine Bilddateien gefunden – für Text-to-Image-LoRA braucht es Bilder (mit .txt-Captions, metadata.jsonl oder Instanz-Prompt).",
         "visionLanguage": "Keine Bilddateien gefunden – ein VLM lernt aus Bild + Frage + Antwort.",
         "llm": "Keine Trainingsdaten gefunden – erwartet werden .jsonl/.json/.csv/.parquet (Chat, Frage-Antwort) oder .txt/.md (Fließtext).",
-        "segmentation": "Keine Maskendateien (.png) gefunden – semantische Segmentierung braucht zu jedem Bild eine Maske (images/ + masks/)."
+        "segmentation": "Keine Maskendateien (.png) gefunden – semantische Segmentierung braucht zu jedem Bild eine Maske (images/ + masks/).",
+        "hfDetect": "Keine YOLO-Labels (.txt) und keine COCO-JSON-Datei gefunden – ohne Boxen lernt ein Detektor nichts."
       },
       "cannotTrain": "{model} kann dieses Dataset nicht trainieren.",
       "typeUnknown": "Dataset-Typ nicht erkannt – {model} kann es eventuell nicht lesen.",
@@ -3689,7 +3691,8 @@
         "clip_score": "CLIP-Score",
         "clip_score_base": "CLIP-Score (Basismodell)",
         "clip_score_delta": "CLIP-Score LoRA gegenüber Basis"
-      }
+      },
+      "detectedObjects": "Erkannte Objekte"
     },
     "confusion": {
       "title": "Konfusionsmatrix",
@@ -4686,13 +4689,17 @@
       "description": "Spracherkennung: Whisper/Moonshine als Seq2Seq, wav2vec2/HuBERT/WavLM mit CTC. Misst WER und CER."
     },
     "yolo": {
-      "description": "YOLOv5 / YOLOv8 / YOLOv9 / YOLO11 – Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation via Ultralytics"
+      "description": "YOLOv5 / v8 / v9 / v10, YOLO11 / 12 / 26, RT-DETR – Erkennung, Segmentierung, Keypoints, gedrehte Boxen und Klassifikation via Ultralytics"
     },
     "xlm-roberta": {
       "description": "Keyword-Erkennung und Textklassifikation mit XLM-RoBERTa base/large, mehrsprachig."
     },
     "vision-language": {
       "description": "Bild + Frage → Antwort, Bildbeschreibung, Texterkennung: SmolVLM, Qwen2-VL, PaliGemma, LLaVA, BLIP."
+    },
+    "hf-object-detection": {
+      "name": "Objekterkennung (HuggingFace)",
+      "description": "Trainiert HuggingFace-Detektoren (DETR, Conditional/Deformable DETR, RT-DETR, YOLOS) auf YOLO- oder COCO-Boxen."
     }
   },
   "engineErrors": {

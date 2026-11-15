@@ -30,6 +30,9 @@ function requiredFiles(taskType: string): { exts: string[]; missing: string } | 
   switch (taskType) {
     case 'detect':
       return { exts: ['.txt', '.xml'], missing: 'detect' };
+    case 'hf_object_detection':
+      // YOLO-Labels oder COCO-JSON
+      return { exts: ['.txt', '.json'], missing: 'hfDetect' };
     case 'hf_image_classification':
     case 'image_classification':
       return { exts: [...IMAGE_EXTS, '.parquet'], missing: 'image' };
