@@ -11,8 +11,10 @@ import {
   Microscope,
   Network,
   Server,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
+import type { TeamInfo } from '../team/team';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
 import BrandMark from './ui/BrandMark';
@@ -21,6 +23,9 @@ interface SidebarProps {
   currentView: string;
   onViewChange: (view: any) => void;
   userEmail: string;
+  /** Business: Name der Person auf dem Platz, sonst null */
+  memberName?: string | null;
+  team?: TeamInfo | null;
   onLogout: () => void;
 }
 
@@ -29,7 +34,7 @@ export const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.
 
 interface NavItem { id: string; label: string; icon: LucideIcon; beta?: boolean }
 
-export default function Sidebar({ currentView, onViewChange, userEmail, onLogout }: SidebarProps) {
+export default function Sidebar({ currentView, onViewChange, userEmail, memberName = null, team = null, onLogout }: SidebarProps) {
   const { t } = useLanguage();
   const { state: training } = useTrainingContext();
 
@@ -62,8 +67,11 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
       { id: 'synapse',  label: t('sidebar.nav.synapse'),     icon: Network, beta: true },
     ] },
   ];
+  // Business: Team-Seite nur fuer Konten in einem Team, oben bei Start/Modellen
+  if (team) groups[0].items.push({ id: 'team', label: t('sidebar.nav.team'), icon: Users });
 
-  const initial = (userEmail.trim()[0] ?? '?').toUpperCase();
+  const accountName = memberName || userEmail;
+  const initial = (accountName.trim()[0] ?? '?').toUpperCase();
 
   return (
     <aside className="ft-glass ft-sidebar flex-none w-[244px] rounded-[12px] flex flex-col min-h-0">
@@ -115,7 +123,10 @@ export default function Sidebar({ currentView, onViewChange, userEmail, onLogout
         >
           {initial}
         </span>
-        <span className="flex-1 min-w-0 truncate text-[12.5px] text-gray-400" title={userEmail}>{userEmail}</span>
+        <span className="flex-1 min-w-0 leading-tight" title={team ? `${accountName} · ${team.name}` : userEmail}>
+          <span className="block truncate text-[12.5px] text-gray-400">{accountName}</span>
+          {team && <span className="block truncate text-[11px] text-gray-500">{team.name}</span>}
+        </span>
         <button
           onClick={() => onViewChange('settings')}
           aria-label={t('sidebar.settings')}

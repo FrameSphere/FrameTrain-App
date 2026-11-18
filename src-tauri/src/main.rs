@@ -33,6 +33,7 @@ mod python_env;
 mod secret_store;
 mod ai_proxy;
 mod mcp;
+mod team_sync;
 
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -222,6 +223,14 @@ fn main() {
             auth::set_diagnostics_consent,
             auth::accept_terms,
             auth::sync_support_tickets,
+            auth::team_set_seat_password,
+            auth::team_overview,
+            team_sync::team_storage_get,
+            team_sync::team_storage_set,
+            team_sync::team_storage_put,
+            team_sync::team_storage_resolve,
+            team_sync::team_storage_remove,
+            team_sync::team_request,
             dataset_fetch::hf_dataset_files,
             dataset_fetch::fetch_dataset,
             dataset_fetch::inspect_dataset,

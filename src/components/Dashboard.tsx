@@ -18,6 +18,8 @@ import TrainingDashboard from './TrainingDashboard';
 import SynapseBuilder from './synapse/SynapseBuilder';
 import StudioPanel from './studio/StudioPanel';
 import HostingPanel from './hosting/HostingPanel';
+import TeamPanel from './team/TeamPanel';
+import type { TeamInfo } from '../team/team';
 import { listen } from '@tauri-apps/api/event';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTrainingContext } from '../contexts/TrainingContext';
@@ -27,6 +29,8 @@ interface UserData {
   password: string;
   userId: string;
   email: string;
+  team: TeamInfo | null;
+  memberName: string | null;
 }
 
 interface DashboardProps {
@@ -34,7 +38,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio' | 'hosting';
+type View = 'home' | 'models' | 'training' | 'dataset' | 'analysis' | 'tests' | 'versions' | 'settings' | 'laboratory' | 'synapse' | 'studio' | 'hosting' | 'team';
 
 export default function Dashboard({ userData, onLogout }: DashboardProps) {
   const [currentView, setCurrentView] = useState<View>('home');
@@ -84,6 +88,10 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         return <Settings userData={userData} onLogout={onLogout} />;
       case 'synapse':
         return <SynapseBuilder userId={userData.userId} />;
+      case 'team':
+        return userData.team
+          ? <TeamPanel apiKey={userData.apiKey} team={userData.team} />
+          : <HomePanel userId={userData.userId} />;
       default:
         return <HomePanel userId={userData.userId} />;
     }
@@ -135,6 +143,8 @@ export default function Dashboard({ userData, onLogout }: DashboardProps) {
         currentView={currentView === 'studio' ? 'dataset' : currentView} 
         onViewChange={setCurrentView}
         userEmail={userData.email}
+        memberName={userData.memberName}
+        team={userData.team}
         onLogout={onLogout}
       />
       

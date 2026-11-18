@@ -1,22 +1,91 @@
-import { useState } from 'react';
-import { Key, Lock, AlertCircle, Eye, EyeOff, ExternalLink, Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { Key, Lock, AlertCircle, Eye, EyeOff, ExternalLink, Info, MonitorSmartphone, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import BrandMark from './ui/BrandMark';
 import { useLanguage } from '../contexts/LanguageContext';
+import { parseSeatLoginError, type SeatEndReason, type SeatLoginError } from '../team/team';
 
 interface LoginProps {
-  onLogin: (apiKey: string, password: string) => Promise<void>;
+  onLogin: (apiKey: string, password: string, takeover?: boolean) => Promise<void>;
+  /** Business: Anmeldung beim Start brauchte eine Entscheidung (gespeicherte Daten) */
+  resume?: { apiKey: string; password: string; error: string } | null;
+  /** Business: warum die App zuletzt abgemeldet hat */
+  notice?: SeatEndReason | null;
 }
 
-export default function Login({ onLogin }: LoginProps) {
+const SEAT_PASSWORD_MIN = 8;
+
+export default function Login({ onLogin, resume = null, notice = null }: LoginProps) {
   const [apiKey, setApiKey] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [needsDesktopPassword, setNeedsDesktopPassword] = useState(false);
+  // Business-Platz: Passwort festlegen oder Platz von anderem Geraet uebernehmen
+  const [seat, setSeat] = useState<SeatLoginError | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const { currentTheme } = useTheme();
   const { t } = useLanguage();
+
+  // Anmeldung beim Start: Daten und Rueckfrage uebernehmen
+  useEffect(() => {
+    if (!resume) return;
+    setApiKey(resume.apiKey);
+    setPassword(resume.password);
+    setSeat(parseSeatLoginError(resume.error));
+  }, [resume]);
+
+  const fail = (err: unknown) => {
+    const seatError = parseSeatLoginError(err);
+    if (seatError && seatError.code !== 'seat_locked') {
+      setSeat(seatError);
+      return;
+    }
+    const msg: string = seatError?.message || (err as any)?.message || (typeof err === 'string' ? err : '') || t('login.errors.loginFailed');
+    if (msg.includes('Kein Desktop-Passwort') || msg.includes('desktop-password') || msg.includes('needsDesktopPassword')) {
+      setNeedsDesktopPassword(true);
+    }
+    setError(msg);
+  };
+
+  const takeOver = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await onLogin(apiKey, password, true);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setSeatPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (newPassword.length < SEAT_PASSWORD_MIN) {
+      setError(t('login.seat.passwordShort', { min: SEAT_PASSWORD_MIN }));
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      setError(t('login.seat.passwordMismatch'));
+      return;
+    }
+    setLoading(true);
+    try {
+      await invoke('team_set_seat_password', { apiKey, password: newPassword });
+      setPassword(newPassword);
+      setSeat(null);
+      await onLogin(apiKey, newPassword);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +96,8 @@ export default function Login({ onLogin }: LoginProps) {
       setError(t('login.errors.apiKeyInvalid'));
       return;
     }
-    if (!password || password.length < 6) {
+    // Business-Platz ohne Passwort: das Feld darf leer bleiben, der Server fragt nach
+    if (password && password.length < 6) {
       setError(t('login.errors.passwordShort'));
       return;
     }
@@ -35,12 +105,8 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
     try {
       await onLogin(apiKey, password);
-    } catch (err: any) {
-      const msg: string = err?.message || err || t('login.errors.loginFailed');
-      if (msg.includes('Kein Desktop-Passwort') || msg.includes('desktop-password') || msg.includes('needsDesktopPassword')) {
-        setNeedsDesktopPassword(true);
-      }
-      setError(msg);
+    } catch (err) {
+      fail(err);
     } finally {
       setLoading(false);
     }
@@ -64,7 +130,88 @@ export default function Login({ onLogin }: LoginProps) {
           <p className="text-gray-400">{t('login.tagline')}</p>
         </div>
 
-        {/* Login Card */}
+        {/* Business: Hinweis, warum zuletzt abgemeldet wurde */}
+        {notice && !seat && (
+          <div role="status" className="mb-4 flex items-start gap-2 p-3 rounded-lg border border-white/10 bg-white/5">
+            <Users className="w-4 h-4 text-gray-300 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-gray-300">{t(`login.seat.ended.${notice}`)}</p>
+          </div>
+        )}
+
+        {seat?.code === 'seat_password' ? (
+          /* Business-Platz, erste Anmeldung: eigenes Passwort festlegen */
+          <form onSubmit={setSeatPassword} className="ft-sheet rounded-[20px] p-8">
+            <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-white mb-1">{t('login.seat.passwordTitle')}</h2>
+            <p className="text-sm text-gray-400 mb-6">
+              {seat.teamName
+                ? t('login.seat.passwordIntroTeam', { name: seat.seatName ?? '', team: seat.teamName })
+                : t('login.seat.passwordIntro')}
+            </p>
+            <div className="mb-4">
+              <label htmlFor="seatPassword" className="block text-sm font-medium text-gray-300 mb-2">{t('login.seat.newPassword')}</label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
+                <input id="seatPassword" type={showPassword ? 'text' : 'password'} value={newPassword} autoFocus
+                  onChange={e => { setNewPassword(e.target.value); setError(''); }} disabled={loading} autoComplete="new-password"
+                  className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed" style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties} />
+              </div>
+              <p className="mt-1 text-xs text-gray-400">{t('login.seat.passwordHint', { min: SEAT_PASSWORD_MIN })}</p>
+            </div>
+            <div className="mb-5">
+              <label htmlFor="seatPasswordConfirm" className="block text-sm font-medium text-gray-300 mb-2">{t('login.seat.confirmPassword')}</label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
+                <input id="seatPasswordConfirm" type={showPassword ? 'text' : 'password'} value={newPasswordConfirm}
+                  onChange={e => { setNewPasswordConfirm(e.target.value); setError(''); }} disabled={loading} autoComplete="new-password"
+                  className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed" style={{ '--tw-ring-color': currentTheme.colors.primary } as React.CSSProperties} />
+              </div>
+              <label className="mt-2 flex items-center gap-2 text-xs text-gray-400 cursor-pointer w-fit">
+                <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
+                {t('login.seat.showPassword')}
+              </label>
+            </div>
+            {error && (
+              <div className="mb-4 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-300">{error}</p>
+              </div>
+            )}
+            <button type="submit" disabled={loading || !newPassword}
+              className={`w-full py-3 px-4 bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold rounded-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}>
+              {loading ? <><Spinner />{t('login.submitting')}</> : t('login.seat.passwordSubmit')}
+            </button>
+            <button type="button" onClick={() => { setSeat(null); setError(''); }} disabled={loading}
+              className="w-full mt-3 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              {t('login.seat.back')}
+            </button>
+          </form>
+        ) : seat?.code === 'seat_in_use' ? (
+          /* Business-Platz laeuft auf einem anderen Geraet: hier weiterarbeiten? */
+          <div className="ft-sheet rounded-[20px] p-8">
+            <div className="flex items-center gap-2 mb-1">
+              <MonitorSmartphone className="w-5 h-5 text-gray-300" />
+              <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-white">{t('login.seat.inUseTitle')}</h2>
+            </div>
+            <p className="text-sm text-gray-400 mb-6">
+              {t('login.seat.inUseText', { device: seat.deviceName || t('login.seat.otherDevice') })}
+            </p>
+            {error && (
+              <div className="mb-4 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-300">{error}</p>
+              </div>
+            )}
+            <button type="button" onClick={() => { void takeOver(); }} disabled={loading}
+              className={`w-full py-3 px-4 bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold rounded-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}>
+              {loading ? <><Spinner />{t('login.submitting')}</> : t('login.seat.takeover')}
+            </button>
+            <button type="button" onClick={() => { setSeat(null); setError(''); }} disabled={loading}
+              className="w-full mt-3 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              {t('login.seat.back')}
+            </button>
+          </div>
+        ) : (
+        /* Login Card */
         <form onSubmit={handleSubmit} className="ft-sheet rounded-[20px] p-8">
           <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-white mb-6">{t('login.title')}</h2>
 
@@ -156,12 +303,13 @@ export default function Login({ onLogin }: LoginProps) {
 
           <button
             type="submit"
-            disabled={loading || !apiKey || !password}
+            disabled={loading || !apiKey}
             className={`w-full py-3 px-4 bg-gradient-to-r ${currentTheme.colors.gradient} text-white font-semibold rounded-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
           >
             {loading ? <><Spinner />{t('login.submitting')}</> : t('login.submit')}
           </button>
         </form>
+        )}
 
         {/* Dauerhafter Weg zum Dashboard. Bisher tauchte der Link nur bei
             einer bestimmten Fehlermeldung auf — wer noch gar keinen API-Key

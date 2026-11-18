@@ -10,7 +10,8 @@
       "laboratory": "Labor",
       "synapse": "Synapse Builder",
       "versions": "Versionen",
-      "hosting": "Hosting"
+      "hosting": "Hosting",
+      "team": "Team"
     },
     "groups": {
       "prepare": "Vorbereiten",
@@ -243,7 +244,29 @@
       "loginFailed": "Anmeldung fehlgeschlagen"
     },
     "noKeyLink": "Noch kein API-Key? Im Dashboard erstellen",
-    "noKeyHint": "Dort legst du auch das Passwort fest, mit dem du dich hier anmeldest."
+    "noKeyHint": "Dort legst du auch das Passwort fest, mit dem du dich hier anmeldest.",
+    "seat": {
+      "passwordTitle": "Passwort festlegen",
+      "passwordIntro": "Dein Schlüssel gehört zu einem Team-Platz. Lege jetzt dein eigenes Passwort fest – damit meldest du dich künftig an.",
+      "passwordIntroTeam": "Hallo {name}, dein Platz im Team {team} ist bereit. Lege jetzt dein eigenes Passwort fest – damit meldest du dich künftig an.",
+      "newPassword": "Neues Passwort",
+      "confirmPassword": "Passwort wiederholen",
+      "passwordHint": "Mindestens {min} Zeichen.",
+      "showPassword": "Passwort anzeigen",
+      "passwordShort": "Das Passwort braucht mindestens {min} Zeichen.",
+      "passwordMismatch": "Die Passwörter stimmen nicht überein.",
+      "passwordSubmit": "Passwort festlegen und anmelden",
+      "back": "Zurück",
+      "inUseTitle": "Platz wird woanders genutzt",
+      "inUseText": "Dein Platz ist gerade auf „{device}“ angemeldet. Ein Platz läuft immer nur auf einem Gerät. Wenn du hier weiterarbeitest, wird das andere Gerät abgemeldet.",
+      "otherDevice": "einem anderen Gerät",
+      "takeover": "Auf diesem Gerät weiterarbeiten",
+      "ended": {
+        "other_device": "Du wurdest abgemeldet, weil dein Platz jetzt auf einem anderen Gerät genutzt wird.",
+        "locked": "Du wurdest abgemeldet, weil der Team-Inhaber deinen Platz gesperrt hat.",
+        "no_access": "Du wurdest abgemeldet, weil der Zugang deines Teams abgelaufen ist. Wende dich an den Team-Inhaber."
+      }
+    }
   },
   "settings": {
     "title": "Einstellungen",
@@ -5079,6 +5102,105 @@
         "revoke": "Widerrufen",
         "revokeFor": "{tool} für {client} widerrufen"
       }
+    }
+  },
+  "team": {
+    "title": "Team",
+    "seatCount": "{used} von {limit} Personen",
+    "refresh": "Aktualisieren",
+    "manage": "Plätze verwalten",
+    "roleIntro": {
+      "admin": "Alle hier nutzen dieselbe Lizenz, jede Person mit eigenem Schlüssel und Passwort. Plätze vergibst und sperrst du im Dashboard.",
+      "member": "Alle hier nutzen dieselbe Lizenz, jede Person mit eigenem Schlüssel und Passwort. Plätze verwaltet der Team-Inhaber.",
+      "viewer": "Du bist mit Leserechten im Team. Plätze verwaltet der Team-Inhaber."
+    },
+    "membersLabel": "Mitglieder",
+    "loading": "Team wird geladen …",
+    "loadError": "Das Team konnte nicht geladen werden. Prüfe deine Internetverbindung.",
+    "freeSeats": "{n} Platz frei",
+    "addInDashboard": "Im Dashboard vergeben",
+    "you": "du",
+    "owner": "Inhaber",
+    "locked": "Gesperrt",
+    "roles": {
+      "admin": "Admin",
+      "member": "Mitglied",
+      "viewer": "Nur lesen"
+    },
+    "seen": {
+      "never": "noch nie angemeldet",
+      "now": "gerade aktiv",
+      "minutes": "vor {n} Min.",
+      "hours": "vor {n} Std.",
+      "days": "vor {n} Tagen",
+      "yesterday": "gestern"
+    },
+    "tabs": {
+      "catalog": "Katalog",
+      "members": "Mitglieder",
+      "activity": "Aktivität"
+    },
+    "storage": {
+      "label": "Team-Speicher:",
+      "none": "auf diesem Gerät nicht eingerichtet",
+      "connected": "verbunden",
+      "offline": "nicht erreichbar",
+      "foreign": "gehört zu einem anderen Team",
+      "choose": "Ordner wählen",
+      "change": "Ändern",
+      "disconnect": "Trennen",
+      "pickTitle": "Ordner des Team-Speichers wählen (NAS, Netzlaufwerk, Cloud-Ordner)",
+      "explain": "Modelle und Datasets liegen im Speicher eurer Firma, nicht bei FrameTrain. Jedes Gerät wählt den Ordner einmal selbst.",
+      "hint": "Ablage im Team: {hint}",
+      "hintEdit": "Hinweis für alle ändern",
+      "hintPlaceholder": "z. B. \\\\nas01\\FrameTrain oder „OneDrive › KI-Team“",
+      "hintSave": "Speichern",
+      "hintCancel": "Abbrechen"
+    },
+    "catalog": {
+      "title": "Team-Katalog",
+      "share": "Teilen",
+      "autoShare": "Fertige Trainingsläufe automatisch im Team zeigen (nur Kennzahlen, keine Dateien)",
+      "emptyTitle": "Noch nichts geteilt",
+      "emptyText": "Teile eine Modellversion oder ein Dataset – alle im Team sehen es dann hier.",
+      "kindDataset": "Dataset",
+      "epochs": "{n} Epochen",
+      "files": "{n} Dateien",
+      "auto": "automatisch",
+      "fetch": "Holen",
+      "fetched": "übernommen",
+      "store": "In Team-Speicher",
+      "filesAt": "Dateien bei {name}",
+      "needStorage": "Richte zuerst den Team-Speicher ein.",
+      "targetModel": "Zu welchem Modell?",
+      "needModel": "Lege zuerst ein Modell an, zu dem das Dataset gehören soll.",
+      "remove": "Aus dem Team nehmen",
+      "confirmRemove": "„{title}“ aus dem Team-Katalog nehmen?",
+      "confirmRemoveFiles": "„{title}“ aus dem Team-Katalog nehmen und die Dateien im Team-Speicher löschen? Bereits geholte Kopien bleiben erhalten.",
+      "loadError": "Der Team-Katalog konnte nicht geladen werden.",
+      "genericError": "Das hat nicht geklappt."
+    },
+    "share": {
+      "title": "Im Team teilen",
+      "close": "Schließen",
+      "versions": "Modellversionen",
+      "datasets": "Datasets",
+      "base": "Basismodell",
+      "empty": "Du hast noch keine Modelle oder Datasets.",
+      "withFiles": "Dateien in den Team-Speicher legen",
+      "withFilesHint": "Die anderen können es dann holen. Zu kopieren: {size}.",
+      "noStorage": "Ohne Team-Speicher werden nur Name und Kennzahlen geteilt.",
+      "cancel": "Abbrechen",
+      "submit": "{n} teilen"
+    },
+    "activity": {
+      "empty": "Noch keine Aktivität im Team.",
+      "justNow": "gerade eben",
+      "shared": "{name} hat „{title}“ geteilt",
+      "updated": "{name} hat „{title}“ aktualisiert",
+      "stored": "{name} hat „{title}“ in den Team-Speicher gelegt",
+      "removed": "{name} hat „{title}“ aus dem Team genommen",
+      "fetched": "{name} hat „{title}“ geholt"
     }
   }
 }

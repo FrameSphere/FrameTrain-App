@@ -61,6 +61,16 @@ pub mod endpoints {
     pub fn support_tickets() -> String {
         format!("{}/desktop/support-tickets", get_api_base_url())
     }
+
+    /// Business: Team, Mitglieder und Lebenszeichen des Platzes
+    pub fn team() -> String {
+        format!("{}/desktop/team", get_api_base_url())
+    }
+
+    /// Business: Passwort bei der ersten Anmeldung auf einem Platz festlegen
+    pub fn team_seat_password() -> String {
+        format!("{}/desktop/team/seat-password", get_api_base_url())
+    }
 }
 
 #[cfg(test)]

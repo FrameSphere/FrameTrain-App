@@ -10,7 +10,8 @@
       "laboratory": "Laboratory",
       "synapse": "Synapse Builder",
       "versions": "Versions",
-      "hosting": "Hosting"
+      "hosting": "Hosting",
+      "team": "Team"
     },
     "groups": {
       "prepare": "Prepare",
@@ -243,7 +244,29 @@
       "loginFailed": "Sign in failed"
     },
     "noKeyLink": "No API key yet? Create one in the dashboard",
-    "noKeyHint": "That is also where you set the password you sign in with here."
+    "noKeyHint": "That is also where you set the password you sign in with here.",
+    "seat": {
+      "passwordTitle": "Set your password",
+      "passwordIntro": "Your key belongs to a team seat. Set your own password now – you will use it to sign in from now on.",
+      "passwordIntroTeam": "Hi {name}, your seat in team {team} is ready. Set your own password now – you will use it to sign in from now on.",
+      "newPassword": "New password",
+      "confirmPassword": "Repeat password",
+      "passwordHint": "At least {min} characters.",
+      "showPassword": "Show password",
+      "passwordShort": "The password needs at least {min} characters.",
+      "passwordMismatch": "The passwords don't match.",
+      "passwordSubmit": "Set password and sign in",
+      "back": "Back",
+      "inUseTitle": "Seat in use elsewhere",
+      "inUseText": "Your seat is currently signed in on “{device}”. A seat runs on one device at a time. If you continue here, the other device is signed out.",
+      "otherDevice": "another device",
+      "takeover": "Continue on this device",
+      "ended": {
+        "other_device": "You were signed out because your seat is now in use on another device.",
+        "locked": "You were signed out because the team owner locked your seat.",
+        "no_access": "You were signed out because your team's access has expired. Contact the team owner."
+      }
+    }
   },
   "settings": {
     "title": "Settings",
@@ -5097,6 +5120,105 @@
         "revoke": "Revoke",
         "revokeFor": "Revoke {tool} for {client}"
       }
+    }
+  },
+  "team": {
+    "title": "Team",
+    "seatCount": "{used} of {limit} people",
+    "refresh": "Refresh",
+    "manage": "Manage seats",
+    "roleIntro": {
+      "admin": "Everyone here shares one license, each person with their own key and password. You add and lock seats in the dashboard.",
+      "member": "Everyone here shares one license, each person with their own key and password. The team owner manages seats.",
+      "viewer": "You are in this team with read access. The team owner manages seats."
+    },
+    "membersLabel": "Members",
+    "loading": "Loading team …",
+    "loadError": "Couldn't load the team. Check your internet connection.",
+    "freeSeats": "{n} seat free",
+    "addInDashboard": "Add in dashboard",
+    "you": "you",
+    "owner": "owner",
+    "locked": "Locked",
+    "roles": {
+      "admin": "Admin",
+      "member": "Member",
+      "viewer": "Read only"
+    },
+    "seen": {
+      "never": "never signed in",
+      "now": "active now",
+      "minutes": "{n} min ago",
+      "hours": "{n} h ago",
+      "days": "{n} days ago",
+      "yesterday": "yesterday"
+    },
+    "tabs": {
+      "catalog": "Catalog",
+      "members": "Members",
+      "activity": "Activity"
+    },
+    "storage": {
+      "label": "Team storage:",
+      "none": "not set up on this device",
+      "connected": "connected",
+      "offline": "not reachable",
+      "foreign": "belongs to another team",
+      "choose": "Choose folder",
+      "change": "Change",
+      "disconnect": "Disconnect",
+      "pickTitle": "Choose the team storage folder (NAS, network drive, cloud folder)",
+      "explain": "Models and datasets live in your company storage, not at FrameTrain. Each device picks the folder once.",
+      "hint": "Team location: {hint}",
+      "hintEdit": "Edit note for everyone",
+      "hintPlaceholder": "e.g. \\\\nas01\\FrameTrain or “OneDrive › AI team”",
+      "hintSave": "Save",
+      "hintCancel": "Cancel"
+    },
+    "catalog": {
+      "title": "Team catalog",
+      "share": "Share",
+      "autoShare": "Show finished training runs in the team automatically (metrics only, no files)",
+      "emptyTitle": "Nothing shared yet",
+      "emptyText": "Share a model version or dataset – everyone in the team will see it here.",
+      "kindDataset": "Dataset",
+      "epochs": "{n} epochs",
+      "files": "{n} files",
+      "auto": "automatic",
+      "fetch": "Fetch",
+      "fetched": "added",
+      "store": "To team storage",
+      "filesAt": "Files with {name}",
+      "needStorage": "Set up team storage first.",
+      "targetModel": "For which model?",
+      "needModel": "Add a model first that the dataset should belong to.",
+      "remove": "Remove from team",
+      "confirmRemove": "Remove “{title}” from the team catalog?",
+      "confirmRemoveFiles": "Remove “{title}” from the team catalog and delete its files in team storage? Copies already fetched stay.",
+      "loadError": "Couldn't load the team catalog.",
+      "genericError": "That didn't work."
+    },
+    "share": {
+      "title": "Share with team",
+      "close": "Close",
+      "versions": "Model versions",
+      "datasets": "Datasets",
+      "base": "Base model",
+      "empty": "You don't have any models or datasets yet.",
+      "withFiles": "Put files into team storage",
+      "withFilesHint": "Others can then fetch it. To copy: {size}.",
+      "noStorage": "Without team storage only name and metrics are shared.",
+      "cancel": "Cancel",
+      "submit": "Share {n}"
+    },
+    "activity": {
+      "empty": "No team activity yet.",
+      "justNow": "just now",
+      "shared": "{name} shared “{title}”",
+      "updated": "{name} updated “{title}”",
+      "stored": "{name} put “{title}” into team storage",
+      "removed": "{name} removed “{title}” from the team",
+      "fetched": "{name} fetched “{title}”"
     }
   }
 }

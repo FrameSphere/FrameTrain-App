@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import Dashboard from './components/Dashboard';
@@ -19,6 +19,8 @@ import { applyAccountDiagnosticsConsent } from './utils/diagnosticsConsent';
 import ApprovalDialog from './mcp/ApprovalDialog';
 import { setMcpUser, startMcpBridge } from './mcp/bridge';
 import { setCurrentUser } from './utils/currentUser';
+import { runAutoShare } from './team/teamApi';
+import { isTeamInfo, parseSeatLoginError, seatEnded, TEAM_HEARTBEAT_MS, type SeatEndReason, type TeamInfo, type TeamStatus } from './team/team';
 import './App.css';
 
 interface ApiKeyValidation {
@@ -36,6 +38,9 @@ interface LoginSession {
   /** Frueher zugestimmt, aber einer aelteren Fassung */
   terms_updated: boolean | null;
   diagnostics_consent: boolean | null;
+  /** Business: Team und Rolle; null = Einzelkonto */
+  team?: unknown;
+  member_name?: string | null;
 }
 
 /** Einwilligungen aus dem Konto uebernehmen; Rueckgabe: ob und warum der AGB-Dialog kommt. */
@@ -50,6 +55,22 @@ interface UserData {
   password: string;
   userId: string;
   email: string;
+  /** Business: Team und eigene Rolle; null = Einzelkonto */
+  team: TeamInfo | null;
+  /** Name der Person auf einem Business-Platz (sonst null) */
+  memberName: string | null;
+}
+
+/** Login-Antwort in die Nutzerdaten der App uebernehmen. */
+function toUserData(apiKey: string, password: string, session: LoginSession): UserData {
+  return {
+    apiKey,
+    password,
+    userId: session.user_id,
+    email: session.email,
+    team: isTeamInfo(session.team) ? session.team : null,
+    memberName: session.member_name ?? null,
+  };
 }
 
 // ============ Close Confirmation Dialog ============
@@ -137,6 +158,11 @@ function App() {
   const [userData, setUserData] = useState<UserData | null>(null);
   // Konto ohne Zustimmung zur aktuellen Fassung von AGB & Datenschutz
   const [needsTerms, setNeedsTerms] = useState<null | 'missing' | 'updated'>(null);
+  // Business: Anmeldung beim Start brauchte eine Entscheidung (Platz uebernehmen,
+  // Passwort festlegen) — die Anmeldemaske zeigt sie mit den gespeicherten Daten.
+  const [resumeLogin, setResumeLogin] = useState<{ apiKey: string; password: string; error: string } | null>(null);
+  // Business: warum die App abgemeldet hat (Platz gesperrt, anderes Geraet ...)
+  const [logoutNotice, setLogoutNotice] = useState<SeatEndReason | null>(null);
   const [isFirstLaunch, setIsFirstLaunch] = useState<boolean | null>(null);
   const [showFirstLaunch, setShowFirstLaunch] = useState(false);
 
@@ -243,18 +269,25 @@ function App() {
       
       if (config.api_key && config.password) {
         // Login user and establish session
-        const session = await invoke<LoginSession>('login_user', {
-          apiKey: config.api_key,
-          password: config.password
-        });
+        let session: LoginSession;
+        try {
+          session = await invoke<LoginSession>('login_user', {
+            apiKey: config.api_key,
+            password: config.password,
+          });
+        } catch (error) {
+          // Business-Platz auf einem anderen Geraet / Passwort fehlt: nicht
+          // vergessen, sondern in der Anmeldemaske nachfragen.
+          const seat = parseSeatLoginError(error);
+          if (seat && seat.code !== 'seat_locked') {
+            setResumeLogin({ apiKey: config.api_key, password: config.password, error: String(error) });
+            return;
+          }
+          throw error;
+        }
         
         setCurrentUser(session.user_id);
-        setUserData({
-          apiKey: config.api_key,
-          password: config.password,
-          userId: session.user_id,
-          email: session.email
-        });
+        setUserData(toUserData(config.api_key, config.password, session));
         setNeedsTerms(await applyAccountConsents(config.api_key, session));
         setIsAuthenticated(true);
         
@@ -273,12 +306,13 @@ function App() {
     }
   };
 
-  const handleLogin = async (apiKey: string, password: string) => {
+  const handleLogin = async (apiKey: string, password: string, takeover = false) => {
     try {
       // Login user and set current user in database
       const session = await invoke<LoginSession>('login_user', {
         apiKey,
-        password
+        password,
+        takeover,
       });
 
       // Speichere Credentials
@@ -293,12 +327,9 @@ function App() {
       });
 
       setCurrentUser(session.user_id);
-      setUserData({
-        apiKey,
-        password,
-        userId: session.user_id,
-        email: session.email
-      });
+      setUserData(toUserData(apiKey, password, session));
+      setResumeLogin(null);
+      setLogoutNotice(null);
       setNeedsTerms(await applyAccountConsents(apiKey, session));
       setIsAuthenticated(true);
       
@@ -308,6 +339,33 @@ function App() {
       throw error;
     }
   };
+
+  // Business: Lebenszeichen des Platzes. Gesperrt, auf einem anderen Geraet
+  // uebernommen oder Zugang abgelaufen -> abmelden und Grund zeigen.
+  // Netzwerkfehler zaehlen nicht (offline weiterarbeiten bleibt moeglich).
+  const teamId = userData?.team?.id ?? null;
+  const teamRef = useRef<TeamInfo | null>(null);
+  teamRef.current = userData?.team ?? null;
+  const heartbeatKey = userData?.apiKey ?? null;
+  useEffect(() => {
+    if (!isAuthenticated || !teamId || !heartbeatKey) return;
+    let stopped = false;
+    const beat = async () => {
+      const status = await invoke<TeamStatus>('team_overview', { apiKey: heartbeatKey }).catch(() => null);
+      // Stufe 2: fertige Trainingslaeufe nebenbei im Team-Katalog zeigen
+      if (status?.active && teamRef.current) void runAutoShare(heartbeatKey, teamRef.current).catch(() => 0);
+      const reason = seatEnded(status);
+      if (reason && !stopped) {
+        stopped = true;
+        await handleLogout();
+        setLogoutNotice(reason);
+      }
+    };
+    const id = window.setInterval(() => { void beat(); }, TEAM_HEARTBEAT_MS);
+    return () => { stopped = true; window.clearInterval(id); };
+    // handleLogout ist pro Render neu, haengt aber nur an userData
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, teamId, heartbeatKey]);
 
   const handleLogout = async () => {
     try {
@@ -397,7 +455,11 @@ function App() {
                   )}
                 </>
               ) : (
-                <Login onLogin={handleLogin} />
+                <Login
+                  onLogin={handleLogin}
+                  resume={resumeLogin}
+                  notice={logoutNotice}
+                />
               )}
             </div>
 

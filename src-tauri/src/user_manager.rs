@@ -12,6 +12,8 @@ pub struct UserSession {
     pub terms_accepted: Option<bool>,
     pub terms_updated: Option<bool>,
     pub diagnostics_consent: Option<bool>,
+    pub team: Option<serde_json::Value>,
+    pub member_name: Option<String>,
 }
 
 /// Login Command - Sets the current user in the database
@@ -20,9 +22,10 @@ pub async fn login_user(
     state: State<'_, AppState>,
     api_key: String,
     password: String,
+    takeover: Option<bool>,
 ) -> Result<UserSession, String> {
     // 1. Validate credentials against Supabase
-    let validation = validate_credentials(api_key.clone(), password).await?;
+    let validation = validate_credentials(api_key.clone(), password, takeover).await?;
     
     if !validation.is_valid {
         return Err("Ungültige Anmeldedaten".to_string());
@@ -45,6 +48,8 @@ pub async fn login_user(
         terms_accepted: validation.terms_accepted,
         terms_updated: validation.terms_updated,
         diagnostics_consent: validation.diagnostics_consent,
+        team: validation.team,
+        member_name: validation.member_name,
     };
     
     println!("✅ User logged in: {}", session.email);
