@@ -20,7 +20,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward, Plus, AlertTriangle,
   ChevronDown, Mic, Square, AudioLines, Tag, ListEnd, Trash2, Play, Globe, Wand2,
-  ShieldQuestion, CopyCheck, Film, Image as ImageIcon, Scissors,
+  ShieldQuestion, CopyCheck, Film, Image as ImageIcon, Scissors, Database,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -38,6 +38,14 @@ import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextM
 import { useEscape } from './useEscape';
 import { toWav16kMono, brauchtWav } from './wavEncode';
 import FetchDialog from './FetchDialog';
+import StudioVideo from './StudioVideo';
+import EditableName from './EditableName';
+import AuswahlLeiste from './AuswahlLeiste';
+import DatasetImportDialog from './DatasetImportDialog';
+import type { DatasetImportReport } from './datasetImport';
+import { filterListe, herkunftText, useMcpAbgleich, useMehrfachauswahl, useSichtbareAuswahl } from './werkbankHilfen';
+import { SPLITS } from './splits';
+export { SPLITS };
 import ModelRunDialog from './ModelRunDialog';
 import NearDupDialog from './NearDupDialog';
 import ExportReportView from './ExportReportView';
@@ -93,7 +101,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   const [stats, setStats]     = useState<StudioStats | null>(null);
   const [newClass, setNewClass] = useState('');
   const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
-  const [dialog, setDialog] = useState<null | 'export' | 'fetch' | 'suggest' | 'review' | 'neardup' | 'videos'>(null);
+  const [dialog, setDialog] = useState<null | 'export' | 'fetch' | 'suggest' | 'review' | 'neardup' | 'videos' | 'dataset'>(null);
   const [transcript, setTranscript] = useState('');
   const [showKeys, setShowKeys] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -467,6 +475,63 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medium, project.id]);
 
+  /** Neu einlesen, ohne die Stelle zu verlieren. */
+  const neuEinlesen = async () => {
+    const id = samples[index]?.id;
+    const page = await invoke<SamplePage>('studio_list_samples', {
+      projectId: project.id, status: filter, offset: 0, limit: Math.min(500, Math.max(PAGE, samples.length)),
+    });
+    setTotal(page.total);
+    setSamples(page.items);
+    const wo = id ? page.items.findIndex(s => s.id === id) : -1;
+    setIndex(i => (wo >= 0 ? wo : Math.min(i, Math.max(0, page.items.length - 1))));
+    setLadeStand(n => n + 1);
+    await loadStats();
+  };
+
+  // ── Umbenennen ──────────────────────────────────────────────────────────
+  const umbenennen = async (name: string) => {
+    try {
+      onProjectChanged(await invoke<StudioProject>('studio_update_project', { projectId: project.id, name }));
+      return true;
+    } catch (err: unknown) {
+      error(t('studio.notifications.saveError'), String(err));
+      return false;
+    }
+  };
+  /** Die Labels ziehen im Backend mit; die Liste hier wird neu gelesen. */
+  const klasseUmbenennen = async (i: number, name: string) => {
+    try {
+      onProjectChanged(await invoke<StudioProject>('studio_update_project', {
+        projectId: project.id, classes: classes.map((k, j) => (j === i ? name : k)),
+      }));
+      await neuEinlesen();
+      return true;
+    } catch (err: unknown) {
+      error(t('studio.notifications.saveError'), String(err));
+      return false;
+    }
+  };
+
+  // ── Mehrfachauswahl und Abgleich mit KI-Clients ─────────────────────────
+  const auswahl = useMehrfachauswahl(samples);
+  const listenRef = useSichtbareAuswahl(index, samples.length);
+  const auffrischen = async () => {
+    const list = await invoke<StudioProject[]>('studio_list_projects').catch(() => [] as StudioProject[]);
+    const fresh = Array.isArray(list) ? list.find(x => x.id === project.id) : undefined;
+    if (fresh) onProjectChanged(fresh);
+    await neuEinlesen();
+  };
+  useMcpAbgleich(project.id, auffrischen, () => recording
+    || (transkript && !!current && transcript !== (current.ann.target ?? '')));
+
+  const nachDatasetImport = async (report: DatasetImportReport) => {
+    success(t('studio.import.doneTitle'), t('studio.import.doneDetail', {
+      added: report.added, duplicates: report.duplicates, labels: report.with_labels ?? 0, unreadable: report.unreadable,
+    }));
+    await auffrischen();
+  };
+
   const addClass = async () => {
     const name = newClass.trim();
     if (!name) return;
@@ -627,8 +692,8 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
     }
     if (medium === 'video') {
       return (
-        <video key={s.id} ref={el => { player.current = el; }} controls src={src}
-          className="max-h-[420px] w-full rounded-lg bg-black"
+        <StudioVideo key={s.id} projectId={project.id} sample={s} src={src}
+          videoRef={el => { player.current = el; }}
           onLoadedMetadata={e => { if (s.meta.start != null) e.currentTarget.currentTime = s.meta.start; }}
           onTimeUpdate={e => {
             // Ein Abschnitt endet an seinem Ende — sonst hoert man das naechste mit.
@@ -664,6 +729,9 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
               : t('studio.audio.importFolder')}
           </button>
         )}
+        <button onClick={() => setDialog('dataset')} className={knopf}>
+          <Database className="w-4 h-4" /> {t('studio.datasetImport.button')}
+        </button>
         <button onClick={() => setDialog('fetch')} className={knopf}>
           <Globe className="w-4 h-4" /> {t('studio.media.getFromWeb')}
         </button>
@@ -680,7 +748,10 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="min-w-0">
-          <h2 className="text-white font-semibold text-lg truncate" title={project.name}>{project.name}</h2>
+          <h2 className="text-white font-semibold text-lg min-w-0 flex">
+            <EditableName value={project.name} label={t('studio.rename.project')} onSave={umbenennen}
+              className="truncate" inputClassName="text-lg w-72" />
+          </h2>
           <p className="text-gray-500 text-xs">
             {t('studio.workbench.subtitle', { confirmed, total: stats?.total ?? total })}
           </p>
@@ -710,28 +781,30 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
           <div className="flex items-center justify-center gap-2 flex-wrap">{sourceButtons(true)}</div>
         </div>
       ) : (
+        <>
+        <AuswahlLeiste projectId={project.id} ids={auswahl.ids} klassen={transkript ? [] : classes}
+          onLeeren={auswahl.leeren} onFertig={neuEinlesen} />
         <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
           <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden flex flex-col">
             <div className="grid grid-cols-3 text-[11px] border-b border-white/10">
-              {([['all', t('studio.filter.all')], ['open', t('studio.filter.open')],
-                 ['confirmed', t('studio.filter.confirmed')], ['uncertain', t('studio.filter.uncertain')],
-                 ...(transkript ? [] : [['doubt', stats?.doubts ? `${t('studio.filter.doubt')} ${stats.doubts}` : t('studio.filter.doubt')]])] as [SampleFilter, string][])
-                .map(([val, label]) => (
-                  <button key={val} onClick={() => setFilter(val)} title={val === 'uncertain' ? t('studio.filter.uncertainHint') : undefined}
-                    className={`py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
-                    {label}
-                  </button>
-                ))}
+              {filterListe(!transkript).map(val => (
+                <button key={val} onClick={() => setFilter(val)}
+                  title={val === 'uncertain' ? t('studio.filter.uncertainHint') : undefined}
+                  className={`py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                  {val === 'doubt' && stats?.doubts ? `${t('studio.filter.doubt')} ${stats.doubts}` : t(`studio.filter.${val}`)}
+                </button>
+              ))}
             </div>
-            <div className="overflow-y-auto max-h-[520px]">
+            <div ref={listenRef} className="overflow-y-auto max-h-[520px]">
               {samples.length === 0 && (
                 <p className="text-gray-600 text-[11px] text-center py-4 px-3">
                   {t(filter === 'uncertain' ? 'studio.filter.uncertainEmpty' : 'studio.filter.empty')}
                 </p>
               )}
               {samples.map((s, i) => (
-                <button key={s.id} onClick={() => goTo(i)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all ${i === index ? 'bg-white/10' : 'hover:bg-white/[0.04]'}`}>
+                <button key={s.id} data-index={i} onClick={e => { if (!auswahl.klick(e, i, index)) goTo(i); }}
+                  title={t('studio.selection.hint')} aria-pressed={auswahl.ids.has(s.id) || undefined}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all ${auswahl.ids.has(s.id) ? 'bg-sky-400/15' : i === index ? 'bg-white/10' : 'hover:bg-white/[0.04]'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s.status)}`} />
                   <span className="text-gray-300 text-xs truncate flex-1">{listenText(s)}</span>
                   {s.status === 'suggested' && s.ann.confidence != null && (
@@ -751,20 +824,6 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
             {current && (
               <>
                 <div className="rounded-lg bg-black/30 border border-white/10 p-4">{mitte(current)}</div>
-
-                {current.status === 'suggested' && (
-                  <p className="text-amber-300/80 text-xs">
-                    {t('studio.media.suggestedHint', {
-                      conf: current.ann.confidence != null ? `${Math.round(current.ann.confidence * 100)} %` : '—',
-                    })}
-                  </p>
-                )}
-                {current.doubt && (
-                  <p className="text-orange-300/90 text-xs flex items-start gap-1.5">
-                    <ShieldQuestion className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    {t('studio.media.doubt', { model: current.doubt.missing.join(', '), label: current.doubt.extra.join(', ') })}
-                  </p>
-                )}
 
                 {transkript ? (
                   <label className="block">
@@ -800,7 +859,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
                   {abschnittText(current.meta.start, current.meta.end, language) && (
                     <span className="tabular-nums">{abschnittText(current.meta.start, current.meta.end, language)}</span>
                   )}
-                  <span className="truncate max-w-xs">{current.src.kind === 'record' ? t('studio.workbench.recording') : current.src.origin?.split(/[\\/]/).pop()}</span>
+                  <span className="truncate max-w-xs">{herkunftText(current.src, t)}</span>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -823,6 +882,20 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
                   <span className="ml-auto" />
                   <RemoveSampleButton key={current.id} onRemove={() => void removeCurrent()} armSignal={entfernenScharf} />
                 </div>
+
+                {current.status === 'suggested' && (
+                  <p className="text-amber-300/80 text-xs">
+                    {t('studio.media.suggestedHint', {
+                      conf: current.ann.confidence != null ? `${Math.round(current.ann.confidence * 100)} %` : '—',
+                    })}
+                  </p>
+                )}
+                {current.doubt && (
+                  <p className="text-orange-300/90 text-xs flex items-start gap-1.5">
+                    <ShieldQuestion className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    {t('studio.media.doubt', { model: current.doubt.missing.join(', '), label: current.doubt.extra.join(', ') })}
+                  </p>
+                )}
               </>
             )}
           </div>
@@ -839,7 +912,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
                       {i < 9 && (
                         <span className="text-[10px] font-mono text-gray-500 border border-white/10 rounded px-1">{i + 1}</span>
                       )}
-                      <span className="text-gray-200 text-xs truncate">{name}</span>
+                      <EditableName value={name} label={t('studio.rename.class', { name })} onSave={n => klasseUmbenennen(i, n)} />
                       <span className="ml-auto text-gray-500 text-xs tabular-nums"
                         title={t('studio.workbench.classCountHint')}>
                         {stats?.per_class?.[i] ?? 0}
@@ -873,6 +946,12 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
                     <span className="text-gray-200 tabular-nums">{val}</span>
                   </div>
                 ))}
+                {(stats.incomplete ?? 0) > 0 && (
+                  <p className="text-amber-300/80 text-[11px] pt-1 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                    {t('studio.stats.incomplete', { count: stats.incomplete ?? 0 })}
+                  </p>
+                )}
                 <div className="flex gap-1.5 pt-1.5">
                   {!transkript && (
                     <button onClick={() => setDialog('review')} disabled={confirmed === 0}
@@ -914,8 +993,13 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
             </div>
           </div>
         </div>
+        </>
       )}
 
+      {dialog === 'dataset' && (
+        <DatasetImportDialog project={project} onClose={() => setDialog(null)}
+          onDone={r => { setDialog(null); void nachDatasetImport(r); }} />
+      )}
       {dialog === 'export' && (
         <MediaExportDialog project={project} medium={medium} confirmed={confirmed}
           suggested={stats?.suggested ?? 0} perClass={stats?.per_class ?? []}
@@ -1014,13 +1098,6 @@ function VideoImportDialog({ onClose, onRun }: {
 
 // ── Export ────────────────────────────────────────────────────────────────
 
-/** Voreinstellungen fuer die Aufteilung: [train, val] — der Rest ist test. */
-export const SPLITS: { key: string; train: number; val: number }[] = [
-  { key: 'none', train: 0, val: 0 },
-  { key: '8020', train: 0.8, val: 0.2 },
-  { key: '701515', train: 0.7, val: 0.15 },
-];
-
 function MediaExportDialog({ project, medium, confirmed, suggested, perClass, onClose, onDone }: {
   project: StudioProject; medium: Medium; confirmed: number; suggested: number; perClass: number[];
   onClose: () => void; onDone: () => void;
@@ -1031,7 +1108,7 @@ function MediaExportDialog({ project, medium, confirmed, suggested, perClass, on
   const [name, setName] = useState(project.name);
   const [busy, setBusy] = useState(false);
   const transkript = project.task === 'transcript';
-  const [split, setSplit] = useState(transkript ? 'none' : '8020');
+  const [split, setSplit] = useState('8020');
   const [mitVorschlaegen, setMitVorschlaegen] = useState(false);
   const [ergebnis, setErgebnis] = useState<ExportResult | null>(null);
 
@@ -1093,20 +1170,18 @@ function MediaExportDialog({ project, medium, confirmed, suggested, perClass, on
               <StudioModelSelect project={project} models={models} value={modelId} onChange={setModelId} />
             </label>
 
-            {!transkript && (
-              <div>
-                <span className="text-gray-400 text-xs">{t('studio.export.splitLabel')}</span>
-                <div className="mt-1.5 flex gap-1.5">
-                  {SPLITS.map(s => (
-                    <button key={s.key} onClick={() => setSplit(s.key)}
-                      className={`px-2.5 py-1.5 rounded-lg border text-xs transition-all ${split === s.key ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}>
-                      {t(`studio.media.split.${s.key}`)}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-gray-600 text-[11px] mt-1.5">{t('studio.media.splitGroupNote')}</p>
+            <div>
+              <span className="text-gray-400 text-xs">{t('studio.export.splitLabel')}</span>
+              <div className="mt-1.5 flex gap-1.5">
+                {SPLITS.map(s => (
+                  <button key={s.key} onClick={() => setSplit(s.key)}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs transition-all ${split === s.key ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}>
+                    {t(`studio.media.split.${s.key}`)}
+                  </button>
+                ))}
               </div>
-            )}
+              <p className="text-gray-600 text-[11px] mt-1.5">{t('studio.media.splitGroupNote')}</p>
+            </div>
 
             {suggested > 0 && (
               <label className="flex items-start gap-2 cursor-pointer">

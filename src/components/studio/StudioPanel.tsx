@@ -284,7 +284,7 @@ function CreateDialog({ onClose, onCreated }: {
   const [busy, setBusy] = useState(false);
 
   const create = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || busy) return;
     setBusy(true);
     try {
       const project = await invoke<StudioProject>('studio_create_project', {
@@ -347,6 +347,7 @@ function CreateDialog({ onClose, onCreated }: {
         <label className="block">
           <span className="text-gray-400 text-xs">{t('studio.create.nameLabel')}</span>
           <input value={name} onChange={e => setName(e.target.value)} autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void create(); } }}
             placeholder={t('studio.create.namePlaceholder')}
             className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-white/25" />
         </label>

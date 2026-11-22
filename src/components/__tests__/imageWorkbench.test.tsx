@@ -19,7 +19,7 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }));
 
-import ImageWorkbench, { hatBilder } from '../studio/ImageWorkbench';
+import ImageWorkbench from '../studio/ImageWorkbench';
 
 const PROJECT = {
   id: 'sp_test', name: 'Ski-Lift', modality: 'image', task: 'bbox',
@@ -57,16 +57,6 @@ function mockBackend(samples = SAMPLES) {
 }
 
 const props = { project: PROJECT, onBack: vi.fn(), onProjectChanged: vi.fn() };
-
-describe('hatBilder', () => {
-  it('laesst Textsammlungen aus der Bildquelle heraus', () => {
-    expect(hatBilder({ extensions: ['.csv', '.md'] })).toBe(false);
-    expect(hatBilder({ extensions: ['.PNG', '.txt'] })).toBe(true);
-    expect(hatBilder({ extensions: ['jpg'] })).toBe(true);
-    // Unbekannt heisst nicht "keine Bilder".
-    expect(hatBilder({ extensions: [] })).toBe(true);
-  });
-});
 
 // Mehr Zeit je Test: gespeichert wird verzoegert (400 ms), und auf einer
 // ausgelasteten Maschine reichten die 5 Sekunden Standard knapp nicht.

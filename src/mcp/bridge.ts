@@ -10,7 +10,7 @@
 import { friendlyClientName } from './clientNames';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { needsApproval, recordDecision, requestApprovalViaDialog, hasApprovalHost } from './approval';
+import { needsApproval, recordDecision, requestApprovalViaDialog, hasApprovalHost, takeLateDecision } from './approval';
 import { registry as defaultRegistry, type ToolRegistry } from './registry';
 import { startRunLog } from './runLog';
 import type {
@@ -20,8 +20,8 @@ import { errorText, fail, ToolArgError, ToolFailure, validateArgs } from './util
 import { announceChange } from './tools/common';
 
 export const MSG_DENIED = 'The user declined this action in FrameTrain.';
-export const MSG_APPROVAL_TIMEOUT = 'Keine Freigabe in FrameTrain erteilt (Zeitlimit). Bitte den Nutzer bitten, die App zu oeffnen und erneut versuchen.';
-export const MSG_NOT_SIGNED_IN = 'In FrameTrain ist niemand angemeldet. Bitte den Nutzer bitten, sich in der App anzumelden.';
+export const MSG_APPROVAL_TIMEOUT = 'The user has not answered the approval dialog in FrameTrain yet. The dialog stays open for 5 minutes. Ask the user to answer it in the FrameTrain window, then repeat exactly the same call; it will run without asking again.';
+export const MSG_NOT_SIGNED_IN = 'Nobody is signed in to FrameTrain. Ask the user to sign in to the app.';
 /**
  * Rust wartet 60 s auf die Antwort (inklusive Freigabe-Dialog). Die Bridge
  * antwortet spaetestens nach diesem Budget; ein laengeres Werkzeug laeuft in
@@ -85,8 +85,10 @@ export async function executeCall(call: McpCallEvent, deps: BridgeDeps): Promise
   if (tool.requiresUser && !userId) return fail(MSG_NOT_SIGNED_IN);
 
   if (needsApproval(tool, call.client)) {
-    deps.focusApp?.();
-    const decision = await deps.requestApproval({ tool, args: call.args, client: call.client, source: call.source });
+    // Der Nutzer hat den Dialog nach dem letzten Zeitlimit noch beantwortet.
+    const late = takeLateDecision(tool, call.args, call.client, call.source);
+    if (!late) deps.focusApp?.();
+    const decision = late ?? await deps.requestApproval({ tool, args: call.args, client: call.client, source: call.source });
     if (decision === 'timeout') return fail(MSG_APPROVAL_TIMEOUT);
     if (decision === 'deny') return fail(MSG_DENIED);
     recordDecision(tool, call.client, decision);

@@ -6,6 +6,7 @@
 // erlauben" — widerrufbar im Einstellungs-Tab "KI-Verbindungen".
 
 import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Bot, Check, Globe, Laptop, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react';
 import ModalPortal from '../components/ui/ModalPortal';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -33,6 +34,37 @@ export function toolTitle(t: (key: string) => string, name: string, fallback: st
   return translated && translated !== key ? translated : fallback;
 }
 
+type Named = { id: string; name?: string; versions?: { id: string; name?: string; version_number?: number }[] };
+
+/** Zu welchen Argumenten es einen Namen gibt und woher er kommt. */
+const NAME_SOURCES: Record<string, string> = {
+  project_id: 'studio_list_projects', dataset_id: 'list_all_datasets',
+  model_id: 'list_models', version_id: 'list_models_with_version_tree',
+};
+
+/** "sp_2655068c13ac" sagt niemandem etwas — vor allem nicht beim Loeschen. */
+export async function resolveArgNames(args: Record<string, unknown>): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(Object.entries(NAME_SOURCES).map(async ([key, cmd]) => {
+    const id = args[key];
+    if (typeof id !== 'string' || !id) return;
+    try {
+      const list = await invoke<Named[]>(cmd);
+      if (!Array.isArray(list)) return;
+      if (key === 'version_id') {
+        for (const m of list) {
+          const v = m.versions?.find((x) => x.id === id);
+          if (v) out[key] = `${m.name ?? ''} · v${v.version_number ?? '?'}`;
+        }
+      } else {
+        const hit = list.find((x) => x.id === id);
+        if (hit?.name) out[key] = hit.name;
+      }
+    } catch { /* dann bleibt die ID allein stehen */ }
+  }));
+  return out;
+}
+
 export default function ApprovalDialog() {
   const { t } = useLanguage();
   const [request, setRequest] = useState<ApprovalRequest | null>(null);
@@ -42,6 +74,17 @@ export default function ApprovalDialog() {
     setRequest(head);
     setWaiting(count);
   }), []);
+
+  const [names, setNames] = useState<Record<string, string>>({});
+  const requestId = request?.id;
+  useEffect(() => {
+    setNames({});
+    if (!request) return;
+    let active = true;
+    void resolveArgNames(request.args).then((n) => { if (active) setNames(n); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestId]);
 
   useEffect(() => {
     if (!request) return;
@@ -97,7 +140,10 @@ export default function ApprovalDialog() {
                   {rows.map((r) => (
                     <div key={r.key} className="grid grid-cols-[minmax(0,9rem)_1fr] gap-2">
                       <dt className="text-gray-400 truncate" title={r.key}>{r.key}</dt>
-                      <dd className="text-gray-100 font-mono text-xs whitespace-pre-wrap break-all">{r.value}</dd>
+                      <dd className="text-gray-100 font-mono text-xs whitespace-pre-wrap break-all">
+                        {names[r.key] && <span className="block font-sans text-sm text-white break-words">{names[r.key]}</span>}
+                        <span className={names[r.key] ? 'text-gray-500' : undefined}>{r.value}</span>
+                      </dd>
                     </div>
                   ))}
                 </dl>
@@ -109,6 +155,9 @@ export default function ApprovalDialog() {
                 <Trash2 className="w-4 h-4 flex-shrink-0" />
                 {t('mcp.tools.approval.destructiveHint')}
               </p>
+            )}
+            {request.late && (
+              <p className="text-xs text-amber-300/90">{t('mcp.tools.approval.late', { client: request.client.name })}</p>
             )}
             {waiting > 1 && (
               <p className="text-xs text-gray-500">{t('mcp.tools.approval.queue', { count: waiting - 1 })}</p>

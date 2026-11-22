@@ -28,7 +28,7 @@ pub(super) fn sha256_datei(p: &Path) -> std::io::Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn collect_videos(root: &Path) -> Vec<PathBuf> {
+pub(super) fn collect_videos(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -106,6 +106,7 @@ pub async fn studio_import_videos(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "video")?;
 
     // (Datei, Wurzel fuer den Klassennamen)
     let mut dateien: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -243,6 +244,59 @@ pub async fn studio_split_segment(
     Ok(id)
 }
 
+// ── Wiedergabekopie ─────────────────────────────────────────────────────────
+
+/// Ordner fuer Kopien, die nur zum Ansehen da sind. Trainiert und exportiert
+/// wird immer mit dem Original in media/.
+fn proxy_dir(dir: &Path) -> PathBuf { dir.join("proxy") }
+
+/// Vorhandene Wiedergabekopie zu einer Mediendatei.
+fn vorhandene_kopie(dir: &Path, media: &str) -> Option<PathBuf> {
+    let stamm = Path::new(media).file_stem()?.to_string_lossy().to_string();
+    ["mp4", "webm"].iter().map(|e| proxy_dir(dir).join(format!("{}.{}", stamm, e))).find(|p| p.is_file())
+}
+
+/// Raeumt die Kopie weg, wenn das Original verschwindet.
+pub(super) fn kopie_entfernen(dir: &Path, media: &str) {
+    if let Some(p) = vorhandene_kopie(dir, media) { let _ = fs::remove_file(p); }
+}
+
+/// Ein Video so bereitstellen, dass die Webview es abspielt. Gerufen wird das
+/// erst, wenn das Original sich nicht abspielen liess (AVI, MKV, MPEG-4 Part 2).
+#[tauri::command]
+pub async fn studio_playable_video(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, sample_id: String,
+) -> Result<String, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    let sample = load_samples(&dir).into_iter().find(|s| s.id == sample_id).ok_or("Sample nicht gefunden")?;
+    if !sample.mime.starts_with("video/") { return Err("Das Sample ist kein Video".to_string()); }
+    if let Some(p) = vorhandene_kopie(&dir, &sample.media) { return Ok(p.to_string_lossy().to_string()); }
+
+    let script = studio_script(&app_handle, "video_tools.py")?;
+    let quelle = dir.join("media").join(&sample.media);
+    let stamm = Path::new(&sample.media).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let ziel = proxy_dir(&dir).join(stamm);
+    // Ein langes Video zu wandeln dauert; der Laufzeit-Thread bleibt frei.
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        Command::new(crate::python_env::resolve_python()).no_window().python_utf8()
+            .arg(script).arg("proxy").arg("--video").arg(quelle).arg("--out").arg(ziel)
+            .output()
+    }).await.map_err(|e| e.to_string())?
+        .map_err(|e| format!("Python ließ sich nicht starten: {}", e))?;
+    for zeile in String::from_utf8_lossy(&out.stdout).lines().rev() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(zeile.trim()) else { continue };
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("done") => return v.get("path").and_then(|p| p.as_str()).map(str::to_string)
+                .ok_or_else(|| "Wiedergabekopie ohne Pfad".to_string()),
+            Some("error") => return Err(v.get("message").and_then(|m| m.as_str()).unwrap_or("Fehler").to_string()),
+            _ => {}
+        }
+    }
+    Err(format!("Video ließ sich nicht umwandeln: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")))
+}
+
 /// Schneidet Abschnitte fuer den Export. Rueckgabe: die Ausgabedateien, die
 /// nicht geschrieben werden konnten.
 pub(super) fn clips_schneiden(
@@ -305,6 +359,18 @@ mod tests {
         avi.extend_from_slice(b"AVI LIST");
         assert_eq!(video_ext_from_bytes(&avi), Some("avi"));
         assert_eq!(video_ext_from_bytes(b"kein video"), None);
+    }
+
+    #[test]
+    fn wiedergabekopie_wird_gefunden_und_entfernt() {
+        let dir = std::env::temp_dir().join(format!("ft_proxy_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(dir.join("proxy")).unwrap();
+        assert!(vorhandene_kopie(&dir, "ab/abc.avi").is_none());
+        fs::write(dir.join("proxy/abc.mp4"), b"x").unwrap();
+        assert_eq!(vorhandene_kopie(&dir, "ab/abc.avi"), Some(dir.join("proxy/abc.mp4")));
+        kopie_entfernen(&dir, "ab/abc.avi");
+        assert!(vorhandene_kopie(&dir, "ab/abc.avi").is_none());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

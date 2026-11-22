@@ -12,7 +12,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import type { StudioProject } from './studioTypes';
 import ModalPortal from '../ui/ModalPortal';
-import { ordneModelle, type StudioModel } from './studioModels';
+import { empfohlenesModell, ordneModelle, type StudioModel } from './studioModels';
 import { useEscape } from './useEscape';
 
 export interface VersionTreeItem { id: string; name: string; version_number: number; }
@@ -23,6 +23,19 @@ export interface ReviewReport {
   doubts:  number;
   agree:   number;
   failed:  number;
+  /** Klassen des Projekts, zu denen das Modell nichts sagen kann. */
+  unknown_classes?: string[];
+  not_comparable?:  number;
+}
+
+/** '' = unter eigenem Namen, IGNORIEREN = nicht verwenden, sonst Projektklasse. */
+export const IGNORIEREN = '\u0000ignorieren';
+
+/** Auswahl in class_map des Backends; null, wenn nichts zugeordnet ist. */
+export function klassenZuordnung(wahl: Record<string, string>): Record<string, string | null> | null {
+  const paare = Object.entries(wahl).filter(([, v]) => v !== '');
+  if (paare.length === 0) return null;
+  return Object.fromEntries(paare.map(([k, v]) => [k, v === IGNORIEREN ? null : v]));
 }
 
 export interface SuggestReport {
@@ -47,7 +60,12 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
   const { t } = useLanguage();
   const { error } = useNotification();
   const [tree, setTree] = useState<ModelWithVersionTree[]>([]);
+  const [passendIds, setPassendIds] = useState<Set<string>>(new Set());
   const [versionId, setVersionId] = useState('');
+  // Klassen des gewaehlten Modells, sobald sie abgefragt sind.
+  const [modellKlassen, setModellKlassen] = useState<string[] | null>(null);
+  const [laedtKlassen, setLaedtKlassen] = useState(false);
+  const [wahl, setWahl] = useState<Record<string, string>>({});
   const [minConfidence, setMinConfidence] = useState(0.25);
   const [addUnknown, setAddUnknown] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,11 +95,14 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
         setTree(geordnet);
         // Vorauswahl: die neueste trainierte Version eines passenden Modells —
         // ein nie trainiertes Original erkennt die Projektklassen nicht.
-        const passendIds = new Set(passend.map(m => m.id));
+        const passendSet = new Set(passend.map(m => m.id));
+        setPassendIds(passendSet);
         const trained = (m: ModelWithVersionTree) =>
           [...m.versions].filter(v => v.version_number > 0).sort((a, b) => b.version_number - a.version_number)[0];
-        const pick = geordnet.filter(m => passendIds.has(m.id)).map(trained).find(Boolean)
-          ?? geordnet[0]?.versions[0];
+        // Passt keines, ist nichts vorausgewaehlt: ein Sprachmodell ueber Videos
+        // laufen zu lassen, war bisher die Voreinstellung.
+        const pick = geordnet.filter(m => passendSet.has(m.id)).map(trained).find(Boolean)
+          ?? geordnet.find(m => passendSet.has(m.id))?.versions[0];
         if (pick) setVersionId(pick.id);
       })
       .catch(() => { /* Auswahl bleibt leer, der Knopf bleibt gesperrt */ });
@@ -96,6 +117,20 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
     return () => { void un.then(f => f()); };
   }, [mode, project.id]);
 
+  const klassenLaden = async () => {
+    if (!versionId) return;
+    setLaedtKlassen(true);
+    try {
+      setModellKlassen(await invoke<string[]>('studio_model_classes', { versionId }));
+    } catch (err: unknown) {
+      error(t('studio.import.classesFromModelError'), String(err));
+    } finally {
+      setLaedtKlassen(false);
+    }
+  };
+  const waehleVersion = (id: string) => { setVersionId(id); setModellKlassen(null); setWahl({}); };
+  const classMap = klassenZuordnung(wahl);
+
   const run = async () => {
     if (!versionId) return;
     setBusy(true);
@@ -104,11 +139,11 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
       if (suggest) {
         setSuggestReport(await invoke<SuggestReport>('studio_suggest', {
           projectId: project.id, versionId, minConfidence, addUnknownClasses: addUnknown,
-          limit: umfang,
+          limit: umfang, classMap,
         }));
       } else {
         setReviewReport(await invoke<ReviewReport>('studio_review', {
-          projectId: project.id, versionId, minConfidence,
+          projectId: project.id, versionId, minConfidence, classMap,
         }));
       }
     } catch (err: unknown) {
@@ -174,6 +209,16 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
               )}
             </div>
 
+            {reviewReport && (reviewReport.unknown_classes?.length ?? 0) > 0 && (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 p-3">
+                <p className="text-amber-200 text-xs font-medium mb-1">{t('studio.review.report.unknownTitle')}</p>
+                <p className="text-amber-200/80 text-xs">{reviewReport.unknown_classes?.join(', ')}</p>
+                <p className="text-gray-400 text-[11px] mt-1.5">
+                  {t('studio.review.report.unknownHint', { count: reviewReport.not_comparable ?? 0 })}
+                </p>
+              </div>
+            )}
+
             {suggestReport && suggestReport.unmapped_classes.length > 0 && (
               <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 p-3">
                 <p className="text-amber-200 text-xs font-medium mb-1">
@@ -209,11 +254,13 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
           <>
             <label className="block">
               <span className="text-gray-400 text-xs">{t('studio.suggest.modelLabel')}</span>
-              <select value={versionId} onChange={e => setVersionId(e.target.value)}
+              <select value={versionId} onChange={e => waehleVersion(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
                 {tree.length === 0 && <option value="">{t('studio.suggest.noVersions')}</option>}
+                {tree.length > 0 && !versionId && <option value="" className="bg-[#101218]">{t('studio.suggest.pickModel')}</option>}
                 {tree.map(m => (
-                  <optgroup key={m.id} label={m.name} className="bg-[#101218]">
+                  <optgroup key={m.id} className="bg-[#101218]"
+                    label={passendIds.size > 0 && !passendIds.has(m.id) ? `${m.name} – ${t('studio.suggest.notFitting')}` : m.name}>
                     {m.versions.map(v => (
                       <option key={v.id} value={v.id} className="bg-[#101218]">
                         {m.name} · v{v.version_number} {v.name}
@@ -223,6 +270,46 @@ export default function ModelRunDialog({ mode, project, onClose, onDone, offen }
                 ))}
               </select>
             </label>
+
+            {tree.length > 0 && passendIds.size === 0 && (
+              <p className="text-amber-300/90 text-[11px]" data-testid="no-fitting-model">
+                {t('studio.suggest.noFittingModel', { model: empfohlenesModell(project) })}
+              </p>
+            )}
+
+            {art !== 'transcript' && art !== 'pairs' && versionId && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-gray-400 text-xs">{t('studio.suggest.mapTitle')}</span>
+                  {modellKlassen === null && (
+                    <button onClick={() => void klassenLaden()} disabled={busy || laedtKlassen}
+                      className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[11px] inline-flex items-center gap-1.5 disabled:opacity-40">
+                      {laedtKlassen && <Loader2 className="w-3 h-3 animate-spin" />} {t('studio.suggest.mapLoad')}
+                    </button>
+                  )}
+                </div>
+                {modellKlassen?.length === 0 && <p className="text-gray-500 text-[11px]">{t('studio.suggest.mapNone')}</p>}
+                {modellKlassen && modellKlassen.length > 0 && (
+                  <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                    {modellKlassen.map(k => {
+                      const gleich = project.classes.find(c => c.trim().toLowerCase() === k.trim().toLowerCase());
+                      return (
+                        <label key={k} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+                          <span className="text-gray-200 text-xs truncate" title={k}>{k}</span>
+                          <select value={wahl[k] ?? ''} onChange={e => setWahl(w => ({ ...w, [k]: e.target.value }))}
+                            aria-label={t('studio.datasetImport.mapFor', { klasse: k })} disabled={busy}
+                            className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white text-xs focus:outline-none focus:border-white/25">
+                            <option value="" className="bg-[#101218]">{gleich ?? t('studio.suggest.mapUnassigned')}</option>
+                            {project.classes.filter(c => c !== gleich).map(c => <option key={c} value={c} className="bg-[#101218]">{c}</option>)}
+                            <option value={IGNORIEREN} className="bg-[#101218]">{t('studio.suggest.mapIgnore')}</option>
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {art !== 'transcript' && art !== 'pairs' && <label className="block">
               <span className="text-gray-400 text-xs">

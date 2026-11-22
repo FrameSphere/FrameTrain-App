@@ -1,8 +1,11 @@
 // Freigabe-Dialog: zeigt Client, Werkzeug und Argumente; Knoepfe beantworten
 // die Anfrage; bei Loeschen gibt es kein "immer erlauben".
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, fireEvent, cleanup } from '@testing-library/react';
+const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn(async (_cmd: string): Promise<unknown> => null) }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }));
+
 import ApprovalDialog, { formatArgs } from '../ApprovalDialog';
 import { requestApprovalViaDialog, resetApprovalQueue } from '../approval';
 import { defineTool, ok } from '../util';
@@ -40,6 +43,16 @@ describe('ApprovalDialog', () => {
     expect(screen.queryByText(/immer erlauben/)).toBeNull();
     act(() => { fireEvent.keyDown(window, { key: 'Escape' }); });
     await expect(p).resolves.toBe('deny');
+  });
+
+  it('nennt Projekt und Modell beim Namen, nicht nur die ID', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => (cmd === 'studio_list_projects' ? [{ id: 'sp_1', name: 'Bohnen' }]
+      : cmd === 'list_models' ? [{ id: 'm1', name: 'YOLOv8' }] : null));
+    render(<ApprovalDialog />);
+    act(() => { void requestApprovalViaDialog({ tool: del, args: { model_id: 'm1', project_id: 'sp_1' }, client: { name: 'Claude' }, source: 'local' }); });
+    expect(await screen.findByText('Bohnen')).toBeTruthy();
+    expect(await screen.findByText('YOLOv8')).toBeTruthy();
+    expect(screen.getByText('sp_1')).toBeTruthy();
   });
 
   it('kuerzt lange Argumente und Bilder', () => {

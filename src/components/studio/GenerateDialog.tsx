@@ -181,14 +181,14 @@ export default function GenerateDialog({
             )}
 
             <label className="block">
-              <span className="text-gray-400 text-xs">
+              <span className="text-gray-400 text-xs block">
                 {paare || classes.length === 0
                   ? t('studio.generate.countLabel')
                   : t('studio.generate.countPerClassLabel')}
               </span>
               <input type="number" min={1} max={MAX_PRO_KLASSE} value={anzahl}
                 onChange={e => setAnzahl(Number(e.target.value) || 1)}
-                className="mt-1 w-28 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25" />
+                className="mt-1 block w-28 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25" />
             </label>
 
             <label className="block">

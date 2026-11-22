@@ -3922,7 +3922,8 @@
       "uncertain": "Unsure",
       "uncertainHint": "Model suggestions, least certain first – that is where your judgment helps most.",
       "uncertainEmpty": "No suggestions. Run “Suggest” first.",
-      "empty": "Nothing in this filter."
+      "empty": "Nothing in this filter.",
+      "skipped": "Skipped"
     },
     "stats": {
       "title": "State",
@@ -3932,7 +3933,9 @@
       "boxes": "Boxes",
       "emptyConfirmed": "{count} confirmed images have no box. Correct as negative examples, rarely intended otherwise.",
       "emptyConfirmed_one": "{count} confirmed image has no box. Correct as negative examples, rarely intended otherwise.",
-      "doubts": "Disagreements"
+      "doubts": "Disagreements",
+      "incomplete": "{count} confirmed samples have no class or target text and will be missing from the export.",
+      "incomplete_one": "{count} confirmed sample has no class or target text and will be missing from the export."
     },
     "shortcuts": {
       "title": "Keyboard",
@@ -4058,7 +4061,15 @@
       "subtitle_pairs": "A text-to-text model writes a draft answer. You correct and confirm.",
       "confidenceLabelClasses": "Take suggestions from this confidence: {value} percent",
       "safetyNoteGeneric": "Confirmed samples are left untouched. Suggestions count as unreviewed until you confirm them with Enter.",
-      "nothingOpen": "Everything in this project is confirmed – there is nothing to suggest. “Check” compares confirmed samples with the model."
+      "nothingOpen": "Everything in this project is confirmed – there is nothing to suggest. “Check” compares confirmed samples with the model.",
+      "pickModel": "Choose a model",
+      "notFitting": "does not fit the project",
+      "noFittingModel": "No fitting model yet. Download one under Models, for example {model}, and train it on your classes.",
+      "mapTitle": "Map the model’s classes",
+      "mapLoad": "Load classes",
+      "mapNone": "The model names no classes.",
+      "mapUnassigned": "not mapped",
+      "mapIgnore": "ignore"
     },
     "review": {
       "title": "Have the labels checked",
@@ -4072,7 +4083,9 @@
         "checked": "Checked",
         "doubts": "Disagreements",
         "agree": "In agreement",
-        "hint": "The images with a disagreement are now under the \"Doubt\" filter in the queue."
+        "hint": "The images with a disagreement are now under the \"Doubt\" filter in the queue.",
+        "unknownTitle": "Classes the model does not know",
+        "unknownHint": "It cannot say anything about them; {count} samples were not compared because of that. Map the classes if they only have different names in the model."
       },
       "subtitleClasses": "The model looks at the confirmed samples. Where it says a different class, the label is often wrong."
     },
@@ -4144,7 +4157,8 @@
       "sourceWrite": "Write them yourself",
       "sourceWriteHint": "One at a time or as a list, with a class if you like",
       "sourceGenerate": "Have them written",
-      "sourceGenerateHint": "Let the AI assistant write examples per class"
+      "sourceGenerateHint": "Let the AI assistant write examples per class",
+      "columnN": "Column {n}"
     },
     "write": {
       "button": "Write",
@@ -4268,7 +4282,8 @@
         "http429": "too many requests – try again later (429)"
       },
       "limitsSummary": "{pages} pages · {files} files · {mb} MB",
-      "labelNeedsClasses": "Add classes first, then you can give everything fetched a class right away."
+      "labelNeedsClasses": "Add classes first, then you can give everything fetched a class right away.",
+      "unclear": "Not an address, therefore ignored: {list}"
     },
     "generate": {
       "title": "Have texts written",
@@ -4400,6 +4415,8 @@
       "nextConfirmed": "They are confirmed in the project, with the correction or the dataset's label. After a few rounds, export and train again."
     },
     "media": {
+      "videoPreparing": "Converting the video for playback …",
+      "videoUnplayable": "This video cannot be played here.",
       "getFromWeb": "From the web",
       "nearDupButton": "Duplicates",
       "pastedTitle": "Image pasted",
@@ -4494,8 +4511,46 @@
         "without_license": "{count} samples fetched from the web without a license – don't pass the dataset on like this.",
         "without_license_one": "{count} sample fetched from the web without a license – don't pass the dataset on like this.",
         "clips_failed": "{count} video segment(s) could not be cut and are missing from the export.",
-        "clips_failed_one": "{count} video segment could not be cut and is missing from the export."
+        "clips_failed_one": "{count} video segment could not be cut and is missing from the export.",
+        "incomplete": "{count} confirmed samples are incomplete and missing from the export.",
+        "incomplete_one": "{count} confirmed sample is incomplete and missing from the export.",
+        "boxes_unknown_class": "{count} boxes with an unknown class were not exported.",
+        "boxes_unknown_class_one": "{count} box with an unknown class was not exported."
       }
+    },
+    "rename": {
+      "hint": "Rename (double-click)",
+      "project": "Rename project",
+      "class": "Rename class “{name}”"
+    },
+    "selection": {
+      "count": "{count} selected",
+      "clear": "Clear selection",
+      "hint": "⌘-click selects several, ⇧-click a range"
+    },
+    "origin": {
+      "byHand": "created by hand",
+      "clipboard": "clipboard",
+      "lab": "laboratory",
+      "assistant": "AI client"
+    },
+    "datasetImport": {
+      "title": "Import from a dataset",
+      "subtitle": "Which dataset should go into the project?",
+      "none": "No dataset in FrameTrain fits this project",
+      "tileHint": "Map classes, optionally only a sample",
+      "button": "Dataset",
+      "reading": "Reading classes …",
+      "mapTitle": "Map classes",
+      "mapCount": "{cur} of {total} will be taken over",
+      "mapFor": "Mapping for {klasse}",
+      "mapOwn": "under its own name",
+      "mapAuto": "only if the name matches",
+      "mapDrop": "leave out",
+      "dropRest": "Leave out classes that are not mapped",
+      "maxLabel": "At most samples",
+      "maxAll": "all",
+      "balanced": "same number per class"
     }
   },
   "datasetHints": {
@@ -5038,7 +5093,8 @@
         "allow": "Allow",
         "deny": "Deny",
         "always": "Always allow for {client}",
-        "revokeHint": "Permissions can be revoked in Settings under AI connections."
+        "revokeHint": "Permissions can be revoked in Settings under AI connections.",
+        "late": "{client} is no longer waiting for the answer. If you allow now, it applies to the next repeat of exactly this call (5 minutes)."
       }
     },
     "settings": {

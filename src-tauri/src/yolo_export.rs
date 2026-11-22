@@ -142,6 +142,49 @@ pub fn write_yolo_layout(
 /// Die Reihenfolge ist deterministisch: derselbe Datenbestand ergibt dieselbe
 /// Aufteilung, sonst waeren zwei Exporte nicht vergleichbar.
 pub fn assign_splits(group_of: &[String], train_ratio: f64, val_ratio: f64) -> Vec<String> {
+    aufteilen(group_of, train_ratio, val_ratio, (2, 3))
+}
+
+/// Wie `assign_splits`, aber jede Klasse fuer sich aufgeteilt. Ein reiner
+/// Zufallssplit laesst kleine Klassen leicht aus val fallen (Testlauf 22.11.:
+/// 12 Bilder je Klasse, eine fehlte in val) — dann misst die Validierung sie nie.
+///
+/// Eine Gruppe zaehlt zu der Klasse, die in ihr am haeufigsten vorkommt, und
+/// bleibt ganz.
+pub fn assign_splits_je_klasse(
+    group_of: &[String], klasse_of: &[Option<String>], train_ratio: f64, val_ratio: f64,
+) -> Vec<String> {
+    use std::collections::{BTreeMap, HashMap};
+    let mut zahl: HashMap<&String, BTreeMap<&str, usize>> = HashMap::new();
+    for (g, k) in group_of.iter().zip(klasse_of) {
+        *zahl.entry(g).or_default().entry(k.as_deref().unwrap_or("")).or_default() += 1;
+    }
+    let klasse_der_gruppe: HashMap<&String, &str> = zahl.iter().map(|(g, m)| {
+        // Bei Gleichstand der erste Name — die Aufteilung muss wiederholbar sein.
+        let mut best = ("", 0usize);
+        for (k, n) in m { if *n > best.1 { best = (k, *n); } }
+        (*g, best.0)
+    }).collect();
+    let mut je_klasse: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, g) in group_of.iter().enumerate() { je_klasse.entry(klasse_der_gruppe[g]).or_default().push(i); }
+
+    let mut out = vec![String::new(); group_of.len()];
+    for idx in je_klasse.values() {
+        let gruppen: Vec<String> = idx.iter().map(|i| group_of[*i].clone()).collect();
+        // Erst ab vier Gruppen eine fuer val abzwacken, ab sechs eine fuer test:
+        // aus drei Beispielen 1/1/1 zu machen, liesse zu wenig zum Lernen.
+        for (i, s) in idx.iter().zip(aufteilen(&gruppen, train_ratio, val_ratio, (4, 6))) { out[*i] = s; }
+    }
+    // Lauter winzige Klassen: lieber ein einfacher Split als ein leerer Teil.
+    let fehlt = |teil: &str| !out.iter().any(|s| s == teil);
+    if (val_ratio > 0.0 && fehlt("val")) || (1.0 - train_ratio - val_ratio >= 0.05 && fehlt("test")) || fehlt("train") {
+        return assign_splits(group_of, train_ratio, val_ratio);
+    }
+    out
+}
+
+/// `mindest`: ab wie vielen Gruppen val bzw. test mindestens eine bekommt.
+fn aufteilen(group_of: &[String], train_ratio: f64, val_ratio: f64, mindest: (usize, usize)) -> Vec<String> {
     use std::collections::HashMap;
 
     // Gruppen in stabiler, aber nicht alphabetischer Reihenfolge: nach Namen
@@ -179,7 +222,7 @@ pub fn assign_splits(group_of: &[String], train_ratio: f64, val_ratio: f64) -> V
     // solange train dabei nicht leer wird. Genommen wird die letzte Gruppe von
     // train, also die, die der Grenze am naechsten lag.
     let test_ratio = (1.0 - train_ratio - val_ratio).max(0.0);
-    for (teil, gewuenscht, mindest_gruppen) in [("val", val_ratio > 0.0, 2usize), ("test", test_ratio >= 0.05, 3usize)] {
+    for (teil, gewuenscht, mindest_gruppen) in [("val", val_ratio > 0.0, mindest.0), ("test", test_ratio >= 0.05, mindest.1)] {
         if !gewuenscht || reihenfolge.len() < mindest_gruppen { continue; }
         if split_der_gruppe.values().any(|s| *s == teil) { continue; }
         let in_train: Vec<&String> = reihenfolge.iter().map(|(_, g)| *g)
@@ -226,6 +269,35 @@ mod tests {
         let mut t = assign_splits(&drei, 0.7, 0.15);
         t.sort();
         assert_eq!(t, vec!["test", "train", "val"]);
+    }
+
+    #[test]
+    fn jede_klasse_ist_in_jedem_teil() {
+        // 3 Klassen zu je 12, 80/10/10: vorher fehlte eine Klasse in val.
+        let g: Vec<String> = (0..36).map(|i| format!("s_{}", i)).collect();
+        let k: Vec<Option<String>> = (0..36).map(|i| Some(format!("k{}", i % 3))).collect();
+        let s = assign_splits_je_klasse(&g, &k, 0.8, 0.1);
+        for klasse in 0..3 {
+            for teil in ["train", "val", "test"] {
+                assert!((0..36).any(|i| i % 3 == klasse && s[i] == teil), "k{} fehlt in {}", klasse, teil);
+            }
+        }
+        assert_eq!(s, assign_splits_je_klasse(&g, &k, 0.8, 0.1), "wiederholbar");
+        let train = s.iter().filter(|x| *x == "train").count();
+        assert!((28..=31).contains(&train), "{}", train);
+    }
+
+    #[test]
+    fn gruppen_bleiben_auch_je_klasse_ganz() {
+        // Ein Video mit Clips zweier Klassen darf nicht zerrissen werden.
+        let g: Vec<String> = (0..40).map(|i| format!("v{}", i / 4)).collect();
+        let k: Vec<Option<String>> = (0..40).map(|i| Some(if i % 4 == 0 { "b".into() } else { format!("a{}", i / 20) })).collect();
+        let s = assign_splits_je_klasse(&g, &k, 0.7, 0.15);
+        for v in 0..10 { assert!((0..4).all(|j| s[v * 4 + j] == s[v * 4]), "v{}", v); }
+        // Lauter Einzelklassen: kein leerer Teil.
+        let k: Vec<Option<String>> = (0..40).map(|i| Some(format!("k{}", i / 4))).collect();
+        let s = assign_splits_je_klasse(&g, &k, 0.7, 0.15);
+        for teil in ["train", "val", "test"] { assert!(s.iter().any(|x| x == teil), "{}", teil); }
     }
 
     #[test]

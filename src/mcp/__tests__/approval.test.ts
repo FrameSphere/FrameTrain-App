@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   answerApproval, isDestructive, listGrants, needsApproval, recordDecision, requestApprovalViaDialog, resetApprovalQueue,
-  revokeAllGrants, revokeClient, revokeGrant, subscribeApprovals, subscribeGrants,
+  revokeAllGrants, revokeClient, revokeGrant, subscribeApprovals, subscribeGrants, takeLateDecision, LATE_APPROVAL_MS,
 } from '../approval';
 import { defineTool, ok } from '../util';
 import { userScopedKey } from '../../utils/currentUser';
@@ -120,6 +120,56 @@ describe('Warteschlange', () => {
     const p = requestApprovalViaDialog({ tool: alwaysTool, args: {}, client: claude, source: 'local' }, 1000);
     vi.advanceTimersByTime(1001);
     await expect(p).resolves.toBe('timeout');
+  });
+
+  it('nach dem Zeitlimit bleibt der Dialog offen; eine spaete Antwort gilt genau einmal fuer denselben Aufruf', async () => {
+    vi.useFakeTimers();
+    let head: { id: string; late?: boolean } | null = null;
+    const off = subscribeApprovals((h) => { head = h; });
+    const p = requestApprovalViaDialog({ tool: deleteTool, args: { model_id: 'm1' }, client: claude, source: 'local' }, 1000);
+    vi.advanceTimersByTime(1001);
+    await expect(p).resolves.toBe('timeout');
+    expect(head!.late).toBe(true);
+    answerApproval(head!.id, 'allow');
+    expect(head).toBeNull();
+    // Andere Argumente, anderer Client, anderer Weg: keine Freigabe.
+    expect(takeLateDecision(deleteTool, { model_id: 'm2' }, claude, 'local')).toBeNull();
+    expect(takeLateDecision(deleteTool, { model_id: 'm1' }, gpt, 'local')).toBeNull();
+    expect(takeLateDecision(deleteTool, { model_id: 'm1' }, claude, 'remote')).toBeNull();
+    expect(takeLateDecision(deleteTool, { model_id: 'm1' }, claude, 'local')).toBe('allow');
+    expect(takeLateDecision(deleteTool, { model_id: 'm1' }, claude, 'local')).toBeNull();
+    off();
+  });
+
+  it('eine spaete Antwort verfaellt, und der offene Dialog auch', async () => {
+    vi.useFakeTimers();
+    let head: { id: string } | null = null;
+    const off = subscribeApprovals((h) => { head = h; });
+    const p = requestApprovalViaDialog({ tool: alwaysTool, args: { model_id: 'm1' }, client: claude, source: 'local' }, 1000);
+    vi.advanceTimersByTime(1001);
+    await p;
+    answerApproval(head!.id, 'allow');
+    vi.advanceTimersByTime(LATE_APPROVAL_MS + 1);
+    expect(takeLateDecision(alwaysTool, { model_id: 'm1' }, claude, 'local')).toBeNull();
+    void requestApprovalViaDialog({ tool: alwaysTool, args: {}, client: claude, source: 'local' }, 1000);
+    vi.advanceTimersByTime(1001 + LATE_APPROVAL_MS + 1);
+    expect(head).toBeNull();
+    off();
+  });
+
+  it('die Wiederholung desselben Aufrufs haengt sich an den offenen Dialog', async () => {
+    vi.useFakeTimers();
+    let head: { id: string; late?: boolean } | null = null; let waiting = 0;
+    const off = subscribeApprovals((h, n) => { head = h; waiting = n; });
+    const p1 = requestApprovalViaDialog({ tool: alwaysTool, args: { a: 1, b: 2 }, client: claude, source: 'local' }, 1000);
+    vi.advanceTimersByTime(1001);
+    await p1;
+    const p2 = requestApprovalViaDialog({ tool: alwaysTool, args: { b: 2, a: 1 }, client: claude, source: 'local' }, 1000);
+    expect(waiting).toBe(1);
+    expect(head!.late).toBe(false);
+    answerApproval(head!.id, 'allow');
+    await expect(p2).resolves.toBe('allow');
+    off();
   });
 });
 

@@ -271,6 +271,7 @@ pub async fn preview_media(
     classes: Option<Vec<String>>,
     max_size: Option<u32>,
     at: Option<f64>,
+    at_sec: Option<f64>,
 ) -> Result<Value, String> {
     let data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let p = PathBuf::from(&path).canonicalize().map_err(|_| "Datei nicht gefunden".to_string())?;
@@ -282,6 +283,7 @@ pub async fn preview_media(
     if let Some(b) = boxes { req["boxes"] = b; }
     if let Some(c) = classes { req["classes"] = json!(c); }
     if let Some(a) = at { req["at"] = json!(a); }
+    if let Some(a) = at_sec { req["at_sec"] = json!(a); }
     let app = app_handle.clone();
     tauri::async_runtime::spawn_blocking(move || run_module(&app, "ft_data.preview", req))
         .await

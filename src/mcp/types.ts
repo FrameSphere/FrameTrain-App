@@ -119,4 +119,6 @@ export interface ApprovalRequest {
   source: McpCallSource;
   /** Dialog bietet "immer erlauben" an (nicht bei destruktiven Werkzeugen). */
   canRemember: boolean;
+  /** Der Aufruf wartet nicht mehr; eine Zustimmung gilt fuer die Wiederholung. */
+  late?: boolean;
 }

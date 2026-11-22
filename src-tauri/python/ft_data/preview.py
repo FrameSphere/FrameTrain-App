@@ -50,14 +50,19 @@ def _boxes_from_label(path: Path) -> List[Dict[str, float]]:
     return out
 
 
-def _video_frame(path: Path, at: float):
+def _video_frame(path: Path, at: float, at_sec: Optional[float] = None):
     try:
         import cv2  # noqa: WPS433
     except Exception:
         raise FetchError("Video preview needs OpenCV (cv2) in the FrameTrain Python environment.")
     cap = cv2.VideoCapture(str(path))
     total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-    if total:
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0
+    if at_sec is not None and fps > 0:
+        # Abschnitt eines Videos: die Stelle in Sekunden, nicht die Mitte der Datei.
+        frame_no = int(max(0.0, at_sec) * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, min(frame_no, int(total) - 1) if total else frame_no)
+    elif total:
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(total * min(max(at, 0.0), 0.99)))
     ok, frame = cap.read()
     cap.release()
@@ -76,7 +81,7 @@ def render(req: Dict[str, Any]) -> Dict[str, Any]:
     if ext in IMAGE_EXTS:
         im = Image.open(path).convert("RGB")
     elif ext in VIDEO_EXTS:
-        im = _video_frame(path, float(req.get("at", 0.5)))
+        im = _video_frame(path, float(req.get("at", 0.5)), req.get("at_sec"))
     else:
         raise FetchError("Preview is available for images and videos only.")
     boxes: Optional[List[Dict[str, Any]]] = req.get("boxes")

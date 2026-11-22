@@ -65,6 +65,7 @@ def inspect(path: Path) -> Dict[str, Any]:
     path = Path(path)
     images = yolo = voc = coco = parquet = csv = audio = video = transcripts = masks = label_images = 0
     class_dirs: Dict[str, int] = {}
+    label_ids: Dict[int, int] = {}
     splits: Dict[str, int] = {}
     yaml_files: List[str] = []
     for f in path.rglob("*"):
@@ -100,6 +101,14 @@ def inspect(path: Path) -> Dict[str, Any]:
             class_dirs[f.parent.name] = class_dirs.get(f.parent.name, 0) + 1
         elif ext == ".txt" and "labels" in rel_parts:
             yolo += 1
+            if yolo <= 20000:
+                try:
+                    for line in f.read_text(errors="ignore").splitlines():
+                        head = line.split(None, 1)[0] if line.strip() else ""
+                        if head.isdigit():
+                            label_ids[int(head)] = label_ids.get(int(head), 0) + 1
+                except OSError:
+                    pass
         elif ext == ".xml":
             voc += 1
         elif ext == ".json" and ("annotations" in rel_parts or "coco" in f.name.lower() or f.name.startswith("_annotations")):
@@ -152,6 +161,11 @@ def inspect(path: Path) -> Dict[str, Any]:
             problems.append(f"Only {masks} masks for {images} images. Images without a mask are skipped.")
     if fmt == "yolo" and yolo < images * 0.5:
         problems.append(f"Only {yolo} label files for {images} images. Many images are unlabeled.")
+    bad_ids = {i: n for i, n in label_ids.items() if classes and i >= len(classes)}
+    if fmt == "yolo" and bad_ids:
+        ids = ", ".join(str(i) for i in sorted(bad_ids)[:5])
+        problems.append(f"{sum(bad_ids.values())} box(es) use a class id without a name ({ids}; the class list has {len(classes)}). "
+                        "Training ignores those images completely.")
     if fmt == "audio" and not transcripts:
         problems.append("Audio without transcripts or class folders.")
     table = table_summary(path) if fmt in ("table", "parquet") else None

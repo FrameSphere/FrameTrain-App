@@ -245,6 +245,18 @@ fn hinweis(code: &str, params: serde_json::Value, text: String) -> Hinweis {
     Hinweis { code: code.to_string(), params, text }
 }
 
+/// Bestaetigte Samples, denen Klasse, Zieltext oder passendes Medium fehlt.
+pub fn unvollstaendig(n: usize) -> Hinweis {
+    hinweis("incomplete", serde_json::json!({ "count": n }),
+        format!("{} bestätigte Sample(s) sind unvollständig und fehlen im Export.", n))
+}
+
+/// Boxen mit einer Klassennummer, die es im Projekt nicht gibt.
+pub fn boxen_ohne_klasse(n: usize) -> Hinweis {
+    hinweis("boxes_unknown_class", serde_json::json!({ "count": n }),
+        format!("{} Box(en) mit unbekannter Klasse wurden nicht exportiert.", n))
+}
+
 /// Hinweis fuer Videoabschnitte, die sich nicht schneiden liessen.
 pub fn clips_fehlgeschlagen(n: usize) -> Hinweis {
     hinweis("clips_failed", serde_json::json!({ "count": n }),

@@ -125,12 +125,21 @@ describe('studio', () => {
     await expect(run('studio_set_annotation', { project_id: 'p', sample_id: 's', status: 'confirmed', boxes: [{ cls: 0 }] })).rejects.toThrow(/numeric/);
   });
 
-  it('studio_fetch_web erlaubt nur http(s) und setzt die Allowlist aus den URLs', async () => {
+  it('studio_set_annotation laesst nicht Angegebenes stehen', async () => {
+    backend({ studio_set_annotation: null });
+    await run('studio_set_annotation', { project_id: 'p', sample_id: 's', status: 'skipped' });
+    expect(argsOf('studio_set_annotation')[0]).toMatchObject({ status: 'skipped', boxes: null, label: null, target: null, keep: true });
+    // Ausdruecklich leer ist etwas anderes als weggelassen.
+    await run('studio_set_annotation', { project_id: 'p', sample_id: 's', status: 'new', label: '', boxes: [] });
+    expect(argsOf('studio_set_annotation')[1]).toMatchObject({ label: '', boxes: [], keep: true });
+  });
+
+  it('studio_fetch_web erlaubt nur http(s) und laesst Bilder vom CDN zu', async () => {
     backend({ studio_fetch_web: { fetched: 4 } });
     await expect(run('studio_fetch_web', { project_id: 'p', urls: ['file:///etc'] })).rejects.toThrow(/http/);
     const r = await run('studio_fetch_web', { project_id: 'p', urls: ['https://example.org/cats'], label: 'cat' });
     expect(r.content[0].text).toContain('4 item');
-    expect((argsOf('studio_fetch_web')[0] as { options: Record<string, unknown> }).options).toMatchObject({ mode: 'urls', allowlist: ['example.org'], label: 'cat' });
+    expect((argsOf('studio_fetch_web')[0] as { options: Record<string, unknown> }).options).toMatchObject({ mode: 'urls', allowlist: [], label: 'cat' });
   });
 
   it('studio_export legt einen Datensatz am Modell an', async () => {
@@ -138,6 +147,32 @@ describe('studio', () => {
     const r = await run('studio_export', { project_id: 'p', model_id: 'm1', dataset_name: 'Spam v1' });
     expect(r.content[0].text).toContain('d9');
     expect(argsOf('studio_export')[0]).toEqual({ projectId: 'p', modelId: 'm1', datasetName: 'Spam v1', includeSuggested: false, trainRatio: 0.8, valRatio: 0.1 });
+  });
+
+  it('studio_export warnt, wenn das Modell nicht zum Projekt passt', async () => {
+    backend({ list_models: [MODEL], studio_list_projects: [{ id: 'p', name: 'Bohnen', modality: 'image', task: 'classify', classes: ['a'] }],
+      studio_export: { dataset: { id: 'd9', name: 'B' }, report: { total: 36, per_split: [['train', 29], ['val', 4]], warnings: ['Hinweis.'] }, path: '/x' } });
+    const r = await run('studio_export', { project_id: 'p', model_id: 'm1', dataset_name: 'B' });
+    expect(r.content[0].text).toMatch(/Exported 36 sample\(s\) \(train 29, val 4\)/);
+    expect(r.content[0].text).toMatch(/Warning: .*vit-base/);
+    expect(r.content[0].text).toContain('Hinweis.');
+  });
+
+  it('studio_inspect_source liest Audio-Ordner und sagt im Text, was es gefunden hat', async () => {
+    backend({ studio_inspect_media: { images: 0, audio: 72, video: 0, texts: 0, with_labels: 0, transcripts: 0, class_folders: { one: 24, two: 48 }, source_classes: [], max_class_id: null, needs_class_list: false } });
+    const r = await run('studio_inspect_source', { source_path: '/daten/ziffern' });
+    expect(r.content[0].text).toBe('72 audio file(s). class folders: one 24, two 48.');
+    backend({ studio_inspect_text: { kind: 'csv', rows: 60, columns: ['v1', 'v2'], text_column: 'v2', label_column: 'v1', labels: ['ham', 'spam'] } });
+    const t = await run('studio_inspect_source', { source_path: '/daten/sms.csv' });
+    expect(t.content[0].text).toContain('text = v2, label = v1');
+  });
+
+  it('studio_suggest reicht die Klassenzuordnung durch und nennt fehlende', async () => {
+    backend({ studio_suggest: { processed: 19, with_boxes: 0, unmapped_classes: ['4-wheeler'], failed: 0 } });
+    const r = await run('studio_suggest', { project_id: 'p', version_id: 'v', class_map: { pedestrian: 'person', bike: null } });
+    expect(argsOf('studio_suggest')[0]).toMatchObject({ classMap: { pedestrian: 'person', bike: null } });
+    expect(r.content[0].text).toContain('4-wheeler');
+    await expect(run('studio_suggest', { project_id: 'p', version_id: 'v', class_map: { a: 3 } })).rejects.toThrow(/class_map/);
   });
 });
 

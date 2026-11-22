@@ -60,6 +60,8 @@ export interface StudioStats {
   boxes_total:     number;
   per_class:       number[];
   empty_confirmed: number;
+  /** Bestaetigt, aber ohne Klasse bzw. Zieltext — fehlt im Export. */
+  incomplete?:     number;
   doubts:          number;
 }
 
@@ -88,4 +90,4 @@ export interface ExportResult {
 }
 
 /** Filter der Sample-Liste. "uncertain": Vorschlaege, unsicherste zuerst. */
-export type SampleFilter = 'all' | 'open' | 'confirmed' | 'doubt' | 'uncertain';
+export type SampleFilter = 'all' | 'open' | 'confirmed' | 'skipped' | 'doubt' | 'uncertain';

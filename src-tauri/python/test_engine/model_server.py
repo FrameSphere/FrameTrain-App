@@ -970,6 +970,18 @@ class ModelServer:
             "inference_time": inference_time,
         }
 
+    def _class_list(self):
+        if self.modality not in ("text", "image", "audio", "video", "token"):
+            return []
+        def key(kv):
+            try:
+                return (0, int(kv[0]))
+            except (TypeError, ValueError):
+                return (1, str(kv[0]))
+        names = [str(v) for _, v in sorted(self.id2label.items(), key=key)]
+        # LABEL_0, LABEL_1 ... sind Platzhalter eines nie trainierten Kopfes.
+        return [] if names and all(n.startswith("LABEL_") for n in names) else names
+
     # ── Loop ─────────────────────────────────────────────────────────────
 
     def run(self):
@@ -985,6 +997,8 @@ class ModelServer:
             "type":       "ready",
             "modality":   self.modality,
             "input_kind": INPUT_KIND[self.modality],
+            # Fuer die Datensatz-Werkstatt: welche Klassen kann das Modell ueberhaupt nennen?
+            "classes":    self._class_list(),
         })
 
         # Request-Loop: eine JSON-Zeile rein, eine JSON-Zeile raus

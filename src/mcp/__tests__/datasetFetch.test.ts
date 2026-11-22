@@ -85,6 +85,9 @@ describe('studio import from a dataset', () => {
     expect(text).toMatch(/Added 50 sample/);
     expect(text).toMatch(/person 30, vehicle 20/);
     expect(calls).toContain('discard_staged');
+    // Herkunft vor dem Aufraeumen umgeschrieben, nicht auf den Zwischenordner.
+    expect(calls.indexOf('studio_rewrite_origin')).toBeGreaterThan(calls.indexOf('studio_import_folder'));
+    expect(calls.indexOf('studio_rewrite_origin')).toBeLessThan(calls.indexOf('discard_staged'));
   });
 });
 
@@ -99,5 +102,18 @@ describe('studio_view_samples', () => {
     const r = await registry.get('studio_view_samples')!.run({ project_id: 'p1' }, ctx);
     expect(r.content[1]).toEqual({ type: 'image', data: 'QUJD', mimeType: 'image/jpeg' });
     expect(r.content[0].text).toMatch(/boxes 1:vehicle/);
+  });
+
+  it('keeps the requested order and takes the frame from the middle of a clip', async () => {
+    const at: unknown[] = [];
+    mockInvoke.mockImplementation(async (cmd: string, a: Record<string, unknown>) => {
+      if (cmd === 'studio_list_projects') return [{ id: 'p1', name: 'V', modality: 'video', task: 'classify', classes: ['x'] }];
+      if (cmd === 'studio_list_samples') return { total: 2, items: ['s1', 's2'].map((id, i) => ({ id, status: 'new', mime: 'video/mp4', abs_path: `/d/${id}.mp4`, meta: { start: i * 2, end: i * 2 + 2 }, ann: {} })) };
+      if (cmd === 'preview_media') { at.push(a.atSec); return { data: 'QUJD', mime: 'image/jpeg' }; }
+      return null;
+    });
+    const r = await registry.get('studio_view_samples')!.run({ project_id: 'p1', sample_ids: ['s2', 's1'] }, ctx);
+    expect(at).toEqual([3, 1]);
+    expect(r.content[0].text.indexOf('s2')).toBeLessThan(r.content[0].text.indexOf('s1'));
   });
 });

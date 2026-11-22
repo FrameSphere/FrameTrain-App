@@ -144,17 +144,38 @@ export function subscribeGrants(listener: () => void): () => void {
 
 // ── Warteschlange fuer den Dialog ───────────────────────────────────────────
 
-/** Ohne Antwort gilt die Anfrage nach dieser Zeit als abgelehnt. Rust wartet 60 s auf
- *  das ganze Ergebnis: 30 s Freigabe + max. 20 s Werkzeug (INLINE_WAIT_MS) passen hinein. */
+/** So lange wartet der Aufruf. Rust wartet 60 s auf das ganze Ergebnis:
+ *  30 s Freigabe + max. 20 s Werkzeug (INLINE_WAIT_MS) passen hinein. */
 export const APPROVAL_TIMEOUT_MS = 30_000;
+/** So lange bleibt der Dialog danach offen — und so lange gilt eine spaete Zustimmung.
+ *  30 s reichen nicht, wenn der Nutzer gerade in einem anderen Fenster ist; laenger
+ *  warten kann der Aufruf nicht, weil die KI-Clients vorher abbrechen. */
+export const LATE_APPROVAL_MS = 5 * 60_000;
 
 interface Pending {
+  key: string;
   request: ApprovalRequest;
-  resolve: (d: ApprovalDecision | 'timeout') => void;
+  resolvers: ((d: ApprovalDecision | 'timeout') => void)[];
   timer: ReturnType<typeof setTimeout>;
 }
 
 const queue: Pending[] = [];
+/** Spaete Zustimmungen: genau dieser Aufruf dieses Clients, einmal, befristet. */
+const tickets = new Map<string, { until: number; decision: ApprovalDecision }>();
+
+function callKey(tool: Tool, args: ToolArgs, client: McpClientInfo, source: McpCallSource): string {
+  const sorted = Object.fromEntries(Object.entries(args ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+  return JSON.stringify([clientKey(client), source, tool.name, sorted]);
+}
+
+/** Hat der Nutzer genau diesen Aufruf inzwischen beantwortet? Verbraucht die Antwort. */
+export function takeLateDecision(tool: Tool, args: ToolArgs, client: McpClientInfo, source: McpCallSource): ApprovalDecision | null {
+  const key = callKey(tool, args, client, source);
+  const hit = tickets.get(key);
+  if (!hit) return null;
+  tickets.delete(key);
+  return hit.until >= Date.now() ? hit.decision : null;
+}
 const queueListeners = new Set<(head: ApprovalRequest | null, waiting: number) => void>();
 let reqSeq = 0;
 
@@ -180,7 +201,9 @@ export function answerApproval(id: string, decision: ApprovalDecision) {
   if (idx < 0) return;
   const [p] = queue.splice(idx, 1);
   clearTimeout(p.timer);
-  p.resolve(decision);
+  if (p.resolvers.length > 0) p.resolvers.forEach((r) => r(decision));
+  // Niemand wartet mehr: die Antwort gilt fuer die Wiederholung desselben Aufrufs.
+  else tickets.set(p.key, { until: Date.now() + LATE_APPROVAL_MS, decision });
   notifyQueue();
 }
 
@@ -188,23 +211,43 @@ export function answerApproval(id: string, decision: ApprovalDecision) {
 export function requestApprovalViaDialog(input: {
   tool: Tool; args: ToolArgs; client: McpClientInfo; source: McpCallSource;
 }, timeoutMs = APPROVAL_TIMEOUT_MS): Promise<ApprovalDecision | 'timeout'> {
-  reqSeq += 1;
-  const request: ApprovalRequest = {
-    id: `appr_${Date.now().toString(36)}_${reqSeq}`,
-    tool: input.tool,
-    args: input.args,
-    client: input.client,
-    source: input.source,
-    canRemember: canRemember(input.tool),
-  };
+  const key = callKey(input.tool, input.args, input.client, input.source);
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      const idx = queue.findIndex((p) => p.request.id === request.id);
-      if (idx >= 0) queue.splice(idx, 1);
-      resolve('timeout');
+    // Derselbe Aufruf steht noch offen da: anhaengen statt ein zweites Mal fragen.
+    let entry = queue.find((p) => p.key === key);
+    if (!entry) {
+      reqSeq += 1;
+      entry = {
+        key,
+        request: {
+          id: `appr_${Date.now().toString(36)}_${reqSeq}`,
+          tool: input.tool,
+          args: input.args,
+          client: input.client,
+          source: input.source,
+          canRemember: canRemember(input.tool),
+        },
+        resolvers: [],
+        timer: setTimeout(() => undefined, 0),
+      };
+      queue.push(entry);
+    }
+    const p = entry;
+    clearTimeout(p.timer);
+    p.resolvers.push(resolve);
+    p.request = { ...p.request, late: false };
+    p.timer = setTimeout(() => {
+      const waiting = p.resolvers;
+      p.resolvers = [];
+      p.request = { ...p.request, late: true };
+      p.timer = setTimeout(() => {
+        const idx = queue.indexOf(p);
+        if (idx >= 0) queue.splice(idx, 1);
+        notifyQueue();
+      }, LATE_APPROVAL_MS);
+      waiting.forEach((r) => r('timeout'));
       notifyQueue();
     }, timeoutMs);
-    queue.push({ request, resolve, timer });
     notifyQueue();
   });
 }
@@ -212,5 +255,6 @@ export function requestApprovalViaDialog(input: {
 /** Nur fuer Tests. */
 export function resetApprovalQueue() {
   while (queue.length) clearTimeout(queue.pop()!.timer);
+  tickets.clear();
   notifyQueue();
 }

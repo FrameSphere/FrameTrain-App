@@ -3918,7 +3918,8 @@
       "uncertain": "Unsicher",
       "uncertainHint": "Vorschläge des Modells, die unsichersten zuerst – dort bringt dein Urteil am meisten.",
       "uncertainEmpty": "Keine Vorschläge. Erst „Vorschlagen“ laufen lassen.",
-      "empty": "Nichts in diesem Filter."
+      "empty": "Nichts in diesem Filter.",
+      "skipped": "Übersprungen"
     },
     "stats": {
       "title": "Stand",
@@ -3928,7 +3929,9 @@
       "boxes": "Boxen",
       "emptyConfirmed": "{count} bestätigte Bilder haben keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
       "emptyConfirmed_one": "{count} bestätigtes Bild hat keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
-      "doubts": "Widersprüche"
+      "doubts": "Widersprüche",
+      "incomplete": "{count} bestätigte Samples haben keine Klasse oder keinen Zieltext und fehlen im Export.",
+      "incomplete_one": "{count} bestätigtes Sample hat keine Klasse oder keinen Zieltext und fehlt im Export."
     },
     "shortcuts": {
       "title": "Tastatur",
@@ -4054,7 +4057,15 @@
       "subtitle_pairs": "Ein Text-zu-Text-Modell schreibt einen Entwurf der Antwort. Du korrigierst und bestätigst.",
       "confidenceLabelClasses": "Ab welcher Sicherheit übernehmen: {value} Prozent",
       "safetyNoteGeneric": "Bestätigtes wird nicht angefasst. Vorschläge gelten als ungeprüft, bis du sie mit Enter bestätigst.",
-      "nothingOpen": "Alles in diesem Projekt ist bestätigt – es gibt nichts vorzuschlagen. „Prüfen“ vergleicht Bestätigtes mit dem Modell."
+      "nothingOpen": "Alles in diesem Projekt ist bestätigt – es gibt nichts vorzuschlagen. „Prüfen“ vergleicht Bestätigtes mit dem Modell.",
+      "pickModel": "Modell wählen",
+      "notFitting": "passt nicht zum Projekt",
+      "noFittingModel": "Noch kein passendes Modell. Lade unter Modelle eines, zum Beispiel {model}, und trainiere es auf deine Klassen.",
+      "mapTitle": "Klassen des Modells zuordnen",
+      "mapLoad": "Klassen laden",
+      "mapNone": "Das Modell nennt keine Klassen.",
+      "mapUnassigned": "nicht zugeordnet",
+      "mapIgnore": "ignorieren"
     },
     "review": {
       "title": "Labels prüfen lassen",
@@ -4068,7 +4079,9 @@
         "checked": "Geprüft",
         "doubts": "Widersprüche",
         "agree": "Einig",
-        "hint": "Die Bilder mit Widerspruch stehen jetzt im Filter „Zweifel“ in der Warteschlange."
+        "hint": "Die Bilder mit Widerspruch stehen jetzt im Filter „Zweifel“ in der Warteschlange.",
+        "unknownTitle": "Klassen, die das Modell nicht kennt",
+        "unknownHint": "Dazu kann es nichts sagen; {count} Samples wurden deshalb nicht verglichen. Ordne die Klassen zu, wenn sie im Modell nur anders heißen."
       },
       "subtitleClasses": "Das Modell sieht sich die bestätigten Samples an. Wo es eine andere Klasse sagt, steckt oft ein Fehler im Label."
     },
@@ -4140,7 +4153,8 @@
       "sourceWrite": "Selbst schreiben",
       "sourceWriteHint": "Einzeln oder als Liste, auf Wunsch gleich mit Klasse",
       "sourceGenerate": "Erzeugen lassen",
-      "sourceGenerateHint": "Beispiele je Klasse vom KI-Assistenten schreiben lassen"
+      "sourceGenerateHint": "Beispiele je Klasse vom KI-Assistenten schreiben lassen",
+      "columnN": "Spalte {n}"
     },
     "write": {
       "button": "Schreiben",
@@ -4264,7 +4278,8 @@
         "http429": "zu viele Anfragen – später noch einmal (429)"
       },
       "limitsSummary": "{pages} Seiten · {files} Dateien · {mb} MB",
-      "labelNeedsClasses": "Leg zuerst Klassen an, dann kannst du allem Geholten gleich eine Klasse geben."
+      "labelNeedsClasses": "Leg zuerst Klassen an, dann kannst du allem Geholten gleich eine Klasse geben.",
+      "unclear": "Keine Adresse und deshalb übergangen: {list}"
     },
     "generate": {
       "title": "Texte erzeugen lassen",
@@ -4396,6 +4411,8 @@
       "nextConfirmed": "Sie stehen im Projekt bestätigt, mit der Korrektur oder dem Label aus dem Datensatz. Nach ein paar Runden neu exportieren und trainieren."
     },
     "media": {
+      "videoPreparing": "Video wird für die Anzeige umgewandelt …",
+      "videoUnplayable": "Dieses Video lässt sich hier nicht abspielen.",
       "getFromWeb": "Aus dem Netz",
       "nearDupButton": "Dubletten",
       "pastedTitle": "Bild eingefügt",
@@ -4490,8 +4507,46 @@
         "without_license": "{count} aus dem Netz geholte Samples ohne Lizenzangabe – so nicht weitergeben.",
         "without_license_one": "{count} aus dem Netz geholtes Sample ohne Lizenzangabe – so nicht weitergeben.",
         "clips_failed": "{count} Videoabschnitt(e) ließen sich nicht schneiden und fehlen im Export.",
-        "clips_failed_one": "{count} Videoabschnitt ließ sich nicht schneiden und fehlt im Export."
+        "clips_failed_one": "{count} Videoabschnitt ließ sich nicht schneiden und fehlt im Export.",
+        "incomplete": "{count} bestätigte Samples sind unvollständig und fehlen im Export.",
+        "incomplete_one": "{count} bestätigtes Sample ist unvollständig und fehlt im Export.",
+        "boxes_unknown_class": "{count} Boxen mit unbekannter Klasse wurden nicht exportiert.",
+        "boxes_unknown_class_one": "{count} Box mit unbekannter Klasse wurde nicht exportiert."
       }
+    },
+    "rename": {
+      "hint": "Umbenennen (Doppelklick)",
+      "project": "Projekt umbenennen",
+      "class": "Klasse „{name}“ umbenennen"
+    },
+    "selection": {
+      "count": "{count} ausgewählt",
+      "clear": "Auswahl aufheben",
+      "hint": "⌘-Klick wählt mehrere, ⇧-Klick einen Bereich"
+    },
+    "origin": {
+      "byHand": "von Hand angelegt",
+      "clipboard": "Zwischenablage",
+      "lab": "Labor",
+      "assistant": "KI-Client"
+    },
+    "datasetImport": {
+      "title": "Aus einem Dataset holen",
+      "subtitle": "Welches Dataset soll ins Projekt?",
+      "none": "Kein Dataset in FrameTrain passt zu diesem Projekt",
+      "tileHint": "Klassen zuordnen, auf Wunsch nur eine Stichprobe",
+      "button": "Dataset",
+      "reading": "Klassen werden gelesen …",
+      "mapTitle": "Klassen zuordnen",
+      "mapCount": "{cur} von {total} werden übernommen",
+      "mapFor": "Zuordnung für {klasse}",
+      "mapOwn": "unter eigenem Namen",
+      "mapAuto": "nur bei gleichem Namen",
+      "mapDrop": "weglassen",
+      "dropRest": "Nicht zugeordnete Klassen weglassen",
+      "maxLabel": "Höchstens Samples",
+      "maxAll": "alle",
+      "balanced": "je Klasse gleich viele"
     }
   },
   "datasetHints": {
@@ -5020,7 +5075,8 @@
         "allow": "Erlauben",
         "deny": "Ablehnen",
         "always": "Für {client} immer erlauben",
-        "revokeHint": "Freigaben lassen sich in den Einstellungen unter KI-Verbindungen widerrufen."
+        "revokeHint": "Freigaben lassen sich in den Einstellungen unter KI-Verbindungen widerrufen.",
+        "late": "{client} wartet gerade nicht mehr auf die Antwort. Wenn du jetzt erlaubst, gilt das für die nächste Wiederholung genau dieses Aufrufs (5 Minuten)."
       }
     },
     "settings": {

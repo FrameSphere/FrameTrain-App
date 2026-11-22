@@ -179,6 +179,10 @@ pub struct ReviewReport {
     pub doubts:  usize,
     pub agree:   usize,
     pub failed:  usize,
+    /// Klassen des Projekts, zu denen das Modell nichts sagen kann.
+    pub unknown_classes: Vec<String>,
+    /// Samples, die nur solche Klassen tragen — weder einig noch Zweifel.
+    pub not_comparable: usize,
 }
 
 /// Eine Aenderung an einem Sample.
@@ -250,6 +254,9 @@ pub struct StudioStats {
     /// Boxen je Klasse, gleiche Reihenfolge wie project.classes.
     pub per_class:   Vec<usize>,
     pub empty_confirmed: usize,
+    /// Bestaetigt, aber ohne Klasse bzw. Zieltext: fehlt spaeter im Export.
+    #[serde(default)]
+    pub incomplete:  usize,
     /// Bilder, bei denen das Modell dem bestaetigten Label widerspricht.
     pub doubts:      usize,
 }
@@ -465,8 +472,6 @@ pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 // YOLO: LESEN UND SCHREIBEN
 // ══════════════════════════════════════════════════════════════════
 
-fn clamp01(v: f64) -> f64 { v.clamp(0.0, 1.0) }
-
 /// Liest eine YOLO-Labeldatei. Segmentierungszeilen (Polygone) bekommen die
 /// umschliessende Box — dasselbe Verhalten wie im Labor, damit ein Dataset
 /// nicht je nach Ansicht anders aussieht.
@@ -665,7 +670,7 @@ pub async fn studio_create_project(
         // Ohne Angabe bleibt es bei Boxen — so verhalten sich Projekte aus
         // der Zeit vor den Textmodalitaeten unveraendert.
         task: task.unwrap_or_else(|| "bbox".to_string()),
-        classes: classes.into_iter().map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect(),
+        classes: regeln::klassen_eindeutig(classes),
         created_at: now.clone(), updated_at: now,
     };
     save_project(&dir, &project)?;
@@ -688,11 +693,10 @@ pub async fn studio_update_project(
     if let Some(c) = classes {
         let cleaned: Vec<String> = c.into_iter().map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
         // Eine Klasse zu entfernen wuerde alle Boxen dahinter auf die falsche
-        // Klasse schieben, weil YOLO ueber den Index geht. Daher nur anhaengen
-        // und umbenennen, nie kuerzen.
-        if cleaned.len() < project.classes.len() {
-            return Err("Klassen können umbenannt und ergänzt, aber nicht entfernt werden".to_string());
-        }
+        // Klasse schieben, weil YOLO ueber den Index geht. Daher nur anhaengen,
+        // umbenennen und umsortieren — und die Labels ziehen mit.
+        let boxen = project.modality == "image" && project.task != "classify";
+        regeln::klassen_umschreiben(&dir, boxen, &project.classes, &cleaned)?;
         project.classes = cleaned;
     }
     project.updated_at = Utc::now().to_rfc3339();
@@ -800,6 +804,70 @@ pub async fn studio_inspect_folder(source_path: String) -> Result<FolderInspecti
     })
 }
 
+/// Was liegt in einem Ordner — egal welche Datenart. Fuer KI-Clients: die
+/// Werkbaenke wissen, was sie suchen, ein Assistent fragt erst nach.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct MediaInspection {
+    pub images: usize,
+    pub audio:  usize,
+    pub video:  usize,
+    pub texts:  usize,
+    /// Bilder mit YOLO-Labeldatei.
+    pub with_labels: usize,
+    /// Audiodateien mit gleichnamiger .txt daneben.
+    pub transcripts: usize,
+    /// Klassen aus Unterordnern: Name -> Dateien.
+    pub class_folders: std::collections::BTreeMap<String, usize>,
+    pub source_classes: Vec<String>,
+    pub max_class_id: Option<usize>,
+    pub needs_class_list: bool,
+}
+
+pub fn inspect_media(src: &Path) -> Result<MediaInspection, String> {
+    if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", src.display())); }
+    let bilder = collect_images(src);
+    let audio = collect_audio(src);
+    let videos = video::collect_videos(src);
+    let mut r = MediaInspection { images: bilder.len(), audio: audio.len(), video: videos.len(), ..Default::default() };
+    for f in bilder.iter().chain(&audio).chain(&videos) {
+        if let Some(k) = klasse_aus_ordner(f, src) { *r.class_folders.entry(k).or_default() += 1; }
+    }
+    r.transcripts = audio.iter().filter(|a| transcript_for(a).is_some()).count();
+    for f in bilder.iter().take(500) {
+        for lp in label_paths_for_image(f) {
+            let Ok(t) = fs::read_to_string(&lp) else { continue };
+            let boxen = parse_yolo_label(&t);
+            if let Some(m) = boxen.iter().map(|b| b.cls).max() {
+                r.with_labels += 1;
+                r.max_class_id = Some(r.max_class_id.map_or(m, |x: usize| x.max(m)));
+            }
+            break;
+        }
+    }
+    // Labelordner sind keine Klassen.
+    if r.with_labels > 0 { r.class_folders.clear(); }
+    // .txt neben Bildern sind Labels, neben Audio Transkripte — als Texte
+    // zaehlen sie nur, wenn sonst nichts da ist.
+    if bilder.is_empty() && audio.is_empty() && videos.is_empty() {
+        let q = textquelle::lesen(src, None, None, false)?;
+        r.texts = q.rows.len();
+        for row in &q.rows {
+            if let Some(l) = &row.label { *r.class_folders.entry(l.clone()).or_default() += 1; }
+        }
+    }
+    r.source_classes = read_source_classes(src);
+    r.needs_class_list = r.with_labels > 0 && r.source_classes.is_empty();
+    if r.images + r.audio + r.video + r.texts == 0 {
+        return Err("In diesem Ordner liegen keine Bilder, Audio-, Video- oder Textdateien".to_string());
+    }
+    Ok(r)
+}
+
+#[tauri::command]
+pub async fn studio_inspect_media(source_path: String) -> Result<MediaInspection, String> {
+    inspect_media(Path::new(&source_path))
+}
+
 /// Klassennamen eines trainierten Modells, in der Reihenfolge seiner IDs.
 ///
 /// Der einzige verlaessliche Weg zu den Namen eines fremden Label-Ordners:
@@ -822,6 +890,7 @@ pub async fn studio_import_folder(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "image")?;
     let src = Path::new(&source_path);
     if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", source_path)); }
 
@@ -1000,6 +1069,7 @@ pub async fn studio_import_video(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "image")?;
     let video = PathBuf::from(&video_path);
     if !video.is_file() { return Err(format!("Video nicht gefunden: {}", video_path)); }
 
@@ -1122,6 +1192,7 @@ pub async fn studio_list_samples(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     repair_audio_exts(&dir);
+    if let Ok(mut project) = load_project(&dir) { let _ = regeln::paare_reparieren(&dir, &mut project); }
     let media_dir = dir.join("media");
     let all = load_samples(&dir);
     let doubts = load_doubts(&dir);
@@ -1173,22 +1244,16 @@ fn klasse_aus_ordner(datei: &Path, wurzel: &Path) -> Option<String> {
 #[tauri::command]
 pub async fn studio_set_annotation(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
-    project_id: String, sample_id: String, boxes: Vec<BoxAnn>, status: String,
+    project_id: String, sample_id: String, boxes: Option<Vec<BoxAnn>>, status: String,
     label: Option<String>, target: Option<String>,
+    // true (MCP): was nicht angegeben ist, bleibt wie es ist.
+    keep: Option<bool>,
 ) -> Result<(), String> {
-    if !matches!(status.as_str(), "new" | "suggested" | "confirmed" | "skipped") {
-        return Err(format!("Unbekannter Status: {}", status));
-    }
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
-    let event = AnnEvent { confidence: None,
-        sample_id, status, label, target,
-        boxes: boxes.into_iter()
-            .map(|b| BoxAnn { cls: b.cls, x: clamp01(b.x), y: clamp01(b.y), w: clamp01(b.w), h: clamp01(b.h) })
-            .filter(|b| b.w > 0.0005 && b.h > 0.0005)
-            .collect(),
-        at: Utc::now().to_rfc3339(),
-    };
+    let project = load_project(&dir)?;
+    let event = regeln::annotation_ereignis(&dir, &project, &sample_id,
+        regeln::Wunsch { status, boxes, label, target, keep: keep.unwrap_or(false) })?;
     let sid = event.sample_id.clone();
     append_jsonl(&events_path(&dir), &event)?;
     maybe_compact(&dir)?;
@@ -1218,7 +1283,7 @@ fn compute_stats(project: &StudioProject, samples: &[StudioSample], doubts: usiz
     let mut stats = StudioStats {
         total: samples.len(), new: 0, suggested: 0, confirmed: 0, skipped: 0,
         boxes_total: 0, per_class: vec![0; project.classes.len()], empty_confirmed: 0,
-        doubts,
+        incomplete: 0, doubts,
     };
     for s in samples {
         match s.status.as_str() {
@@ -1231,6 +1296,7 @@ fn compute_stats(project: &StudioProject, samples: &[StudioSample], doubts: usiz
         // "Bestaetigt ohne Box" ist nur bei Bildern ein Hinweis; ein Text
         // hat nie Boxen und waere sonst immer "leer".
         if bild && s.status == "confirmed" && s.ann.boxes.is_empty() { stats.empty_confirmed += 1; }
+        if s.status == "confirmed" && !regeln::exportierbar(project, s) { stats.incomplete += 1; }
         for b in &s.ann.boxes {
             stats.boxes_total += 1;
             if b.cls < stats.per_class.len() { stats.per_class[b.cls] += 1; }
@@ -1261,7 +1327,11 @@ fn compute_stats(project: &StudioProject, samples: &[StudioSample], doubts: usiz
 /// und der Fall klar umrissen ist: Anfuehrungszeichen schuetzen Kommas,
 /// Zeilenumbrueche und verdoppelte Anfuehrungszeichen. Genau das produziert
 /// auch der Export des Labors.
-pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
+#[cfg(test)]
+pub fn parse_csv(text: &str) -> Vec<Vec<String>> { parse_csv_mit(text, ',') }
+
+/// Wie `parse_csv`, mit waehlbarem Trennzeichen ('\0' = eine Spalte).
+pub fn parse_csv_mit(text: &str, trenner: char) -> Vec<Vec<String>> {
     let mut zeilen = Vec::new();
     let mut feld = String::new();
     let mut zeile: Vec<String> = Vec::new();
@@ -1280,7 +1350,7 @@ pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
         }
         match c {
             '"' if feld.is_empty() => in_quotes = true,
-            ',' => zeile.push(std::mem::take(&mut feld)),
+            c if c == trenner => zeile.push(std::mem::take(&mut feld)),
             '\r' => { if chars.peek() == Some(&'\n') { chars.next(); }
                       zeile.push(std::mem::take(&mut feld));
                       zeilen.push(std::mem::take(&mut zeile)); }
@@ -1322,126 +1392,26 @@ pub struct TextInspection {
     pub preview:    Vec<String>,
     /// Klassen, die in der Quelle vorkommen.
     pub labels:     Vec<String>,
+    /// Die ersten Zeilen mit allen Spalten.
+    pub samples:    Vec<Vec<String>>,
 }
 
 const TEXT_EXTS: &[&str] = &["txt", "md"];
 
-fn spalte_finden(spalten: &[String], kandidaten: &[&str]) -> Option<String> {
-    spalten.iter()
-        .find(|s| kandidaten.iter().any(|k| s.trim().eq_ignore_ascii_case(k)))
-        .cloned()
-}
-
-/// Liest eine Textquelle: CSV, JSONL oder ein Ordner mit .txt-Dateien.
-fn read_text_source(
-    path: &Path, text_column: Option<&str>, label_column: Option<&str>,
-) -> Result<(String, Vec<String>, Vec<TextRow>), String> {
-    if path.is_dir() {
-        // Ordner: jede .txt ist ein Sample. Liegt sie in einem Unterordner,
-        // ist dessen Name das Label — dieselbe Konvention wie bei Bildern.
-        let mut rows = Vec::new();
-        let mut stack = vec![path.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = fs::read_dir(&dir) else { continue };
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_dir() {
-                    if !p.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('.') {
-                        stack.push(p);
-                    }
-                    continue;
-                }
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                if !TEXT_EXTS.contains(&ext.as_str()) { continue; }
-                let Ok(text) = fs::read_to_string(&p) else { continue };
-                if text.trim().is_empty() { continue; }
-                let label = p.parent()
-                    .filter(|parent| *parent != path)
-                    .and_then(|parent| parent.file_name())
-                    .map(|n| n.to_string_lossy().to_string());
-                rows.push(TextRow { text, label, origin: p.to_string_lossy().to_string() });
-            }
-        }
-        rows.sort_by(|a, b| a.origin.cmp(&b.origin));
-        return Ok(("folder".to_string(), vec![], rows));
-    }
-
-    let inhalt = fs::read_to_string(path).map_err(|e| format!("Datei lesen: {}", e))?;
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-    let quelle = path.to_string_lossy().to_string();
-
-    if ext == "jsonl" || ext == "ndjson" {
-        let mut spalten: Vec<String> = Vec::new();
-        let mut werte: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
-        for line in inhalt.lines().filter(|l| !l.trim().is_empty()) {
-            let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(line) else { continue };
-            for k in obj.keys() {
-                if !spalten.contains(k) { spalten.push(k.clone()); }
-            }
-            werte.push(obj);
-        }
-        let tcol = text_column.map(str::to_string)
-            .or_else(|| spalte_finden(&spalten, &["text", "source", "input", "sentence"]))
-            .or_else(|| spalten.first().cloned())
-            .ok_or("Die Datei enthaelt keine lesbaren Felder")?;
-        let lcol = label_column.map(str::to_string)
-            .or_else(|| spalte_finden(&spalten, &["label", "target", "class", "klasse"]));
-        let rows = werte.into_iter().filter_map(|obj| {
-            let text = obj.get(&tcol).and_then(|v| v.as_str())?.to_string();
-            if text.trim().is_empty() { return None; }
-            let label = lcol.as_ref().and_then(|c| obj.get(c))
-                .and_then(|v| v.as_str().map(str::to_string));
-            Some(TextRow { text, label, origin: quelle.clone() })
-        }).collect();
-        return Ok(("jsonl".to_string(), spalten, rows));
-    }
-
-    // Alles andere als CSV lesen. Eine .txt ohne Kommas ergibt dabei eine
-    // einspaltige Tabelle — jede Zeile ein Sample, was genau richtig ist.
-    let tabelle = parse_csv(&inhalt);
-    if tabelle.is_empty() { return Err("Die Datei ist leer".to_string()); }
-
-    let kopf = &tabelle[0];
-    // Kopfzeile nur annehmen, wenn sie nach Spaltennamen aussieht.
-    let hat_kopf = kopf.iter().any(|f| {
-        let f = f.trim().to_lowercase();
-        ["text", "label", "source", "target", "class", "klasse", "input", "sentence"].contains(&f.as_str())
-    });
-    let spalten: Vec<String> = if hat_kopf {
-        kopf.clone()
-    } else {
-        (0..kopf.len()).map(|i| format!("Spalte {}", i + 1)).collect()
-    };
-    let tcol = text_column.map(str::to_string)
-        .or_else(|| spalte_finden(&spalten, &["text", "source", "input", "sentence"]))
-        .or_else(|| spalten.first().cloned())
-        .ok_or("Keine Spalte gefunden")?;
-    let lcol = label_column.map(str::to_string)
-        .or_else(|| spalte_finden(&spalten, &["label", "target", "class", "klasse"]));
-    let ti = spalten.iter().position(|s| *s == tcol).unwrap_or(0);
-    let li = lcol.as_ref().and_then(|c| spalten.iter().position(|s| s == c));
-
-    let daten = if hat_kopf { &tabelle[1..] } else { &tabelle[..] };
-    let rows = daten.iter().filter_map(|z| {
-        let text = z.get(ti)?.trim().to_string();
-        if text.is_empty() { return None; }
-        let label = li.and_then(|i| z.get(i)).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        Some(TextRow { text, label, origin: quelle.clone() })
-    }).collect();
-    Ok(("csv".to_string(), spalten, rows))
-}
-
 #[tauri::command]
 pub async fn studio_inspect_text(
-    source_path: String, text_column: Option<String>, label_column: Option<String>,
+    source_path: String, text_column: Option<String>, label_column: Option<String>, pairs: Option<bool>,
 ) -> Result<TextInspection, String> {
     let path = Path::new(&source_path);
+    let paare = pairs.unwrap_or(false);
     if !path.exists() { return Err(format!("Nicht gefunden: {}", source_path)); }
-    let (kind, spalten, rows) = read_text_source(path, text_column.as_deref(), label_column.as_deref())?;
-    if rows.is_empty() { return Err("Keine verwertbaren Texte gefunden".to_string()); }
+    let q = textquelle::lesen(path, text_column.as_deref(), label_column.as_deref(), paare)?;
+    if q.rows.is_empty() { return Err("Keine verwertbaren Texte gefunden".to_string()); }
 
+    // Zieltexte sind keine Klassen — sie hier aufzuzaehlen, hiesse den halben
+    // Datensatz als Klassenliste zu zeigen.
     let mut labels: Vec<String> = Vec::new();
-    for r in &rows {
+    for r in q.rows.iter().filter(|_| !paare) {
         if let Some(l) = &r.label {
             if !labels.iter().any(|x| x.eq_ignore_ascii_case(l)) { labels.push(l.clone()); }
         }
@@ -1449,13 +1419,12 @@ pub async fn studio_inspect_text(
     labels.sort();
 
     Ok(TextInspection {
-        text_column: spalte_finden(&spalten, &["text", "source", "input", "sentence"])
-            .or_else(|| spalten.first().cloned()),
-        label_column: spalte_finden(&spalten, &["label", "target", "class", "klasse"]),
-        preview: rows.iter().take(3)
+        preview: q.rows.iter().take(3)
             .map(|r| r.text.chars().take(140).collect::<String>()).collect(),
-        rows: rows.len(),
-        kind, columns: spalten, labels,
+        rows: q.rows.len(),
+        kind: q.kind, columns: q.spalten, labels,
+        text_column: q.text_spalte, label_column: q.label_spalte,
+        samples: q.proben,
     })
 }
 
@@ -1468,10 +1437,12 @@ pub async fn studio_import_text(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "text")?;
     let path = Path::new(&source_path);
     if !path.exists() { return Err(format!("Nicht gefunden: {}", source_path)); }
 
-    let (_kind, _spalten, rows) = read_text_source(path, text_column.as_deref(), label_column.as_deref())?;
+    let paare = project.task == "pairs";
+    let textquelle::Quelle { kind, rows, .. } = textquelle::lesen(path, text_column.as_deref(), label_column.as_deref(), paare)?;
     if rows.is_empty() { return Err("Keine verwertbaren Texte gefunden".to_string()); }
 
     let existing = load_samples(&dir);
@@ -1497,6 +1468,11 @@ pub async fn studio_import_text(
         let mut label = row.label.clone();
         if ignore_labels && label.is_some() { report.labels_ignored += 1; label = None; }
 
+        // In einem Paar-Projekt ist die zweite Spalte der Zieltext, keine
+        // Klasse. Der Ordnername eines Textordners ist dort beides nicht.
+        let target = if paare && kind != "folder" { label.take() } else { None };
+        if paare { label = None; }
+
         // Klassen aus der Quelle uebernehmen — unter dem Namen, den das
         // Projekt schon fuehrt, damit "Spam" und "spam" nicht zweimal stehen.
         if let Some(l) = &label {
@@ -1508,15 +1484,16 @@ pub async fn studio_import_text(
                 }
             }
         }
-        if label.is_some() { report.with_labels += 1; }
+        let fertig = label.is_some() || target.is_some();
+        if fertig { report.with_labels += 1; }
 
         append_jsonl(&samples_path(&dir), &StudioSample {
             id: format!("s_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..10]),
             media: String::new(),
             mime: "text/plain".to_string(),
             content: Some(row.text.clone()),
-            status: if label.is_some() { "confirmed".to_string() } else { "new".to_string() },
-            ann: Annotation { confidence: None, boxes: vec![], label, target: None },
+            status: if fertig { "confirmed".to_string() } else { "new".to_string() },
+            ann: Annotation { confidence: None, boxes: vec![], label, target },
             src: SampleSource { page: None,
                 kind: "import".to_string(),
                 origin: Some(row.origin.clone()),
@@ -1544,6 +1521,8 @@ pub mod web;
 pub mod video;
 pub mod quality;
 pub mod transfer;
+pub mod regeln;
+pub mod textquelle;
 #[cfg(test)]
 use web::{robots_erlaubt, html_zu_text, ext_aus_typ};
 
@@ -1709,6 +1688,7 @@ pub async fn studio_import_audio(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "audio")?;
     let src = Path::new(&source_path);
     if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", source_path)); }
 
@@ -1803,6 +1783,7 @@ pub async fn studio_add_audio(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "audio")?;
     if bytes.is_empty() { return Err("Die Aufnahme ist leer".to_string()); }
 
     let ext = ext.trim().trim_start_matches('.').to_lowercase();
@@ -1899,6 +1880,7 @@ fn remove_samples(dir: &Path, ids: &[String]) -> Result<usize, String> {
     for s in &raus {
         if !s.media.is_empty() && !noch_benutzt.contains(s.media.as_str()) {
             let _ = fs::remove_file(dir.join("media").join(&s.media));
+            video::kopie_entfernen(dir, &s.media);
         }
     }
 
@@ -1975,12 +1957,19 @@ pub async fn studio_add_texts(
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
+    regeln::medium_pruefen(&project, "text")?;
 
     let sauber: Vec<NewText> = items.into_iter()
         .map(|i| NewText {
             text: i.text.trim().to_string(),
             label: i.label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()),
             target: i.target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+        })
+        // Paare haben einen Zieltext, Klassenprojekte eine Klasse. Das jeweils
+        // andere Feld ergaebe ein "bestaetigt" ohne Inhalt.
+        .map(|mut i| {
+            if regeln::mit_zieltext(&project) { i.label = None; } else { i.target = None; }
+            i
         })
         .filter(|i| !i.text.is_empty())
         .collect();
@@ -2057,6 +2046,7 @@ pub async fn studio_add_image(
 ) -> Result<ImportReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    regeln::medium_pruefen(&load_project(&dir)?, "image")?;
 
     let Some((w, h)) = image_dimensions(&bytes) else {
         return Err("Das ist kein lesbares Bild (PNG, JPEG, GIF, BMP oder WebP).".to_string());
@@ -2318,8 +2308,8 @@ fn modell_passt(art: Vorschlagsart, project: &StudioProject, modalitaet: &str) -
         Vorschlagsart::Ziel if project.modality == "audio" => "ein Spracherkennungs-Modell wie Whisper",
         Vorschlagsart::Ziel => "ein Text-zu-Text-Modell wie T5",
         Vorschlagsart::Klasse => match project.modality.as_str() {
-            "image" => "ein Bildklassifikator", "audio" => "ein Audioklassifikator",
-            "video" => "ein Videoklassifikator", _ => "ein Textklassifikator",
+            "image" => "einen Bildklassifikator", "audio" => "einen Audioklassifikator",
+            "video" => "einen Videoklassifikator", _ => "einen Textklassifikator",
         },
     };
     Err(format!("Das gewählte Modell ist {}. Dieses Projekt braucht {}.", was, braucht))
@@ -2342,7 +2332,9 @@ pub async fn studio_suggest(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, version_id: String,
     min_confidence: f64, add_unknown_classes: bool, limit: Option<usize>,
+    class_map: Option<HashMap<String, Option<String>>>,
 ) -> Result<SuggestReport, String> {
+    let zuordnung = regeln::Zuordnung::neu(class_map);
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
@@ -2404,10 +2396,13 @@ pub async fn studio_suggest(
             }
             Vorschlagsart::Klasse => {
                 let konfidenz = konfidenz.unwrap_or(1.0);
-                let Some(vorhersage) = answer.get("predicted").and_then(|v| v.as_str()) else {
+                let Some(roh) = answer.get("predicted").and_then(|v| v.as_str()) else {
                     report.without_boxes += 1; continue;
                 };
                 if konfidenz < min_confidence { report.without_boxes += 1; continue; }
+                // Ausdruecklich "ignorieren" ist keine fehlende Zuordnung.
+                let Some(vorhersage) = zuordnung.ziel(roh) else { report.without_boxes += 1; continue };
+                let vorhersage = vorhersage.as_str();
 
                 let name = match class_index_for(vorhersage, &project.classes) {
                     Some(i) => project.classes[i].clone(),
@@ -2446,7 +2441,8 @@ pub async fn studio_suggest(
                 for b in answer.get("boxes").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
                     let conf = b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     if conf < min_confidence { continue; }
-                    let Some(label) = b.get("label").and_then(|v| v.as_str()) else { continue; };
+                    let Some(label) = b.get("label").and_then(|v| v.as_str()).and_then(|l| zuordnung.ziel(l)) else { continue; };
+                    let label = label.as_str();
 
                     let cls = match class_index_for(label, &project.classes) {
                         Some(idx) => idx,
@@ -2511,6 +2507,8 @@ pub async fn studio_suggest(
 pub async fn studio_review(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, version_id: String, min_confidence: f64,
+    // Modellklasse -> Projektklasse (null: ignorieren), wenn die Namen abweichen.
+    class_map: Option<HashMap<String, Option<String>>>,
 ) -> Result<ReviewReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
@@ -2527,13 +2525,24 @@ pub async fn studio_review(
         return Err("Es gibt noch nichts Bestätigtes zum Prüfen.".to_string());
     }
 
-    let (mut server, _model_classes, modalitaet) = start_inference_server(&app_handle, &version_id)?;
+    let (mut server, model_classes, modalitaet) = start_inference_server(&app_handle, &version_id)?;
     if let Err(e) = modell_passt(art, &project, &modalitaet) {
         server.shutdown();
         return Err(e);
     }
+    // Was das Modell nie gelernt hat, kann es auch nicht widerlegen. Vorher galt
+    // jedes Label mit so einer Klasse als Zweifel (Testlauf 22.11.: 26 von 27).
+    let zuordnung = regeln::Zuordnung::neu(class_map);
+    let bekannt = zuordnung.bekannte_klassen(&model_classes, &project.classes);
+    if !model_classes.is_empty() && bekannt.is_empty() {
+        server.shutdown();
+        return Err(format!("Das Modell kennt keine Klasse dieses Projekts (Modell: {}). Ordne die Klassen zu oder nimm ein Modell, das auf diese Klassen trainiert ist.",
+            model_classes.join(", ")));
+    }
+    let kennt = |k: &str| model_classes.is_empty() || bekannt.iter().any(|b| b.eq_ignore_ascii_case(k));
     let mut doubts: HashMap<String, Doubt> = HashMap::new();
-    let mut report = ReviewReport { checked: 0, doubts: 0, agree: 0, failed: 0 };
+    let mut report = ReviewReport { checked: 0, doubts: 0, agree: 0, failed: 0, not_comparable: 0,
+        unknown_classes: project.classes.iter().filter(|c| !kennt(c)).cloned().collect() };
     let total = bestaetigt.len();
     let now = Utc::now().to_rfc3339();
 
@@ -2559,9 +2568,11 @@ pub async fn studio_review(
 
         if art == Vorschlagsart::Klasse {
             // Klassifikation: das Modell sagt eine Klasse, im Label steht eine.
-            let vorhersage = answer.get("predicted").and_then(|v| v.as_str()).unwrap_or("");
+            let roh = answer.get("predicted").and_then(|v| v.as_str()).unwrap_or("");
+            let vorhersage = zuordnung.ziel(roh).unwrap_or_default();
             let konfidenz = answer.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);
             let im_label = sample.ann.label.clone().unwrap_or_default();
+            if !kennt(&im_label) { report.not_comparable += 1; continue; }
             let einig = konfidenz < min_confidence
                 || vorhersage.trim().to_lowercase() == im_label.trim().to_lowercase();
             if einig {
@@ -2583,15 +2594,20 @@ pub async fn studio_review(
         let mut gesehen: Vec<String> = Vec::new();
         for b in answer.get("boxes").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
             if b.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0) < min_confidence { continue; }
-            let Some(label) = b.get("label").and_then(|v| v.as_str()) else { continue; };
-            if let Some(idx) = class_index_for(label, &project.classes) {
+            let Some(label) = b.get("label").and_then(|v| v.as_str()).and_then(|l| zuordnung.ziel(l)) else { continue; };
+            if let Some(idx) = class_index_for(&label, &project.classes) {
                 gesehen.push(project.classes[idx].clone());
             }
         }
 
         let im_label: Vec<String> = sample.ann.boxes.iter()
             .filter_map(|b| project.classes.get(b.cls).cloned())
+            .filter(|k| kennt(k))
             .collect();
+        if im_label.is_empty() && gesehen.is_empty() && !sample.ann.boxes.is_empty() {
+            report.not_comparable += 1;
+            continue;
+        }
 
         let (missing, extra) = compare_class_sets(&im_label, &gesehen);
         if missing.is_empty() && extra.is_empty() {
@@ -2637,15 +2653,7 @@ fn write_yolo_export(
     // Gruppenbewusst aufteilen: Einzelbilder eines Videos duerfen nicht
     // gleichzeitig in Train und Val landen. Ohne Gruppe steht jedes Bild fuer
     // sich, dann ist es ein gewoehnlicher Zufallssplit.
-    let splits: Vec<Option<String>> = if train_ratio > 0.0 && train_ratio < 1.0 {
-        let gruppen: Vec<String> = samples.iter()
-            .map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
-            .collect();
-        crate::yolo_export::assign_splits(&gruppen, train_ratio, val_ratio)
-            .into_iter().map(Some).collect()
-    } else {
-        vec![None; samples.len()]
-    };
+    let splits = gruppen_splits(samples, train_ratio, val_ratio);
 
     let items: Vec<crate::yolo_export::ExportItem> = samples.iter().zip(splits.clone())
         .map(|(s, split)| crate::yolo_export::ExportItem {
@@ -2708,13 +2716,24 @@ Herkunft je Bild steht in PROVENANCE.csv.
     Ok(splits)
 }
 
-/// Aufteilung nach Gruppen, oder keine, wenn alles in train soll.
+/// Wonach geschichtet wird: die Klasse, bei Boxen die seltenste im Bild — eine
+/// haeufige verteilt sich von allein.
+fn schichten(samples: &[&StudioSample]) -> Vec<Option<String>> {
+    let mut zahl: HashMap<usize, usize> = HashMap::new();
+    for s in samples { for b in &s.ann.boxes { *zahl.entry(b.cls).or_default() += 1; } }
+    samples.iter().map(|s| {
+        if let Some(l) = &s.ann.label { return Some(l.trim().to_lowercase()); }
+        s.ann.boxes.iter().map(|b| b.cls).min_by_key(|c| (zahl.get(c).copied().unwrap_or(0), *c)).map(|c| format!("#{}", c))
+    }).collect()
+}
+
+/// Aufteilung nach Gruppen und Klassen, oder keine, wenn alles in train soll.
 fn gruppen_splits(samples: &[&StudioSample], train_ratio: f64, val_ratio: f64) -> Vec<Option<String>> {
     if train_ratio > 0.0 && train_ratio < 1.0 {
         let gruppen: Vec<String> = samples.iter()
             .map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
             .collect();
-        crate::yolo_export::assign_splits(&gruppen, train_ratio, val_ratio)
+        crate::yolo_export::assign_splits_je_klasse(&gruppen, &schichten(samples), train_ratio, val_ratio)
             .into_iter().map(Some).collect()
     } else {
         vec![None; samples.len()]
@@ -2848,11 +2867,8 @@ fn write_text_export(
     // Wie beim Bild-Export gruppenbewusst aufteilen. Vorher landete alles in
     // einer data.csv ohne Split, obwohl der Export "train/val/test" versprach
     // (Benchmark 09.11.).
-    let splits: Vec<Option<String>> = if train_ratio > 0.0 && train_ratio < 1.0 && samples.len() >= 3 {
-        let gruppen: Vec<String> = samples.iter()
-            .map(|s| s.meta.group.clone().unwrap_or_else(|| s.id.clone()))
-            .collect();
-        crate::yolo_export::assign_splits(&gruppen, train_ratio, val_ratio).into_iter().map(Some).collect()
+    let splits: Vec<Option<String>> = if samples.len() >= 3 {
+        gruppen_splits(samples, train_ratio, val_ratio)
     } else {
         vec![None; samples.len()]
     };
@@ -2899,8 +2915,12 @@ Herkunft je Text steht in PROVENANCE.csv.
         date = Utc::now().format("%Y-%m-%d"),
         count = samples.len(),
         classes = if project.classes.is_empty() { "—".to_string() } else { project.classes.join(", ") },
-        format = if seq2seq { "dataset/data.jsonl mit source und target" }
-                 else { "dataset/data.csv mit text und label" });
+        format = format!("{}, {}",
+            match (splits.iter().any(|s| s.is_some()), seq2seq) {
+                (true, true) => "dataset/<teil>/data.jsonl", (true, false) => "dataset/<teil>/data.csv",
+                (false, true) => "dataset/data.jsonl", (false, false) => "dataset/data.csv",
+            },
+            if seq2seq { "Felder source und target" } else { "Spalten text und label" }));
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
     Ok((daten, splits))
 }
@@ -2912,8 +2932,12 @@ Herkunft je Text steht in PROVENANCE.csv.
 /// gleichnamiger .txt daneben (AudioTranscript).
 fn write_audio_export(
     project: &StudioProject, samples: &[&StudioSample], media_dir: &Path, out: &Path,
-) -> Result<PathBuf, String> {
+    train_ratio: f64, val_ratio: f64,
+) -> Result<(PathBuf, Vec<Option<String>>), String> {
     let transkript = project.task == "transcript";
+    let splits: Vec<Option<String>> = if samples.len() >= 3 {
+        gruppen_splits(samples, train_ratio, val_ratio)
+    } else { vec![None; samples.len()] };
     let mut provenance = String::from("sample_id,datei,herkunft,lizenz,status,label\n");
 
     // Klassenordner werden nur erkannt, wenn im Wurzelordner keine Dateien
@@ -2925,17 +2949,18 @@ fn write_audio_export(
     let daten = out.join("dataset");
     fs::create_dir_all(&daten).map_err(|e| format!("mkdir: {}", e))?;
 
-    for s in samples {
+    for (s, split) in samples.iter().zip(&splits) {
         let ext = Path::new(&s.media).extension().and_then(|e| e.to_str()).unwrap_or("wav");
         let quelle = media_dir.join(&s.media);
 
+        let teil = split.as_ref().map(|t| daten.join(t)).unwrap_or_else(|| daten.clone());
         let (ordner, name) = if transkript {
-            (daten.clone(), format!("{}.{}", s.id, ext))
+            (teil, format!("{}.{}", s.id, ext))
         } else {
             // Ohne Klasse waere der Ordnername leer — solche Samples gehoeren
             // nicht in einen Klassifikations-Export.
             let Some(klasse) = s.ann.label.as_ref() else { continue };
-            (daten.join(klasse.replace('/', "_")), format!("{}.{}", s.id, ext))
+            (teil.join(klasse.replace('/', "_")), format!("{}.{}", s.id, ext))
         };
         fs::create_dir_all(&ordner).map_err(|e| format!("mkdir: {}", e))?;
         fs::copy(&quelle, ordner.join(&name)).map_err(|e| format!("Audio kopieren: {}", e))?;
@@ -2970,12 +2995,48 @@ Herkunft je Aufnahme steht in PROVENANCE.csv.
         name = project.name,
         date = Utc::now().format("%Y-%m-%d"),
         count = samples.len(),
-        form = if transkript { "Audiodatei mit gleichnamiger .txt daneben" }
-               else { "ein Ordner je Klasse" },
+        form = format!("{}{}",
+            if transkript { "Audiodatei mit gleichnamiger .txt daneben" } else { "ein Ordner je Klasse" },
+            if splits.iter().any(|s| s.is_some()) { ", aufgeteilt in train/val/test" } else { "" }),
         klassen = if transkript { String::new() }
                   else { format!("- Klassen: {}\n", project.classes.join(", ")) });
     fs::write(out.join("DATA_CARD.md"), card).map_err(|e| format!("DATA_CARD.md: {}", e))?;
-    Ok(daten)
+    Ok((daten, splits))
+}
+
+/// Herkunft nach einem Import aus einem Dataset richtigstellen.
+///
+/// Der Import laeuft ueber einen Zwischenordner, der danach verschwindet. Ohne
+/// das stuende in PROVENANCE.csv ein Pfad, den es nicht mehr gibt.
+pub fn herkunft_umschreiben(dir: &Path, vorsatz: &str, name: &str) -> Result<usize, String> {
+    if vorsatz.trim().is_empty() { return Ok(0); }
+    let mut alle: Vec<StudioSample> = read_jsonl(&samples_path(dir));
+    let mut n = 0;
+    for s in alle.iter_mut() {
+        let Some(o) = s.src.origin.as_deref() else { continue };
+        if !o.starts_with(vorsatz) { continue; }
+        let datei = Path::new(o).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+        // Der Zwischenordner zaehlt durch ("000012_bild.jpg"); die Nummer gehoert
+        // nicht zum Original.
+        let ohne_nr = match datei.split_once('_') {
+            Some((nr, rest)) if nr.len() == 6 && nr.bytes().all(|b| b.is_ascii_digit()) && !rest.is_empty() => rest.to_string(),
+            _ => datei,
+        };
+        s.src.origin = Some(if ohne_nr == "data.jsonl" { format!("Dataset: {}", name) } else { format!("Dataset: {}/{}", name, ohne_nr) });
+        n += 1;
+    }
+    if n > 0 { write_jsonl(&samples_path(dir), &alle)?; }
+    Ok(n)
+}
+
+#[tauri::command]
+pub async fn studio_rewrite_origin(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>,
+    project_id: String, prefix: String, dataset_name: String,
+) -> Result<usize, String> {
+    let user_id = get_user_id(&state)?;
+    let dir = project_dir(&app_handle, &user_id, &project_id)?;
+    herkunft_umschreiben(&dir, &prefix, &dataset_name)
 }
 
 /// Was ein Export zurueckgibt: der registrierte Datensatz und sein Bericht.
@@ -2995,7 +3056,8 @@ pub async fn studio_export(
 ) -> Result<ExportResult, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
-    let project = load_project(&dir)?;
+    let mut project = load_project(&dir)?;
+    regeln::paare_reparieren(&dir, &mut project)?;
     if project.classes.is_empty() && project.task != "pairs" && project.task != "transcript" {
         return Err("Das Projekt hat noch keine Klassen".to_string());
     }
@@ -3008,9 +3070,19 @@ pub async fn studio_export(
         return Err("Keine bestätigten Samples — es gibt nichts zu exportieren".to_string());
     }
 
-    let stamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let out = dir.join("exports").join(&stamp);
-    fs::create_dir_all(&out).map_err(|e| format!("mkdir export: {}", e))?;
+    // Nur was vollstaendig ist, zaehlt — vorher nannte der Bericht auch Samples,
+    // die in keiner Datei standen.
+    let ausgewaehlt = selected.len();
+    let selected: Vec<&StudioSample> = selected.into_iter()
+        .filter(|s| regeln::exportierbar(&project, s)).collect();
+    let unvollstaendig = ausgewaehlt - selected.len();
+    if selected.is_empty() {
+        return Err("Keines der bestätigten Samples ist vollständig (Klasse, Zieltext oder passendes Medium fehlt) – es gibt nichts zu exportieren".to_string());
+    }
+    let (sauber, fremde_boxen) = regeln::ohne_fremde_boxen(&project, &selected);
+    let selected: Vec<&StudioSample> = sauber.iter().collect();
+
+    let out = regeln::export_ordner(&dir)?;
     let media_dir = dir.join("media");
 
     // Welcher Ordner am Ende registriert wird, entscheidet der Writer: bei
@@ -3023,8 +3095,8 @@ pub async fn studio_export(
                 (d, selected.clone(), sp, vec![])
             }
             ("audio", "transcript") => {
-                let d = write_audio_export(&project, &selected, &media_dir, &out)?;
-                (d, selected.clone(), vec![None; selected.len()], vec![])
+                let (d, sp) = write_audio_export(&project, &selected, &media_dir, &out, train_ratio, val_ratio)?;
+                (d, selected.clone(), sp, vec![])
             }
             ("image", t) if t != "classify" => {
                 let sp = write_yolo_export(&project, &selected, &media_dir, &out, train_ratio, val_ratio)?;
@@ -3038,6 +3110,8 @@ pub async fn studio_export(
 
     let mut report = quality::baue_report(&project, &exportiert, &splits, &quality::load_hashes(&dir));
     for h in hinweise { report.melde(h); }
+    if unvollstaendig > 0 { report.melde(quality::unvollstaendig(unvollstaendig)); }
+    if fremde_boxen > 0 { report.melde(quality::boxen_ohne_klasse(fremde_boxen)); }
     fs::write(out.join("EXPORT_REPORT.md"), quality::report_markdown(&project, &report))
         .map_err(|e| format!("EXPORT_REPORT.md: {}", e))?;
     fs::write(out.join("export_report.json"), serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)
@@ -3295,7 +3369,7 @@ mod tests {
         let s3 = audiosample("s_3", None, None);
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        let daten = write_audio_export(&project, &[&s1, &s2, &s3], &dir.path().join("media"), &out).unwrap();
+        let daten = write_audio_export(&project, &[&s1, &s2, &s3], &dir.path().join("media"), &out, 0.0, 0.0).unwrap().0;
 
         assert!(daten.join("ansage/s_1.wav").exists());
         assert!(daten.join("stoerung/s_2.wav").exists());
@@ -3324,7 +3398,7 @@ mod tests {
         let s1 = audiosample("s_1", None, Some("Der Lift faehrt gleich weiter"));
         let out = dir.path().join("out");
         fs::create_dir_all(&out).unwrap();
-        let daten = write_audio_export(&project, &[&s1], &dir.path().join("media"), &out).unwrap();
+        let daten = write_audio_export(&project, &[&s1], &dir.path().join("media"), &out, 0.0, 0.0).unwrap().0;
 
         assert!(daten.join("s_1.wav").exists());
         assert_eq!(fs::read_to_string(daten.join("s_1.txt")).unwrap(),
@@ -3522,7 +3596,7 @@ mod tests {
         let datei = dir.path().join("daten.csv");
         fs::write(&datei, "text,label\nDer Lift steht,defekt\nSchoene Piste,ok\n").unwrap();
 
-        let (kind, spalten, rows) = read_text_source(&datei, None, None).unwrap();
+        let textquelle::Quelle { kind, spalten, rows, .. } = textquelle::lesen(&datei, None, None, false).unwrap();
         assert_eq!(kind, "csv");
         assert_eq!(spalten, vec!["text", "label"]);
         assert_eq!(rows.len(), 2);
@@ -3536,7 +3610,7 @@ mod tests {
         let datei = dir.path().join("roh.csv");
         fs::write(&datei, "Der Lift steht\nSchoene Piste\n").unwrap();
 
-        let (_, spalten, rows) = read_text_source(&datei, None, None).unwrap();
+        let textquelle::Quelle { kind: _, spalten, rows, .. } = textquelle::lesen(&datei, None, None, false).unwrap();
         assert_eq!(spalten, vec!["Spalte 1"]);
         assert_eq!(rows.len(), 2, "beide Zeilen sind Daten, keine davon ist ein Kopf");
         assert_eq!(rows[0].text, "Der Lift steht");
@@ -3553,7 +3627,7 @@ mod tests {
         // Direkt im Wurzelordner: kein Unterordner, also kein Label.
         fs::write(dir.path().join("c.txt"), "Ohne Zuordnung").unwrap();
 
-        let (kind, _, rows) = read_text_source(dir.path(), None, None).unwrap();
+        let textquelle::Quelle { kind, spalten: _, rows, .. } = textquelle::lesen(dir.path(), None, None, false).unwrap();
         assert_eq!(kind, "folder");
         assert_eq!(rows.len(), 3);
         let label_von = |t: &str| rows.iter().find(|r| r.text.contains(t))
@@ -3569,11 +3643,67 @@ mod tests {
         let datei = dir.path().join("paare.jsonl");
         fs::write(&datei, "{\"source\":\"Hallo\",\"target\":\"Moin\"}\n{\"source\":\"Tschuess\",\"target\":\"Ciao\"}\n").unwrap();
 
-        let (kind, spalten, rows) = read_text_source(&datei, None, None).unwrap();
+        let textquelle::Quelle { kind, spalten, rows, .. } = textquelle::lesen(&datei, None, None, false).unwrap();
         assert_eq!(kind, "jsonl");
         assert!(spalten.contains(&"source".to_string()));
         assert_eq!(rows[0].text, "Hallo");
         assert_eq!(rows[0].label.as_deref(), Some("Moin"));
+    }
+
+    #[test]
+    fn textquelle_paare_liest_den_zieltext_und_seine_spaltennamen() {
+        let dir = TempDir::new("paarquelle");
+        let f = dir.path().join("a.csv");
+        fs::write(&f, "source,target\nHow are you?,Wie geht es dir?\n").unwrap();
+        let textquelle::Quelle { kind: _, spalten: _, rows, .. } = textquelle::lesen(&f, None, None, true).unwrap();
+        assert_eq!((rows[0].text.as_str(), rows[0].label.as_deref()), ("How are you?", Some("Wie geht es dir?")));
+        // Frage/Antwort ist in einem Klassenprojekt keine bekannte Kopfzeile, bei Paaren schon.
+        fs::write(&f, "question,answer\nWas ist 6 mal 7?,42\n").unwrap();
+        let textquelle::Quelle { kind: _, spalten: _, rows, .. } = textquelle::lesen(&f, None, None, true).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label.as_deref(), Some("42"));
+        // Eine Antwort als Zahl geht in JSONL nicht verloren.
+        let j = dir.path().join("a.jsonl");
+        fs::write(&j, "{\"prompt\":\"6*7\",\"completion\":42}\n").unwrap();
+        let textquelle::Quelle { kind: _, spalten: _, rows, .. } = textquelle::lesen(&j, None, None, true).unwrap();
+        assert_eq!((rows[0].text.as_str(), rows[0].label.as_deref()), ("6*7", Some("42")));
+        // Auch Klassen als Zahl kommen an.
+        fs::write(&j, "{\"text\":\"hallo\",\"label\":0}\n").unwrap();
+        let textquelle::Quelle { kind: _, spalten: _, rows, .. } = textquelle::lesen(&j, None, None, false).unwrap();
+        assert_eq!(rows[0].label.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn ordner_pruefen_kennt_audio_und_text() {
+        let dir = TempDir::new("inspect_media");
+        for (d, f) in [("eins", "a.wav"), ("eins", "b.wav"), ("zwei", "c.wav")] {
+            fs::create_dir_all(dir.path().join(d)).unwrap();
+            fs::write(dir.path().join(d).join(f), b"RIFF").unwrap();
+        }
+        fs::write(dir.path().join("eins/a.txt"), "hallo").unwrap();
+        let r = inspect_media(dir.path()).unwrap();
+        assert_eq!((r.audio, r.images, r.transcripts), (3, 0, 1));
+        assert_eq!(r.class_folders.get("eins"), Some(&2));
+        let t = TempDir::new("inspect_text");
+        fs::create_dir_all(t.path().join("lob")).unwrap();
+        fs::write(t.path().join("lob/a.txt"), "gut").unwrap();
+        assert_eq!(inspect_media(t.path()).unwrap().texts, 1);
+        assert!(inspect_media(TempDir::new("leer").path()).is_err());
+    }
+
+    #[test]
+    fn herkunft_zeigt_nach_dem_datasetimport_nicht_auf_den_zwischenordner() {
+        let dir = TempDir::new("herkunft");
+        let mut a = sample("s_1", "confirmed");
+        a.src.origin = Some("/cache/fetch/abc/staged/images/000012_hund.jpg".to_string());
+        let mut b = sample("s_2", "confirmed");
+        b.src.origin = Some("/daten/eigenes.jpg".to_string());
+        append_jsonl(&samples_path(dir.path()), &a).unwrap();
+        append_jsonl(&samples_path(dir.path()), &b).unwrap();
+        assert_eq!(herkunft_umschreiben(dir.path(), "/cache/fetch/abc", "coco128").unwrap(), 1);
+        let s = load_samples(dir.path());
+        assert_eq!(s[0].src.origin.as_deref(), Some("Dataset: coco128/hund.jpg"));
+        assert_eq!(s[1].src.origin.as_deref(), Some("/daten/eigenes.jpg"));
     }
 
     #[test]

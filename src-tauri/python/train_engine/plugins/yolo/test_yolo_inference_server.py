@@ -38,6 +38,30 @@ class FindWeightsTest(unittest.TestCase):
         (self.root / "yolov8n.pt").write_bytes(b"x")
         self.assertEqual(find_weights(self.root).name, "yolov8n.pt")
 
+    def test_original_laedt_nicht_die_trainierte_version(self):
+        # Modellordner: Basisgewichte neben versions/<id>/train/weights/best.pt.
+        w = self.root / "versions" / "ver_1" / "train" / "weights"
+        w.mkdir(parents=True)
+        (w / "best.pt").write_bytes(b"x")
+        (w.parent.parent / "model.pt").write_bytes(b"x")
+        (self.root / "yolov8x.pt").write_bytes(b"xxx")
+        (self.root / "yolov8n.pt").write_bytes(b"xx")
+        self.assertEqual(find_weights(self.root), self.root / "yolov8n.pt")
+        # Die Version selbst nimmt ihre eigenen Gewichte.
+        self.assertEqual(find_weights(self.root / "versions" / "ver_1").name, "model.pt")
+
+    def test_boxen_gewichte_vor_anderen_aufgaben(self):
+        (self.root / "yolo11n-cls.pt").write_bytes(b"x")
+        (self.root / "yolo11n.pt").write_bytes(b"xx")
+        self.assertEqual(find_weights(self.root).name, "yolo11n.pt")
+
+    def test_nur_versionen_zaehlt_nicht_als_basismodell(self):
+        w = self.root / "versions" / "ver_1"
+        w.mkdir(parents=True)
+        (w / "model.pt").write_bytes(b"x")
+        with self.assertRaises(FileNotFoundError):
+            find_weights(self.root)
+
     def test_datei_statt_ordner(self):
         f = self.root / "mein_modell.pt"
         f.write_bytes(b"x")

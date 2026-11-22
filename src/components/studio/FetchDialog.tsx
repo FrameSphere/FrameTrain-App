@@ -49,8 +49,22 @@ export interface WebOptions {
 
 /** Adressen aus einem Eingabefeld: je Zeile, mit Leerzeichen oder Komma getrennt. */
 export function adressenAus(text: string): string[] {
-  return text.split(/[\s,]+/).map(u => u.trim())
-    .filter(u => u.startsWith('http://') || u.startsWith('https://'));
+  return zerlegeAdressen(text).adressen;
+}
+
+/** "example.com/seite" ist als Adresse gemeint — vorher fiel sie still weg. */
+const OHNE_SCHEMA = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#]\S*)?$/i;
+
+/** Gueltige Adressen und was sich nicht als Adresse lesen liess. */
+export function zerlegeAdressen(text: string): { adressen: string[]; unklar: string[] } {
+  const adressen: string[] = [];
+  const unklar: string[] = [];
+  for (const u of text.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)) {
+    if (/^https?:\/\/\S+/i.test(u)) adressen.push(u);
+    else if (OHNE_SCHEMA.test(u)) adressen.push(`https://${u}`);
+    else unklar.push(u);
+  }
+  return { adressen, unklar };
 }
 
 /** Startwerte je Projektart. Videos sind gross und wenige, Bilder klein und
@@ -105,7 +119,7 @@ export default function FetchDialog({ project, onClose, onDone }: {
   const [fortschritt, setFortschritt] = useState<Fortschritt | null>(null);
   const [report, setReport] = useState<FetchReport | null>(null);
 
-  const adressen = adressenAus(text);
+  const { adressen, unklar } = zerlegeAdressen(text);
 
   useEffect(() => {
     const un = listen<{ project_id: string; current: number; total: number; pages?: number; max_pages?: number; url?: string; done?: boolean }>(
@@ -250,6 +264,11 @@ export default function FetchDialog({ project, onClose, onDone }: {
               <textarea value={text} onChange={e => setText(e.target.value)} rows={mode === 'urls' ? 6 : 3} autoFocus disabled={busy}
                 placeholder={mode === 'sitemap' ? 'https://example.org\nhttps://example.org/sitemap.xml' : 'https://…\nhttps://…'}
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-white/25 resize-none font-mono" />
+              {unklar.length > 0 && (
+                <span className="text-amber-300/90 text-[11px] block mt-1" data-testid="unclear-addresses">
+                  {t('studio.fetch.unclear', { list: unklar.slice(0, 5).join(', ') })}
+                </span>
+              )}
             </label>
 
             {klassenProjekt && (

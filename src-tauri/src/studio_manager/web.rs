@@ -986,6 +986,18 @@ pub async fn studio_fetch_web(
     }
 }
 
+/// Rechner im eigenen Netz: localhost, *.local und private Adressbereiche.
+pub fn ist_lokal(host: &str) -> bool {
+    let h = host.trim_matches(['[', ']']).to_lowercase();
+    if h == "localhost" || h.ends_with(".localhost") || h.ends_with(".local") || h.ends_with(".internal") { return true; }
+    match h.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(a)) => a.is_loopback() || a.is_private() || a.is_link_local() || a.is_unspecified(),
+        Ok(std::net::IpAddr::V6(a)) => a.is_loopback() || a.is_unspecified()
+            || (a.segments()[0] & 0xfe00) == 0xfc00 || (a.segments()[0] & 0xffc0) == 0xfe80,
+        Err(_) => false,
+    }
+}
+
 /// Der eigentliche Lauf — ohne Tauri, damit er gegen einen lokalen Server
 /// getestet werden kann.
 pub async fn web_lauf(
@@ -1037,8 +1049,14 @@ pub async fn web_lauf(
     let seite_erlaubt = |u: &Url| domains.is_empty() || u.host_str().map(|h| host_erlaubt(h, &domains)).unwrap_or(false);
     // Eingebettete Dateien liegen oft auf einem CDN mit anderer Domain; fuer
     // sie gilt nur eine ausdrueckliche Allowlist.
-    let datei_erlaubt = |u: &Url| opts.allowlist.is_empty()
-        || u.host_str().map(|h| host_erlaubt(h, &opts.allowlist)).unwrap_or(false);
+    // Adressen im eigenen Netz nur, wenn man selbst dort gestartet ist: eine
+    // fremde Seite soll nicht den Router oder einen lokalen Dienst abfragen lassen.
+    let startet_lokal: Vec<String> = startadressen.iter().filter_map(|u| u.host_str().map(str::to_lowercase)).collect();
+    let datei_erlaubt = |u: &Url| {
+        let Some(h) = u.host_str() else { return false };
+        if ist_lokal(h) && !startet_lokal.contains(&h.to_lowercase()) { return false; }
+        opts.allowlist.is_empty() || host_erlaubt(h, &opts.allowlist)
+    };
 
     let existing = load_samples(&dir);
     let mut ablage = Ablage {
@@ -1249,6 +1267,14 @@ mod tests {
     use super::*;
 
     fn url(s: &str) -> Url { Url::parse(s).unwrap() }
+
+    #[test]
+    fn adressen_im_eigenen_netz() {
+        for h in ["localhost", "127.0.0.1", "192.168.1.1", "10.0.0.5", "172.20.1.1", "169.254.169.254", "[::1]", "nas.local"] {
+            assert!(ist_lokal(h), "{}", h);
+        }
+        for h in ["example.com", "upload.wikimedia.org", "8.8.8.8", "172.32.0.1"] { assert!(!ist_lokal(h), "{}", h); }
+    }
 
     #[test]
     fn bilder_einer_seite_werden_gefunden() {

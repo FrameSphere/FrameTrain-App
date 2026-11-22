@@ -13,6 +13,13 @@ Zwei Befehle, Ausgabe zeilenweise als JSON auf stdout:
         {"type": "progress", "current": 3, "total": 20}
         {"type": "done", "written": 20, "failed": []}
 
+    proxy --video <pfad> --out <pfad ohne Endung>
+        {"type": "done", "path": ".../ab12.mp4"}
+
+Warum eine Wiedergabekopie (proxy): AVI und MKV, aber auch MPEG-4 Part 2 in
+MP4, spielt keine Webview ab. Zum Labeln muss man das Video sehen; trainiert
+wird weiter mit dem Original.
+
 Warum schneiden erst beim Export: beim Labeln verweist ein Abschnitt nur auf
 Start und Ende im Originalvideo. Wird ein Abschnitt verschoben oder geteilt,
 entsteht keine neue Datei; erst der fertige Datensatz braucht einzelne Clips,
@@ -106,11 +113,62 @@ def cut_one(cv2, src: str, start: float, end: float, out: str) -> None:
         raise ValueError(f"Keine Bilder zwischen {start:.2f} s und {end:.2f} s in {src}")
 
 
+PROXY_MAX = 720
+
+
+def make_proxy(cv2, src: str, out_base: str) -> str:
+    """Wiedergabekopie schreiben. H.264 kann OpenCV nur dort, wo das
+    Betriebssystem einen Encoder mitbringt (macOS, Windows); VP8 bringt das
+    pip-Paket selbst mit. Die Bildrate bleibt, damit Abschnitte passen."""
+    letzter = "kein Encoder verfuegbar"
+    for fourcc, ext in (("avc1", ".mp4"), ("VP80", ".webm")):
+        cap = cv2.VideoCapture(src)
+        if not cap.isOpened():
+            raise ValueError(f"Video laesst sich nicht oeffnen: {src}")
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0) or 25.0
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        f = min(1.0, PROXY_MAX / max(1, min(w, h)))
+        # Gerade Kantenlaengen: H.264 mit 4:2:0 nimmt nichts anderes.
+        size = (max(2, int(w * f) // 2 * 2), max(2, int(h * f) // 2 * 2))
+        out = out_base + ext
+        tmp = out_base + ".tmp" + ext
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        writer = cv2.VideoWriter(tmp, cv2.VideoWriter_fourcc(*fourcc), fps, size)
+        written = 0
+        if writer.isOpened():
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                if (frame.shape[1], frame.shape[0]) != size:
+                    frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+                writer.write(frame)
+                written += 1
+        writer.release()
+        cap.release()
+        # Ein Encoder, der sich oeffnen laesst, aber nichts schreibt, kommt vor:
+        # das Ergebnis muss sich lesen lassen.
+        check = cv2.VideoCapture(tmp) if written and Path(tmp).exists() else None
+        gut = bool(check is not None and check.isOpened() and check.read()[0])
+        if check is not None:
+            check.release()
+        if gut:
+            Path(tmp).replace(out)
+            return out
+        Path(tmp).unlink(missing_ok=True)
+        letzter = f"{fourcc} nicht verfuegbar" if not written else f"{fourcc} nicht lesbar"
+    raise ValueError(f"Wiedergabekopie liess sich nicht schreiben ({letzter})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("probe")
     p.add_argument("--video", required=True)
+    x = sub.add_parser("proxy")
+    x.add_argument("--video", required=True)
+    x.add_argument("--out", required=True)
     c = sub.add_parser("cut")
     c.add_argument("--jobs", required=True)
     args = ap.parse_args()
@@ -121,6 +179,9 @@ def main() -> int:
             return 0
 
         cv2 = need_cv2()
+        if args.cmd == "proxy":
+            emit({"type": "done", "path": make_proxy(cv2, args.video, args.out)})
+            return 0
         jobs = json.loads(Path(args.jobs).read_text(encoding="utf-8"))
         failed = []
         for i, job in enumerate(jobs):

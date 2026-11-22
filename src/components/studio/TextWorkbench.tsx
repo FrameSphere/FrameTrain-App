@@ -12,7 +12,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import {
   ArrowLeft, FolderOpen, Download, Loader2, Check, SkipForward,
   Plus, AlertTriangle, FileText, ChevronDown, Info, Wand2, ShieldQuestion, PenLine, Globe, Sparkles,
-  Tag, ListEnd, Trash2, CopyCheck,
+  Tag, ListEnd, Trash2, CopyCheck, Database,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -24,7 +24,13 @@ import ExportReportView from './ExportReportView';
 import { BalanceHinweise } from './MediaWorkbench';
 import { nextOpenIndex } from './studioBoxes';
 import ModelRunDialog from './ModelRunDialog';
+import { SPLITS } from './splits';
 import FetchDialog from './FetchDialog';
+import EditableName from './EditableName';
+import AuswahlLeiste from './AuswahlLeiste';
+import DatasetImportDialog from './DatasetImportDialog';
+import type { DatasetImportReport } from './datasetImport';
+import { filterListe, herkunftText, useMcpAbgleich, useMehrfachauswahl, useSichtbareAuswahl } from './werkbankHilfen';
 import GenerateDialog from './GenerateDialog';
 import type { GeneratedItem } from './generatedTexts';
 import type {
@@ -68,6 +74,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
   const [newClass, setNewClass] = useState('');
   const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
   const [plan, setPlan] = useState<{ path: string; inspection: TextInspection } | null>(null);
+  const [showDataset, setShowDataset] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [modelRun, setModelRun] = useState<'suggest' | 'review' | null>(null);
   const [showWrite, setShowWrite] = useState(false);
@@ -361,7 +368,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         : { multiple: false, title: t('studio.text.pickFile'),
             filters: [{ name: 'Text', extensions: ['csv', 'tsv', 'jsonl', 'ndjson', 'txt'] }] });
       if (!sel || typeof sel !== 'string') return;
-      const inspection = await invoke<TextInspection>('studio_inspect_text', { sourcePath: sel });
+      const inspection = await invoke<TextInspection>('studio_inspect_text', { sourcePath: sel, pairs: paare });
       setPlan({ path: sel, inspection });
     } catch (err: unknown) {
       error(t('studio.import.errorTitle'), String(err));
@@ -416,6 +423,63 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     }
   };
 
+  /** Neu einlesen, ohne die Stelle zu verlieren. */
+  const neuEinlesen = async () => {
+    const id = samples[index]?.id;
+    const page = await invoke<SamplePage>('studio_list_samples', {
+      projectId: project.id, status: filter, offset: 0, limit: Math.min(500, Math.max(PAGE, samples.length)),
+    });
+    setTotal(page.total);
+    setSamples(page.items);
+    const wo = id ? page.items.findIndex(s => s.id === id) : -1;
+    setIndex(i => (wo >= 0 ? wo : Math.min(i, Math.max(0, page.items.length - 1))));
+    setLadeStand(n => n + 1);
+    await loadStats();
+  };
+
+  // ── Umbenennen ──────────────────────────────────────────────────────────
+  const umbenennen = async (name: string) => {
+    try {
+      onProjectChanged(await invoke<StudioProject>('studio_update_project', { projectId: project.id, name }));
+      return true;
+    } catch (err: unknown) {
+      error(t('studio.notifications.saveError'), String(err));
+      return false;
+    }
+  };
+  /** Die Labels ziehen im Backend mit; die Liste hier wird neu gelesen. */
+  const klasseUmbenennen = async (i: number, name: string) => {
+    try {
+      onProjectChanged(await invoke<StudioProject>('studio_update_project', {
+        projectId: project.id, classes: classes.map((k, j) => (j === i ? name : k)),
+      }));
+      await neuEinlesen();
+      return true;
+    } catch (err: unknown) {
+      error(t('studio.notifications.saveError'), String(err));
+      return false;
+    }
+  };
+
+  // ── Mehrfachauswahl und Abgleich mit KI-Clients ─────────────────────────
+  const auswahl = useMehrfachauswahl(samples);
+  const listenRef = useSichtbareAuswahl(index, samples.length);
+  const auffrischen = async () => {
+    const list = await invoke<StudioProject[]>('studio_list_projects').catch(() => [] as StudioProject[]);
+    const fresh = Array.isArray(list) ? list.find(x => x.id === project.id) : undefined;
+    if (fresh) onProjectChanged(fresh);
+    await neuEinlesen();
+  };
+  // Waehrend getippt wird, nimmt ein Abgleich nichts weg.
+  useMcpAbgleich(project.id, auffrischen, () => entwurf !== null || (paare && !!current && target !== (current.ann.target ?? '')));
+
+  const nachDatasetImport = async (report: DatasetImportReport) => {
+    success(t('studio.import.doneTitle'), t('studio.import.doneDetail', {
+      added: report.added, duplicates: report.duplicates, labels: report.with_labels ?? 0, unreadable: report.unreadable,
+    }));
+    await auffrischen();
+  };
+
   const addClass = async () => {
     const name = newClass.trim();
     if (!name) return;
@@ -443,7 +507,10 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="min-w-0">
-          <h2 className="text-white font-semibold text-lg truncate" title={project.name}>{project.name}</h2>
+          <h2 className="text-white font-semibold text-lg min-w-0 flex">
+            <EditableName value={project.name} label={t('studio.rename.project')} onSave={umbenennen}
+              className="truncate" inputClassName="text-lg w-72" />
+          </h2>
           <p className="text-gray-500 text-xs">
             {t('studio.workbench.subtitle', { confirmed, total: stats?.total ?? total })}
           </p>
@@ -483,7 +550,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         <div className="flex items-center justify-center py-20 text-gray-500 gap-2">
           <Loader2 className="w-5 h-5 animate-spin" /> {t('common.loading', 'Lädt…')}
         </div>
-      ) : samples.length === 0 ? (
+      ) : samples.length === 0 && filter === 'all' ? (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-12 text-center">
           <FileText className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t('studio.text.emptyTitle')}</p>
@@ -494,23 +561,30 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           </button>
         </div>
       ) : (
+        <>
+        <AuswahlLeiste projectId={project.id} ids={auswahl.ids} klassen={paare ? [] : classes}
+          onLeeren={auswahl.leeren} onFertig={neuEinlesen} />
         <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
           <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden flex flex-col">
             <div className="grid grid-cols-3 text-[11px] border-b border-white/10">
-              {([['all', t('studio.filter.all')], ['open', t('studio.filter.open')],
-                 ['confirmed', t('studio.filter.confirmed')], ['uncertain', t('studio.filter.uncertain')],
-                 ...(paare ? [] : [['doubt', stats?.doubts ? `${t('studio.filter.doubt')} ${stats.doubts}` : t('studio.filter.doubt')]])] as [SampleFilter, string][]).map(([val, label]) => (
+              {filterListe(!paare).map(val => (
                 <button key={val} onClick={() => setFilter(val)}
                   title={val === 'uncertain' ? t('studio.filter.uncertainHint') : undefined}
                   className={`py-2 px-0.5 whitespace-nowrap transition-all ${filter === val ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
-                  {label}
+                  {val === 'doubt' && stats?.doubts ? `${t('studio.filter.doubt')} ${stats.doubts}` : t(`studio.filter.${val}`)}
                 </button>
               ))}
             </div>
-            <div className="overflow-y-auto max-h-[520px]">
+            <div ref={listenRef} className="overflow-y-auto max-h-[520px]">
+              {samples.length === 0 && (
+                <p className="text-gray-600 text-[11px] text-center py-4 px-3">
+                  {t(filter === 'uncertain' ? 'studio.filter.uncertainEmpty' : 'studio.filter.empty')}
+                </p>
+              )}
               {samples.map((s, i) => (
-                <button key={s.id} onClick={() => goTo(i)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all ${i === index ? 'bg-white/10' : 'hover:bg-white/[0.04]'}`}>
+                <button key={s.id} data-index={i} onClick={e => { if (!auswahl.klick(e, i, index)) goTo(i); }}
+                  title={t('studio.selection.hint')} aria-pressed={auswahl.ids.has(s.id) || undefined}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-all ${auswahl.ids.has(s.id) ? 'bg-sky-400/15' : i === index ? 'bg-white/10' : 'hover:bg-white/[0.04]'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s.status)}`} />
                   {/* Der Text selbst, nicht nur die Klasse — bei 62 Zeilen stand
                       sonst 62-mal "Request" untereinander. Die Klasse steht als
@@ -619,7 +693,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                 )}
                 <div className="flex items-center gap-3 text-[11px] text-gray-500">
                   <span className="tabular-nums">{index + 1} / {total}</span>
-                  <span className="truncate max-w-xs">{current.src.origin?.split(/[\\/]/).pop()}</span>
+                  <span className="truncate max-w-xs">{herkunftText(current.src, t)}</span>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -652,7 +726,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                       {i < 9 && (
                         <span className="text-[10px] font-mono text-gray-500 border border-white/10 rounded px-1">{i + 1}</span>
                       )}
-                      <span className="text-gray-200 text-xs truncate">{name}</span>
+                      <EditableName value={name} label={t('studio.rename.class', { name })} onSave={n => klasseUmbenennen(i, n)} />
                       {/* Die Verteilung ist bei einer Klassifikation das, worauf es
                           ankommt: 58 zu 2 trainiert ein Modell, das immer die
                           grosse Klasse sagt. Gezaehlt wird nur Bestaetigtes. */}
@@ -687,6 +761,12 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
                     <span className="text-gray-200 tabular-nums">{val}</span>
                   </div>
                 ))}
+                {(stats.incomplete ?? 0) > 0 && (
+                  <p className="text-amber-300/80 text-[11px] pt-1 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                    {t('studio.stats.incomplete', { count: stats.incomplete ?? 0 })}
+                  </p>
+                )}
                 <button onClick={() => setShowNearDup(true)} disabled={total < 2}
                   className="mt-1 w-full px-2 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-[11px] inline-flex items-center justify-center gap-1 disabled:opacity-40">
                   <CopyCheck className="w-3.5 h-3.5" /> {t('studio.media.nearDupButton')}
@@ -717,10 +797,12 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
             </div>
           </div>
         </div>
+        </>
       )}
 
       {plan && (
         <TextImportDialog
+          path={plan.path}
           inspection={plan.inspection}
           paare={paare}
           onCancel={() => setPlan(null)}
@@ -734,9 +816,15 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
           onFile={() => { setShowSource(false); void pickSource(false); }}
           onFolder={() => { setShowSource(false); void pickSource(true); }}
           onWeb={() => { setShowSource(false); setShowFetch(true); }}
+          onDataset={() => { setShowSource(false); setShowDataset(true); }}
           onWrite={() => { setShowSource(false); setShowWrite(true); }}
           onGenerate={() => { setShowSource(false); setShowGenerate(true); }}
         />
+      )}
+
+      {showDataset && (
+        <DatasetImportDialog project={project} onClose={() => setShowDataset(false)}
+          onDone={r => { setShowDataset(false); void nachDatasetImport(r); }} />
       )}
 
       {showFetch && (
@@ -812,15 +900,29 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
 
 // ── Import ────────────────────────────────────────────────────────────────
 
-function TextImportDialog({ inspection, paare, onCancel, onRun }: {
-  inspection: TextInspection; paare: boolean;
+function TextImportDialog({ path, inspection: start, paare, onCancel, onRun }: {
+  path: string; inspection: TextInspection; paare: boolean;
   onCancel: () => void;
   onRun: (textColumn: string | null, labelColumn: string | null, ignore: boolean) => void;
 }) {
   const { t } = useLanguage();
-  const [textColumn, setTextColumn] = useState(inspection.text_column ?? '');
-  const [labelColumn, setLabelColumn] = useState(inspection.label_column ?? '');
+  const [inspection, setInspection] = useState(start);
+  const [textColumn, setTextColumn] = useState(start.text_column ?? '');
+  const [labelColumn, setLabelColumn] = useState(start.label_column ?? '');
   const [ignore, setIgnore] = useState(false);
+  // Andere Spalte gewaehlt: Vorschau, Zeilenzahl und Klassen neu lesen — sonst
+  // stehen dort noch die der alten.
+  const neuLesen = async (tc: string, lc: string) => {
+    try {
+      setInspection(await invoke<TextInspection>('studio_inspect_text', {
+        sourcePath: path, textColumn: tc || null, labelColumn: lc || null, pairs: paare,
+      }));
+    } catch { /* die alte Vorschau bleibt stehen, der Import meldet den Fehler */ }
+  };
+  const spaltenName = (c: string) => {
+    const nr = /^Spalte (\d+)$/.exec(c)?.[1];
+    return nr ? t('studio.text.columnN', { n: nr }) : c;
+  };
   const hatSpalten = inspection.columns.length > 0;
 
   useEscape(onCancel);
@@ -849,9 +951,9 @@ function TextImportDialog({ inspection, paare, onCancel, onRun }: {
           <>
             <label className="block">
               <span className="text-gray-400 text-xs">{t('studio.text.textColumn')}</span>
-              <select value={textColumn} onChange={e => setTextColumn(e.target.value)}
+              <select value={textColumn} onChange={e => { setTextColumn(e.target.value); void neuLesen(e.target.value, labelColumn); }}
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
-                {inspection.columns.map(c => <option key={c} value={c} className="bg-[#101218]">{c}</option>)}
+                {inspection.columns.map(c => <option key={c} value={c} className="bg-[#101218]">{spaltenName(c)}</option>)}
               </select>
             </label>
 
@@ -859,10 +961,10 @@ function TextImportDialog({ inspection, paare, onCancel, onRun }: {
               <span className="text-gray-400 text-xs">
                 {t(paare ? 'studio.text.targetColumn' : 'studio.text.labelColumn')}
               </span>
-              <select value={labelColumn} onChange={e => setLabelColumn(e.target.value)}
+              <select value={labelColumn} onChange={e => { setLabelColumn(e.target.value); void neuLesen(textColumn, e.target.value); }}
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25">
                 <option value="" className="bg-[#101218]">{t('studio.text.noColumn')}</option>
-                {inspection.columns.map(c => <option key={c} value={c} className="bg-[#101218]">{c}</option>)}
+                {inspection.columns.map(c => <option key={c} value={c} className="bg-[#101218]">{spaltenName(c)}</option>)}
               </select>
             </label>
           </>
@@ -911,17 +1013,20 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
   const { models, modelId, setModelId } = useStudioModels(project);
   const [name, setName] = useState(project.name);
   const [busy, setBusy] = useState(false);
+  const [split, setSplit] = useState('8020');
   const [ergebnis, setErgebnis] = useState<ExportResult | null>(null);
 
   const run = async () => {
     if (!modelId) return;
     setBusy(true);
+    const sp = SPLITS.find(x => x.key === split) ?? SPLITS[0];
     try {
       setErgebnis(await invoke<ExportResult>('studio_export', {
         projectId: project.id, modelId, datasetName: name,
-        includeSuggested: false, trainRatio: 0, valRatio: 0,
+        includeSuggested: false, trainRatio: sp.train, valRatio: sp.val,
       }));
-      success(t('studio.export.doneTitle'), t('studio.export.doneDetail', { name }));
+      success(t('studio.export.doneTitle'),
+        t(sp.train > 0 ? 'studio.export.doneDetailSplit' : 'studio.export.doneDetail', { name }));
       onDone();
     } catch (err: unknown) {
       error(t('studio.export.errorTitle'), String(err));
@@ -962,6 +1067,18 @@ function TextExportDialog({ project, confirmed, onClose, onDone }: {
           <span className="text-gray-400 text-xs">{t('studio.export.modelLabel')}</span>
           <StudioModelSelect project={project} models={models} value={modelId} onChange={setModelId} />
         </label>
+
+        <div>
+          <span className="text-gray-400 text-xs">{t('studio.export.splitLabel')}</span>
+          <div className="mt-1.5 flex gap-1.5">
+            {SPLITS.map(s => (
+              <button key={s.key} onClick={() => setSplit(s.key)}
+                className={`px-2.5 py-1.5 rounded-lg border text-xs transition-all ${split === s.key ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}>
+                {t(`studio.media.split.${s.key}`)}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <p className="text-gray-500 text-xs">{t('studio.export.summaryText', { confirmed })}</p>
 
@@ -1076,11 +1193,12 @@ function WriteDialog({ classes, paare, onCancel, onCreate }: {
 
 // ── Woher kommen die Texte ────────────────────────────────────────────────
 
-function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite, onGenerate }: {
+function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onDataset, onWrite, onGenerate }: {
   onClose: () => void;
   onFile: () => void;
   onFolder: () => void;
   onWeb: () => void;
+  onDataset: () => void;
   onWrite: () => void;
   onGenerate: () => void;
 }) {
@@ -1112,6 +1230,7 @@ function TextSourceDialog({ onClose, onFile, onFolder, onWeb, onWrite, onGenerat
         <div className="space-y-2">
           {tile(<FileText className="w-4 h-4" />, t('studio.text.sourceFile'), t('studio.text.sourceFileHint'), onFile)}
           {tile(<FolderOpen className="w-4 h-4" />, t('studio.text.sourceFolder'), t('studio.text.sourceFolderHint'), onFolder)}
+          {tile(<Database className="w-4 h-4" />, t('studio.source.dataset'), t('studio.datasetImport.tileHint'), onDataset)}
           {tile(<Globe className="w-4 h-4" />, t('studio.source.web'), t('studio.source.webHint'), onWeb)}
           {tile(<PenLine className="w-4 h-4" />, t('studio.text.sourceWrite'), t('studio.text.sourceWriteHint'), onWrite)}
           {tile(<Sparkles className="w-4 h-4" />, t('studio.text.sourceGenerate'), t('studio.text.sourceGenerateHint'), onGenerate)}

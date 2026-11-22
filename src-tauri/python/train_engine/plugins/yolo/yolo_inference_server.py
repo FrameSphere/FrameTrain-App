@@ -54,13 +54,26 @@ def find_weights(model_dir: Path) -> Path:
     if model_dir.is_file() and model_dir.suffix in (".pt", ".pth"):
         return model_dir
 
-    preferred = ["best.pt", "last.pt", "weights/best.pt", "weights/last.pt"]
+    preferred = ["model.pt", "best.pt", "last.pt", "weights/best.pt", "weights/last.pt",
+                 "train/weights/best.pt", "train/weights/last.pt"]
     for rel in preferred:
         candidate = model_dir / rel
         if candidate.exists():
             return candidate
 
-    found = sorted(model_dir.rglob("*.pt"))
+    # Direkt im Ordner zuerst, das kleinste zuerst — wie beim Testen
+    # (test_engine/plugins/yolo). Im Modellordner liegen unter versions/ die
+    # trainierten Staende: rekursiv gesucht lud die Version "Original" deshalb
+    # das best.pt eines spaeteren Trainings.
+    # Ordner mit mehreren Aufgaben: die Boxen-Gewichte vor -cls/-pose/-seg/-obb.
+    def rang(p: Path):
+        andere = p.stem.lower().endswith(("-cls", "-pose", "-seg", "-obb", "-sem"))
+        return (andere, p.stat().st_size, p.name)
+
+    found = sorted(model_dir.glob("*.pt"), key=rang)
+    if not found:
+        found = sorted(p for p in model_dir.rglob("*.pt")
+                       if "versions" not in p.relative_to(model_dir).parts[:-1])
     if found:
         return found[0]
     raise FileNotFoundError(
