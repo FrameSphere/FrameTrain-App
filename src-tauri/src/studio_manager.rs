@@ -886,15 +886,16 @@ pub async fn studio_import_folder(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, source_path: String,
     label_classes: Option<Vec<String>>, ignore_labels: bool,
+    // Einzelne Dateien statt eines Ordners (ins Fenster gezogen).
+    files: Option<Vec<String>>,
 ) -> Result<ImportReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
     regeln::medium_pruefen(&project, "image")?;
     let src = Path::new(&source_path);
-    if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", source_path)); }
 
-    let files = collect_images(src);
+    let (files, lose) = ablage::quellen(&source_path, files, IMAGE_EXTS, collect_images)?;
     if files.is_empty() { return Err("Keine Bilder in diesem Ordner gefunden".to_string()); }
 
     let existing = load_samples(&dir);
@@ -906,7 +907,7 @@ pub async fn studio_import_folder(
     // Liste im Ordner selbst.
     let source_classes: Vec<String> = label_classes
         .filter(|c| !c.is_empty())
-        .unwrap_or_else(|| read_source_classes(src));
+        .unwrap_or_else(|| if lose { vec![] } else { read_source_classes(src) });
 
     let klassifikation = project.task == "classify";
 
@@ -961,7 +962,7 @@ pub async fn studio_import_folder(
         // bei null anzufangen.
         // Bild-Klassifikation: der Ordnername ist die Klasse, Boxen gibt es nicht.
         if klassifikation {
-            let label = if ignore_labels { None } else {
+            let label = if ignore_labels || lose { None } else {
                 klasse_aus_ordner(file, src).map(|l| match class_index_for(&l, &project.classes) {
                     Some(idx) => project.classes[idx].clone(),
                     None => { project.classes.push(l.clone()); classes_added.push(l.clone()); l }
@@ -1521,6 +1522,7 @@ pub mod web;
 pub mod video;
 pub mod quality;
 pub mod transfer;
+pub mod ablage;
 pub mod regeln;
 pub mod textquelle;
 #[cfg(test)]
@@ -1684,15 +1686,16 @@ fn transcript_for(audio: &Path) -> Option<String> {
 pub async fn studio_import_audio(
     app_handle: tauri::AppHandle, state: State<'_, AppState>,
     project_id: String, source_path: String, ignore_labels: bool,
+    // Einzelne Dateien statt eines Ordners (ins Fenster gezogen).
+    files: Option<Vec<String>>,
 ) -> Result<ImportReport, String> {
     let user_id = get_user_id(&state)?;
     let dir = project_dir(&app_handle, &user_id, &project_id)?;
     let mut project = load_project(&dir)?;
     regeln::medium_pruefen(&project, "audio")?;
     let src = Path::new(&source_path);
-    if !src.is_dir() { return Err(format!("Ordner nicht gefunden: {}", source_path)); }
 
-    let dateien = collect_audio(src);
+    let (dateien, lose) = ablage::quellen(&source_path, files, AUDIO_EXTS, collect_audio)?;
     if dateien.is_empty() { return Err("Keine Audiodateien in diesem Ordner gefunden".to_string()); }
 
     let existing = load_samples(&dir);
@@ -1729,7 +1732,7 @@ pub async fn studio_import_audio(
         let (mut label, mut target) = if transkript {
             (None, transcript_for(datei))
         } else {
-            (klasse_aus_ordner(datei, src), None)
+            (if lose { None } else { klasse_aus_ordner(datei, src) }, None)
         };
         if ignore_labels { label = None; target = None; }
 

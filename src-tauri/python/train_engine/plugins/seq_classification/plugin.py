@@ -586,6 +586,9 @@ class Plugin(TrainPlugin):
         from transformers import TrainerCallback
 
         class ProgressCallback(TrainerCallback):
+            def on_train_begin(self, args, state, control, **kwargs):
+                hft.logge_kurze_laeufe(state)
+
             def on_log(self, args, state, control, logs=None, **kwargs):
                 if not logs:
                     return

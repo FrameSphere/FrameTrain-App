@@ -45,10 +45,24 @@ export function passtZurQuelle(d: Pick<DatasetChoice, 'extensions' | 'dataset_ty
   if (p.modality === 'image' && p.task === 'classify' && (d.dataset_type === 'yolo_bbox' || d.dataset_type === 'pascal_voc')) return false;
   if (!d.extensions || d.extensions.length === 0) return true;
   const ok = new Set(ENDUNGEN[p.modality] ?? []);
-  const endungen = d.extensions.map(e => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
+  const endungen = normEndungen(d.extensions);
   // Ein Bild-Dataset bringt oft eine CSV mit; als Textquelle taugt es deshalb nicht.
   if (p.modality === 'text' && endungen.some(e => ENDUNGEN.image.includes(e) && e !== '.parquet')) return false;
   return endungen.some(e => ok.has(e));
+}
+
+const normEndungen = (e?: string[]) => (e ?? []).map(x => (x.startsWith('.') ? x : `.${x}`).toLowerCase());
+
+/**
+ * Aufgeteilte Klassenordner (train/hund/…, val/hund/…) heissen nur "pre_split",
+ * nicht "folder_class". Zu erkennen sind sie daran, dass neben den Bildern nichts
+ * liegt, worin Boxen stehen koennten. Aufgeteilte YOLO- und VOC-Datasets haben
+ * einen eigenen Typ.
+ */
+function istAufgeteilteKlassenordner(d: Pick<DatasetChoice, 'dataset_type'>, endungen: string[]): boolean {
+  return d.dataset_type === 'pre_split'
+    && endungen.some(e => ENDUNGEN.image.includes(e) && e !== '.parquet')
+    && !endungen.some(e => ['.txt', '.xml', '.json', '.jsonl', '.csv', '.parquet'].includes(e));
 }
 
 /**
@@ -57,10 +71,11 @@ export function passtZurQuelle(d: Pick<DatasetChoice, 'extensions' | 'dataset_ty
  * zu dem das Dataset gehoert: ein Textmodell hat keine Bilder.
  */
 export function naheliegend(
-  d: Pick<DatasetChoice, 'extensions'>, p: Pick<StudioProject, 'modality' | 'task'>, modell: StudioModel | undefined,
+  d: Pick<DatasetChoice, 'extensions' | 'dataset_type'>, p: Pick<StudioProject, 'modality' | 'task'>, modell: StudioModel | undefined,
 ): boolean {
+  const endungen = normEndungen(d.extensions);
+  if (p.modality === 'image' && p.task === 'bbox' && istAufgeteilteKlassenordner(d, endungen)) return false;
   if (!modell || passtZumProjekt(modell, p)) return true;
-  const endungen = (d.extensions ?? []).map(e => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
   return (ENDUNGEN[p.modality] ?? []).some(e => e !== '.parquet' && endungen.includes(e));
 }
 

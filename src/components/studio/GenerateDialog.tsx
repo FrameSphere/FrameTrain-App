@@ -13,8 +13,8 @@
 //      anderes als einer aus gesammeltem — wer das spaeter nicht mehr
 //      auseinanderhalten kann, misst seine Genauigkeit gegen sich selbst.
 
-import { useState } from 'react';
-import { Loader2, Sparkles, Check, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2, Sparkles, Check, X, Square } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useAISettings } from '../../contexts/AISettingsContext';
@@ -36,30 +36,37 @@ export interface GenerateDialogProps {
   /** Vorhandene Texte: gegen Dubletten und als Beispiel fuer den Stil. */
   vorhanden: VorhandenerText[];
   onCancel: () => void;
-  onAdd: (items: GeneratedItem[], origin: string) => void;
+  /** false = nicht gespeichert: der Dialog bleibt mit den Vorschlaegen offen. */
+  onAdd: (items: GeneratedItem[], origin: string) => void | Promise<boolean | void>;
 }
 
 export default function GenerateDialog({
   project, paare, vorhanden, onCancel, onAdd,
 }: GenerateDialogProps) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const { error } = useNotification();
   const { settings } = useAISettings();
 
   const classes = project.classes;
   const [gewaehlt, setGewaehlt] = useState<string[]>(classes);
-  const [anzahl, setAnzahl] = useState(10);
+  const [anzahlText, setAnzahlText] = useState('10');
   const [thema, setThema] = useState('');
   const [anlehnen, setAnlehnen] = useState(vorhanden.length > 0);
   const [busy, setBusy] = useState(false);
   const [lauf, setLauf] = useState<{ cur: number; total: number } | null>(null);
   const [vorschlaege, setVorschlaege] = useState<GeneratedItem[] | null>(null);
   const [aus, setAus] = useState<Set<number>>(new Set());
+  const [hinweise, setHinweise] = useState<string[]>([]);
+  const [speichert, setSpeichert] = useState(false);
+  /** Beendet den laufenden Auftrag. Die Anfrage selbst laeuft beim Anbieter zu
+   *  Ende, auf ihre Antwort wartet dann aber niemand mehr. */
+  const stoppen = useRef<(() => void) | null>(null);
+  useEffect(() => () => stoppen.current?.(), []);
 
   const meta = PROVIDER_META[settings.provider];
   const bereit = settings.enabled && (!meta.needsKey || !!settings.apiKey);
   const modell = resolveModel(settings.provider, settings.selectedModel, settings.ollamaModel);
-  const proLauf = Math.min(Math.max(1, anzahl), MAX_PRO_KLASSE);
+  const proLauf = Math.min(Math.max(1, Math.round(Number(anzahlText)) || 1), MAX_PRO_KLASSE);
 
   const toggleKlasse = (name: string) => {
     setGewaehlt(g => (g.includes(name) ? g.filter(x => x !== name) : [...g, name]));
@@ -76,13 +83,19 @@ export default function GenerateDialog({
       ? `\n\n${t('studio.generate.promptExamples')}\n${vorlage.map(b => `- ${b}`).join('\n')}`
       : '';
     const zusatz = thema.trim() ? `\n\n${t('studio.generate.promptTopic')} ${thema.trim()}` : '';
-    if (paare) {
-      return `${t('studio.generate.promptPairs', { count: proLauf })}${zusatz}${beispiele}`;
-    }
+    // Die Sprache gehoert zum Datensatz, nicht zur Oberflaeche: ein englisches
+    // Projekt in einer deutschen App braucht englische Texte.
+    const sprache = `\n\n${t(vorlage.length > 0
+      ? 'studio.generate.promptLanguageExamples' : 'studio.generate.promptLanguage')}`;
+    const rest = `${zusatz}${beispiele}${sprache}`;
+    if (paare) return `${t('studio.generate.promptPairs', { count: proLauf })}${rest}`;
     if (klasse) {
-      return `${t('studio.generate.promptClass', { count: proLauf, klasse })}${zusatz}${beispiele}`;
+      const andere = classes.filter(c => c !== klasse);
+      const abgrenzung = andere.length > 0
+        ? ` ${t('studio.generate.promptOthers', { klasse, andere: andere.join(', ') })}` : '';
+      return `${t('studio.generate.promptClass', { count: proLauf, klasse })}${abgrenzung}${rest}`;
     }
-    return `${t('studio.generate.promptPlain', { count: proLauf })}${zusatz}${beispiele}`;
+    return `${t('studio.generate.promptPlain', { count: proLauf })}${rest}`;
   };
 
   const run = async () => {
@@ -91,60 +104,86 @@ export default function GenerateDialog({
     setBusy(true);
     setVorschlaege(null);
     setAus(new Set());
+    setHinweise([]);
     const gesammelt: GeneratedItem[] = [];
+    const meldungen: string[] = [];
+    let gestoppt = false;
+    let abgeschnitten = false;
+    let dieseAbgeschnitten = false;
+    let fehler: unknown = null;
+    const stopp = new Promise<null>(r => { stoppen.current = () => { gestoppt = true; r(null); }; });
     try {
       for (let i = 0; i < laeufe.length; i++) {
         const klasse = laeufe[i];
         setLauf({ cur: i + 1, total: laeufe.length });
-        const antwort = await callAI(settings, {
-          system: t('studio.generate.system'),
+        dieseAbgeschnitten = false;
+        const antwort = await Promise.race([stopp, callAI(settings, {
+          system: t(paare ? 'studio.generate.systemPairs' : 'studio.generate.system'),
           messages: [{ role: 'user', content: auftrag(klasse) }],
           maxTokens: 4000,
           // Beispiele sollen sich unterscheiden — bei 0 schreibt das Modell
           // zehnmal fast denselben Satz.
           temperature: 0.9,
           style: 'raw',
-          responseLanguage: language,
-        });
-        for (const item of parseGenerated(antwort)) {
+          onTruncated: () => { abgeschnitten = true; dieseAbgeschnitten = true; },
+        })]);
+        if (antwort === null) break;
+        // Kleine Modelle hoeren oft nicht auf; mehr als bestellt wird nicht gezeigt.
+        for (const item of ohneDubletten(parseGenerated(antwort, dieseAbgeschnitten), vorhanden.map(v => v.text)).slice(0, proLauf)) {
           gesammelt.push(klasse ? { ...item, label: klasse } : item);
         }
       }
-      const frisch = ohneDubletten(gesammelt, vorhanden.map(v => v.text));
-      if (frisch.length === 0) {
-        error(t('studio.generate.emptyTitle'), t('studio.generate.emptyDetail'));
-        return;
-      }
-      setVorschlaege(frisch);
     } catch (err: unknown) {
-      error(t('studio.generate.errorTitle'), String(err));
+      fehler = err;
     } finally {
+      stoppen.current = null;
       setBusy(false);
       setLauf(null);
     }
+    // Was schon da ist, bleibt: die Anfragen davor sind bezahlt.
+    const frisch = ohneDubletten(gesammelt, vorhanden.map(v => v.text))
+      .map(item => (paare ? { ...item, target: item.target ?? '' } : item));
+    const text = fehler instanceof Error ? fehler.message : String(fehler);
+    if (frisch.length === 0) {
+      if (fehler) error(t('studio.generate.errorTitle'), text);
+      else if (!gestoppt) error(t('studio.generate.emptyTitle'), t('studio.generate.emptyDetail'));
+      return;
+    }
+    if (fehler) meldungen.push(t('studio.generate.partialError', { detail: text }));
+    else if (gestoppt) meldungen.push(t('studio.generate.stopped'));
+    if (abgeschnitten) meldungen.push(t('studio.generate.truncated'));
+    const ohneAntwort = paare ? frisch.flatMap((item, i) => (item.target?.trim() ? [] : [i])) : [];
+    if (ohneAntwort.length > 0) meldungen.push(t('studio.generate.noTarget', { count: ohneAntwort.length }));
+    setAus(new Set(ohneAntwort));
+    setHinweise(meldungen);
+    setVorschlaege(frisch);
   };
 
   const aendern = (i: number, teil: Partial<GeneratedItem>) => {
     setVorschlaege(v => v ? v.map((item, k) => (k === i ? { ...item, ...teil } : item)) : v);
   };
 
-  const uebernehmen = () => {
-    if (!vorschlaege) return;
-    // Was beim Korrigieren leer geworden ist, faellt weg.
-    const behalten = vorschlaege
-      .filter((item, i) => !aus.has(i) && item.text.trim())
-      .map(item => ({ ...item, text: item.text.trim() }));
+  // Was beim Korrigieren leer geworden ist, faellt weg; ein Paar braucht beides.
+  const behalten = (vorschlaege ?? [])
+    .filter((item, i) => !aus.has(i) && item.text.trim() && (!paare || item.target?.trim()))
+    .map(item => ({ ...item, text: item.text.trim() }));
+
+  const uebernehmen = async () => {
+    if (!vorschlaege || speichert) return;
     if (behalten.length === 0) return;
-    onAdd(behalten, t('studio.generate.origin', { model: modell }));
+    setSpeichert(true);
+    try {
+      await onAdd(behalten, t('studio.generate.origin', { model: modell }));
+    } finally {
+      setSpeichert(false);
+    }
   };
 
-  const behalten = vorschlaege ? vorschlaege.length - aus.size : 0;
-
-  useEscape(onCancel, !busy);
+  useEscape(onCancel, !busy && !vorschlaege);
 
   return (
     <ModalPortal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
-      onClick={busy ? undefined : onCancel}>
+      onClick={busy || vorschlaege ? undefined : onCancel}>
       <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#101218] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
         <div>
@@ -186,8 +225,9 @@ export default function GenerateDialog({
                   ? t('studio.generate.countLabel')
                   : t('studio.generate.countPerClassLabel')}
               </span>
-              <input type="number" min={1} max={MAX_PRO_KLASSE} value={anzahl}
-                onChange={e => setAnzahl(Number(e.target.value) || 1)}
+              <input type="number" min={1} max={MAX_PRO_KLASSE} value={anzahlText}
+                onChange={e => setAnzahlText(e.target.value)}
+                onBlur={() => setAnzahlText(String(proLauf))}
                 className="mt-1 block w-28 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white/25" />
             </label>
 
@@ -214,9 +254,10 @@ export default function GenerateDialog({
             </p>
 
             <div className="flex gap-2">
-              <button onClick={onCancel} disabled={busy}
-                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm disabled:opacity-40">
-                {t('common.cancel', 'Abbrechen')}
+              <button onClick={busy ? () => stoppen.current?.() : onCancel}
+                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm inline-flex items-center justify-center gap-2">
+                {busy && <Square className="w-3.5 h-3.5" />}
+                {busy ? t('studio.generate.stop') : t('common.cancel', 'Abbrechen')}
               </button>
               <button onClick={() => void run()}
                 disabled={busy || !bereit || (!paare && classes.length > 0 && gewaehlt.length === 0)}
@@ -233,6 +274,9 @@ export default function GenerateDialog({
             <p className="text-gray-400 text-xs">
               {t('studio.generate.reviewHint', { count: vorschlaege.length })}
             </p>
+            {hinweise.map(h => (
+              <p key={h} className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-200 text-xs break-words">{h}</p>
+            ))}
 
             <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
               {vorschlaege.map((item, i) => (
@@ -279,13 +323,18 @@ export default function GenerateDialog({
             </div>
 
             <div className="flex gap-2">
+              <button onClick={onCancel} disabled={speichert}
+                className="px-4 py-2.5 rounded-xl text-gray-400 hover:text-white text-sm disabled:opacity-40">
+                {t('common.cancel', 'Abbrechen')}
+              </button>
               <button onClick={() => setVorschlaege(null)}
-                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm">
+                disabled={speichert}
+                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm disabled:opacity-40">
                 {t('studio.generate.again')}
               </button>
-              <button onClick={uebernehmen} disabled={behalten === 0}
+              <button onClick={() => void uebernehmen()} disabled={behalten.length === 0 || speichert}
                 className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center justify-center gap-2 disabled:opacity-40">
-                <Check className="w-4 h-4" /> {t('studio.generate.addButton', { count: behalten })}
+                {speichert ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} {t('studio.generate.addButton', { count: behalten.length })}
               </button>
             </div>
           </>

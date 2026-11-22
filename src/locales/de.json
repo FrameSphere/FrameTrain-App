@@ -4199,7 +4199,16 @@
       "doneDetail": "{added} neu, {duplicates} doppelt, {labels} mit Zuordnung",
       "exportClasses": "Schreibt einen Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
       "exportTranscript": "Schreibt jede Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription.",
-      "waitingForMic": "Warte auf Freigabe des Mikrofons…"
+      "waitingForMic": "Warte auf Freigabe des Mikrofons…",
+      "recordAs": "Klasse für neue Aufnahmen",
+      "recordAsNone": "Ohne Klasse",
+      "recordAsClass": "Klasse: {klasse}",
+      "micNoneTitle": "Kein Mikrofon gefunden",
+      "micNoneDetail": "Ein Mikrofon anschließen oder in den Systemeinstellungen unter Ton einen Eingang wählen. ({detail})",
+      "micBusyTitle": "Mikrofon nicht verfügbar",
+      "micBusyDetail": "Ein anderes Programm belegt das Mikrofon, oder der Eingang wurde getrennt. ({detail})",
+      "micUnsupportedTitle": "Aufnehmen nicht möglich",
+      "micUnsupportedDetail": "Dieses System stellt der App keine Tonaufnahme bereit. Aufnahmen lassen sich als Dateien einlesen. ({detail})"
     },
     "fetch": {
       "title": "Aus dem Netz holen",
@@ -4313,7 +4322,17 @@
       "editItem": "Vorschlag {n} bearbeiten",
       "editTarget": "Antwort zu Vorschlag {n} bearbeiten",
       "subtitleMore": "Das Projekt hat schon {count} Texte. Der KI-Assistent schreibt weitere Beispiele im selben Stil — nichts davon landet ungesehen im Projekt.",
-      "subtitleMore_one": "Das Projekt hat schon {count} Text. Der KI-Assistent schreibt weitere Beispiele im selben Stil — nichts davon landet ungesehen im Projekt."
+      "subtitleMore_one": "Das Projekt hat schon {count} Text. Der KI-Assistent schreibt weitere Beispiele im selben Stil — nichts davon landet ungesehen im Projekt.",
+      "stop": "Stoppen",
+      "stopped": "Gestoppt. Das hier lag schon vor.",
+      "partialError": "Nicht alles wurde erzeugt: {detail} Das hier lag schon vor.",
+      "truncated": "Das Modell wurde mitten in einer Antwort abgeschnitten. Vollständige Beispiele sind dabei, einige fehlen. Weniger je Klasse anfordern oder ein größeres Token-Budget wählen.",
+      "noTarget": "{count} Vorschläge haben keine Antwort und sind abgewählt. Antwort ergänzen oder weglassen.",
+      "noTarget_one": "{count} Vorschlag hat keine Antwort und ist abgewählt. Antwort ergänzen oder weglassen.",
+      "systemPairs": "Du schreibst Trainingsbeispiele für einen Datensatz. Antworte ausschließlich mit einem JSON-Array von Objekten mit den Feldern \"text\" und \"target\", ohne Nummerierung, ohne Vorwort, ohne Erklärung. Jeder Eintrag ist ein eigenständiges Beispiel und steht für sich. Die Beispiele sollen sich deutlich voneinander unterscheiden — in Wortwahl, Länge und Blickwinkel.",
+      "promptOthers": "Die anderen Klassen sind: {andere}. Jeder Text soll eindeutig zu \"{klasse}\" gehören und zu keiner anderen.",
+      "promptLanguage": "Schreibe auf Deutsch, außer Thema und Stil oben verlangen eine andere Sprache.",
+      "promptLanguageExamples": "Schreibe in derselben Sprache wie die vorhandenen Beispiele."
     },
     "remove": {
       "button": "Entfernen",
@@ -4549,6 +4568,19 @@
       "maxLabel": "Höchstens Samples",
       "maxAll": "alle",
       "balanced": "je Klasse gleich viele"
+    },
+    "drop": {
+      "title": "Hier ablegen",
+      "image": "Bilder oder Ordner lassen sich ins Fenster ziehen.",
+      "audio": "Audiodateien oder Ordner lassen sich ins Fenster ziehen.",
+      "video": "Videos oder Ordner lassen sich ins Fenster ziehen.",
+      "text": "CSV, TSV, JSONL, Textdateien oder Ordner lassen sich ins Fenster ziehen.",
+      "nothingTitle": "Nichts Passendes dabei",
+      "restTitle": "Nicht alles eingelesen",
+      "rest": "{count} weitere Quellen bitte einzeln ablegen.",
+      "rest_one": "{count} weitere Quelle bitte einzeln ablegen.",
+      "importVideos": "{count} Quellen einlesen",
+      "importVideos_one": "{count} Quelle einlesen"
     }
   },
   "datasetHints": {

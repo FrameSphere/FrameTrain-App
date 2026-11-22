@@ -185,6 +185,9 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
             if plugin.is_stopped:
                 control.should_training_stop = True
 
+        def on_train_begin(self, args, state, control, **kwargs):
+            logge_kurze_laeufe(state)
+
         def on_log(self, args, state, control, logs=None, **kwargs):
             if not logs:
                 return
@@ -236,6 +239,18 @@ def progress_callback(TrainerCallback, plugin, total_steps_fallback: int):
                 )
 
     return _Progress()
+
+
+def logge_kurze_laeufe(state) -> None:
+    """Mindestens rund zehn Messpunkte, auch wenn der Lauf kuerzer ist als logging_steps.
+
+    Mit einem kleinen Dataset (7 Aufnahmen, Batch 2 = 4 Schritte) und logging_steps 10
+    kam nie ein Trainings-Log: keine Kurve, kein Val-Loss im Verlauf und am Ende
+    "final_train_loss 0.0".
+    """
+    gesamt = int(getattr(state, "max_steps", 0) or 0)
+    if gesamt > 0 and (getattr(state, "logging_steps", 0) or 0) > 0:
+        state.logging_steps = min(state.logging_steps, max(1, gesamt // 10))
 
 
 def final_metrics(plugin, trainer, eval_result: Dict[str, Any], start_time: float,

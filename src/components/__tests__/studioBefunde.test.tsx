@@ -168,6 +168,18 @@ describe('Dataset-Import', () => {
     expect(naheliegend({ extensions: ['.parquet'] }, projekt(), yolo)).toBe(false);
   });
 
+  it('stellt aufgeteilte Klassenordner in Boxprojekten zurueck', () => {
+    const box = projekt({ modality: 'image', task: 'bbox' });
+    const yolo = { id: 'm', name: 'YOLOv8', model_type: 'yolo' } as never;
+    const ordner = { extensions: ['jpg', '.png'], dataset_type: 'pre_split' };
+    expect(naheliegend(ordner, box, yolo)).toBe(false);
+    expect(naheliegend(ordner, box, undefined)).toBe(false);
+    expect(naheliegend(ordner, projekt({ modality: 'image', task: 'classify' }), undefined)).toBe(true);
+    // Labels daneben (auch COCO-JSON) sprechen fuer Boxen.
+    expect(naheliegend({ ...ordner, extensions: ['.jpg', '.json'] }, box, yolo)).toBe(true);
+    expect(naheliegend({ ...ordner, dataset_type: 'yolo_bbox' }, box, yolo)).toBe(true);
+  });
+
   it('zeigt die zurueckgestellten erst auf Wunsch', async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === 'list_all_datasets') return [

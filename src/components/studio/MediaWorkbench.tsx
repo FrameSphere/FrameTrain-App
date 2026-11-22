@@ -36,8 +36,10 @@ import ModalPortal from '../ui/ModalPortal';
 import RemoveSampleButton from './RemoveSampleButton';
 import { useContextMenuActions, type ContextMenuAction } from '../../ui/contextMenuRegistry';
 import { useEscape } from './useEscape';
-import { toWav16kMono, brauchtWav } from './wavEncode';
+import { toWav16kMono, brauchtWav, istStille } from './wavEncode';
+import { mikrofonFehler } from './mikrofon';
 import FetchDialog from './FetchDialog';
+import DateiAblage, { type Ablage } from './DateiAblage';
 import StudioVideo from './StudioVideo';
 import EditableName from './EditableName';
 import AuswahlLeiste from './AuswahlLeiste';
@@ -102,6 +104,7 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   const [newClass, setNewClass] = useState('');
   const [importing, setImporting] = useState<{ cur: number; total: number } | null>(null);
   const [dialog, setDialog] = useState<null | 'export' | 'fetch' | 'suggest' | 'review' | 'neardup' | 'videos' | 'dataset'>(null);
+  const [abgelegt, setAbgelegt] = useState<string[]>([]);
   const [transcript, setTranscript] = useState('');
   const [showKeys, setShowKeys] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -112,6 +115,10 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   const player   = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
   const chunks   = useRef<Blob[]>([]);
   const ticker   = useRef<number | null>(null);
+  const lebt     = useRef(true);
+  const [klasseFuerAufnahme, setKlasseFuerAufnahme] = useState('');
+  /** Die Aufnahme endet spaeter als sie beginnt: es gilt die Wahl beim Speichern. */
+  const aufnahmeKlasse = useRef('');
 
   const classes  = project.classes;
   const current  = samples[index];
@@ -312,14 +319,18 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
     // Beim ersten Mal fragt macOS nach dem Mikrofon; bis dahin sah es aus, als
     // haette der Knopf nicht reagiert.
     setWartetAufMikrofon(true);
+    let stream: MediaStream | null = null;
+    const stromAus = () => stream?.getTracks().forEach(tr => tr.stop());
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Werkbank inzwischen verlassen: sonst bliebe das Mikrofon offen.
+      if (!lebt.current) { stromAus(); return; }
       setWartetAufMikrofon(false);
       const rec = new MediaRecorder(stream);
       chunks.current = [];
       rec.ondataavailable = e => { if (e.data.size > 0) chunks.current.push(e.data); };
       rec.onstop = async () => {
-        stream.getTracks().forEach(tr => tr.stop());
+        stromAus();
         stopTicker();
         setRecording(false);
         setSeconds(0);
@@ -336,14 +347,21 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
           let bytes: number[];
           let ext: string;
           try {
-            bytes = Array.from(await convertToWav(roh));
+            const wav = await convertToWav(roh);
+            // Ohne Freigabe oder mit stummem Eingang liefert macOS Nullen statt
+            // eines Fehlers. So etwas gehoert nicht in den Datensatz.
+            if (istStille(wav)) {
+              warning(t('studio.audio.emptyTitle'), t('studio.audio.emptyDetail'));
+              return;
+            }
+            bytes = Array.from(wav);
             ext = 'wav';
           } catch {
             bytes = Array.from(new Uint8Array(roh));
             ext = audioExtForMime(typ);
           }
           const report = await invoke<ImportReport>('studio_add_audio', {
-            projectId: project.id, bytes, ext, label: null,
+            projectId: project.id, bytes, ext, label: aufnahmeKlasse.current || null,
           });
           if (report.duplicates > 0) {
             info(t('studio.audio.recordedTitle'), t('studio.audio.duplicate'));
@@ -363,9 +381,13 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
       setSeconds(0);
       ticker.current = window.setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (err: unknown) {
+      stromAus();
+      stopTicker();
+      if (!lebt.current) return;
       setWartetAufMikrofon(false);
-      error(t('studio.audio.micErrorTitle'), t('studio.audio.micErrorDetail', { detail: String(err) }));
       setRecording(false);
+      const f = mikrofonFehler(err);
+      error(t(f.title), t(f.detail, { detail: f.text }));
     }
   };
 
@@ -373,11 +395,13 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
     if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
   };
 
+  useEffect(() => { lebt.current = true; return () => { lebt.current = false; }; }, []);
   useEffect(() => () => {
     stopTicker();
     if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
   }, []);
 
+  aufnahmeKlasse.current = classes.includes(klasseFuerAufnahme) ? klasseFuerAufnahme : '';
   const uhrzeit = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
   /** Derselbe Knopf oben und im leeren Zustand — beide muessen stoppen koennen. */
@@ -417,18 +441,39 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
       const sel = await open({ directory: true, multiple: false,
         title: t(medium === 'image' ? 'studio.import.dialogTitle' : 'studio.audio.pickFolder') });
       if (!sel || typeof sel !== 'string') return;
-      setImporting({ cur: 0, total: 0 });
+      await importQuelle(sel, null);
+    } catch (err: unknown) {
+      error(t('studio.import.errorTitle'), String(err));
+    }
+  };
+
+  /** Ein Ordner oder einzelne Dateien (Bild und Audio). */
+  const importQuelle = async (ordner: string, files: string[] | null) => {
+    setImporting({ cur: 0, total: 0 });
+    try {
       const report = medium === 'image'
         ? await invoke<ImportReport>('studio_import_folder', {
-          projectId: project.id, sourcePath: sel, labelClasses: null, ignoreLabels: false })
+          projectId: project.id, sourcePath: ordner, labelClasses: null, ignoreLabels: false, files })
         : await invoke<ImportReport>('studio_import_audio', {
-          projectId: project.id, sourcePath: sel, ignoreLabels: false });
+          projectId: project.id, sourcePath: ordner, ignoreLabels: false, files });
       await nachImport(report);
     } catch (err: unknown) {
       error(t('studio.import.errorTitle'), String(err));
     } finally {
       setImporting(null);
     }
+  };
+
+  const ablegen = async (a: Ablage) => {
+    if (medium === 'video') {
+      // Erst fragen, ob in Abschnitte zerlegt wird.
+      setAbgelegt([...a.folders, ...a.videos]);
+      setDialog('videos');
+      return;
+    }
+    const dateien = medium === 'image' ? a.images : a.audio;
+    if (dateien.length > 0) await importQuelle('', dateien);
+    for (const ordner of a.folders) await importQuelle(ordner, null);
   };
 
   const importVideos = async (paths: string[], clipSeconds: number | null) => {
@@ -714,6 +759,14 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
     return (
       <>
         {medium === 'audio' && aufnahmeKnopf(form)}
+        {medium === 'audio' && !transkript && classes.length > 0 && (
+          <select value={klasseFuerAufnahme} onChange={e => setKlasseFuerAufnahme(e.target.value)}
+            aria-label={t('studio.audio.recordAs')} title={t('studio.audio.recordAs')}
+            className={`${form} bg-white/5 border border-white/10 text-gray-200 text-sm max-w-[180px]`}>
+            <option value="">{t('studio.audio.recordAsNone')}</option>
+            {classes.map(k => <option key={k} value={k}>{t('studio.audio.recordAsClass', { klasse: k })}</option>)}
+          </select>
+        )}
         {medium === 'video' ? (
           <button onClick={() => setDialog('videos')} disabled={!!importing} className={knopf}>
             {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
@@ -777,7 +830,8 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-12 text-center">
           <EmptyIcon className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t(`studio.media.empty.${medium}Title`)}</p>
-          <p className="text-gray-500 text-sm mt-1 mb-5 max-w-md mx-auto">{t(`studio.media.empty.${medium}Detail`)}</p>
+          <p className="text-gray-500 text-sm mt-1 max-w-md mx-auto">{t(`studio.media.empty.${medium}Detail`)}</p>
+          <p className="text-gray-600 text-xs mt-1 mb-5">{t(`studio.drop.${medium}`)}</p>
           <div className="flex items-center justify-center gap-2 flex-wrap">{sourceButtons(true)}</div>
         </div>
       ) : (
@@ -1019,8 +1073,10 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
           onDone={() => { setDialog(null); void neuLaden(); void refreshProject(); }} />
       )}
       {dialog === 'videos' && (
-        <VideoImportDialog onClose={() => setDialog(null)} onRun={(p, s) => void importVideos(p, s)} />
+        <VideoImportDialog vorgabe={abgelegt} onClose={() => { setAbgelegt([]); setDialog(null); }}
+          onRun={(p, s) => { setAbgelegt([]); void importVideos(p, s); }} />
       )}
+      <DateiAblage art={medium} aktiv={dialog === null && !importing && !recording && !wartetAufMikrofon} onAblage={ablegen} />
     </div>
   );
 }
@@ -1046,7 +1102,9 @@ export function BalanceHinweise({ warnungen }: { warnungen: ReturnType<typeof ba
 
 // ── Videos einlesen ───────────────────────────────────────────────────────
 
-function VideoImportDialog({ onClose, onRun }: {
+function VideoImportDialog({ vorgabe, onClose, onRun }: {
+  /** Ins Fenster gezogen: dann wird nicht noch einmal nach der Quelle gefragt. */
+  vorgabe: string[];
   onClose: () => void; onRun: (paths: string[], clipSeconds: number | null) => void;
 }) {
   const { t } = useLanguage();
@@ -1081,6 +1139,12 @@ function VideoImportDialog({ onClose, onRun }: {
           </div>
           <p className="text-gray-600 text-[11px] mt-1.5">{t('studio.media.videoImport.clipHint')}</p>
         </div>
+        {vorgabe.length > 0 ? (
+          <button onClick={() => onRun(vorgabe, clip)}
+            className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center justify-center gap-2">
+            <Film className="w-4 h-4" /> {t('studio.drop.importVideos', { count: vorgabe.length })}
+          </button>
+        ) : (
         <div className="flex gap-2">
           <button onClick={() => void waehlen(true)}
             className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center justify-center gap-2">
@@ -1091,6 +1155,7 @@ function VideoImportDialog({ onClose, onRun }: {
             <Film className="w-4 h-4" /> {t('studio.media.videoImport.filesButton')}
           </button>
         </div>
+        )}
       </div>
     </div></ModalPortal>
   );

@@ -4203,7 +4203,16 @@
       "doneDetail": "{added} new, {duplicates} duplicate, {labels} with an assignment",
       "exportClasses": "Writes one folder per class — the layout the app recognises as classification.",
       "exportTranscript": "Writes each recording with a matching .txt next to it — the layout for transcription.",
-      "waitingForMic": "Waiting for microphone access…"
+      "waitingForMic": "Waiting for microphone access…",
+      "recordAs": "Class for new recordings",
+      "recordAsNone": "No class",
+      "recordAsClass": "Class: {klasse}",
+      "micNoneTitle": "No microphone found",
+      "micNoneDetail": "Connect a microphone or choose an input under Sound in the system settings. ({detail})",
+      "micBusyTitle": "Microphone not available",
+      "micBusyDetail": "Another program is using the microphone, or the input was disconnected. ({detail})",
+      "micUnsupportedTitle": "Recording not possible",
+      "micUnsupportedDetail": "This system does not give the app access to audio recording. Recordings can be imported as files. ({detail})"
     },
     "fetch": {
       "title": "Fetch from the web",
@@ -4317,7 +4326,17 @@
       "editItem": "Edit suggestion {n}",
       "editTarget": "Edit answer to suggestion {n}",
       "subtitleMore": "The project already has {count} texts. The AI assistant writes more examples in the same style — none of them enter the project unseen.",
-      "subtitleMore_one": "The project already has {count} text. The AI assistant writes more examples in the same style — none of them enter the project unseen."
+      "subtitleMore_one": "The project already has {count} text. The AI assistant writes more examples in the same style — none of them enter the project unseen.",
+      "stop": "Stop",
+      "stopped": "Stopped. This had already arrived.",
+      "partialError": "Not everything was generated: {detail} This had already arrived.",
+      "truncated": "The model was cut off in the middle of a reply. Complete examples are included, some are missing. Request fewer per class or choose a larger token budget.",
+      "noTarget": "{count} suggestions have no answer and are deselected. Add an answer or leave them out.",
+      "noTarget_one": "{count} suggestion has no answer and is deselected. Add an answer or leave it out.",
+      "systemPairs": "You write training examples for a dataset. Reply with a JSON array of objects with the fields \"text\" and \"target\" only — no numbering, no preamble, no explanation. Each entry is a standalone example. The examples must differ clearly from one another in wording, length and perspective.",
+      "promptOthers": "The other classes are: {andere}. Every text must clearly belong to \"{klasse}\" and to no other class.",
+      "promptLanguage": "Write in English unless the topic and style above ask for another language.",
+      "promptLanguageExamples": "Write in the same language as the existing examples."
     },
     "remove": {
       "button": "Remove",
@@ -4553,6 +4572,19 @@
       "maxLabel": "At most samples",
       "maxAll": "all",
       "balanced": "same number per class"
+    },
+    "drop": {
+      "title": "Drop here",
+      "image": "Drag images or folders into the window.",
+      "audio": "Drag audio files or folders into the window.",
+      "video": "Drag videos or folders into the window.",
+      "text": "Drag CSV, TSV, JSONL, text files or folders into the window.",
+      "nothingTitle": "Nothing suitable",
+      "restTitle": "Not everything was read",
+      "rest": "Please drop the {count} remaining sources one at a time.",
+      "rest_one": "Please drop the {count} remaining source separately.",
+      "importVideos": "Import {count} sources",
+      "importVideos_one": "Import {count} source"
     }
   },
   "datasetHints": {

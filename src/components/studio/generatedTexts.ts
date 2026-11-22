@@ -55,14 +55,48 @@ function ausArray(arr: unknown[]): GeneratedItem[] {
   return out;
 }
 
+/** Vollstaendige Eintraege eines JSON-Arrays, das kein Ende hat. */
+function ausAbgebrochenem(text: string): GeneratedItem[] {
+  const start = text.search(/\[\s*["{]/);
+  if (start < 0) return [];
+  const teile: unknown[] = [];
+  let tiefe = 0;
+  let anfang = -1;
+  let inText = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const c = text[i];
+    if (inText) {
+      if (c === '\\') i++;
+      else if (c === '"') {
+        inText = false;
+        if (tiefe === 0) { teile.push(lies(text.slice(anfang, i + 1))); anfang = -1; }
+      }
+      continue;
+    }
+    if (c === '"') { inText = true; if (tiefe === 0) anfang = i; }
+    else if (c === '{' || c === '[') { if (tiefe === 0) anfang = i; tiefe++; }
+    else if (c === '}' || c === ']') {
+      if (tiefe === 0) break;
+      tiefe--;
+      if (tiefe === 0) { teile.push(lies(text.slice(anfang, i + 1))); anfang = -1; }
+    }
+  }
+  return ausArray(teile);
+}
+
+function lies(s: string): unknown {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
 /**
  * Liest die erzeugten Zeilen aus einer Modellantwort.
  *
  * Reihenfolge: erst als JSON-Array (mit und ohne Code-Zaun), dann zeilenweise.
  * Die zeilenweise Lesart ist die wichtige — kleinere Modelle liefern fast nie
- * gueltiges JSON, und eine Liste ist trotzdem brauchbar.
+ * gueltiges JSON, und eine Liste ist trotzdem brauchbar. `abgeschnitten`: das
+ * Token-Budget war mitten in der Antwort aufgebraucht.
  */
-export function parseGenerated(antwort: string): GeneratedItem[] {
+export function parseGenerated(antwort: string, abgeschnitten = false): GeneratedItem[] {
   const text = (antwort ?? '').trim();
   if (!text) return [];
 
@@ -83,6 +117,12 @@ export function parseGenerated(antwort: string): GeneratedItem[] {
     } catch { /* naechste Strategie */ }
   }
 
+  // Mitten im Array abgeschnitten (Token-Budget aufgebraucht): die vollstaendigen
+  // Eintraege davor sind brauchbar. Zeilenweise gelesen waere daraus ein einziger
+  // langer Text mit Klammern und Anfuehrungszeichen geworden.
+  const gerettet = ausAbgebrochenem(text);
+  if (gerettet.length > 0) return gerettet;
+
   // Zeilenweise: JSONL zuerst, sonst der gesaeuberte Rohtext. Eine Zeile mit
   // Doppelpunkt am Ende ist eine Ueberschrift ("Hier sind 10 Beispiele:") und
   // gehoert nicht in den Datensatz.
@@ -99,10 +139,21 @@ export function parseGenerated(antwort: string): GeneratedItem[] {
         }
       } catch { /* dann eben als Text */ }
     }
+    // Bruchstuecke von kaputtem JSON sind keine Beispiele: reine Klammern fallen
+    // weg, von "schluessel": "wert" zaehlt nur der Wert eines Textfelds.
+    if (!/[\p{L}\p{N}]/u.test(zeile)) continue;
+    const feld = zeile.match(/^["']?([\w-]+)["']\s*:\s*(.*?),?\s*$/);
+    if (feld) {
+      const item = ausObjekt({ [feld[1].toLowerCase()]: zeileSaeubern(feld[2]) });
+      if (item && /^["']/.test(feld[2])) out.push(item);
+      continue;
+    }
     const sauber = zeileSaeubern(zeile);
-    if (!sauber || sauber.endsWith(':')) continue;
+    if (!sauber || /[:{[]$/.test(sauber)) continue;
     out.push({ text: sauber });
   }
+  // Die letzte Zeile einer abgeschnittenen Antwort ist ein halber Satz.
+  if (abgeschnitten) out.pop();
   return out;
 }
 

@@ -53,6 +53,16 @@ export async function toWav16kMono(data: ArrayBuffer): Promise<Uint8Array> {
   }
 }
 
+/** Nur Nullen (oder Rauschen im letzten Bit)? Leise Aufnahmen sind nicht still. */
+export function istStille(wav: Uint8Array): boolean {
+  if (wav.length < 46 || wav[0] !== 0x52 || wav[1] !== 0x49) return false;   // kein RIFF
+  const v = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  for (let i = 44; i + 1 < wav.byteLength; i += 2) {
+    if (Math.abs(v.getInt16(i, true)) > 8) return false;
+  }
+  return true;
+}
+
 /** Endungen, die nach WAV gewandelt werden sollten (Aufnahmen aus dem Webview). */
 export function brauchtWav(media: string): boolean {
   return /\.(m4a|webm|ogg|aac|mp4)$/i.test(media);

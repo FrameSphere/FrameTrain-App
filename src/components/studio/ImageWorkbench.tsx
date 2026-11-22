@@ -39,6 +39,7 @@ import ExportReportView from './ExportReportView';
 import { BalanceHinweise } from './MediaWorkbench';
 import ModelRunDialog, { type ModelWithVersionTree } from './ModelRunDialog';
 import FetchDialog from './FetchDialog';
+import DateiAblage, { type Ablage } from './DateiAblage';
 import EditableName from './EditableName';
 import AuswahlLeiste from './AuswahlLeiste';
 import DatasetImportDialog from './DatasetImportDialog';
@@ -415,7 +416,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     if (next >= 0) goTo(next);
   };
 
-  const dialogOffen = !!(showExport || modelRun || importPlan || showSource || videoPath || showFetch || showNearDup);
+  const dialogOffen = !!(showExport || modelRun || importPlan || showSource || videoPath || showFetch || showNearDup || showDataset);
 
   // ── Rechtsklick-Menue ───────────────────────────────────────────────────
   //
@@ -581,8 +582,23 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
   /// ab hier ist der Weg derselbe, inklusive der Frage nach der Klassenliste.
   const inspectAndImport = async (path: string) => {
     const inspection = await invoke<FolderInspection>('studio_inspect_folder', { sourcePath: path });
-    if (inspection.with_labels > 0) { setImportPlan({ path, inspection }); return; }
+    if (inspection.with_labels > 0) { setImportPlan({ path, inspection }); return true; }
     await runImport(path, null, false);
+    return false;
+  };
+
+  /** Ins Fenster gezogen. Ein Dialog (Klassenliste, Video) kann nur fuer eine
+   *  Quelle offen sein; was danach noch uebrig ist, wird benannt. */
+  const ablegen = async (a: Ablage) => {
+    if (a.images.length > 0) await runImport('', null, true, a.images);
+    const reihe = [...a.folders];
+    while (reihe.length > 0) {
+      if (await inspectAndImport(reihe.shift()!)) break;
+    }
+    const dialogZu = reihe.length === 0;
+    if (a.videos.length > 0 && dialogZu && a.folders.length === 0) setVideoPath(a.videos[0]);
+    const rest = reihe.length + (a.folders.length > 0 || !dialogZu ? a.videos.length : Math.max(0, a.videos.length - 1));
+    if (rest > 0) info(t('studio.drop.restTitle'), t('studio.drop.rest', { count: rest }));
   };
 
   const handleImport = async () => {
@@ -597,12 +613,12 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
     }
   };
 
-  const runImport = async (path: string, labelClasses: string[] | null, ignoreLabels: boolean) => {
+  const runImport = async (path: string, labelClasses: string[] | null, ignoreLabels: boolean, files: string[] | null = null) => {
     setImportPlan(null);
     try {
       setImporting({ cur: 0, total: 0 });
       const report = await invoke<ImportReport>('studio_import_folder', {
-        projectId: project.id, sourcePath: path, labelClasses, ignoreLabels,
+        projectId: project.id, sourcePath: path, labelClasses, ignoreLabels, files,
       });
       success(
         t('studio.import.doneTitle'),
@@ -853,7 +869,8 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           <ImageOff className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t('studio.workbench.emptyTitle')}</p>
           <p className="text-gray-500 text-sm mt-1 mb-1">{t('studio.workbench.emptyDetail')}</p>
-          <p className="text-gray-600 text-xs mb-5">{t('studio.write.pasteHint')}</p>
+          <p className="text-gray-600 text-xs">{t('studio.write.pasteHint')}</p>
+          <p className="text-gray-600 text-xs mb-5">{t('studio.drop.image')}</p>
           <button onClick={() => setShowSource(true)}
             className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
             <FolderOpen className="w-4 h-4" /> {t('studio.workbench.importButton')}
@@ -1179,6 +1196,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
         </div>
       )}
 
+      <DateiAblage art="image" auchVideos aktiv={!dialogOffen && !importing && !running} onAblage={ablegen} />
       {showDataset && (
         <DatasetImportDialog project={project} onClose={() => setShowDataset(false)}
           onDone={r => { setShowDataset(false); void nachDatasetImport(r); }} />

@@ -69,6 +69,24 @@ describe('parseGenerated', () => {
     ]);
   });
 
+  it('rettet die vollstaendigen Eintraege einer abgeschnittenen Antwort', () => {
+    expect(parseGenerated('["eins", "zwei \\"x\\"", "dr').map(i => i.text)).toEqual(['eins', 'zwei "x"']);
+    expect(parseGenerated('```json\n[\n  {\n    "text": "a",\n    "target": "b"\n  },\n  {\n    "text": "c",')).toEqual([
+      { text: 'a', label: null, target: 'b' },
+    ]);
+    expect(parseGenerated('1. Ganz\n2. Auch ganz\n3. Übe', true).map(i => i.text)).toEqual(['Ganz', 'Auch ganz']);
+    // Eckige Klammern in normalem Text sind kein Array.
+    expect(parseGenerated('1. Hallo [Name]\n2. Bis bald').map(i => i.text)).toEqual(['Hallo [Name]', 'Bis bald']);
+  });
+
+  it('macht aus kaputtem JSON keine Beispiele aus Klammern und Schluesseln', () => {
+    // So antwortete ein echtes kleines Modell (SmolLM2-135M) im Test.
+    const antwort = '{\n  "action": {\n    "type": "submit",\n    "text": "Jetzt gewinnen"\n  },\n}\nRuf an!';
+    expect(parseGenerated(antwort).map(i => i.text)).toEqual(['Jetzt gewinnen', 'Ruf an!']);
+    // Ein Satz mit Doppelpunkt bleibt ein Satz.
+    expect(parseGenerated('Achtung: Lift steht\nZweite Zeile').map(i => i.text)).toEqual(['Achtung: Lift steht', 'Zweite Zeile']);
+  });
+
   it('gibt bei leerer Antwort nichts zurueck', () => {
     expect(parseGenerated('')).toEqual([]);
     expect(parseGenerated('   ')).toEqual([]);
@@ -121,7 +139,7 @@ describe('GenerateDialog', () => {
     // Eine Anfrage fuer alle Klassen zugleich verteilt ungleich — je Klasse
     // eine Anfrage ist der Grund, warum die Zuordnung ueberhaupt stimmt.
     callAIMock.mockImplementation(async (_s: unknown, o: { messages: { content: string }[] }) =>
-      o.messages[0].content.includes('beschwerde') ? '["Lift kaputt"]' : '["Piste top"]');
+      o.messages[0].content.includes('Klasse "beschwerde"') ? '["Lift kaputt"]' : '["Piste top"]');
     const onAdd = vi.fn();
 
     render(<GenerateDialog {...props(onAdd)} />);
@@ -181,6 +199,75 @@ describe('GenerateDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^[0-9]+ übernehmen$/ }));
 
     expect(onAdd.mock.calls[0][0]).toEqual([{ text: 'Der Lift steht still' }]);
+  });
+
+  // Der Auftrag an das Modell: Abgrenzung und Sprache.
+  it('nennt die anderen Klassen und laesst die Sprache der Beispiele gelten', async () => {
+    callAIMock.mockResolvedValue('["x"]');
+    render(<GenerateDialog {...props()} vorhanden={[{ text: 'Great slope', label: 'lob' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+    await waitFor(() => expect(callAIMock).toHaveBeenCalledTimes(2));
+    const [beschwerde, lob] = callAIMock.mock.calls.map(c => (c[1] as { messages: { content: string }[] }).messages[0].content);
+    expect(lob).toContain('Die anderen Klassen sind: beschwerde');
+    expect(lob).toContain('in derselben Sprache wie die vorhandenen Beispiele');
+    expect(beschwerde).toContain('Schreibe auf Deutsch, außer');
+    // Die Oberflaechensprache darf nicht als Antwortsprache mitgehen.
+    expect((callAIMock.mock.calls[0][1] as Record<string, unknown>).responseLanguage).toBeUndefined();
+  });
+
+  it('behaelt, was vor einem Fehler schon da war', async () => {
+    callAIMock.mockResolvedValueOnce('["Lift kaputt"]').mockRejectedValueOnce(new Error('HTTP 529'));
+    render(<GenerateDialog {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+    await screen.findByText('Lift kaputt');
+    expect(screen.getByText(/HTTP 529/)).toBeInTheDocument();
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('laesst sich stoppen und zeigt, was bis dahin kam', async () => {
+    callAIMock.mockResolvedValueOnce('["Lift kaputt"]').mockReturnValueOnce(new Promise(() => {}));
+    render(<GenerateDialog {...props()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+    await waitFor(() => expect(callAIMock).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Stoppen' }));
+    await screen.findByText('Lift kaputt');
+    expect(screen.getByText(/Gestoppt/)).toBeInTheDocument();
+  });
+
+  it('waehlt Paare ohne Antwort ab und speichert sie nicht', async () => {
+    callAIMock.mockResolvedValue('[{"text":"a","target":"b"},{"text":"c"}]');
+    const onAdd = vi.fn();
+    render(<GenerateDialog {...props(onAdd)} paare project={{ ...projekt, classes: [] }} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+    await screen.findByText('a');
+    expect(screen.getByText(/keine Antwort/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '1 übernehmen' }));
+    expect(onAdd.mock.calls[0][0]).toEqual([{ text: 'a', label: null, target: 'b' }]);
+  });
+
+  it('verwirft Vorschlaege nicht durch einen Klick daneben', async () => {
+    callAIMock.mockResolvedValue('["a"]');
+    const p = props();
+    render(<GenerateDialog {...p} project={{ ...projekt, classes: [] }} />);
+    fireEvent.click(screen.getByRole('button', { name: /Erzeugen$/ }));
+    await screen.findByText('a');
+    fireEvent.click(document.querySelector('.fixed.inset-0')!);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(p.onCancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+    expect(p.onCancel).toHaveBeenCalled();
+  });
+
+  it('laesst die Anzahl leeren und neu tippen', () => {
+    render(<GenerateDialog {...props()} />);
+    const feld = screen.getByLabelText(/Wie viele/);
+    fireEvent.change(feld, { target: { value: '' } });
+    expect(feld).toHaveValue(null);
+    fireEvent.change(feld, { target: { value: '5' } });
+    expect(screen.getByText(/bis zu 10 Texte/)).toBeInTheDocument();
+    fireEvent.change(feld, { target: { value: '900' } });
+    fireEvent.blur(feld);
+    expect(feld).toHaveValue(50);
   });
 
   it('sagt es, wenn nichts Brauchbares zurueckkam', async () => {

@@ -429,6 +429,7 @@ fn main() {
             studio_manager::video::studio_split_segment,
             studio_manager::video::studio_playable_video,
             studio_manager::studio_inspect_media,
+            studio_manager::ablage::studio_sort_drop,
             studio_manager::studio_rewrite_origin,
             studio_manager::quality::studio_near_duplicates,
             studio_manager::quality::studio_save_hashes,

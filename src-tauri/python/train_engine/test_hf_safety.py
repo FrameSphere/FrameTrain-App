@@ -56,6 +56,17 @@ class HfSafetyTest(unittest.TestCase):
         self.assertTrue(hft.sanitize_nan_grads(type("T", (), {})(), m))
         self.assertTrue(all(p.grad is None for p in m.parameters()))
 
+    def test_kurze_laeufe_bekommen_messpunkte(self):
+        def state(gesamt, schritte):
+            s = type("S", (), {})()
+            s.max_steps, s.logging_steps = gesamt, schritte
+            hft.logge_kurze_laeufe(s)
+            return s.logging_steps
+        self.assertEqual(state(4, 10), 1)      # 7 Aufnahmen, Batch 2
+        self.assertEqual(state(42, 10), 4)
+        self.assertEqual(state(1000, 10), 10)  # lange Laeufe bleiben
+        self.assertEqual(state(0, 10), 10)     # unbekannte Laenge
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

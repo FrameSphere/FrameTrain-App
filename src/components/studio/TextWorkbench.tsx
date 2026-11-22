@@ -26,6 +26,7 @@ import { nextOpenIndex } from './studioBoxes';
 import ModelRunDialog from './ModelRunDialog';
 import { SPLITS } from './splits';
 import FetchDialog from './FetchDialog';
+import DateiAblage, { type Ablage } from './DateiAblage';
 import EditableName from './EditableName';
 import AuswahlLeiste from './AuswahlLeiste';
 import DatasetImportDialog from './DatasetImportDialog';
@@ -62,7 +63,7 @@ interface Props {
 
 export default function TextWorkbench({ project, onBack, onProjectChanged }: Props) {
   const { t } = useLanguage();
-  const { success, error, warning } = useNotification();
+  const { success, error, warning, info } = useNotification();
 
   const [samples, setSamples] = useState<StudioSample[]>([]);
   const [total, setTotal]     = useState(0);
@@ -368,11 +369,22 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         : { multiple: false, title: t('studio.text.pickFile'),
             filters: [{ name: 'Text', extensions: ['csv', 'tsv', 'jsonl', 'ndjson', 'txt'] }] });
       if (!sel || typeof sel !== 'string') return;
-      const inspection = await invoke<TextInspection>('studio_inspect_text', { sourcePath: sel, pairs: paare });
-      setPlan({ path: sel, inspection });
+      await planen(sel);
     } catch (err: unknown) {
       error(t('studio.import.errorTitle'), String(err));
     }
+  };
+
+  const planen = async (path: string) => {
+    const inspection = await invoke<TextInspection>('studio_inspect_text', { sourcePath: path, pairs: paare });
+    setPlan({ path, inspection });
+  };
+
+  /** Ins Fenster gezogen: gefragt wird nach den Spalten einer Quelle. */
+  const ablegen = async (a: Ablage) => {
+    const quellen = [...a.texts, ...a.folders];
+    await planen(quellen[0]);
+    if (quellen.length > 1) info(t('studio.drop.restTitle'), t('studio.drop.rest', { count: quellen.length - 1 }));
   };
 
   const runImport = async (textColumn: string | null, labelColumn: string | null, ignore: boolean) => {
@@ -403,13 +415,15 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
     }
   };
 
-  const addTexts = async (items: GeneratedItem[], origin: string | null) => {
-    setShowWrite(false);
-    setShowGenerate(false);
+  /** Schliesst die Dialoge erst nach dem Speichern: schlaegt es fehl, sind die
+   *  geschriebenen (oder bezahlt erzeugten) Texte noch da. */
+  const addTexts = async (items: GeneratedItem[], origin: string | null): Promise<boolean> => {
     try {
       const report = await invoke<ImportReport>('studio_add_texts', {
         projectId: project.id, items, origin,
       });
+      setShowWrite(false);
+      setShowGenerate(false);
       success(t('studio.write.doneTitle'),
         t('studio.write.doneDetail', { added: report.added, duplicates: report.duplicates }));
       const list = await invoke<StudioProject[]>('studio_list_projects');
@@ -418,8 +432,10 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
       await loadSamples(0, true);
       setLadeStand(n => n + 1);
       await loadStats();
+      return true;
     } catch (err: unknown) {
       error(t('studio.write.errorTitle'), String(err));
+      return false;
     }
   };
 
@@ -554,7 +570,8 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-12 text-center">
           <FileText className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-white font-medium">{t('studio.text.emptyTitle')}</p>
-          <p className="text-gray-500 text-sm mt-1 mb-5 max-w-md mx-auto">{t('studio.text.emptyDetail')}</p>
+          <p className="text-gray-500 text-sm mt-1 max-w-md mx-auto">{t('studio.text.emptyDetail')}</p>
+          <p className="text-gray-600 text-xs mt-1 mb-5">{t('studio.drop.text')}</p>
           <button onClick={() => setShowSource(true)}
             className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm inline-flex items-center gap-2">
             <FileText className="w-4 h-4" /> {t('studio.text.addButton')}
@@ -850,6 +867,10 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
         />
       )}
 
+      <DateiAblage art="text" onAblage={ablegen}
+        aktiv={!plan && !importing && !running && !showDataset && !showExport && !modelRun && !showWrite
+          && !showFetch && !showSource && !showGenerate && !showNearDup} />
+
       {showGenerate && (
         <GenerateDialog
           project={project}
@@ -859,7 +880,7 @@ export default function TextWorkbench({ project, onBack, onProjectChanged }: Pro
             bestaetigt: x.status === 'confirmed',
           }))}
           onCancel={() => setShowGenerate(false)}
-          onAdd={(items, origin) => void addTexts(items, origin)}
+          onAdd={addTexts}
         />
       )}
 
