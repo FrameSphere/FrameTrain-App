@@ -12,6 +12,7 @@ import { useEscape } from './useEscape';
 import {
   importDatasetIntoProject, studioKindOf, type DatasetImportReport, type StagedResult,
 } from './datasetImport';
+import { passtZumProjekt, type StudioModel } from './studioModelFit';
 import type { StudioProject } from './studioTypes';
 
 export interface DatasetChoice {
@@ -50,6 +51,19 @@ export function passtZurQuelle(d: Pick<DatasetChoice, 'extensions' | 'dataset_ty
   return endungen.some(e => ok.has(e));
 }
 
+/**
+ * Wahrscheinlich gemeint oder nur moeglich? In Parquet koennen Bilder, Audio
+ * oder Text stecken — die Endung sagt es nicht. Entscheidend ist dann das Modell,
+ * zu dem das Dataset gehoert: ein Textmodell hat keine Bilder.
+ */
+export function naheliegend(
+  d: Pick<DatasetChoice, 'extensions'>, p: Pick<StudioProject, 'modality' | 'task'>, modell: StudioModel | undefined,
+): boolean {
+  if (!modell || passtZumProjekt(modell, p)) return true;
+  const endungen = (d.extensions ?? []).map(e => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
+  return (ENDUNGEN[p.modality] ?? []).some(e => e !== '.parquet' && endungen.includes(e));
+}
+
 /** '' = unter eigenem Namen, WEG = weglassen, sonst die Projektklasse. */
 export const WEG = '\u0000weg';
 
@@ -79,7 +93,8 @@ export default function DatasetImportDialog({ project, onClose, onDone }: {
   const { t } = useLanguage();
   const { error } = useNotification();
   const [datasets, setDatasets] = useState<DatasetChoice[] | null>(null);
-  const [modelle, setModelle] = useState<Record<string, string>>({});
+  const [modelle, setModelle] = useState<Record<string, StudioModel>>({});
+  const [alleZeigen, setAlleZeigen] = useState(false);
   const [gewaehlt, setGewaehlt] = useState<DatasetChoice | null>(null);
   const [klassen, setKlassen] = useState<string[] | null>(null);
   const [wahl, setWahl] = useState<Record<string, string>>({});
@@ -93,8 +108,8 @@ export default function DatasetImportDialog({ project, onClose, onDone }: {
     invoke<DatasetChoice[]>('list_all_datasets')
       .then(l => setDatasets((Array.isArray(l) ? l : []).filter(d => d.storage_path && passtZurQuelle(d, project))))
       .catch(() => setDatasets([]));
-    invoke<{ id: string; name: string }[]>('list_models')
-      .then(l => setModelle(Object.fromEntries((Array.isArray(l) ? l : []).map(m => [m.id, m.name]))))
+    invoke<StudioModel[]>('list_models')
+      .then(l => setModelle(Object.fromEntries((Array.isArray(l) ? l : []).map(m => [m.id, m]))))
       .catch(() => { /* dann ohne Modellnamen */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
@@ -128,6 +143,10 @@ export default function DatasetImportDialog({ project, onClose, onDone }: {
     }
   };
 
+  const modellVon = (d: DatasetChoice) => (d.model_id ? modelle[d.model_id] : undefined);
+  const gemeint = (datasets ?? []).filter(d => naheliegend(d, project, modellVon(d)));
+  const weitere = (datasets ?? []).filter(d => !naheliegend(d, project, modellVon(d)));
+
   const uebernommen = useMemo(() => {
     if (!klassen) return 0;
     const { classMap, keepUnmapped } = zuordnung(klassen, wahl, restWeg, project.classes);
@@ -155,20 +174,26 @@ export default function DatasetImportDialog({ project, onClose, onDone }: {
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('common.loading', 'Lädt…')}
               </p>
             )}
-            {datasets?.length === 0 && <p className="text-gray-500 text-xs">{t('studio.datasetImport.none')}</p>}
-            {datasets?.map(d => (
+            {datasets !== null && gemeint.length === 0 && <p className="text-gray-500 text-xs">{t('studio.datasetImport.none')}</p>}
+            {(alleZeigen ? [...gemeint, ...weitere] : gemeint).map(d => (
               <button key={d.id} onClick={() => setGewaehlt(d)}
                 className="w-full flex items-center gap-3 p-2.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all">
                 <Database className="w-4 h-4 text-gray-400 flex-shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="text-gray-200 text-xs block truncate">{d.name}</span>
                   <span className="text-gray-500 text-[11px] block truncate">
-                    {[d.model_id ? modelle[d.model_id] : null, t('studio.source.datasetMeta', { files: d.file_count, type: d.dataset_type ?? '' })]
+                    {[modellVon(d)?.name, t('studio.source.datasetMeta', { files: d.file_count, type: d.dataset_type ?? '' })]
                       .filter(Boolean).join(' · ')}
                   </span>
                 </span>
               </button>
             ))}
+            {weitere.length > 0 && !alleZeigen && (
+              <button onClick={() => setAlleZeigen(true)}
+                className="w-full py-2 text-gray-400 hover:text-white text-xs">
+                {t('studio.datasetImport.more', { count: weitere.length })}
+              </button>
+            )}
           </div>
         ) : (
           <>

@@ -599,7 +599,7 @@ export const studioTools: McpTool[] = [
       const warnings: string[] = [];
       // Paare und Transkripte haben keine Klassen.
       const perClass = (stats.per_class as number[] | undefined) ?? [];
-      if ((stats.incomplete as number) > 0) warnings.push(`${stats.incomplete} confirmed sample(s) have no class or target text and will be missing from the export.`);
+      if ((stats.incomplete as number) > 0) warnings.push(`${stats.incomplete} confirmed sample(s) have no valid class or target text and will be missing from the export.`);
       if ((stats.confirmed as number) < 20) warnings.push('Fewer than 20 confirmed samples — too little for training.');
       if (perClass.length > 1) {
         const max = Math.max(...perClass), min = Math.min(...perClass);
@@ -644,7 +644,8 @@ export const studioTools: McpTool[] = [
       }, { describe: (r) => {
         const rep = r.report as { total?: number; per_split?: [string, number][]; warnings?: string[] } | undefined;
         const split = rep?.per_split?.length ? ` (${rep.per_split.map(([k, n]) => `${k} ${n}`).join(', ')})` : '';
-        const warn = rep?.warnings?.length ? ` Notes: ${rep.warnings.slice(0, 6).join(' ')}` : '';
+        const notes = rep?.warnings ?? [];
+        const warn = notes.length ? ` Notes: ${notes.slice(0, 12).join(' ')}${notes.length > 12 ? ` (and ${notes.length - 12} more)` : ''}` : '';
         return `Exported ${rep?.total ?? '?'} sample(s)${split} as dataset ${r.dataset.name} (${r.dataset.id}).${misfit}${warn}`;
       } });
     },

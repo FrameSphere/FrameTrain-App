@@ -271,19 +271,27 @@ pub(super) fn exportierbar(project: &StudioProject, s: &StudioSample) -> bool {
         "text" => voll(&s.content),
         m => !s.media.is_empty() && s.mime.starts_with(&format!("{}/", m)),
     };
+    // Eine Klasse, die das Projekt nicht fuehrt, ist keine: im Datensatz waere
+    // sie eine zusaetzliche Klasse, die niemand angelegt hat.
+    let klasse = || s.ann.label.as_deref().map(|l| class_index_for(l, &project.classes).is_some()).unwrap_or(false);
     medium && (ist_boxenprojekt(project)
-        || if mit_zieltext(project) { voll(&s.ann.target) } else { voll(&s.ann.label) })
+        || if mit_zieltext(project) { voll(&s.ann.target) } else { klasse() })
 }
 
-/// Boxen, deren Klasse es nicht gibt, nimmt der Export nicht mit: eine
-/// Klassennummer jenseits der Liste laesst Ultralytics das ganze Bild verwerfen.
-pub(super) fn ohne_fremde_boxen(project: &StudioProject, samples: &[&StudioSample]) -> (Vec<StudioSample>, usize) {
+/// Samples, wie der Export sie schreibt. Boxen, deren Klasse es nicht gibt,
+/// bleiben draussen: eine Nummer jenseits der Liste laesst Ultralytics das ganze
+/// Bild verwerfen. Klassen stehen in der Schreibweise des Projekts, sonst waeren
+/// "ham" und "HAM" im Datensatz zwei. Zweiter Wert: weggelassene Boxen.
+pub(super) fn fuer_export(project: &StudioProject, samples: &[&StudioSample]) -> (Vec<StudioSample>, usize) {
     let mut weg = 0;
     let out = samples.iter().map(|s| {
         let mut s = (*s).clone();
         let vorher = s.ann.boxes.len();
         s.ann.boxes.retain(|b| b.cls < project.classes.len());
         weg += vorher - s.ann.boxes.len();
+        if let Some(i) = s.ann.label.as_deref().and_then(|l| class_index_for(l, &project.classes)) {
+            s.ann.label = Some(project.classes[i].clone());
+        }
         s
     }).collect();
     (out, weg)
@@ -473,8 +481,14 @@ mod tests {
         b.media = "ab/x.jpg".into(); b.mime = "image/jpeg".into(); b.content = None;
         assert!(exportierbar(&projekt("image", "bbox", &["a"]), &b), "ohne Box ist ein Negativbeispiel");
         b.ann.boxes = vec![BoxAnn { cls: 0, x: 0.5, y: 0.5, w: 0.1, h: 0.1 }, BoxAnn { cls: 9, x: 0.5, y: 0.5, w: 0.1, h: 0.1 }];
-        let (sauber, weg) = ohne_fremde_boxen(&projekt("image", "bbox", &["a"]), &[&b]);
+        let (sauber, weg) = fuer_export(&projekt("image", "bbox", &["a"]), &[&b]);
         assert_eq!((sauber[0].ann.boxes.len(), weg), (1, 1));
+        // Klassen: unbekannte fehlen, abweichende Schreibweise wird angeglichen.
+        let k = projekt("text", "classification", &["spam", "ham"]);
+        assert!(!exportierbar(&k, &sample("s_x", Some("gibtsnicht"))));
+        let h = sample("s_h", Some("HAM"));
+        assert!(exportierbar(&k, &h));
+        assert_eq!(fuer_export(&k, &[&h]).0[0].ann.label.as_deref(), Some("ham"));
     }
 
     #[test]

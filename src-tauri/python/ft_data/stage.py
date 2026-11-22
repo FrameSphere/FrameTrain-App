@@ -73,9 +73,12 @@ def _sample(items: List[Tuple[Any, List[str]]], max_samples: int, per_class: boo
     if not per_class:
         return items[:max_samples]
     by_cls: Dict[str, List[int]] = defaultdict(list)
+    without: List[int] = []
     for i, (_, classes) in enumerate(items):
-        for c in set(classes) or {"(none)"}:
+        for c in set(classes):
             by_cls[c].append(i)
+        if not classes:
+            without.append(i)
     chosen: List[int] = []
     seen = set()
     queues = {c: list(v) for c, v in by_cls.items()}
@@ -89,6 +92,9 @@ def _sample(items: List[Tuple[Any, List[str]]], max_samples: int, per_class: boo
                     break
             if len(chosen) >= max_samples:
                 break
+    # Ohne Klasse (Bilder ohne Boxen) nur zum Auffuellen. Als eigene "Klasse"
+    # nahmen sie den echten Klassen Plaetze weg.
+    chosen.extend(without[:max(0, max_samples - len(chosen))])
     return [items[i] for i in chosen]
 
 

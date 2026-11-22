@@ -16,7 +16,7 @@ vi.mock('../../contexts/NotificationContext', () => ({ useNotification: () => me
 
 import EditableName from '../studio/EditableName';
 import TextWorkbench from '../studio/TextWorkbench';
-import DatasetImportDialog, { WEG, passtZurQuelle, zuordnung } from '../studio/DatasetImportDialog';
+import DatasetImportDialog, { WEG, naheliegend, passtZurQuelle, zuordnung } from '../studio/DatasetImportDialog';
 import ModelRunDialog, { IGNORIEREN, klassenZuordnung } from '../studio/ModelRunDialog';
 import { adressenAus, zerlegeAdressen } from '../studio/FetchDialog';
 import { filterListe, herkunftText, useMehrfachauswahl } from '../studio/werkbankHilfen';
@@ -153,6 +153,32 @@ describe('Dataset-Import', () => {
     expect(passtZurQuelle({ extensions: ['.jpg'], dataset_type: 'yolo_bbox' }, projekt({ modality: 'image', task: 'classify' }))).toBe(false);
     expect(passtZurQuelle({ extensions: ['.jpg', '.csv'] }, projekt())).toBe(false);
     expect(passtZurQuelle({ extensions: ['.csv'] }, projekt())).toBe(true);
+  });
+
+  it('stellt Parquet-Datasets fremder Modelle zurueck', () => {
+    const box = projekt({ modality: 'image', task: 'bbox' });
+    const yolo = { id: 'm', name: 'YOLOv8', model_type: 'yolo' } as never;
+    const bert = { id: 'm2', name: 'bench-distilbert', model_type: 'distilbert' } as never;
+    expect(naheliegend({ extensions: ['.parquet'] }, box, bert)).toBe(false);
+    expect(naheliegend({ extensions: ['.parquet'] }, box, yolo)).toBe(true);
+    expect(naheliegend({ extensions: ['.parquet'] }, box, undefined)).toBe(true);
+    // Echte Bilder zaehlen, egal bei welchem Modell sie liegen.
+    expect(naheliegend({ extensions: ['.jpg'] }, box, bert)).toBe(true);
+    expect(naheliegend({ extensions: ['.parquet'] }, projekt(), bert)).toBe(true);
+    expect(naheliegend({ extensions: ['.parquet'] }, projekt(), yolo)).toBe(false);
+  });
+
+  it('zeigt die zurueckgestellten erst auf Wunsch', async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_all_datasets') return [
+        { id: 'd1', name: 'coco', model_id: 'm1', storage_path: '/d', file_count: 9, extensions: ['.jpg'] },
+        { id: 'd2', name: 'imdb', model_id: 'm2', storage_path: '/d', file_count: 1, extensions: ['.parquet'] }];
+      if (cmd === 'list_models') return [{ id: 'm1', name: 'YOLOv8', model_type: 'yolo' }, { id: 'm2', name: 'distilbert', model_type: 'distilbert' }];
+      return null;
+    });
+    render(<DatasetImportDialog project={projekt({ modality: 'image', task: 'bbox' })} onClose={() => {}} onDone={() => {}} />);
+    fireEvent.click(await screen.findByText('studio.datasetImport.more:1'));
+    expect(screen.getByText('imdb')).toBeTruthy();
   });
 
   it('uebersetzt die Zuordnung', () => {

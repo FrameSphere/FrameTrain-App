@@ -41,8 +41,12 @@ export default function AuswahlLeiste({ projectId, ids, klassen, onLeeren, onFer
     projectId, sampleId: id, status, label: label ?? null, target: null, boxes: null, keep: true,
   }));
 
+  // Ohne Platz im Layout (Hoehe und negativer Rand heben sich auf): unter der
+  // Werkbank, sonst am unteren Rand. Stand sie oben, rutschte beim ersten
+  // ⌘-Klick alles nach unten und der naechste Klick traf die falsche Zeile.
   return (
-    <div className="rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 flex flex-wrap items-center gap-2" data-testid="auswahl-leiste">
+    <div className="sticky bottom-4 z-30 mt-2 h-14 -mb-16 flex items-center justify-center pointer-events-none">
+    <div className="pointer-events-auto rounded-xl border border-white/15 bg-[#1b1d26] shadow-xl px-3 py-2 flex flex-wrap items-center gap-2" data-testid="auswahl-leiste">
       <span className="text-gray-200 text-xs tabular-nums">
         {lauf ? t('studio.suggest.progress', lauf) : t('studio.selection.count', { count: ids.size })}
       </span>
@@ -77,6 +81,7 @@ export default function AuswahlLeiste({ projectId, ids, klassen, onLeeren, onFer
           </button>
         </>
       )}
+    </div>
     </div>
   );
 }

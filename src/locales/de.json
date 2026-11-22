@@ -3930,8 +3930,8 @@
       "emptyConfirmed": "{count} bestätigte Bilder haben keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
       "emptyConfirmed_one": "{count} bestätigtes Bild hat keine Box. Als Negativbeispiel ist das richtig, versehentlich meist nicht.",
       "doubts": "Widersprüche",
-      "incomplete": "{count} bestätigte Samples haben keine Klasse oder keinen Zieltext und fehlen im Export.",
-      "incomplete_one": "{count} bestätigtes Sample hat keine Klasse oder keinen Zieltext und fehlt im Export."
+      "incomplete": "{count} bestätigte Samples haben keine gültige Klasse oder keinen Zieltext und fehlen im Export.",
+      "incomplete_one": "{count} bestätigtes Sample hat keine gültige Klasse oder keinen Zieltext und fehlt im Export."
     },
     "shortcuts": {
       "title": "Tastatur",
@@ -4535,6 +4535,8 @@
       "subtitle": "Welches Dataset soll ins Projekt?",
       "none": "Kein Dataset in FrameTrain passt zu diesem Projekt",
       "tileHint": "Klassen zuordnen, auf Wunsch nur eine Stichprobe",
+      "more": "{count} weitere zeigen, die vermutlich nicht passen",
+      "more_one": "{count} weiteres zeigen, das vermutlich nicht passt",
       "button": "Dataset",
       "reading": "Klassen werden gelesen …",
       "mapTitle": "Klassen zuordnen",

@@ -325,6 +325,11 @@ impl ExportReport {
         self.warnings.push(h.text.clone());
         self.hints.push(h);
     }
+    /// Vorn einreihen: Hinweise auf fehlende Daten.
+    pub fn melde_zuerst(&mut self, h: Hinweis) {
+        self.warnings.insert(0, h.text.clone());
+        self.hints.insert(0, h);
+    }
 }
 
 fn zaehle<I: IntoIterator<Item = String>>(it: I) -> Vec<(String, usize)> {

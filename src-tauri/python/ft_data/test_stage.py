@@ -39,6 +39,14 @@ class StageTest(unittest.TestCase):
         self.assertEqual(sorted(l.split()[0] for l in labels.splitlines()),
                          sorted(str(res["label_classes"].index(n)) for n in ["person", "vehicle", "vehicle"]))
 
+    def test_stichprobe_je_klasse_zieht_leere_bilder_zuletzt(self):
+        # a: person+truck, b: dog, c: car, d: leer
+        for n, erwartet_leer in ((3, 0), (4, 1)):
+            res = stage.stage({"source": str(self._yolo()) if n == 3 else str(self.root / "ds"), "target": str(self.root / f"w{n}"),
+                               "project_kind": "image_boxes", "max_samples": n, "per_class": True})
+            leer = [p for p in Path(res["path"], "labels").glob("*.txt") if not p.read_text().strip()]
+            self.assertEqual((res["samples"], len(leer)), (n, erwartet_leer))
+
     def test_klassenordner_mit_stichprobe_je_klasse(self):
         src = self.root / "imgs"
         for cls, n in (("Cat", 10), ("dog", 2)):

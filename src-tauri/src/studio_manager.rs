@@ -3079,7 +3079,7 @@ pub async fn studio_export(
     if selected.is_empty() {
         return Err("Keines der bestätigten Samples ist vollständig (Klasse, Zieltext oder passendes Medium fehlt) – es gibt nichts zu exportieren".to_string());
     }
-    let (sauber, fremde_boxen) = regeln::ohne_fremde_boxen(&project, &selected);
+    let (sauber, fremde_boxen) = regeln::fuer_export(&project, &selected);
     let selected: Vec<&StudioSample> = sauber.iter().collect();
 
     let out = regeln::export_ordner(&dir)?;
@@ -3109,9 +3109,10 @@ pub async fn studio_export(
     }
 
     let mut report = quality::baue_report(&project, &exportiert, &splits, &quality::load_hashes(&dir));
-    for h in hinweise { report.melde(h); }
-    if unvollstaendig > 0 { report.melde(quality::unvollstaendig(unvollstaendig)); }
-    if fremde_boxen > 0 { report.melde(quality::boxen_ohne_klasse(fremde_boxen)); }
+    // Was fehlt, steht vor dem, was nur unausgewogen ist.
+    if fremde_boxen > 0 { report.melde_zuerst(quality::boxen_ohne_klasse(fremde_boxen)); }
+    if unvollstaendig > 0 { report.melde_zuerst(quality::unvollstaendig(unvollstaendig)); }
+    for h in hinweise.into_iter().rev() { report.melde_zuerst(h); }
     fs::write(out.join("EXPORT_REPORT.md"), quality::report_markdown(&project, &report))
         .map_err(|e| format!("EXPORT_REPORT.md: {}", e))?;
     fs::write(out.join("export_report.json"), serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)

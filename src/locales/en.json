@@ -3934,8 +3934,8 @@
       "emptyConfirmed": "{count} confirmed images have no box. Correct as negative examples, rarely intended otherwise.",
       "emptyConfirmed_one": "{count} confirmed image has no box. Correct as negative examples, rarely intended otherwise.",
       "doubts": "Disagreements",
-      "incomplete": "{count} confirmed samples have no class or target text and will be missing from the export.",
-      "incomplete_one": "{count} confirmed sample has no class or target text and will be missing from the export."
+      "incomplete": "{count} confirmed samples have no valid class or target text and will be missing from the export.",
+      "incomplete_one": "{count} confirmed sample has no valid class or target text and will be missing from the export."
     },
     "shortcuts": {
       "title": "Keyboard",
@@ -4539,6 +4539,8 @@
       "subtitle": "Which dataset should go into the project?",
       "none": "No dataset in FrameTrain fits this project",
       "tileHint": "Map classes, optionally only a sample",
+      "more": "Show {count} more that probably do not fit",
+      "more_one": "Show {count} more that probably does not fit",
       "button": "Dataset",
       "reading": "Reading classes …",
       "mapTitle": "Map classes",

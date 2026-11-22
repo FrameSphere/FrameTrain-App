@@ -860,9 +860,7 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
           </button>
         </div>
       ) : (
-        <>
-        <AuswahlLeiste projectId={project.id} ids={auswahl.ids} klassen={[]}
-          onLeeren={auswahl.leeren} onFertig={neuEinlesen} />
+        <div className="relative">
         <div className="grid grid-cols-[200px_minmax(0,1fr)_220px] gap-4">
           {/* Warteschlange */}
           <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden flex flex-col">
@@ -1176,7 +1174,9 @@ export default function ImageWorkbench({ project, onBack, onProjectChanged }: Pr
             </div>
           </div>
         </div>
-        </>
+        <AuswahlLeiste projectId={project.id} ids={auswahl.ids} klassen={[]}
+          onLeeren={auswahl.leeren} onFertig={neuEinlesen} />
+        </div>
       )}
 
       {showDataset && (
