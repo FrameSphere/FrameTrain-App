@@ -92,6 +92,7 @@ class Plugin(TrainPlugin):
         self.threshold: float = float((config.plugin_config or {}).get("threshold", 0.5) or 0.5)
         self._start_time      = time.time()
         self._last_train_loss: float = 0.0
+        self._train_loss_seen: bool = False
         self._last_lr:         float = 0.0
         self._last_step:       int   = 0
 
@@ -621,6 +622,14 @@ class Plugin(TrainPlugin):
                         metrics=extra_metrics,
                     )
                 else:
+                    if "train_runtime" in logs:
+                        # Abschluss-Zusammenfassung des Trainers: train_loss ist dort
+                        # der MITTELWERT ueber den ganzen Lauf, kein Messpunkt. Als
+                        # letzter Kurvenpunkt und als final_train_loss zeigte die
+                        # Analyse sonst z. B. 0.85 statt der zuletzt gemessenen 0.56.
+                        return
+                    if "loss" not in logs and "train_loss" not in logs:
+                        return
                     step   = state.global_step
                     # 1-basiert und gedeckelt: sonst erzeugte das letzte Log bei
                     # epoch=3.0 eine vierte Epoche in der Analyse.
@@ -628,6 +637,7 @@ class Plugin(TrainPlugin):
                     t_loss = logs.get("loss", logs.get("train_loss", 0.0))
                     lr     = logs.get("learning_rate", plugin_ref.config.learning_rate)
                     plugin_ref._last_train_loss = t_loss
+                    plugin_ref._train_loss_seen = True
                     plugin_ref._last_lr = lr
                     extra_metrics = {
                         k: v for k, v in logs.items()
@@ -806,7 +816,12 @@ class Plugin(TrainPlugin):
         # Trainings-Metriken aus Trainer
         tr = self._train_result
         total_steps  = tr.global_step if hasattr(tr, "global_step") else 0
-        train_loss   = tr.training_loss if hasattr(tr, "training_loss") else 0.0
+        # Zuletzt gemessener Loss wie in core/hf_training.py; training_loss des
+        # Trainers ist der Mittelwert ueber den Lauf und nur der Notbehelf.
+        if getattr(self, "_train_loss_seen", False):
+            train_loss = self._last_train_loss
+        else:
+            train_loss = tr.training_loss if hasattr(tr, "training_loss") else 0.0
 
         # Beste Epoche
         best_epoch = getattr(self._trainer.state, "best_epoch", 0) or 0

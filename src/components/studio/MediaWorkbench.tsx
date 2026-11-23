@@ -408,12 +408,14 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   const aufnahmeKnopf = (form: string) => (
     <button onClick={recording ? stopRecording : () => void startRecording()}
       disabled={wartetAufMikrofon}
-      className={`${form} border text-sm transition-all inline-flex items-center gap-2 disabled:opacity-70 ${recording
+      title={wartetAufMikrofon ? t('studio.audio.waitingForMic') : undefined}
+      aria-label={wartetAufMikrofon ? t('studio.audio.waitingForMic') : undefined}
+      className={`${form} border text-sm transition-all inline-flex items-center gap-2 whitespace-nowrap disabled:opacity-70 ${recording
         ? 'bg-red-500/20 hover:bg-red-500/30 border-red-500/40 text-red-200'
         : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}>
       {wartetAufMikrofon ? <Loader2 className="w-4 h-4 animate-spin" />
         : recording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-      {wartetAufMikrofon ? t('studio.audio.waitingForMic')
+      {wartetAufMikrofon ? t('studio.audio.waitingForMicShort')
         : recording ? t('studio.audio.stop', { time: uhrzeit }) : t('studio.audio.record')}
     </button>
   );
@@ -429,9 +431,16 @@ export default function MediaWorkbench({ project, onBack, onProjectChanged, conv
   }, [project.id]);
 
   const nachImport = async (report: ImportReport) => {
-    success(t('studio.audio.doneTitle'), t('studio.audio.doneDetail', {
-      added: report.added, duplicates: report.duplicates, labels: report.with_labels,
-    }));
+    if (medium === 'image') {
+      success(t('studio.import.doneTitle'), t('studio.import.doneDetail', {
+        added: report.added, duplicates: report.duplicates, labels: report.with_labels,
+        unreadable: report.unreadable,
+      }));
+    } else {
+      success(t('studio.audio.doneTitle'), t('studio.audio.doneDetail', {
+        added: report.added, duplicates: report.duplicates, labels: report.with_labels,
+      }));
+    }
     if (report.classes_added.length > 0) await refreshProject();
     await neuLaden();
   };

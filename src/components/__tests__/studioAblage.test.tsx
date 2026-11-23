@@ -84,6 +84,13 @@ describe('Ins Fenster ziehen', () => {
     expect(aufrufe('studio_import_folder')[2]).toMatchObject({ sourcePath: '/o2', files: null });
   });
 
+  it('meldet Bilder als Import, nicht als Aufnahmen', async () => {
+    render(<MediaWorkbench project={projekt('image', 'classify')} {...p} />);
+    await werfen({ images: ['/a.png'] });
+    await waitFor(() => expect(melden.success).toHaveBeenCalledWith('studio.import.doneTitle', 'studio.import.doneDetail'));
+    expect(melden.success).not.toHaveBeenCalledWith('studio.audio.doneTitle', expect.anything());
+  });
+
   it('Audio nimmt Audiodateien', async () => {
     render(<MediaWorkbench project={projekt('audio', 'transcript')} {...p} />);
     await werfen({ audio: ['/a.wav'] });
@@ -177,6 +184,16 @@ describe('Mikrofon', () => {
     fireEvent.click((await screen.findAllByText('studio.audio.record'))[0]);
     await waitFor(() => expect(melden.error).toHaveBeenCalledWith('studio.audio.micUnsupportedTitle', 'studio.audio.micUnsupportedDetail'));
     expect(tracks[0].stop).toHaveBeenCalled();
+  });
+
+  it('haelt den Knopf beim Warten auf die Freigabe kurz', async () => {
+    mikro(() => new Promise(() => {}));
+    render(<MediaWorkbench project={projekt('audio', 'classification')} {...p} />);
+    fireEvent.click((await screen.findAllByText('studio.audio.record'))[0]);
+    const knopf = (await screen.findAllByText('studio.audio.waitingForMicShort'))[0].closest('button')!;
+    expect(knopf.getAttribute('title')).toBe('studio.audio.waitingForMic');
+    expect(knopf.className).toContain('whitespace-nowrap');
+    expect(screen.queryByText('studio.audio.waitingForMic')).toBeNull();
   });
 
   it('gibt es auch frei, wenn man waehrend der Freigabe weggeht', async () => {

@@ -4200,6 +4200,7 @@
       "exportClasses": "Schreibt einen Ordner je Klasse — das Layout, das die App als Klassifikation erkennt.",
       "exportTranscript": "Schreibt jede Aufnahme mit gleichnamiger .txt daneben — das Layout für Transkription.",
       "waitingForMic": "Warte auf Freigabe des Mikrofons…",
+      "waitingForMicShort": "Warte…",
       "recordAs": "Klasse für neue Aufnahmen",
       "recordAsNone": "Ohne Klasse",
       "recordAsClass": "Klasse: {klasse}",

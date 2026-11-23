@@ -149,7 +149,7 @@ describe('AudioWorkbench', () => {
     });
     render(<AudioWorkbench {...props()} />);
     fireEvent.click(await screen.findByRole('button', { name: /Aufnehmen/ }));
-    expect(await screen.findByText('Warte auf Freigabe des Mikrofons…')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Warte auf Freigabe des Mikrofons…' })).toHaveTextContent('Warte…');
     freigeben({ getTracks: () => [] });
   });
 
@@ -203,7 +203,7 @@ describe('AudioWorkbench', () => {
     await screen.findByText('1 / 2');
     fireEvent.keyDown(window, { key: 'r' });
     expect(angefragt).toBe(1);
-    expect(await screen.findByText('Warte auf Freigabe des Mikrofons…')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Warte auf Freigabe des Mikrofons…' })).toHaveTextContent('Warte…');
   });
 
   it('sagt beim verweigerten Mikrofon, wo man es erlaubt', async () => {

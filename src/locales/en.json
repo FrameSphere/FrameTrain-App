@@ -4204,6 +4204,7 @@
       "exportClasses": "Writes one folder per class — the layout the app recognises as classification.",
       "exportTranscript": "Writes each recording with a matching .txt next to it — the layout for transcription.",
       "waitingForMic": "Waiting for microphone access…",
+      "waitingForMicShort": "Waiting…",
       "recordAs": "Class for new recordings",
       "recordAsNone": "No class",
       "recordAsClass": "Class: {klasse}",
