@@ -9,7 +9,7 @@
 // (Splits, dataset.yaml, Metadaten) wie beim Import eines lokalen Ordners.
 
 use crate::command_ext::{NoWindow, PythonUtf8};
-use crate::dataset_manager::{get_dataset_path, import_local_dataset};
+use crate::dataset_manager::{dataset_location, get_dataset_path, import_local_dataset, rescan_dataset_dir};
 use crate::AppState;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read};
@@ -290,6 +290,194 @@ pub async fn preview_media(
         .map_err(|e| format!("Abgebrochen: {}", e))?
 }
 
+// ── Dateiverwaltung im Datensatz (KI-Werkzeuge datasets_tree/repair/move/remove) ──
+
+/// Relativen Pfad sicher an den Datensatz-Ordner haengen: keine absoluten Pfade,
+/// kein "..", nicht der Ordner selbst.
+pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let rel = rel.trim().trim_start_matches("./");
+    if rel.is_empty() || rel == "." {
+        return Err("Path must name something inside the dataset, not the dataset folder itself.".into());
+    }
+    let p = Path::new(rel);
+    for c in p.components() {
+        match c {
+            Component::Normal(_) => {}
+            Component::CurDir => {}
+            _ => return Err(format!("Path not allowed (must stay inside the dataset): {}", rel)),
+        }
+    }
+    let joined = root.join(p);
+    // Symlinks duerfen nicht hinausfuehren: vorhandenen Teil kanonisieren und pruefen
+    let mut existing = joined.clone();
+    while !existing.exists() {
+        match existing.parent() { Some(par) => existing = par.to_path_buf(), None => break }
+    }
+    if let (Ok(a), Ok(b)) = (existing.canonicalize(), root.canonicalize()) {
+        if !a.starts_with(&b) {
+            return Err(format!("Path leads outside the dataset: {}", rel));
+        }
+    }
+    Ok(joined)
+}
+
+fn move_path(src: &Path, dst: &Path) -> Result<(), String> {
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {}", e))?;
+    }
+    if std::fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    if src.is_dir() {
+        copy_tree(src, dst)?;
+        std::fs::remove_dir_all(src).map_err(|e| format!("remove: {}", e))
+    } else {
+        std::fs::copy(src, dst).map_err(|e| format!("copy: {}", e))?;
+        std::fs::remove_file(src).map_err(|e| format!("remove: {}", e))
+    }
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("mkdir: {}", e))?;
+    for e in std::fs::read_dir(src).map_err(|e| e.to_string())?.flatten() {
+        let (s, d) = (e.path(), dst.join(e.file_name()));
+        if s.is_dir() { copy_tree(&s, &d)?; } else { std::fs::copy(&s, &d).map_err(|e| format!("copy: {}", e))?; }
+    }
+    Ok(())
+}
+
+/// Leere Ordner unterhalb von root entfernen (nach Verschieben/Loeschen).
+fn prune_empty_dirs(dir: &Path, root: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            if e.path().is_dir() { prune_empty_dirs(&e.path(), root); }
+        }
+    }
+    if dir != root && std::fs::read_dir(dir).map(|mut r| r.next().is_none()).unwrap_or(false) {
+        let _ = std::fs::remove_dir(dir);
+    }
+}
+
+/// Verschiebe-/Anlege-Schritte ausfuehren. ops: [{op:"move", from, to} | {op:"mkdir", path}]
+pub fn apply_move_ops(root: &Path, ops: &[Value]) -> Result<Vec<String>, String> {
+    // Erst alles pruefen, dann ausfuehren – ein Fehler in Schritt 5 soll nicht Schritt 1-4 halb stehen lassen.
+    let mut plan: Vec<(String, PathBuf, Option<PathBuf>)> = Vec::new();
+    for (i, op) in ops.iter().enumerate() {
+        let kind = op.get("op").and_then(|v| v.as_str()).unwrap_or("");
+        match kind {
+            "move" | "rename" => {
+                let from = op.get("from").and_then(|v| v.as_str()).ok_or(format!("Step {}: 'from' missing", i + 1))?;
+                let to = op.get("to").and_then(|v| v.as_str()).ok_or(format!("Step {}: 'to' missing", i + 1))?;
+                let (src, dst) = (safe_join(root, from)?, safe_join(root, to)?);
+                if dst.starts_with(&src) && dst != src {
+                    return Err(format!("Step {}: cannot move a folder into itself", i + 1));
+                }
+                plan.push(("move".into(), src, Some(dst)));
+            }
+            "mkdir" => {
+                let path = op.get("path").and_then(|v| v.as_str()).ok_or(format!("Step {}: 'path' missing", i + 1))?;
+                plan.push(("mkdir".into(), safe_join(root, path)?, None));
+            }
+            other => return Err(format!("Step {}: unknown op '{}' (use move, rename or mkdir)", i + 1, other)),
+        }
+    }
+    let mut log = Vec::new();
+    for (i, (kind, a, b)) in plan.iter().enumerate() {
+        let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().to_string();
+        if kind == "mkdir" {
+            std::fs::create_dir_all(a).map_err(|e| format!("Step {}: mkdir: {}", i + 1, e))?;
+            log.push(format!("created {}", rel(a)));
+            continue;
+        }
+        let dst = b.as_ref().unwrap();
+        if !a.exists() {
+            return Err(format!("Step {}: {} does not exist (steps before it were applied: {:?})", i + 1, rel(a), log));
+        }
+        // Ziel ist ein vorhandener Ordner: hineinlegen (wie mv)
+        let target = if dst.is_dir() { dst.join(a.file_name().unwrap_or_default()) } else { dst.clone() };
+        if target.exists() {
+            return Err(format!("Step {}: {} already exists (steps before it were applied: {:?})", i + 1, rel(&target), log));
+        }
+        move_path(a, &target).map_err(|e| format!("Step {}: {}", i + 1, e))?;
+        log.push(format!("moved {} -> {}", rel(a), rel(&target)));
+    }
+    prune_empty_dirs(root, root);
+    Ok(log)
+}
+
+/// Dateien oder Ordner im Datensatz loeschen.
+pub fn remove_paths(root: &Path, paths: &[String]) -> Result<(usize, Vec<String>), String> {
+    let targets: Vec<PathBuf> = paths.iter().map(|p| safe_join(root, p)).collect::<Result<_, _>>()?;
+    let mut files = 0usize;
+    let mut missing = Vec::new();
+    for (t, rel) in targets.iter().zip(paths) {
+        if !t.exists() { missing.push(rel.clone()); continue; }
+        if t.is_dir() {
+            files += walkdir_count(t);
+            std::fs::remove_dir_all(t).map_err(|e| format!("{}: {}", rel, e))?;
+        } else {
+            std::fs::remove_file(t).map_err(|e| format!("{}: {}", rel, e))?;
+            files += 1;
+        }
+    }
+    prune_empty_dirs(root, root);
+    Ok((files, missing))
+}
+
+fn walkdir_count(dir: &Path) -> usize {
+    std::fs::read_dir(dir).map(|r| r.flatten().map(|e| if e.path().is_dir() { walkdir_count(&e.path()) } else { 1 }).sum()).unwrap_or(0)
+}
+
+#[tauri::command]
+pub async fn dataset_tree(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>, dataset_id: String, max_depth: Option<u32>,
+) -> Result<Value, String> {
+    let (_, target, _) = dataset_location(&app_handle, &state, &dataset_id)?;
+    let req = json!({ "kind": "tree", "path": target.to_string_lossy(), "max_depth": max_depth.unwrap_or(4) });
+    tauri::async_runtime::spawn_blocking(move || run_module(&app_handle, "ft_data.manage", req))
+        .await.map_err(|e| format!("Abgebrochen: {}", e))?
+}
+
+#[tauri::command]
+pub async fn dataset_repair(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>, dataset_id: String, actions: Vec<String>,
+) -> Result<Value, String> {
+    let (dir, target, old) = dataset_location(&app_handle, &state, &dataset_id)?;
+    let req = json!({ "kind": "repair", "path": target.to_string_lossy(), "actions": actions });
+    let app = app_handle.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || run_module(&app, "ft_data.manage", req))
+        .await.map_err(|e| format!("Abgebrochen: {}", e))??;
+    let info = rescan_dataset_dir(&dir, &target, &old)?;
+    Ok(json!({ "result": result, "dataset": info }))
+}
+
+#[tauri::command]
+pub async fn dataset_move(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>, dataset_id: String, ops: Vec<Value>,
+) -> Result<Value, String> {
+    let (dir, target, old) = dataset_location(&app_handle, &state, &dataset_id)?;
+    let t = target.clone();
+    let applied = tauri::async_runtime::spawn_blocking(move || apply_move_ops(&t, &ops))
+        .await.map_err(|e| format!("Abgebrochen: {}", e))?;
+    // Auch bei einem Fehler mittendrin die Infos neu einlesen (bereits ausgefuehrte Schritte)
+    let info = rescan_dataset_dir(&dir, &target, &old)?;
+    let log = applied?;
+    Ok(json!({ "applied": log, "dataset": info }))
+}
+
+#[tauri::command]
+pub async fn dataset_remove(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>, dataset_id: String, paths: Vec<String>,
+) -> Result<Value, String> {
+    let (dir, target, old) = dataset_location(&app_handle, &state, &dataset_id)?;
+    let t = target.clone();
+    let (files, missing) = tauri::async_runtime::spawn_blocking(move || remove_paths(&t, &paths))
+        .await.map_err(|e| format!("Abgebrochen: {}", e))??;
+    let info = rescan_dataset_dir(&dir, &target, &old)?;
+    Ok(json!({ "removed_files": files, "missing": missing, "dataset": info }))
+}
+
 /// Stoppt einen laufenden fetch_dataset (gleiche fetch_id). Der halb geladene
 /// Ordner wird danach von fetch_dataset selbst geloescht.
 #[tauri::command]
@@ -448,5 +636,54 @@ mod cleanup_tests {
     #[test]
     fn abbruch_ohne_laufenden_download() {
         assert!(!cancel("gibt-es-nicht"));
+    }
+}
+
+#[cfg(test)]
+mod manage_tests {
+    use super::*;
+
+    fn tmp() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ft-manage-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn pfade_bleiben_im_datensatz() {
+        let root = tmp();
+        assert!(safe_join(&root, "train/images/a.jpg").is_ok());
+        assert!(safe_join(&root, "../x").is_err());
+        assert!(safe_join(&root, "/etc/passwd").is_err());
+        assert!(safe_join(&root, "a/../../x").is_err());
+        assert!(safe_join(&root, "").is_err());
+        assert!(safe_join(&root, ".").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn verschieben_und_loeschen() {
+        let root = tmp();
+        std::fs::create_dir_all(root.join("data/apple/images")).unwrap();
+        std::fs::write(root.join("data/apple/images/a.jpg"), b"x").unwrap();
+        std::fs::write(root.join("junk.txt"), b"x").unwrap();
+        let ops = vec![
+            json!({"op": "mkdir", "path": "train"}),
+            json!({"op": "move", "from": "data/apple/images", "to": "train/images"}),
+        ];
+        let log = apply_move_ops(&root, &ops).unwrap();
+        assert_eq!(log.len(), 2);
+        assert!(root.join("train/images/a.jpg").exists());
+        assert!(!root.join("data").exists(), "leere Ordner werden entfernt");
+        // Ziel existiert schon -> Fehler, nichts ueberschrieben
+        std::fs::create_dir_all(root.join("x")).unwrap();
+        std::fs::write(root.join("x/a.jpg"), b"y").unwrap();
+        assert!(apply_move_ops(&root, &[json!({"op": "move", "from": "x/a.jpg", "to": "train/images/a.jpg"})]).is_err());
+        // Ordner in sich selbst -> Fehler
+        assert!(apply_move_ops(&root, &[json!({"op": "move", "from": "train", "to": "train/sub"})]).is_err());
+        let (n, missing) = remove_paths(&root, &["junk.txt".into(), "gibt-es-nicht".into()]).unwrap();
+        assert_eq!((n, missing.len()), (1, 1));
+        assert!(remove_paths(&root, &["..".into()]).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

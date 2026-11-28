@@ -315,6 +315,31 @@ class MehrFormateTest(unittest.TestCase):
             (self.root / split / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n")
         self.assertIsNone(fetch.merge_yolo_subsets(self.root, self.root / "out"))
 
+    def test_manage_baum_und_reparatur(self):
+        from ft_data import manage
+        ds = self.root / "ds"
+        for fruit in ("apple", "banana"):
+            for split in ("train", "val"):
+                (ds / "data" / fruit / "images" / split).mkdir(parents=True)
+                (ds / "data" / fruit / "labels" / split).mkdir(parents=True)
+                (ds / "data" / fruit / "images" / split / f"{fruit}.jpg").write_bytes(_png())
+                (ds / "data" / fruit / "labels" / split / f"{fruit}.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+            (ds / "data" / fruit / "labels" / "classes.txt").write_text(fruit + "\n")
+        (ds / ".cache").mkdir()
+        (ds / ".cache" / "a.lock").write_text("")
+        (ds / ".DS_Store").write_text("")
+        t = manage.tree(ds)
+        self.assertEqual(t["layout"], "sub_datasets")
+        self.assertEqual({f["fix"] for f in t["findings"]}, {"remove_hidden", "merge_subsets"})
+        r = manage.repair(ds, ["remove_hidden", "merge_subsets"])
+        self.assertEqual(r["tree"]["layout"], "yolo_split")
+        self.assertEqual(r["tree"]["findings"], [])
+        self.assertEqual(r["done"][1]["classes"], ["apple", "banana"])
+        self.assertFalse((ds / ".cache").exists())
+        self.assertFalse((ds.parent / "ds.repair_old").exists())
+        with self.assertRaises(fetch.FetchError):
+            manage.repair(ds, ["rm_rf"])
+
 
 if __name__ == "__main__":
     unittest.main()

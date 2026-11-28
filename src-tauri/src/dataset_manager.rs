@@ -3247,6 +3247,65 @@ pub async fn import_structured_dataset(
 }
 
 /// Resolve dataset storage path for Synapse / training env vars.
+/// Ordner, Metadaten-Verzeichnis und gespeicherte Infos eines Datasets.
+pub fn dataset_location(
+    app_handle: &tauri::AppHandle, state: &State<'_, AppState>, dataset_id: &str,
+) -> Result<(PathBuf, PathBuf, DatasetInfo), String> {
+    if !is_safe_id(dataset_id) { return Err("Ungültige Dataset-ID".to_string()); }
+    let user_id = get_user_id(state)?;
+    let datasets_dir = get_datasets_dir(app_handle, &user_id)?;
+    let info = load_metadata(&datasets_dir).into_iter().find(|d| d.id == dataset_id)
+        .ok_or_else(|| format!("Dataset nicht gefunden: {}", dataset_id))?;
+    let target = if !info.storage_path.is_empty() && Path::new(&info.storage_path).is_dir() {
+        PathBuf::from(&info.storage_path)
+    } else {
+        datasets_dir.join(dataset_id)
+    };
+    if !target.is_dir() { return Err(format!("Dataset-Ordner fehlt: {}", target.display())); }
+    Ok((datasets_dir, target, info))
+}
+
+/// Dataset-Ordner nach Aenderungen (KI-Dateiverwaltung, Reparatur) neu einlesen:
+/// Typ, Split, Groesse, Dateizahl; Name, Modell, Herkunft und Zaehler bleiben.
+pub fn rescan_dataset_dir(datasets_dir: &Path, target: &Path, old: &DatasetInfo) -> Result<DatasetInfo, String> {
+    let analysis = detect_dataset_type(target);
+    let (size, files) = dir_size(target);
+    let layout = detect_split_layout(target);
+    let (status, split_info) = match &layout {
+        Some(l) => {
+            let (tr, va, te) = (l.count_of("train"), l.count_of("val"), l.count_of("test"));
+            let total = (tr + va + te).max(1) as f64;
+            ("split", Some(SplitInfo {
+                train_count: tr, val_count: va, test_count: te,
+                train_ratio: tr as f64 / total, val_ratio: va as f64 / total, test_ratio: te as f64 / total,
+            }))
+        }
+        None => match tabular_split_info(target, true) {
+            Some(info) => ("split", Some(info)),
+            None => ("unused", None),
+        },
+    };
+    let mut info = make_info(&old.id, &old.name, &old.model_id, &old.source, old.source_path.clone(),
+        target, size, files, status, split_info, analysis.detected_type.clone(), analysis.pairing_status, analysis.hints);
+    info.created_at = old.created_at.clone();
+    info.training_count = old.training_count;
+    info.last_used_at = old.last_used_at.clone();
+    let has_yaml = target.join("data.yaml").exists() || target.join("dataset.yaml").exists();
+    if !has_yaml && matches!(info.dataset_type, DatasetType::YoloBbox | DatasetType::PascalVoc) {
+        if let Some(l) = &layout { generate_split_dataset_yaml(target, l).ok(); }
+    }
+    upsert_metadata(datasets_dir, &info)?;
+    Ok(info)
+}
+
+#[tauri::command]
+pub async fn rescan_dataset(
+    app_handle: tauri::AppHandle, state: State<'_, AppState>, dataset_id: String,
+) -> Result<DatasetInfo, String> {
+    let (dir, target, old) = dataset_location(&app_handle, &state, &dataset_id)?;
+    rescan_dataset_dir(&dir, &target, &old)
+}
+
 #[tauri::command]
 pub async fn get_dataset_path(
     app_handle: tauri::AppHandle,

@@ -64,6 +64,29 @@ export function describeReport(r: FetchReport, model?: Pick<ModelInfo, 'model_ty
   return text;
 }
 
+interface DatasetTree {
+  layout: string; images: number; labels: number; hidden_files: number; truncated: boolean;
+  dirs: { path: string; images: number; labels: number; other: number; files: number }[];
+  findings: { code: string; message: string; fix: string | null }[];
+}
+
+export function describeTree(name: string, t: DatasetTree): string {
+  const dirs = t.dirs.slice(0, 25).map((x) => `${x.path} (${x.images} img, ${x.labels} lbl${x.other ? `, ${x.other} other` : ''})`).join('; ');
+  const findings = t.findings.length
+    ? t.findings.map((f) => `- ${f.message}${f.fix ? ` Fix: datasets_repair action ${f.fix}.` : ''}`).join('\n')
+    : 'No problems found.';
+  return `${name}: layout ${t.layout}, ${t.images} images, ${t.labels} label files${t.hidden_files ? `, ${t.hidden_files} hidden files` : ''}.\nFolders: ${dirs}${t.truncated || t.dirs.length > 25 ? ' ...' : ''}\nFindings:\n${findings}`;
+}
+
+function summarizeStep(x: Record<string, unknown>): string {
+  if (typeof x.removed_files === 'number') return `removed ${x.removed_files} files`;
+  const parts: string[] = [];
+  if (typeof x.images === 'number') parts.push(`${x.images} images`);
+  if (Array.isArray(x.classes)) parts.push(`classes ${(x.classes as string[]).slice(0, 20).join(', ')}`);
+  if (x.splits && typeof x.splits === 'object') parts.push(`splits ${JSON.stringify(x.splits)}`);
+  return parts.join(', ') || 'done';
+}
+
 export const datasetsTools: McpTool[] = [
   defineTool({
     name: 'datasets_list',
@@ -373,6 +396,85 @@ export const datasetsTools: McpTool[] = [
       await call('delete_dataset', { datasetId: d.id, modelId: d.model_id });
       announceChange('datasets', { datasetId: d.id });
       return ok(`Deleted dataset ${d.name}.`, { dataset_id: d.id, deleted: true });
+    },
+  }),
+  defineTool({
+    name: 'datasets_tree',
+    title: 'Dataset folder tree',
+    description: 'Shows the folder tree of a dataset with image, label and other file counts per folder, the detected layout (yolo_split, sub_datasets, flat, other) and concrete findings: hidden helper files, several YOLO sub-datasets that training will not find, labels not next to their images, images without labels, missing or wrong data.yaml. Each finding names the datasets_repair action that fixes it. Call this before training when a dataset was downloaded or imported, and after changing files.',
+    properties: {
+      dataset_id: S.str('Dataset id from datasets_list.'),
+      max_depth: S.int('Folder depth to show (1-8). Default 4.', { minimum: 1, maximum: 8 }),
+    },
+    required: ['dataset_id'],
+    async run(args) {
+      const d = await findDataset(reqStr(args, 'dataset_id'));
+      const t = await call<DatasetTree>('dataset_tree', { datasetId: d.id, maxDepth: optNum(args, 'max_depth') });
+      return ok(describeTree(d.name, t), t);
+    },
+  }),
+  defineTool({
+    name: 'datasets_repair',
+    title: 'Repair dataset',
+    description: 'Fixes the structure of a dataset in place with safe, fixed actions (run in the given order): remove_hidden deletes hidden helper files (.cache, .DS_Store, __MACOSX); merge_subsets merges several YOLO sub-datasets (e.g. one folder per class, each with images/ and labels/) into one train/val/test layout with a common class list; pair_labels pairs images and labels that sit in separate trees; write_yaml rewrites data.yaml from the folders and class list. Afterwards FrameTrain re-reads type and split. Use datasets_tree first to see which actions are needed.',
+    properties: {
+      dataset_id: S.str('Dataset id from datasets_list.'),
+      actions: S.arr('Repair actions in order.', { type: 'string', enum: ['remove_hidden', 'merge_subsets', 'pair_labels', 'write_yaml'] }, { minItems: 1 }),
+    },
+    required: ['dataset_id', 'actions'],
+    approval: 'once',
+    annotations: { destructiveHint: true },
+    async run(args) {
+      const d = await findDataset(reqStr(args, 'dataset_id'));
+      const actions = strArr(args, 'actions', true);
+      const r = await call<{ result: { done: Record<string, unknown>[]; tree: DatasetTree }; dataset: DatasetInfo }>('dataset_repair', { datasetId: d.id, actions });
+      announceChange('datasets', { datasetId: d.id });
+      const steps = r.result.done.map((x) => `${String(x.action)}: ${x.changed === false ? `no change (${String(x.reason)})` : summarizeStep(x)}`).join('; ');
+      return ok(`${steps}. Now: ${describeTree(d.name, r.result.tree)}\nDataset status: ${r.dataset.status}, type ${String(r.dataset.dataset_type)}.`, r);
+    },
+  }),
+  defineTool({
+    name: 'datasets_files_move',
+    title: 'Move dataset files',
+    description: 'Moves or renames files and folders inside one dataset and creates folders, e.g. to arrange train/images + train/labels. ops is a list of steps: {op:"move", from, to} (to an existing folder = move into it), {op:"rename", from, to} or {op:"mkdir", path}. Paths are relative to the dataset folder (see datasets_tree); nothing outside the dataset can be touched and existing files are never overwritten. Empty folders are removed afterwards and FrameTrain re-reads type and split.',
+    properties: {
+      dataset_id: S.str('Dataset id from datasets_list.'),
+      ops: S.arr('Steps in order.', S.obj('One step.', {
+        op: S.enumOf('Step type.', ['move', 'rename', 'mkdir']),
+        from: S.str('Source path (move/rename).'),
+        to: S.str('Target path (move/rename).'),
+        path: S.str('Folder to create (mkdir).'),
+      }, { required: ['op'] }), { minItems: 1, maxItems: 500 }),
+    },
+    required: ['dataset_id', 'ops'],
+    approval: 'once',
+    annotations: { destructiveHint: true },
+    async run(args) {
+      const d = await findDataset(reqStr(args, 'dataset_id'));
+      const ops = Array.isArray(args.ops) ? args.ops : [];
+      if (!ops.length) throw new ToolArgError('ops must contain at least one step.');
+      const r = await call<{ applied: string[]; dataset: DatasetInfo }>('dataset_move', { datasetId: d.id, ops });
+      announceChange('datasets', { datasetId: d.id });
+      return ok(`${r.applied.length} step(s) done (${clip(r.applied.join('; '), 600)}). Dataset status: ${r.dataset.status}, type ${String(r.dataset.dataset_type)}, ${r.dataset.file_count} files. Check with datasets_tree.`, r);
+    },
+  }),
+  defineTool({
+    name: 'datasets_files_delete',
+    title: 'Delete dataset files',
+    description: 'Deletes files or folders inside one dataset (paths relative to the dataset folder, see datasets_tree). This cannot be undone. To delete a whole dataset use datasets_delete; to remove hidden helper files use datasets_repair with remove_hidden.',
+    properties: {
+      dataset_id: S.str('Dataset id from datasets_list.'),
+      paths: S.strArr('Files or folders to delete, relative to the dataset folder.', { minItems: 1, maxItems: 1000 }),
+    },
+    required: ['dataset_id', 'paths'],
+    approval: 'always',
+    annotations: { destructiveHint: true },
+    async run(args) {
+      const d = await findDataset(reqStr(args, 'dataset_id'));
+      const paths = strArr(args, 'paths', true);
+      const r = await call<{ removed_files: number; missing: string[]; dataset: DatasetInfo }>('dataset_remove', { datasetId: d.id, paths });
+      announceChange('datasets', { datasetId: d.id });
+      return ok(`Deleted ${r.removed_files} file(s)${r.missing.length ? `; not found: ${r.missing.slice(0, 10).join(', ')}` : ''}. Dataset status: ${r.dataset.status}, ${r.dataset.file_count} files.`, r);
     },
   }),
 ];
