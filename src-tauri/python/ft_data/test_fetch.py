@@ -283,6 +283,38 @@ class MehrFormateTest(unittest.TestCase):
         self.assertEqual(sorted(geholt), sorted(p for p, _ in files))
         self.assertGreater(maximal[0], 1)
 
+    def test_yolo_teildatensaetze_werden_zusammengefuehrt(self):
+        """FruitDet-Aufbau: data/<obst>/images/<split> + labels/<split>, je eigene classes.txt mit Klasse 0."""
+        raw = self.root / "raw"
+        for fruit in ("apple", "banana"):
+            for split in ("train", "val", "test"):
+                (raw / "data" / fruit / "images" / split).mkdir(parents=True)
+                (raw / "data" / fruit / "labels" / split).mkdir(parents=True)
+                (raw / "data" / fruit / "images" / split / f"{fruit}_1.jpg").write_bytes(_png())
+                (raw / "data" / fruit / "labels" / split / f"{fruit}_1.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+                (raw / "data" / fruit / "labels" / split / "classes.txt").write_text(fruit + "\n")
+            (raw / "data" / fruit / "labels" / "classes.txt").write_text(fruit + "\n")
+        (raw / ".cache" / "huggingface").mkdir(parents=True)
+        (raw / ".cache" / "huggingface" / "x.jpg.lock").write_text("")
+        fetch._drop_hf_cache(raw)
+        out, conv = fetch.normalize(raw, self.root, {"yolo": True})
+        self.assertEqual(conv["kind"], "merged_yolo_subsets")
+        self.assertEqual(conv["classes"], ["apple", "banana"])
+        rep = fetch.inspect(out)
+        self.assertEqual((rep["images"], rep["splits"]), (6, {"train": 2, "val": 2, "test": 2}))
+        ids = sorted({l.split()[0] for f in out.rglob("labels/*.txt") for l in f.read_text().splitlines()})
+        self.assertEqual(ids, ["0", "1"])
+        self.assertIn("test: test/images", (out / "data.yaml").read_text())
+        self.assertFalse((raw / ".cache").exists())
+
+    def test_kanonischer_yolo_ordner_bleibt_unveraendert(self):
+        for split in ("train", "val"):
+            (self.root / split / "images").mkdir(parents=True)
+            (self.root / split / "labels").mkdir(parents=True)
+            (self.root / split / "images" / "a.jpg").write_bytes(_png())
+            (self.root / split / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+        self.assertIsNone(fetch.merge_yolo_subsets(self.root, self.root / "out"))
+
 
 if __name__ == "__main__":
     unittest.main()

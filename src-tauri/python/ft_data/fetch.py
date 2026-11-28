@@ -69,7 +69,7 @@ def inspect(path: Path) -> Dict[str, Any]:
     splits: Dict[str, int] = {}
     yaml_files: List[str] = []
     for f in path.rglob("*"):
-        if not f.is_file() or f.name.startswith(".") or ".frametrain_media" in f.parts:
+        if not f.is_file() or ".frametrain_media" in f.parts or any(p.startswith(".") for p in f.relative_to(path).parts):
             continue
         ext = f.suffix.lower()
         rel_parts = [p.lower() for p in f.relative_to(path).parts]
@@ -395,6 +395,12 @@ def _parquet_order(files: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
     return sorted(files, key=lambda f: (rank(f[0]), f[0]))
 
 
+def _drop_hf_cache(raw: Path) -> None:
+    """hf_hub_download(local_dir=...) legt .cache/huggingface (lock, metadata) an.
+    Das darf nicht mit in den Datensatz (Live-Test 28.11.: 632 Fremddateien)."""
+    shutil.rmtree(raw / ".cache", ignore_errors=True)
+
+
 def _hf_parquet_rows(repo: str, chosen: List[Tuple[str, int]], revision: Optional[str], max_rows: int,
                      max_mb: float, target: Path) -> Path:
     """Nur so viele Parquet-Shards laden, wie fuer max_rows noetig sind.
@@ -425,6 +431,7 @@ def _hf_parquet_rows(repo: str, chosen: List[Tuple[str, int]], revision: Optiona
              message=f"{path}: {rows} rows so far (need {max_rows})")
         if rows >= max_rows:
             break
+    _drop_hf_cache(raw)
     return raw
 
 
@@ -550,6 +557,7 @@ def hf_download(req: Dict[str, Any], target: Path) -> Path:
         raise FetchError(f"No data files found in {repo}.")
     raw = target / "raw"
     _download_parallel(repo, chosen, revision, raw, total)
+    _drop_hf_cache(raw)
     root = raw
     if req.get("include") and len(req["include"]) == 1:
         sub = raw / req["include"][0].rstrip("/")
@@ -687,8 +695,10 @@ def parquet_to_yolo(src: Path, out: Path, max_rows: int = 0, bbox_format: str = 
         names = [f"class_{i}" for i in range(top + 1)]
     if not (out / "val" / "images").is_dir():
         _move_share_to_val(out, 0.15)
-    yaml = ["path: .", "train: train/images", "val: val/images", f"nc: {len(names)}", "names:"]
-    yaml += [f"  - '{n}'" for n in names]
+    yaml = ["path: .", "train: train/images", "val: val/images"]
+    if (out / "test" / "images").is_dir():
+        yaml.append("test: test/images")
+    yaml += [f"nc: {len(names)}", "names:"] + [f"  - '{n}'" for n in names]
     (out / "data.yaml").write_text("\n".join(yaml) + "\n", encoding="utf-8")
     return {"images": written, "boxes": boxes_total, "skipped_rows": skipped, "classes": names}
 
@@ -959,6 +969,89 @@ def pair_images_and_labels(root: Path) -> Optional[Path]:
     return out
 
 
+SPLIT_ALIASES = {"train": "train", "training": "train", "val": "val", "valid": "val", "validation": "val", "test": "test"}
+
+
+def _yolo_subsets(root: Path) -> List[Path]:
+    """Ordner mit images/ und labels/ nebeneinander (nicht versteckt)."""
+    found = []
+    for d in [root] + sorted(p for p in root.rglob("*") if p.is_dir()):
+        rel = d.relative_to(root).parts
+        if any(x.startswith(".") for x in rel):
+            continue
+        if (d / "images").is_dir() and (d / "labels").is_dir():
+            found.append(d)
+    return found
+
+
+def _canonical_yolo(root: Path) -> bool:
+    return (root / "train" / "images").is_dir() or (root / "images" / "train").is_dir()
+
+
+def merge_yolo_subsets(root: Path, target: Path) -> Optional[Path]:
+    """Mehrere YOLO-Teildatensaetze (z. B. data/apple/images/train, data/banana/...)
+    zu einem zusammenfuehren: <split>/images + <split>/labels, Klassen-IDs
+    ueber die Klassenlisten der Teile auf eine gemeinsame Liste umgeschrieben.
+
+    Live-Test 28.11. (FruitDet): fuenf Obstordner, jeder mit eigener
+    classes.txt und Klasse 0 – ohne Zusammenfuehrung fand das Training keine Bilder.
+    """
+    if _canonical_yolo(root):
+        return None
+    subsets = _yolo_subsets(root)
+    if not subsets or (len(subsets) == 1 and subsets[0] == root):
+        return None
+    out = target / "yolo_merged"
+    if out.exists():
+        shutil.rmtree(out)
+    names: List[str] = []
+    index: Dict[str, int] = {}
+
+    def gid(name: str) -> int:
+        key = name.strip().lower()
+        if key not in index:
+            index[key] = len(names)
+            names.append(name.strip())
+        return index[key]
+
+    counts = {"train": 0, "val": 0, "test": 0}
+    for sub in subsets:
+        local = _read_class_list(sub / "labels") or _read_class_list(sub)
+        if not local:
+            local = [sub.name]
+        mapping = {i: gid(n) for i, n in enumerate(local)}
+        prefix = "_".join(sub.relative_to(root).parts) or "set"
+        for img in sorted((sub / "images").rglob("*")):
+            if not img.is_file() or img.suffix.lower() not in IMAGE_EXTS:
+                continue
+            rel = img.relative_to(sub / "images")
+            split = next((SPLIT_ALIASES[p.lower()] for p in rel.parts[:-1] if p.lower() in SPLIT_ALIASES), "train")
+            lbl = (sub / "labels" / rel).with_suffix(".txt")
+            lines = []
+            if lbl.exists():
+                for line in lbl.read_text(errors="ignore").splitlines():
+                    parts = line.split()
+                    if len(parts) >= 5 and parts[0].isdigit():
+                        cid = mapping.get(int(parts[0]))
+                        if cid is None:
+                            cid = gid(f"{prefix}_{parts[0]}")
+                            mapping[int(parts[0])] = cid
+                        lines.append(" ".join([str(cid)] + parts[1:]))
+            stem = f"{prefix}_{img.stem}"
+            (out / split / "images").mkdir(parents=True, exist_ok=True)
+            (out / split / "labels").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(img, out / split / "images" / f"{stem}{img.suffix}")
+            (out / split / "labels" / f"{stem}.txt").write_text("\n".join(lines) + ("\n" if lines else ""))
+            counts[split] += 1
+    if counts["train"] == 0:
+        shutil.rmtree(out, ignore_errors=True)
+        return None
+    if counts["val"] == 0:
+        _move_share_to_val(out, 0.15)
+    _write_data_yaml(out, names)
+    return out
+
+
 def _names_from_labels(out: Path) -> List[str]:
     top = -1
     for lf in out.rglob("*.txt"):
@@ -970,8 +1063,10 @@ def _names_from_labels(out: Path) -> List[str]:
 
 
 def _write_data_yaml(out: Path, names: List[str]) -> None:
-    yaml = ["path: .", "train: train/images", "val: val/images", f"nc: {len(names)}", "names:"]
-    yaml += [f"  - '{n}'" for n in names]
+    yaml = ["path: .", "train: train/images", "val: val/images"]
+    if (out / "test" / "images").is_dir():
+        yaml.append("test: test/images")
+    yaml += [f"nc: {len(names)}", "names:"] + [f"  - '{n}'" for n in names]
     (out / "data.yaml").write_text("\n".join(yaml) + "\n", encoding="utf-8")
 
 
@@ -1073,6 +1168,12 @@ def normalize(root: Path, target: Path, req: Dict[str, Any]) -> Tuple[Path, Opti
         if out:
             r2 = inspect(out)
             return out, {"kind": "coco_to_yolo", "images": r2["images"], "classes": r2["classes"]}
+    if rep["images"] and rep["yolo_labels"]:
+        merged = merge_yolo_subsets(root, target)
+        if merged:
+            emit("status", message="Merging YOLO sub-datasets into one")
+            r2 = inspect(merged)
+            return merged, {"kind": "merged_yolo_subsets", "images": r2["images"], "classes": r2["classes"]}
     if rep["images"]:
         paired = pair_images_and_labels(root)
         if paired:

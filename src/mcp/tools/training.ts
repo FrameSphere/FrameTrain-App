@@ -65,6 +65,19 @@ export const TRAINING_CONFIG_SCHEMA: JsonSchema = {
   additionalProperties: true,
 };
 
+/** Lesbare Fehlermeldung aus job.error oder dem Fehler-Event (Text, {message, details} oder {data}). */
+export function errorMessage(e: unknown): string | null {
+  if (e == null) return null;
+  if (typeof e === 'string') return e.trim() ? e.trim().slice(0, 1500) : null;
+  if (typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    const parts = [o.message, o.error, o.details, o.detail].filter((x) => typeof x === 'string' && x.trim()) as string[];
+    if (parts.length) return parts.join(': ').slice(0, 1500);
+    if (o.data !== undefined) return errorMessage(o.data);
+  }
+  return null;
+}
+
 function jobBrief(j: TrainingJob | null | undefined) {
   if (!j) return null;
   return {
@@ -211,7 +224,9 @@ export const trainingTools: McpTool[] = [
       const status = run?.status ?? String(job?.status ?? 'unknown');
       const eta = etaSeconds(job);
       const activeWithEta = active.map((a) => (a.training_id === id && a.estimated_time_remaining_seconds == null ? { ...a, estimated_time_remaining_seconds: eta } : a));
-      return ok(`Training ${id}: ${status}${eta != null ? `, about ${Math.round(eta)} s left` : ''}.`, {
+      const errText = errorMessage(job?.error) ?? errorMessage(run?.error);
+      const failed = /error|fail/i.test(status);
+      return ok(`Training ${id}: ${status}${eta != null ? `, about ${Math.round(eta)} s left` : ''}.${failed && errText ? ` Error: ${errText}` : ''}`, {
         job: jobBrief(job), eta_seconds: eta, live: run, active: activeWithEta,
       });
     },
